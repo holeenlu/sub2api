@@ -1,3 +1,6 @@
+import vendor from './vendor'
+import autoBPSOps from './autoBPSOps'
+import ui from './ui'
 import adminAccessKeys from './adminAccessKeys'
 import landing from './landing'
 import common from './common'
@@ -6,8 +9,12 @@ import channelMonitorV2 from './channelMonitorV2'
 import batchImage from './batchImage'
 import admin from './admin'
 import misc from './misc'
+import docs from './docs'
 
 export default {
+  vendor,
+  autoBPSOps,
+  ...ui,
   adminAccessKeys,
   ...landing,
   ...common,
@@ -16,4 +23,5 @@ export default {
   ...batchImage,
   admin,
   ...misc,
+  ...docs,
 }

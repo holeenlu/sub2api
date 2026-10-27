@@ -21,6 +21,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { formatCacheHitRate, getUsageCacheHitRate } from '@/utils/usageMetrics'
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -107,11 +108,8 @@ const chartData = computed(() => {
         tension: 0.3
       },
       {
-        label: 'Cache Hit Rate',
-        data: props.trendData.map((d) => {
-          const totalPromptTokens = d.input_tokens + d.cache_read_tokens + d.cache_creation_tokens
-          return totalPromptTokens > 0 ? (d.cache_read_tokens / totalPromptTokens) * 100 : 0
-        }),
+        label: t('usage.cacheHitRate'),
+        data: props.trendData.map(getUsageCacheHitRate),
         borderColor: chartColors.value.cacheHitRate,
         backgroundColor: `${chartColors.value.cacheHitRate}20`,
         borderDash: [5, 5],
@@ -147,7 +145,7 @@ const lineOptions = computed(() => ({
       callbacks: {
         label: (context: any) => {
           if (context.dataset.yAxisID === 'yPercent') {
-            return `${context.dataset.label}: ${context.raw.toFixed(1)}%`
+            return `${context.dataset.label}: ${formatCacheHitRate(context.raw)}`
           }
           return `${context.dataset.label}: ${formatTokens(context.raw)}`
         },

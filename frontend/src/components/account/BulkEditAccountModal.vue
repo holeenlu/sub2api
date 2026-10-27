@@ -6,6 +6,10 @@
     @close="handleClose"
   >
     <form id="bulk-edit-account-form" class="space-y-5" @submit.prevent="() => handleSubmit()">
+      <div v-if="!isMixedPlatform && targetSelectedTypes.length === 1" class="rounded-xl border border-gray-200 p-4 dark:border-dark-600">
+        <p class="mb-3 text-sm text-gray-500">{{ t('admin.accounts.bulkEdit.fullEditorHelp') }}</p>
+        <button type="button" class="btn btn-secondary" data-testid="bulk-full-editor" :disabled="submitting" @click="openFullEditor">{{ t('admin.accounts.bulkEdit.fullEditor') }}</button>
+      </div>
       <!-- Info -->
       <div class="rounded-lg bg-blue-50 p-4 dark:bg-blue-900/20">
         <p class="text-sm text-blue-700 dark:text-blue-400">
@@ -17,7 +21,7 @@
               d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
             />
           </svg>
-          {{ t('admin.accounts.bulkEdit.selectionInfo', { count: targetMode === 'filtered' ? targetPreviewCount : accountIds.length }) }}
+          {{ t('admin.accounts.bulkEdit.selectionInfo', { count: targetAccountIds.length }) }}
         </p>
       </div>
 
@@ -31,9 +35,129 @@
         </p>
       </div>
 
+      <div v-if="allowTransportEdit && !supplierScope && allOpenAIOAuthOnly" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="mb-3 flex items-center justify-between gap-4">
+          <div class="min-w-0">
+            <label for="bulk-edit-cloud-enabled" class="input-label mb-0">{{ t('admin.accounts.openai.cloud.enable') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.cloud.nativeHint') }}</p>
+          </div>
+          <input id="bulk-edit-cloud-enabled" v-model="enableCloud" type="checkbox"
+            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+        </div>
+        <Toggle id="bulk-edit-cloud-toggle" v-model="cloudEnabled" :disabled="!enableCloud || cloudEligibilityLoading || !!cloudEligibilityError"
+          :class="!enableCloud && 'pointer-events-none opacity-50'" :aria-label="t('admin.accounts.openai.cloud.enable')" />
+        <p v-if="enableCloud && cloudEligibilityLoading" class="mt-2 text-xs text-gray-500">{{ t('common.loading') }}</p>
+        <p v-else-if="enableCloud && cloudEligibilityError" class="mt-2 text-xs text-amber-700 dark:text-amber-400" role="status">{{ cloudEligibilityError }}</p>
+      </div>
+
+      <!-- Excel / BPS protocol (ChatGPT OAuth only) -->
+      <div v-if="allowTransportEdit && allOpenAIOAuthOnly" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="mb-3 flex items-center justify-between">
+          <div class="flex-1 pr-4">
+            <label id="bulk-edit-excel-bps-label" class="input-label mb-0" for="bulk-edit-excel-bps-enabled">
+              {{ t('admin.accounts.openai.excelBPS') }}
+            </label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.excelBPSDesc') }}
+            </p>
+          </div>
+          <input v-model="enableExcelBPS" id="bulk-edit-excel-bps-enabled" type="checkbox"
+            aria-controls="bulk-edit-excel-bps-body"
+            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+        </div>
+        <fieldset id="bulk-edit-excel-bps-body" :disabled="!enableExcelBPS"
+          :class="!enableExcelBPS && 'pointer-events-none opacity-50'"
+          aria-labelledby="bulk-edit-excel-bps-label">
+          <Toggle v-model="excelBPSEnabled" data-testid="bulk-excel-bps-toggle" :aria-label="t('admin.accounts.openai.excelBPS')" />
+          <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSAccountSettingsHint') }}</p>
+          <div v-if="excelBPSEnabled" class="mt-3 space-y-3">
+            <label class="flex items-center gap-2 text-sm">
+              <input v-model="excelBPSAllModels" type="checkbox" data-testid="bulk-excel-bps-all-models" />
+              <span>{{ t('admin.accounts.openai.excelBPSAllModels') }}</span>
+            </label>
+            <div v-if="!excelBPSAllModels" data-testid="bulk-excel-bps-model-selection">
+              <label class="input-label">{{ t('admin.accounts.openai.excelBPSModels') }}</label>
+              <ModelWhitelistSelector v-model="excelBPSModels" platform="openai" />
+              <button type="button" class="btn btn-secondary" data-testid="bulk-excel-bps-astra-only"
+                @click="excelBPSModels = ['gpt-6-astra']">{{ t('admin.accounts.openai.excelBPSAstraOnly') }}</button>
+              <p class="input-hint">{{ t('admin.accounts.openai.excelBPSModelsHint') }}</p>
+            </div>
+            <p class="text-xs text-amber-600 dark:text-amber-400">{{ t('admin.accounts.openai.excelBPSNotice') }}</p>
+            <div class="mt-3">
+              <label class="flex items-center gap-2">
+                <input v-model="excelBPSOmitUnsupportedTools" type="checkbox"
+                  data-testid="bulk-excel-bps-omit-unsupported-tools"
+                  class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
+                <span class="text-sm">{{ t('admin.accounts.openai.excelBPSOmitUnsupportedTools') }}</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSOmitUnsupportedToolsDesc') }}</p>
+            </div>
+            <div class="mt-3">
+              <label class="flex items-center gap-2">
+                <input v-model="excelBPSIgnoreEncryptedContent" type="checkbox"
+                  data-testid="bulk-excel-bps-ignore-encrypted-content"
+                  class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
+                <span class="text-sm">{{ t('admin.accounts.openai.excelBPSIgnoreEncryptedContent') }}</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSIgnoreEncryptedContentDesc') }}</p>
+            </div>
+            <div class="mt-3">
+              <label class="flex items-center gap-2">
+                <input v-model="excelBPSAutoDisableOn403" type="checkbox"
+                  data-testid="bulk-excel-bps-auto-disable-on-403"
+                  class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
+                <span class="text-sm">{{ t('admin.accounts.openai.excelBPSAutoDisableOn403') }}</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSAutoDisableOn403Desc') }}</p>
+            </div>
+            <div class="mt-3">
+              <label class="flex items-center gap-2">
+                <input v-model="excelBPSAutoRecoverOn403" type="checkbox" :disabled="!excelBPSAutoDisableOn403"
+                  data-testid="bulk-excel-bps-auto-recover-on-403"
+                  class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500 disabled:opacity-50" />
+                <span class="text-sm">{{ t('admin.accounts.openai.excelBPSAutoRecoverOn403') }}</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSAutoRecoverOn403Desc') }}</p>
+              <div v-if="excelBPSAutoRecoverOn403 && excelBPSAutoDisableOn403" class="mt-2">
+                <label class="block space-y-1">
+                  <span class="text-sm">{{ t('admin.accounts.openai.excelBPS403RecoveryInterval') }}</span>
+                  <input v-model.number="excelBPSRecoveryIntervalMinutes" type="number" min="1" :max="MAX_BPS_RECOVERY_INTERVAL_MINUTES" step="1" required
+                    data-testid="bulk-excel-bps-recovery-interval" class="input w-40" />
+                </label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPS403RecoveryIntervalHint') }}</p>
+              </div>
+            </div>
+            <div class="mt-3">
+              <label class="flex items-center gap-2">
+                <input v-model="excelBPSAutoMoveOn403" type="checkbox"
+                  data-testid="bulk-excel-bps-auto-move-on-403"
+                  class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
+                <span class="text-sm">{{ t('admin.accounts.openai.excelBPSAutoMoveOn403') }}</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSAutoMoveOn403Desc') }}</p>
+              <div v-if="excelBPSAutoMoveOn403" class="mt-2">
+                <label class="input-label">{{ t('admin.accounts.openai.excelBPS403TargetGroup') }}</label>
+                <Select v-model="excelBPS403TargetGroupID" :options="excelBPS403GroupOptions"
+                  :aria-label="t('admin.accounts.openai.excelBPS403TargetGroup')"
+                  data-testid="bulk-excel-bps-403-target-group" />
+              </div>
+            </div>
+            <div>
+              <label class="flex items-center gap-2">
+                <input v-model="excelBPSCacheCreationAsInput" type="checkbox"
+                  data-testid="bulk-excel-bps-cache-creation-as-input"
+                  class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
+                <span class="text-sm">{{ t('admin.accounts.openai.excelBPSCacheCreationAsInput') }}</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSCacheCreationAsInputDesc') }}</p>
+            </div>
+          </div>
+        </fieldset>
+      </div>
+
       <!-- OpenAI passthrough -->
       <div
-        v-if="allOpenAIPassthroughCapable"
+        v-if="allowTransportEdit && (allOpenAIPassthroughCapable)"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="mb-3 flex items-center justify-between">
@@ -84,7 +208,7 @@
 
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
       <div
-        v-if="allOpenAIOAuthOnly"
+        v-if="allowTransportEdit && (allOpenAIOAuthOnly)"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="mb-3 flex items-center justify-between">
@@ -135,7 +259,7 @@
 
       <!-- OpenAI API long-context billing -->
       <div
-        v-if="allOpenAIPassthroughCapable"
+        v-if="allowTransportEdit && (allOpenAIPassthroughCapable)"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="mb-3 flex items-center justify-between gap-4">
@@ -194,7 +318,7 @@
       </div>
 
       <!-- Base URL (API Key only) -->
-      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allowTransportEdit" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <label
             id="bulk-edit-base-url-label"
@@ -232,7 +356,7 @@
       </div>
 
       <!-- Model restriction -->
-      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allowAuthorize" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <label
             id="bulk-edit-model-restriction-label"
@@ -345,6 +469,7 @@
                 v-model="allowedModels"
                 :model-mappings="modelMappings"
                 :platforms="targetSelectedPlatforms"
+                :sync-account-ids="canSyncUpstream ? resolveSyncAccountIds : undefined"
               />
 
               <p class="text-xs text-gray-500 dark:text-gray-400">
@@ -464,7 +589,7 @@
       </div>
 
       <!-- Custom error codes -->
-      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allowAuthorize" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <div>
             <label
@@ -562,7 +687,7 @@
       </div>
 
       <!-- Intercept warmup requests (Anthropic only) -->
-      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allowAuthorize" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="flex items-center justify-between">
           <div class="flex-1 pr-4">
             <label
@@ -604,7 +729,7 @@
       </div>
 
       <!-- Header Override (eligible API-key platforms + grok OAuth) -->
-      <div v-if="allHeaderOverrideCapable" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allowAuthorize && (allHeaderOverrideCapable)" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="flex items-center justify-between">
           <div class="flex-1 pr-4">
             <label
@@ -667,7 +792,7 @@
       </div>
 
       <!-- Proxy -->
-      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allowTransportEdit" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <label
             id="bulk-edit-proxy-label"
@@ -782,7 +907,7 @@
             aria-labelledby="bulk-edit-priority-label"
           />
         </div>
-        <div>
+        <div v-if="allowRateEdit">
           <div class="mb-3 flex items-center justify-between">
             <label
               id="bulk-edit-rate-multiplier-label"
@@ -850,7 +975,7 @@
       </div>
 
       <!-- OpenAI OAuth WS mode -->
-      <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allowTransportEdit && (allOpenAIOAuth)" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <label
             id="bulk-edit-openai-ws-mode-label"
@@ -887,7 +1012,7 @@
       </div>
 
       <!-- OpenAI OAuth Codex CLI only -->
-      <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allowTransportEdit && (allOpenAIOAuth)" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <label
             id="bulk-edit-openai-codex-cli-only-label"
@@ -931,7 +1056,7 @@
       </div>
 
       <!-- OpenAI OAuth: Codex app-server -->
-      <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allowTransportEdit && (allOpenAIOAuth)" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <label
             id="bulk-edit-openai-codex-app-server-label"
@@ -975,7 +1100,7 @@
       </div>
 
       <!-- Codex 指纹收敛模式（仅 OpenAI OAuth） -->
-      <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allowTransportEdit && (allOpenAIOAuth)" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <label class="input-label mb-0">{{ t('admin.accounts.openai.codexFingerprintMode') }}</label>
           <input
@@ -994,7 +1119,7 @@
       </div>
 
       <!-- Upstream billing auto probe (any API-key platform) -->
-      <div v-if="allBillingProbeCapable" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allowRateEdit && (allBillingProbeCapable)" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <div class="flex-1 pr-4">
             <label
@@ -1033,7 +1158,7 @@
       </div>
 
       <!-- OpenAI API Key endpoint capabilities -->
-      <div v-if="allOpenAIAPIKey" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allowAuthorize && (allOpenAIAPIKey)" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between gap-4">
           <div class="flex-1">
             <label
@@ -1082,7 +1207,7 @@
       </div>
 
       <!-- OpenAI API Key Responses route -->
-      <div v-if="allOpenAIAPIKey" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allowTransportEdit && (allOpenAIAPIKey)" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between gap-4">
           <div class="flex-1">
             <label
@@ -1128,7 +1253,7 @@
       </div>
 
       <!-- OpenAI API Key WS mode -->
-      <div v-if="allOpenAIAPIKey" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allowTransportEdit && (allOpenAIAPIKey)" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <label
             id="bulk-edit-openai-apikey-ws-mode-label"
@@ -1165,7 +1290,7 @@
       </div>
 
       <!-- OpenAI Compact mode -->
-      <div v-if="allOpenAIPassthroughCapable" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allowTransportEdit && (allOpenAIPassthroughCapable)" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <div class="flex-1 pr-4">
             <label
@@ -1201,7 +1326,7 @@
       </div>
 
       <!-- OpenAI Compact model mapping -->
-      <div v-if="allOpenAIPassthroughCapable" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allowAuthorize && (allOpenAIPassthroughCapable)" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <div class="flex-1 pr-4">
             <label
@@ -1269,7 +1394,7 @@
       </div>
 
       <!-- RPM Limit (仅全部为 Anthropic OAuth/SetupToken 时显示) -->
-      <div v-if="allAnthropicOAuthOrSetupToken" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allowTransportEdit && (allAnthropicOAuthOrSetupToken)" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <label
             id="bulk-edit-rpm-limit-label"
@@ -1471,13 +1596,25 @@
     @confirm="handleMixedChannelConfirm"
     @cancel="handleMixedChannelCancel"
   />
+  <EditAccountModal v-if="referenceAccount" :show="true" :account="referenceAccount"
+    :proxies="proxies" :groups="groups" :allow-authorize="false" :allow-rate-edit="allowRateEdit"
+    :allow-transport-edit="allowTransportEdit" :supplier-scope="supplierScope" :save-account="saveFullEditor" capture-baseline @baseline="initialParameters = $event"
+    @close="referenceAccount = null" @updated="referenceAccount = null; emit('updated'); handleClose()" />
 </template>
 
 <script setup lang="ts">
+import EditAccountModal from './EditAccountModal.vue'
+import { canEnableOpenAICloud } from '@/utils/openaiCloud'
+import { accountParameterPatch } from '@/utils/accountParameterPatch'
+import type { Account } from '@/types'
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import Toggle from '@/components/common/Toggle.vue'
+import { DEFAULT_BPS_RECOVERY_INTERVAL_MINUTES, MAX_BPS_RECOVERY_INTERVAL_MINUTES, isValidBPSRecoveryInterval, bpsRecoveryIntervalOrDefault } from '@/utils/excelBPSRecovery'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
+import { DEFAULT_EXCEL_BPS_MODELS } from '@/constants/account'
 import type {
   Proxy as ProxyConfig,
   AdminGroup,
@@ -1518,14 +1655,20 @@ import {
 } from '@/utils/openaiWsMode'
 import type { OpenAIWSMode } from '@/utils/openaiWsMode'
 interface Props {
+  supplierScope?: boolean
+  loadReferenceAccount?: () => Promise<Account>
+  saveBatch?: (ids: number[], updates: Record<string, unknown>, advanced?: boolean) => ReturnType<typeof adminAPI.accounts.bulkUpdate>
+
+  allowRateEdit?: boolean
+  allowAuthorize?: boolean
+  allowTransportEdit?: boolean
   show: boolean
   accountIds: number[]
   selectedPlatforms: AccountPlatform[]
   selectedTypes: AccountType[]
   target?: {
-    mode: 'selected' | 'filtered'
-    filters?: Record<string, unknown>
-    previewCount?: number
+    mode: 'selected'
+    accountIds?: number[]
     selectedPlatforms?: AccountPlatform[]
     selectedTypes?: AccountType[]
   }
@@ -1533,18 +1676,50 @@ interface Props {
   groups: AdminGroup[]
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), { allowRateEdit: true, allowAuthorize: true, allowTransportEdit: true })
 const emit = defineEmits<{
   close: []
   updated: []
 }>()
 
+const referenceAccount = ref<Account | null>(null)
+const initialParameters = ref<Record<string, unknown>>()
+const advancedIDs = ref<number[]>([])
+async function openFullEditor() {
+  initialParameters.value = undefined
+  submitting.value = true
+  try {
+    const ids = [...targetAccountIds.value]
+    if (ids.length === 0) throw new Error(t('admin.accounts.bulkEdit.noSelection'))
+    if (props.loadReferenceAccount) {
+      referenceAccount.value = await props.loadReferenceAccount()
+    } else {
+      referenceAccount.value = await adminAPI.accounts.getById(ids[0])
+    }
+    advancedIDs.value = ids
+  } catch {
+    appStore.showError(t('admin.accounts.failedToLoad'))
+  } finally { submitting.value = false }
+}
+async function saveFullEditor(_id: number, payload: Record<string, unknown>): Promise<Account> {
+  const reference = referenceAccount.value!
+  if (!initialParameters.value) throw new Error(t('common.loading'))
+  const patch = accountParameterPatch(reference, payload, initialParameters.value)
+  if (!Object.keys(patch).length) throw new Error(t('admin.accounts.bulkEdit.noChanges'))
+  const result = props.saveBatch
+    ? await props.saveBatch(advancedIDs.value, patch, true)
+    : await adminAPI.accounts.bulkUpdate(advancedIDs.value, patch, { view: 'management' })
+  if (result.failed) throw new Error(t('admin.accounts.bulkEdit.partialSuccess', { success: result.success, failed: result.failed }))
+  appStore.showSuccess(t('admin.accounts.bulkEdit.success', { count: result.success }))
+  return reference
+}
+
 const { t } = useI18n()
 const appStore = useAppStore()
+const authStore = useAuthStore()
 
 // Platform awareness
-const targetMode = computed(() => props.target?.mode ?? 'selected')
-const targetPreviewCount = computed(() => props.target?.previewCount ?? props.accountIds.length)
+const targetAccountIds = computed(() => props.target?.accountIds ?? props.accountIds)
 const targetSelectedPlatforms = computed(() => props.target?.selectedPlatforms ?? props.selectedPlatforms)
 const targetSelectedTypes = computed(() => props.target?.selectedTypes ?? props.selectedTypes)
 // Grok 快捷端点仅在所选账号全部为 grok 平台时展示（其他平台不显示）
@@ -1554,6 +1729,16 @@ const allTargetsGrok = computed(
     targetSelectedPlatforms.value.every((p) => p === 'grok')
 )
 const isMixedPlatform = computed(() => targetSelectedPlatforms.value.length > 1)
+const canSyncUpstream = computed(() => {
+  if (targetSelectedPlatforms.value.length !== 1 || targetSelectedTypes.value.length === 0) return false
+  const platform = targetSelectedPlatforms.value[0]
+  const supportedTypes = platform === 'openai' ? ['oauth', 'apikey']
+    : platform === 'anthropic' ? ['oauth', 'setup-token', 'apikey'] : []
+  return targetSelectedTypes.value.every(type => supportedTypes.includes(type))
+})
+const resolveSyncAccountIds = async (): Promise<number[]> => {
+  return [...targetAccountIds.value]
+}
 
 const allOpenAIPassthroughCapable = computed(() => {
   return (
@@ -1655,9 +1840,41 @@ const enableProxy = ref(false)
 const enableConcurrency = ref(false)
 const enableLoadFactor = ref(false)
 const enablePriority = ref(false)
+const enableCostMultiplier = ref(false)
 const enableRateMultiplier = ref(false)
 const enableStatus = ref(false)
 const enableGroups = ref(false)
+const enableCloud = ref(false)
+const cloudEnabled = ref(false)
+const cloudEligibilityLoading = ref(false)
+const cloudEligibilityError = ref('')
+watch(() => [props.show, enableCloud.value, targetAccountIds.value.join(',')], async (_, __, onCleanup) => {
+  let current = true
+  onCleanup(() => { current = false })
+  cloudEligibilityError.value = ''
+  cloudEligibilityLoading.value = false
+  if (!props.show || !enableCloud.value || props.supplierScope || !props.allowTransportEdit || !allOpenAIOAuthOnly.value) return
+  cloudEligibilityLoading.value = true
+  const ids = [...targetAccountIds.value]
+  const invalid: string[] = []
+  let cursor = 0, failed = false
+  await Promise.all(Array.from({ length: Math.min(4, ids.length) }, async () => {
+    while (current && cursor < ids.length) {
+      const id = ids[cursor++]
+      try {
+        const account = await adminAPI.accounts.getById(id)
+        if (!canEnableOpenAICloud(account)) invalid.push(`${account?.name || ''} #${id}`.trim())
+      } catch { failed = true }
+    }
+  }))
+  if (!current) return
+  cloudEligibilityLoading.value = false
+  cloudEligibilityError.value = failed ? t('admin.accounts.failedToLoad')
+    : invalid.length ? t('admin.accounts.openai.cloud.ineligibleAccounts', { accounts: invalid.join(', ') }) : ''
+  if (cloudEligibilityError.value) cloudEnabled.value = false
+})
+
+const enableExcelBPS = ref(false)
 const enableOpenAIPassthrough = ref(false)
 const enableOpenAIFlattenNamespaces = ref(false)
 const enableOpenAILongContextBilling = ref(false)
@@ -1693,6 +1910,25 @@ const priority = ref(1)
 const rateMultiplier = ref(1)
 const status = ref<'active' | 'inactive'>('active')
 const groupIds = ref<number[]>([])
+const excelBPSEnabled = ref(false)
+const excelBPSAllModels = ref(false)
+const excelBPSModels = ref<string[]>([...DEFAULT_EXCEL_BPS_MODELS])
+const excelBPSCacheCreationAsInput = ref(true)
+const excelBPSAutoDisableOn403 = ref(true)
+const excelBPSAutoRecoverOn403 = ref(false)
+const excelBPSRecoveryIntervalMinutes = ref<number | string>(DEFAULT_BPS_RECOVERY_INTERVAL_MINUTES)
+const excelBPSOmitUnsupportedTools = ref(false)
+const excelBPSIgnoreEncryptedContent = ref(false)
+const excelBPSAutoMoveOn403 = ref(false)
+const excelBPS403TargetGroupID = ref<number | string>('')
+
+const excelBPS403GroupOptions = computed(() => [
+  { value: '', label: t('admin.accounts.openai.excelBPS403SelectTarget') },
+  { value: 0, label: t('admin.accounts.openai.excelBPS403LeaveAllGroups') },
+  ...props.groups
+    .filter(group => group.platform === 'openai' || (!authStore.isSimpleMode && group.platform === 'composite'))
+    .map(group => ({ value: group.id, label: group.name }))
+])
 const openaiPassthroughEnabled = ref(false)
 // Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
@@ -1977,6 +2213,30 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     }
   }
 
+  if (props.allowTransportEdit && !props.supplierScope && enableCloud.value && allOpenAIOAuthOnly.value) {
+    ensureExtra().openai_cloud = cloudEnabled.value
+  }
+
+  if (enableExcelBPS.value && allOpenAIOAuthOnly.value) {
+    const extra = ensureExtra()
+    extra.openai_excel_bps = excelBPSEnabled.value
+    // null explicitly removes an existing model scope; [] selects no BPS models.
+    extra.openai_excel_bps_models = excelBPSEnabled.value && !excelBPSAllModels.value
+      ? [...new Set(excelBPSModels.value.map(model => model.trim()).filter(Boolean))]
+      : null
+    extra.openai_excel_bps_cache_creation_as_input =
+      excelBPSEnabled.value && excelBPSCacheCreationAsInput.value
+    extra.openai_excel_bps_auto_disable_on_403 = excelBPSEnabled.value && excelBPSAutoDisableOn403.value
+    extra.openai_excel_bps_auto_recover_on_403 = excelBPSEnabled.value && excelBPSAutoDisableOn403.value && excelBPSAutoRecoverOn403.value
+    extra.openai_excel_bps_403_recovery_interval_minutes = bpsRecoveryIntervalOrDefault(excelBPSRecoveryIntervalMinutes.value)
+    extra.openai_excel_bps_omit_unsupported_tools = excelBPSEnabled.value && excelBPSOmitUnsupportedTools.value
+    extra.openai_excel_bps_ignore_encrypted_content = excelBPSEnabled.value && excelBPSIgnoreEncryptedContent.value
+    extra.openai_excel_bps_auto_move_on_403 = excelBPSEnabled.value && excelBPSAutoMoveOn403.value
+    extra.openai_excel_bps_403_target_group_id = excelBPSEnabled.value && excelBPSAutoMoveOn403.value
+      ? Number(excelBPS403TargetGroupID.value)
+      : null
+  }
+
   if (enableOpenAIPassthrough.value) {
     const extra = ensureExtra()
     extra.openai_passthrough = openaiPassthroughEnabled.value
@@ -2160,12 +2420,14 @@ const mixedChannelConfirmed = ref(false)
 // 是否需要预检查：改了分组 + 全是单一的 antigravity 或 anthropic 平台
 // 多平台混合的情况由 submitBulkUpdate 的 409 catch 兜底
 const canPreCheck = () =>
+  !props.supplierScope &&
   enableGroups.value &&
   groupIds.value.length > 0 &&
   targetSelectedPlatforms.value.length === 1 &&
   (targetSelectedPlatforms.value[0] === 'antigravity' || targetSelectedPlatforms.value[0] === 'anthropic')
 
 const handleClose = () => {
+  referenceAccount.value = null
   showMixedChannelWarning.value = false
   mixedChannelWarningMessage.value = ''
   pendingUpdatesForConfirm.value = null
@@ -2196,13 +2458,20 @@ const preCheckMixedChannelRisk = async (built: Record<string, unknown>): Promise
 }
 
 const handleSubmit = async () => {
-  if (targetMode.value === 'selected' && props.accountIds.length === 0) {
+  if (enableCloud.value && cloudEligibilityLoading.value) return
+  if (enableCloud.value && cloudEnabled.value && cloudEligibilityError.value) {
+    appStore.showError(cloudEligibilityError.value)
+    return
+  }
+  if (targetAccountIds.value.length === 0) {
     appStore.showError(t('admin.accounts.bulkEdit.noSelection'))
     return
   }
 
   const hasAnyFieldEnabled =
     enableBaseUrl.value ||
+    (props.allowTransportEdit && !props.supplierScope && enableCloud.value && allOpenAIOAuthOnly.value) ||
+    (enableExcelBPS.value && allOpenAIOAuthOnly.value) ||
     enableOpenAIPassthrough.value ||
     enableOpenAIFlattenNamespaces.value ||
     (enableOpenAILongContextBilling.value && allOpenAIPassthroughCapable.value) ||
@@ -2233,6 +2502,20 @@ const handleSubmit = async () => {
   if (!hasAnyFieldEnabled) {
     appStore.showError(t('admin.accounts.bulkEdit.noFieldsSelected'))
     return
+  }
+
+  if (enableExcelBPS.value && allOpenAIOAuthOnly.value && excelBPSEnabled.value && excelBPSAutoDisableOn403.value && excelBPSAutoRecoverOn403.value && !isValidBPSRecoveryInterval(excelBPSRecoveryIntervalMinutes.value)) {
+    appStore.showError(t('admin.accounts.openai.excelBPS403RecoveryIntervalInvalid'))
+    return
+  }
+
+  if (enableExcelBPS.value && allOpenAIOAuthOnly.value && excelBPSEnabled.value && excelBPSAutoMoveOn403.value) {
+    const target = Number(excelBPS403TargetGroupID.value)
+    if (excelBPS403TargetGroupID.value === '' || !Number.isSafeInteger(target) || target < 0 ||
+      !excelBPS403GroupOptions.value.some(option => option.value === target)) {
+      appStore.showError(t('admin.accounts.openai.excelBPS403SelectTarget'))
+      return
+    }
   }
 
   // base_url 现在也会作用于 Grok OAuth 订阅账号的转发端点；坏值会让请求期
@@ -2280,12 +2563,8 @@ const submitBulkUpdate = async (baseUpdates: Record<string, unknown>) => {
   submitting.value = true
 
   try {
-    const res = targetMode.value === 'filtered' && props.target?.filters
-      ? await adminAPI.accounts.bulkUpdate({
-        filters: props.target.filters,
-        ...updates
-      })
-      : await adminAPI.accounts.bulkUpdate(props.accountIds, updates)
+    const res = props.saveBatch ? await props.saveBatch([...targetAccountIds.value], updates)
+      : await adminAPI.accounts.bulkUpdate([...targetAccountIds.value], updates)
     const success = res.success || 0
     const failed = res.failed || 0
     const inherited = res.long_context_inherited_count || 0
@@ -2362,9 +2641,13 @@ watch(
       enableConcurrency.value = false
       enableLoadFactor.value = false
       enablePriority.value = false
+      enableCostMultiplier.value = false
       enableRateMultiplier.value = false
       enableStatus.value = false
       enableGroups.value = false
+      enableCloud.value = false
+      cloudEnabled.value = false
+      enableExcelBPS.value = false
       enableOpenAIPassthrough.value = false
       enableOpenAIFlattenNamespaces.value = false
       enableOpenAILongContextBilling.value = false
@@ -2383,6 +2666,18 @@ watch(
 
       // Reset all values
       baseUrl.value = ''
+      excelBPSEnabled.value = false
+
+      excelBPSAllModels.value = false
+      excelBPSModels.value = [...DEFAULT_EXCEL_BPS_MODELS]
+      excelBPSCacheCreationAsInput.value = true
+      excelBPSAutoDisableOn403.value = true
+      excelBPSAutoRecoverOn403.value = false
+      excelBPSRecoveryIntervalMinutes.value = DEFAULT_BPS_RECOVERY_INTERVAL_MINUTES
+      excelBPSOmitUnsupportedTools.value = false
+      excelBPSIgnoreEncryptedContent.value = false
+      excelBPSAutoMoveOn403.value = false
+      excelBPS403TargetGroupID.value = ''
       openaiPassthroughEnabled.value = false
       openaiFlattenNamespacesEnabled.value = false
       openAILongContextBillingEnabled.value = false

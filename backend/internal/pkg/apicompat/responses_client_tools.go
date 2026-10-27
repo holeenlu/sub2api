@@ -27,7 +27,7 @@ func AdaptResponsesClientTools(req map[string]any) (ResponsesClientToolMapping, 
 	if !ok || len(tools) == 0 {
 		return ResponsesClientToolMapping{}, false, nil
 	}
-	discovered, err := promoteResponsesToolSearchDiscoveries(req)
+	discovered, err := PromoteResponsesToolSearchDiscoveries(req)
 	if err != nil {
 		return ResponsesClientToolMapping{}, false, err
 	}
@@ -109,10 +109,18 @@ func AdaptResponsesClientTools(req map[string]any) (ResponsesClientToolMapping, 
 				continue
 			}
 			seenSearch = true
+			schema, err := toolSearchParameters(tool["parameters"])
+			if err != nil {
+				return ResponsesClientToolMapping{}, false, err
+			}
+			description, _ := tool["description"].(string)
+			if description == "" {
+				description = "Search and load Codex tools, plugins, connectors, and MCP namespaces for the current task."
+			}
 			lowered = append(lowered, map[string]any{
 				"type": "function", "name": toolSearchProxyName,
-				"description": "Search and load Codex tools, plugins, connectors, and MCP namespaces for the current task.",
-				"parameters":  json.RawMessage(toolSearchProxySchema),
+				"description": description,
+				"parameters":  schema,
 			})
 			changed = true
 		default:
@@ -142,6 +150,29 @@ func AdaptResponsesClientTools(req map[string]any) (ResponsesClientToolMapping, 
 		adapter.NamespaceTools = nil
 	}
 	return adapter, changed, nil
+}
+
+// Older clients omit the declaration schema; only those use the historical
+// default. Modern Codex supplies its exact query/limit schema and descriptions.
+func toolSearchParameters(value any) (any, error) {
+	if value == nil {
+		return json.RawMessage(toolSearchProxySchema), nil
+	}
+	switch schema := value.(type) {
+	case map[string]any:
+		if schema != nil {
+			return schema, nil
+		}
+	case json.RawMessage:
+		if len(schema) == 0 || bytes.Equal(bytes.TrimSpace(schema), []byte("null")) {
+			return json.RawMessage(toolSearchProxySchema), nil
+		}
+		var object map[string]json.RawMessage
+		if json.Unmarshal(schema, &object) == nil && object != nil {
+			return schema, nil
+		}
+	}
+	return nil, fmt.Errorf("tool_search parameters must be a JSON schema object")
 }
 
 // stripResponsesDeferredToolFlags removes defer_loading only when the final
@@ -451,7 +482,10 @@ func rewriteClientToolChoice(req map[string]any, adapter *ResponsesClientToolMap
 	return false
 }
 
-func customToolCallArguments(input string) string {
+func customToolCallArguments(input string) string { return CustomToolCallArguments(input) }
+
+// CustomToolCallArguments is the lossless freeform-to-function encoding shared by protocol adapters.
+func CustomToolCallArguments(input string) string {
 	encoded, _ := json.Marshal(map[string]string{"input": input})
 	return string(encoded)
 }

@@ -1041,7 +1041,8 @@ func TestParseGrokMediaRequestBuildsMultipartModerationBody(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, writer.Close())
 
-	info := ParseGrokMediaRequest(writer.FormDataContentType(), buf.Bytes())
+	info, err := ParseGrokMediaRequest(writer.FormDataContentType(), buf.Bytes())
+	require.NoError(t, err)
 	require.Equal(t, "grok-imagine-edit", info.Model)
 	require.Equal(t, "edit this private image", info.Prompt)
 
@@ -1051,8 +1052,33 @@ func TestParseGrokMediaRequestBuildsMultipartModerationBody(t *testing.T) {
 	require.True(t, strings.HasPrefix(gjson.GetBytes(moderationBody, "images.0.image_url").String(), "data:image/"))
 }
 
+func TestParseGrokMediaRequestMultipartPartSizeLimit(t *testing.T) {
+	build := func(imageSize int) (string, []byte) {
+		var buf bytes.Buffer
+		writer := multipart.NewWriter(&buf)
+		require.NoError(t, writer.WriteField("model", "grok-imagine-edit"))
+		part, err := writer.CreateFormFile("image", "input.png")
+		require.NoError(t, err)
+		_, err = part.Write(bytes.Repeat([]byte{'x'}, imageSize))
+		require.NoError(t, err)
+		require.NoError(t, writer.Close())
+		return writer.FormDataContentType(), buf.Bytes()
+	}
+
+	contentType, body := build(openAIImageMaxUploadPartSize)
+	info, err := ParseGrokMediaRequest(contentType, body)
+	require.NoError(t, err)
+	require.Len(t, info.Uploads, 1)
+	require.Len(t, info.Uploads[0].Data, openAIImageMaxUploadPartSize)
+
+	contentType, body = build(openAIImageMaxUploadPartSize + 1)
+	_, err = ParseGrokMediaRequest(contentType, body)
+	require.EqualError(t, err, "multipart field image exceeds 32 MiB")
+}
+
 func TestParseGrokMediaVideoRequestResolution(t *testing.T) {
-	info := ParseGrokMediaRequest("application/json", []byte(`{"model":"grok-imagine-video","prompt":"waves","resolution":"720p"}`))
+	info, err := ParseGrokMediaRequest("application/json", []byte(`{"model":"grok-imagine-video","prompt":"waves","resolution":"720p"}`))
+	require.NoError(t, err)
 
 	require.Equal(t, "grok-imagine-video", info.Model)
 	require.Equal(t, "720p", info.Resolution)
@@ -1065,7 +1091,8 @@ func TestParseGrokMediaRequestAcceptsOfficialImageURLFields(t *testing.T) {
 		"reference_images":[{"url":"https://example.com/reference.png"}]
 	}`)
 
-	info := ParseGrokMediaRequest("application/json", body)
+	info, err := ParseGrokMediaRequest("application/json", body)
+	require.NoError(t, err)
 
 	require.Equal(t, []string{
 		"https://example.com/source.png",
@@ -1996,6 +2023,7 @@ func TestForwardGrokResponsesStreamingDefaultsEmptyModelTo45AndSnapshots(t *test
 		"",
 		`data: {"type":"response.completed","sequence_number":1,"response":{"id":"resp_grok","model":"grok-4.3","usage":{"input_tokens":5,"output_tokens":3,"input_tokens_details":{"cached_tokens":2}}}}`,
 		"",
+		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -2065,6 +2093,7 @@ func TestForwardGrokResponsesAPIKeyUsesXAIResponses(t *testing.T) {
 		`data: {"type":"response.output_text.delta","sequence_number":0,"delta":"ok"}`,
 		"",
 		`data: {"type":"response.completed","sequence_number":1,"response":{"id":"resp_grok_api_key","model":"grok-4.5","usage":{"input_tokens":2,"output_tokens":1}}}`,
+		"",
 		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -2570,6 +2599,7 @@ func TestForwardAsChatCompletionsForGrokStreamingUsesRawXAIChatCompletions(t *te
 		"",
 		"data: [DONE]",
 		"",
+		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -2742,6 +2772,7 @@ func TestForwardAsChatCompletionsForGrokStreamingStopFallsBackToRawXAIChatComple
 		`data: {"id":"chatcmpl_grok","object":"chat.completion.chunk","model":"grok-4.3","choices":[],"usage":{"prompt_tokens":6,"completion_tokens":4,"total_tokens":10,"prompt_tokens_details":{"cached_tokens":1}}}`,
 		"",
 		"data: [DONE]",
+		"",
 		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{

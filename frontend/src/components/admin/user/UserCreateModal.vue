@@ -14,9 +14,9 @@
         <label class="input-label">{{ t('admin.users.password') }}</label>
         <div class="flex gap-2">
           <div class="relative flex-1">
-            <input v-model="form.password" type="text" required class="input pr-10" :placeholder="t('admin.users.enterPassword')" />
+            <input v-model="form.password" type="text" required minlength="6" maxlength="72" autocomplete="new-password" class="input pr-10" :placeholder="t('admin.users.enterPassword')" />
           </div>
-          <button type="button" @click="generateRandomPassword" class="btn btn-secondary px-3">
+          <button type="button" @click="form.password = generateRandomPassword()" :title="t('admin.users.generatePassword')" :aria-label="t('admin.users.generatePassword')" class="btn btn-secondary px-3">
             <Icon name="refresh" size="md" />
           </button>
         </div>
@@ -28,14 +28,14 @@
       <div>
         <label class="input-label">{{ t('admin.users.form.roleLabel') }}</label>
         <select v-model="form.role" class="input">
-          <option value="user">{{ t('admin.users.roles.user') }}</option>
-          <option value="admin">{{ t('admin.users.roles.admin') }}</option>
+          <option v-for="role in roles" :key="role" :value="role">{{ t(`admin.users.roles.${role}`) }}</option>
         </select>
       </div>
+      <p v-if="form.role === 'admin'" class="text-sm text-gray-500">{{ t('admin.rolePermissions.sharedPolicy') }}</p>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
+        <div v-if="auth.can('billing.balance.adjust') && form.role !== 'super_admin'">
           <label class="input-label">{{ t('admin.users.columns.balance') }}</label>
-          <input v-model="form.balance" type="number" step="any" class="input" />
+          <input v-model="form.balance" type="number" step="any" min="0" :max="auth.isSuperAdmin ? undefined : auth.user?.balance ?? 0" class="input" />
         </div>
         <div>
           <label class="input-label">{{ t('admin.users.columns.concurrency') }}</label>
@@ -70,19 +70,26 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'; import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { generateRandomPassword } from '@/utils/password'
+import { USER_ROLES, isVendorRole } from '@/constants/userRoles'
 import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits(['close', 'success']); const { t } = useI18n()
 const appStore = useAppStore()
+const auth = useAuthStore()
+const roles = computed(() => USER_ROLES.filter(role => !isVendorRole(role) && (
+  role === 'user' ? auth.can('users.create') : auth.isSuperAdmin
+)))
 
-const form = reactive({ email: '', password: '', username: '', notes: '', role: 'user' as 'user' | 'admin', balance: '', concurrency: 1, rpm_limit: 0 })
+const form = reactive({ email: '', password: '', username: '', notes: '', role: 'user' as 'user' | 'admin' | 'super_admin', balance: '', concurrency: 1, rpm_limit: 0 })
 
 const stepUp = useStepUp()
 const loading = ref(false)
@@ -94,11 +101,12 @@ const submit = async () => {
     const { balance: rawBalance, ...rest } = { ...form }
     const balance = String(rawBalance).trim()
     const payload: typeof rest & { balance?: number } = { ...rest }
-    if (balance !== '') {
+    if (balance !== '' && form.role !== 'super_admin') {
       payload.balance = Number(balance)
     }
     // 创建管理员属敏感操作：后端返回 STEP_UP_REQUIRED 时弹 TOTP 验证并重试
     await stepUp.run(() => adminAPI.users.create(payload))
+    await auth.refreshUser().catch(() => {})
     appStore.showSuccess(t('admin.users.userCreated'))
     emit('success'); emit('close')
   } catch (e: any) {
@@ -118,9 +126,4 @@ const submit = async () => {
 
 watch(() => props.show, (v) => { if(v) Object.assign(form, { email: '', password: '', username: '', notes: '', role: 'user', balance: '', concurrency: 1, rpm_limit: 0 }) })
 
-const generateRandomPassword = () => {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%^&*'
-  let p = ''; for (let i = 0; i < 16; i++) p += chars.charAt(Math.floor(Math.random() * chars.length))
-  form.password = p
-}
 </script>
