@@ -3,6 +3,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -12,7 +13,7 @@ import (
 func TestComputeDashboardHealthScore_IdleReturns100(t *testing.T) {
 	t.Parallel()
 
-	score := computeDashboardHealthScore(time.Now().UTC(), &OpsDashboardOverview{})
+	score := computeDashboardHealthScore(time.Now().UTC(), &OpsDashboardOverview{}, nil)
 	require.Equal(t, 100, score)
 }
 
@@ -50,7 +51,7 @@ func TestComputeDashboardHealthScore_DegradesOnBadSignals(t *testing.T) {
 		},
 	}
 
-	score := computeDashboardHealthScore(time.Now().UTC(), ov)
+	score := computeDashboardHealthScore(time.Now().UTC(), ov, nil)
 	require.Less(t, score, 80)
 	require.GreaterOrEqual(t, score, 0)
 }
@@ -127,8 +128,8 @@ func TestComputeDashboardHealthScore_Comprehensive(t *testing.T) {
 					MemoryUsagePercent: float64Ptr(75),
 				},
 			},
-			wantMin: 96,
-			wantMax: 97,
+			wantMin: 89,
+			wantMax: 89,
 		},
 		{
 			name: "DB failure",
@@ -146,8 +147,8 @@ func TestComputeDashboardHealthScore_Comprehensive(t *testing.T) {
 					MemoryUsagePercent: float64Ptr(40),
 				},
 			},
-			wantMin: 70,
-			wantMax: 90,
+			wantMin: 49,
+			wantMax: 49,
 		},
 		{
 			name: "Redis failure",
@@ -203,8 +204,8 @@ func TestComputeDashboardHealthScore_Comprehensive(t *testing.T) {
 					MemoryUsagePercent: float64Ptr(30),
 				},
 			},
-			wantMin: 84,
-			wantMax: 85,
+			wantMin: 71,
+			wantMax: 73,
 		},
 		{
 			name: "combined failures - business healthy + infra degraded",
@@ -222,14 +223,14 @@ func TestComputeDashboardHealthScore_Comprehensive(t *testing.T) {
 					MemoryUsagePercent: float64Ptr(95),
 				},
 			},
-			wantMin: 70,
-			wantMax: 90,
+			wantMin: 49,
+			wantMax: 49,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			score := computeDashboardHealthScore(time.Now().UTC(), tt.overview)
+			score := computeDashboardHealthScore(time.Now().UTC(), tt.overview, nil)
 			require.GreaterOrEqual(t, score, tt.wantMin, "score should be >= %d", tt.wantMin)
 			require.LessOrEqual(t, score, tt.wantMax, "score should be <= %d", tt.wantMax)
 			require.GreaterOrEqual(t, score, 0, "score must be >= 0")
@@ -288,8 +289,8 @@ func TestComputeBusinessHealth(t *testing.T) {
 				UpstreamErrorRate: 0,
 				Duration:          OpsPercentiles{P99: intPtr(500)},
 			},
-			wantMin: 100,
-			wantMax: 100,
+			wantMin: 92,
+			wantMax: 92,
 		},
 		{
 			name: "error rate 5%",
@@ -299,8 +300,8 @@ func TestComputeBusinessHealth(t *testing.T) {
 				UpstreamErrorRate: 0,
 				Duration:          OpsPercentiles{P99: intPtr(500)},
 			},
-			wantMin: 77,
-			wantMax: 78,
+			wantMin: 60,
+			wantMax: 60,
 		},
 		{
 			name: "TTFT boundary 2s",
@@ -310,8 +311,8 @@ func TestComputeBusinessHealth(t *testing.T) {
 				UpstreamErrorRate: 0,
 				TTFT:              OpsPercentiles{P99: intPtr(2000)},
 			},
-			wantMin: 75,
-			wantMax: 75,
+			wantMin: 100,
+			wantMax: 100,
 		},
 		{
 			name: "upstream error dominates",
@@ -321,14 +322,14 @@ func TestComputeBusinessHealth(t *testing.T) {
 				UpstreamErrorRate: 0.03,
 				Duration:          OpsPercentiles{P99: intPtr(500)},
 			},
-			wantMin: 88,
-			wantMax: 90,
+			wantMin: 76,
+			wantMax: 76,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			score := computeBusinessHealth(tt.overview)
+			score := computeBusinessHealth(tt.overview, nil)
 			require.GreaterOrEqual(t, score, tt.wantMin, "score should be >= %.1f", tt.wantMin)
 			require.LessOrEqual(t, score, tt.wantMax, "score should be <= %.1f", tt.wantMax)
 			require.GreaterOrEqual(t, score, 0.0, "score must be >= 0")
@@ -440,3 +441,96 @@ func TestComputeInfraHealth(t *testing.T) {
 func timePtr(v time.Time) *time.Time { return &v }
 
 func stringPtr(v string) *string { return &v }
+
+func TestOpsHealthCalibrationAndFailureBoundaries(t *testing.T) {
+	now := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
+	thresholds := &OpsMetricThresholds{TTFTp99MsMax: float64Ptr(60_000), RequestErrorRatePercentMax: float64Ptr(5), UpstreamErrorRatePercentMax: float64Ptr(5)}
+	screenshot := OpsDashboardOverview{RequestCountTotal: 353, RequestCountSLA: 353, SuccessCount: 350, ErrorCountTotal: 3, ErrorCountSLA: 3, SLA: 350.0 / 353, ErrorRate: 3.0 / 353, UpstreamErrorRate: 2.0 / 353, TTFT: OpsPercentiles{P99: intPtr(21827)}, Duration: OpsPercentiles{P99: intPtr(111528)},
+		SystemMetrics: &OpsSystemMetricsSnapshot{DBOK: boolPtr(true), RedisOK: boolPtr(true), CPUUsagePercent: float64Ptr(2.4), MemoryUsagePercent: float64Ptr(9.6)},
+		JobHeartbeats: []*OpsJobHeartbeat{
+			{JobName: "ops_cleanup", ExpectedIntervalSeconds: 86400, LastSuccessAt: timePtr(now.Add(-6 * time.Hour))},
+			{JobName: "ops_preaggregation_daily", ExpectedIntervalSeconds: 3600, LastSuccessAt: timePtr(now.Add(-35 * time.Minute))},
+		}}
+	require.Equal(t, 95, computeDashboardHealthScore(now, &screenshot, thresholds))
+	// Existing configured limits are honored, and total generation duration is not a penalty.
+	strict := *thresholds
+	strict.TTFTp99MsMax = float64Ptr(10000)
+	require.Less(t, computeDashboardHealthScore(now, &screenshot, &strict), 90)
+	screenshot.Duration.P99 = intPtr(500000)
+	require.Equal(t, 95, computeDashboardHealthScore(now, &screenshot, thresholds))
+	previous := 101
+	for _, rate := range []float64{0, 0.0085, 0.02, 0.05, 0.1, 1} {
+		sample := screenshot
+		sample.ErrorRate = rate
+		sample.UpstreamErrorRate = 0
+		score := computeDashboardHealthScore(now, &sample, thresholds)
+		require.LessOrEqual(t, score, previous)
+		previous = score
+		if rate >= 0.1 {
+			require.Less(t, score, 60)
+		}
+	}
+	for _, traffic := range []int64{0, 353} {
+		sample := screenshot
+		sample.RequestCountTotal = traffic
+		sample.RequestCountSLA = traffic
+		sample.ErrorCountTotal = 0
+		sample.SystemMetrics = &OpsSystemMetricsSnapshot{DBOK: boolPtr(false)}
+		require.Less(t, computeDashboardHealthScore(now, &sample, thresholds), 60, "DB failure cannot be hidden by idle or successful requests")
+	}
+	require.Equal(t, 10000.0, *defaultOpsMetricThresholds().TTFTp99MsMax)
+}
+
+func TestOpsJobHealthFollowsExpectedSchedule(t *testing.T) {
+	now := time.Now().UTC()
+	cases := []struct {
+		name string
+		hb   *OpsJobHeartbeat
+		want string
+	}{
+		{"daily job still on schedule", &OpsJobHeartbeat{ExpectedIntervalSeconds: 86400, LastSuccessAt: timePtr(now.Add(-6 * time.Hour))}, "healthy"},
+		{"hourly job still on schedule", &OpsJobHeartbeat{ExpectedIntervalSeconds: 3600, LastSuccessAt: timePtr(now.Add(-35 * time.Minute))}, "healthy"},
+		{"three missed collector cycles", &OpsJobHeartbeat{ExpectedIntervalSeconds: 60, LastSuccessAt: timePtr(now.Add(-4 * time.Minute))}, "stale"},
+		{"newer failure", &OpsJobHeartbeat{LastSuccessAt: timePtr(now.Add(-time.Minute)), LastErrorAt: &now}, "failed"},
+		{"recovered failure", &OpsJobHeartbeat{LastSuccessAt: &now, LastErrorAt: timePtr(now.Add(-time.Minute))}, "healthy"},
+		{"disabled reports", &OpsJobHeartbeat{JobName: "ops_scheduled_reports", LastResult: stringPtr("skipped: no scheduled reports enabled"), LastRunAt: timePtr(now.Add(-10 * 24 * time.Hour))}, "unknown"},
+		{"never run", &OpsJobHeartbeat{}, "unknown"},
+		{"legacy interval fallback", &OpsJobHeartbeat{LastSuccessAt: timePtr(now.Add(-16 * time.Minute))}, "stale"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) { require.Equal(t, tc.want, opsJobHealthStatus(now, tc.hb)) })
+	}
+}
+
+// Exercise the overview path, not only the scoring function: configured limits
+// and persisted job schedules must reach the API response.
+type opsHealthOverviewRepo struct {
+	opsRepoMock
+	overview *OpsDashboardOverview
+	jobs     []*OpsJobHeartbeat
+}
+
+func (r *opsHealthOverviewRepo) GetDashboardOverview(context.Context, *OpsDashboardFilter) (*OpsDashboardOverview, error) {
+	return r.overview, nil
+}
+func (r *opsHealthOverviewRepo) ListJobHeartbeats(context.Context) ([]*OpsJobHeartbeat, error) {
+	return r.jobs, nil
+}
+func TestOpsDashboardUsesConfiguredHealthLimitsAndJobStatus(t *testing.T) {
+	now := time.Now().UTC()
+	settings := newStubSettingRepo()
+	settings.values[SettingKeyOpsMetricThresholds] = `{"ttft_p99_ms_max":60000}`
+	repo := &opsHealthOverviewRepo{overview: &OpsDashboardOverview{RequestCountTotal: 353, RequestCountSLA: 353, ErrorRate: 3.0 / 353, UpstreamErrorRate: 2.0 / 353, TTFT: OpsPercentiles{P99: intPtr(21827)}}, jobs: []*OpsJobHeartbeat{{JobName: "ops_cleanup", ExpectedIntervalSeconds: 86400, LastSuccessAt: timePtr(now.Add(-6 * time.Hour))}}}
+	svc := &OpsService{opsRepo: repo, settingRepo: settings, nodeMetrics: opsNodeReaderFunc(func(context.Context) ([]*OpsNodeMetricsSnapshot, error) {
+		return []*OpsNodeMetricsSnapshot{{LastSeenAt: now, OpsSystemMetricsSnapshot: OpsSystemMetricsSnapshot{CreatedAt: now, DBOK: boolPtr(true), RedisOK: boolPtr(true), CPUUsagePercent: float64Ptr(1), MemoryUsagePercent: float64Ptr(1)}}}, nil
+	})}
+	got, err := svc.GetDashboardOverview(context.Background(), &OpsDashboardFilter{StartTime: now.Add(-time.Hour), EndTime: now})
+	require.NoError(t, err)
+	require.Equal(t, 95, got.HealthScore)
+	require.Equal(t, "healthy", got.JobHeartbeats[0].HealthStatus)
+	resolved, err := svc.GetMetricThresholds(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 60000.0, *resolved.TTFTp99MsMax)
+	require.Equal(t, 5.0, *resolved.RequestErrorRatePercentMax)
+	require.Equal(t, 99.5, *resolved.SLAPercentMin)
+}

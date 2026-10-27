@@ -7,6 +7,9 @@ package apicompat
 import (
 	"bytes"
 	"encoding/json"
+	"math"
+
+	"github.com/tidwall/gjson"
 )
 
 // ---------------------------------------------------------------------------
@@ -15,17 +18,18 @@ import (
 
 // AnthropicRequest is the request body for POST /v1/messages.
 type AnthropicRequest struct {
-	Model       string             `json:"model"`
-	MaxTokens   int                `json:"max_tokens"`
-	System      json.RawMessage    `json:"system,omitempty"` // string or []AnthropicContentBlock
-	Messages    []AnthropicMessage `json:"messages"`
-	Tools       []AnthropicTool    `json:"tools,omitempty"`
-	Stream      bool               `json:"stream,omitempty"`
-	Temperature *float64           `json:"temperature,omitempty"`
-	TopP        *float64           `json:"top_p,omitempty"`
-	StopSeqs    []string           `json:"stop_sequences,omitempty"`
-	Thinking    *AnthropicThinking `json:"thinking,omitempty"`
-	ToolChoice  json.RawMessage    `json:"tool_choice,omitempty"`
+	Diagnostics ConversionDiagnostics `json:"-"`
+	Model       string                `json:"model"`
+	MaxTokens   int                   `json:"max_tokens"`
+	System      json.RawMessage       `json:"system,omitempty"` // string or []AnthropicContentBlock
+	Messages    []AnthropicMessage    `json:"messages"`
+	Tools       []AnthropicTool       `json:"tools,omitempty"`
+	Stream      bool                  `json:"stream,omitempty"`
+	Temperature *float64              `json:"temperature,omitempty"`
+	TopP        *float64              `json:"top_p,omitempty"`
+	StopSeqs    []string              `json:"stop_sequences,omitempty"`
+	Thinking    *AnthropicThinking    `json:"thinking,omitempty"`
+	ToolChoice  json.RawMessage       `json:"tool_choice,omitempty"`
 	// Metadata 会被原样透传给上游。OAuth/Claude-Code 路径依赖 metadata.user_id
 	// 参与上游的"是否为官方 Claude Code 请求"判定；如果经由本结构体重新序列化
 	// 时丢弃该字段，网关侧后续的 metadata 重写(ensureClaudeOAuthMetadataUserID/
@@ -37,7 +41,8 @@ type AnthropicRequest struct {
 
 // AnthropicOutputConfig controls output generation parameters.
 type AnthropicOutputConfig struct {
-	Effort string `json:"effort,omitempty"` // "low" | "medium" | "high" | "max"
+	Format json.RawMessage `json:"format,omitempty"`
+	Effort string          `json:"effort,omitempty"` // "low" | "medium" | "high" | "max"
 }
 
 // AnthropicThinking configures extended thinking in the Anthropic API.
@@ -117,6 +122,9 @@ type AnthropicImageSource struct {
 
 // AnthropicTool describes a tool available to the model.
 type AnthropicTool struct {
+	EagerInputStreaming *bool `json:"eager_input_streaming,omitempty"`
+	Strict              *bool `json:"strict,omitempty"`
+
 	Type         string                 `json:"type,omitempty"` // e.g. "web_search_20250305" for server tools
 	Name         string                 `json:"name"`
 	Description  string                 `json:"description,omitempty"`
@@ -166,12 +174,19 @@ type AnthropicPromptTokensDetails struct {
 	CachedTokens int `json:"cached_tokens,omitempty"`
 }
 
+// AnthropicCacheCreation preserves the provider's cache-write TTL buckets.
+type AnthropicCacheCreation struct {
+	Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens"`
+	Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens"`
+}
+
 // AnthropicUsage holds token counts in Anthropic format.
 type AnthropicUsage struct {
-	InputTokens              int `json:"input_tokens"`
-	OutputTokens             int `json:"output_tokens"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	InputTokens              int                     `json:"input_tokens"`
+	OutputTokens             int                     `json:"output_tokens"`
+	CacheCreationInputTokens int                     `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int                     `json:"cache_read_input_tokens"`
+	CacheCreation            *AnthropicCacheCreation `json:"cache_creation,omitempty"`
 	// Anthropic-compatible providers can also expose their native OpenAI-style
 	// total/cache fields. Preserve them so callers can normalize provider totals
 	// into Anthropic's mutually-exclusive billing buckets.
@@ -231,24 +246,27 @@ type AnthropicDelta struct {
 
 // ResponsesRequest is the request body for POST /v1/responses.
 type ResponsesRequest struct {
-	PromptCacheOptions json.RawMessage     `json:"prompt_cache_options,omitempty"`
-	Model              string              `json:"model"`
-	Instructions       string              `json:"instructions,omitempty"`
-	Input              json.RawMessage     `json:"input"` // string or []ResponsesInputItem
-	MaxOutputTokens    *int                `json:"max_output_tokens,omitempty"`
-	Temperature        *float64            `json:"temperature,omitempty"`
-	TopP               *float64            `json:"top_p,omitempty"`
-	Stream             bool                `json:"stream,omitempty"`
-	Tools              []ResponsesTool     `json:"tools,omitempty"`
-	Include            []string            `json:"include,omitempty"`
-	Store              *bool               `json:"store,omitempty"`
-	ParallelToolCalls  *bool               `json:"parallel_tool_calls,omitempty"`
-	Reasoning          *ResponsesReasoning `json:"reasoning,omitempty"`
-	Text               *ResponsesText      `json:"text,omitempty"`
-	ToolChoice         json.RawMessage     `json:"tool_choice,omitempty"`
-	ServiceTier        string              `json:"service_tier,omitempty"`
-	PromptCacheKey     string              `json:"prompt_cache_key,omitempty"`
-	PreviousResponseID string              `json:"previous_response_id,omitempty"`
+	// Internal source identity must never be accepted from a wire request.
+	FromChatCompletions           bool                `json:"-"`
+	TargetRejectsAssistantPrefill bool                `json:"-"`
+	PromptCacheOptions            json.RawMessage     `json:"prompt_cache_options,omitempty"`
+	Model                         string              `json:"model"`
+	Instructions                  string              `json:"instructions,omitempty"`
+	Input                         json.RawMessage     `json:"input"` // string or []ResponsesInputItem
+	MaxOutputTokens               *int                `json:"max_output_tokens,omitempty"`
+	Temperature                   *float64            `json:"temperature,omitempty"`
+	TopP                          *float64            `json:"top_p,omitempty"`
+	Stream                        bool                `json:"stream,omitempty"`
+	Tools                         []ResponsesTool     `json:"tools,omitempty"`
+	Include                       []string            `json:"include,omitempty"`
+	Store                         *bool               `json:"store,omitempty"`
+	ParallelToolCalls             *bool               `json:"parallel_tool_calls,omitempty"`
+	Reasoning                     *ResponsesReasoning `json:"reasoning,omitempty"`
+	Text                          *ResponsesText      `json:"text,omitempty"`
+	ToolChoice                    json.RawMessage     `json:"tool_choice,omitempty"`
+	ServiceTier                   string              `json:"service_tier,omitempty"`
+	PromptCacheKey                string              `json:"prompt_cache_key,omitempty"`
+	PreviousResponseID            string              `json:"previous_response_id,omitempty"`
 }
 
 // ResponsesReasoning configures reasoning effort in the Responses API.
@@ -266,6 +284,7 @@ type ResponsesText struct {
 // ResponsesInputItem is one item in the Responses API input array.
 // The Type field determines which other fields are populated.
 type ResponsesInputItem struct {
+	Status string `json:"status,omitempty"`
 	// Common
 	Type string `json:"type,omitempty"` // "message" for role-based messages
 
@@ -320,6 +339,7 @@ type ResponsesContentPart struct {
 	Text                  string          `json:"text,omitempty"`
 	Refusal               string          `json:"refusal,omitempty"`   // type=refusal
 	ImageURL              string          `json:"image_url,omitempty"` // data URI for input_image
+	Detail                string          `json:"detail,omitempty"`
 
 	// input_file fields.
 	Filename string `json:"filename,omitempty"`
@@ -329,6 +349,9 @@ type ResponsesContentPart struct {
 
 // ResponsesTool describes a tool in the Responses API.
 type ResponsesTool struct {
+	EagerInputStreaming *bool                  `json:"eager_input_streaming,omitempty"`
+	CacheControl        *AnthropicCacheControl `json:"cache_control,omitempty"`
+
 	Type        string          `json:"type"` // "function" | "custom" | "web_search" | "x_search" | "local_shell" etc.
 	Name        string          `json:"name,omitempty"`
 	Description string          `json:"description,omitempty"`
@@ -346,6 +369,17 @@ type ResponsesTool struct {
 	ToDate                   string   `json:"to_date,omitempty"`
 	EnableImageUnderstanding *bool    `json:"enable_image_understanding,omitempty"`
 	EnableVideoUnderstanding *bool    `json:"enable_video_understanding,omitempty"`
+}
+
+// These controls are accepted for Messages bridges, but are not fields of an
+// OpenAI Responses tool. Keep them in the intermediate struct, not its wire JSON.
+func (t ResponsesTool) MarshalJSON() ([]byte, error) {
+	type wire ResponsesTool
+	return json.Marshal(struct {
+		wire
+		CacheControl        *AnthropicCacheControl `json:"cache_control,omitempty"`
+		EagerInputStreaming *bool                  `json:"eager_input_streaming,omitempty"`
+	}{wire: wire(t)})
 }
 
 // UnmarshalJSON 容忍字符串形式的工具声明：codex 会以 "name" 简写声明 custom 工具，
@@ -425,12 +459,16 @@ type ResponsesOutput struct {
 	Action *WebSearchAction `json:"action,omitempty"`
 }
 
-// MarshalJSON 处理 tool_search_call 项的线上形态（复用 CallID/Arguments 字段）：
-// execution 固定为 "client"（codex 的必填字段，非 client 的调用会被静默忽略），
-// arguments 是 JSON 对象而非 function_call 语义下的字符串。其余类型走默认结构体
-// 序列化，输出逐字节不变。
+// MarshalJSON preserves required empty reasoning summaries and the client-side
+// tool_search_call shape (object arguments and execution="client").
 func (o ResponsesOutput) MarshalJSON() ([]byte, error) {
 	type responsesOutputAlias ResponsesOutput
+	if o.Type == "reasoning" && len(o.Summary) == 0 {
+		return json.Marshal(struct {
+			responsesOutputAlias
+			Summary []ResponsesSummary `json:"summary"`
+		}{responsesOutputAlias(o), []ResponsesSummary{}})
+	}
 	if o.Type != "tool_search_call" {
 		return json.Marshal(responsesOutputAlias(o))
 	}
@@ -459,7 +497,7 @@ func (o *ResponsesOutput) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &kind); err != nil {
 		return err
 	}
-	if kind.Type != "tool_search_call" {
+	if kind.Type != "tool_search_call" && kind.Type != "function_call" {
 		var decoded responsesOutputAlias
 		if err := json.Unmarshal(data, &decoded); err != nil {
 			return err
@@ -484,12 +522,14 @@ func (o *ResponsesOutput) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*o = ResponsesOutput(decoded)
-	if !hasArguments || string(arguments) == "null" {
+	if !hasArguments || (kind.Type == "tool_search_call" && string(arguments) == "null") {
 		return nil
 	}
 
 	var argumentString string
-	if err := json.Unmarshal(arguments, &argumentString); err == nil {
+	if string(arguments) == "null" {
+		o.Arguments = "null"
+	} else if err := json.Unmarshal(arguments, &argumentString); err == nil {
 		o.Arguments = argumentString
 	} else {
 		o.Arguments = string(arguments)
@@ -584,6 +624,10 @@ func (u *ResponsesUsage) UnmarshalJSON(data []byte) error {
 	if canonicalCacheCreationTokens != nil {
 		u.CacheCreationInputTokens = max(*canonicalCacheCreationTokens, 0)
 	}
+	rawUsage := gjson.ParseBytes(data)
+	if rawUsage.Get("input_tokens_details.cache_creation_input_tokens").Int() > 0 || rawUsage.Get("prompt_tokens_details.cache_creation_input_tokens").Int() > 0 {
+		u.CacheCreationInputTokens = OpenAICacheCreationTokensFromUsage(rawUsage)
+	}
 	if u.TotalTokens == 0 && (u.InputTokens != 0 || u.OutputTokens != 0) {
 		u.TotalTokens = u.InputTokens + u.OutputTokens
 	}
@@ -592,10 +636,64 @@ func (u *ResponsesUsage) UnmarshalJSON(data []byte) error {
 
 // ResponsesInputTokensDetails breaks down input token usage.
 type ResponsesInputTokensDetails struct {
-	CachedTokens        int `json:"cached_tokens,omitempty"`
-	AudioTokens         int `json:"audio_tokens,omitempty"`
-	CacheCreationTokens int `json:"cache_creation_tokens,omitempty"`
-	CacheWriteTokens    int `json:"cache_write_tokens,omitempty"`
+	CachedTokens             int                      `json:"cached_tokens,omitempty"`
+	AudioTokens              int                      `json:"audio_tokens,omitempty"`
+	CacheCreationTokens      int                      `json:"cache_creation_tokens,omitempty"`
+	CacheWriteTokens         int                      `json:"cache_write_tokens,omitempty"`
+	CacheCreationInputTokens int                      `json:"cache_creation_input_tokens,omitempty"`
+	CacheWriteTokensDetails  *CacheWriteTokensDetails `json:"cache_write_tokens_details,omitempty"`
+}
+
+// CacheWriteTokensDetails contains mutually exclusive OpenAI write lifetimes.
+// The parent cache_write_tokens is their aggregate, not an additional charge.
+type CacheWriteTokensDetails struct {
+	TTL30mTokens int `json:"ttl_30m_tokens"`
+	TTL12hTokens int `json:"ttl_12h_tokens"`
+}
+
+// CacheWriteTokensDetailsFromUsage shares canonical Responses/Chat precedence
+// between HTTP and WS metering; request TTL is never used to invent counters.
+func CacheWriteTokensDetailsFromUsage(value gjson.Result, total int) CacheWriteTokensDetails {
+	for _, path := range []string{"input_tokens_details.cache_write_tokens_details", "prompt_tokens_details.cache_write_tokens_details"} {
+		if details := value.Get(path); details.Exists() {
+			return (CacheWriteTokensDetails{
+				TTL30mTokens: int(details.Get("ttl_30m_tokens").Int()),
+				TTL12hTokens: int(details.Get("ttl_12h_tokens").Int()),
+			}).Normalize(total)
+		}
+	}
+	return CacheWriteTokensDetails{}
+}
+
+// MergeNonZero retains observed TTL components omitted by progressive usage.
+// Terminal snapshots must bypass this merge; the latest explicit total bounds it.
+func (d CacheWriteTokensDetails) MergeNonZero(next CacheWriteTokensDetails, total int) CacheWriteTokensDetails {
+	if next.TTL30mTokens > 0 {
+		d.TTL30mTokens = next.TTL30mTokens
+	}
+	if next.TTL12hTokens > 0 {
+		d.TTL12hTokens = next.TTL12hTokens
+	}
+	return d.Normalize(total)
+}
+
+// Normalize caps a contradictory breakdown at its authoritative aggregate.
+// Missing details remain unknown; they are never invented from request TTL.
+func (d CacheWriteTokensDetails) Normalize(total int) CacheWriteTokensDetails {
+	if total <= 0 {
+		return CacheWriteTokensDetails{}
+	}
+	d.TTL30mTokens, d.TTL12hTokens = max(d.TTL30mTokens, 0), max(d.TTL12hTokens, 0)
+	if d.TTL30mTokens <= total && d.TTL12hTokens <= total-d.TTL30mTokens {
+		return d
+	}
+	short := math.Round(float64(total) * (float64(d.TTL30mTokens) / (float64(d.TTL30mTokens) + float64(d.TTL12hTokens))))
+	if short >= float64(total) {
+		return CacheWriteTokensDetails{TTL30mTokens: total}
+	}
+	d.TTL30mTokens = int(short)
+	d.TTL12hTokens = total - d.TTL30mTokens
+	return d
 }
 
 // ResponsesOutputTokensDetails breaks down output token usage.
@@ -628,6 +726,7 @@ type ResponsesStreamEvent struct {
 	ContentIndex int    `json:"content_index,omitempty"`
 	Delta        string `json:"delta,omitempty"`
 	Text         string `json:"text,omitempty"`
+	Refusal      string `json:"refusal,omitempty"`
 	ItemID       string `json:"item_id,omitempty"`
 
 	// response.function_call_arguments.delta / done
@@ -718,7 +817,7 @@ type ChatContentPart struct {
 // ChatImageURL contains the URL for an image content part.
 type ChatImageURL struct {
 	URL    string `json:"url"`
-	Detail string `json:"detail,omitempty"` // "auto" | "low" | "high"
+	Detail string `json:"detail,omitempty"` // "auto" | "low" | "high" | "original"
 }
 
 // ChatFile contains the payload of a "file" content part (e.g. PDF input).
@@ -730,6 +829,9 @@ type ChatFile struct {
 
 // ChatTool describes a tool available to the model.
 type ChatTool struct {
+	EagerInputStreaming *bool                  `json:"eager_input_streaming,omitempty"`
+	CacheControl        *AnthropicCacheControl `json:"cache_control,omitempty"`
+
 	Type     string        `json:"type"` // "function" | "web_search" | "code_execution" | "x_search"
 	Function *ChatFunction `json:"function,omitempty"`
 
@@ -744,6 +846,9 @@ type ChatTool struct {
 
 // ChatFunction describes a function tool definition.
 type ChatFunction struct {
+	EagerInputStreaming *bool                  `json:"eager_input_streaming,omitempty"`
+	CacheControl        *AnthropicCacheControl `json:"cache_control,omitempty"`
+
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Parameters  json.RawMessage `json:"parameters,omitempty"`
@@ -804,13 +909,15 @@ type ChatUsage struct {
 //   - completion_tokens_details: reasoning_tokens, audio_tokens,
 //     accepted_prediction_tokens, rejected_prediction_tokens
 type ChatTokenDetails struct {
-	CachedTokens             int `json:"cached_tokens,omitempty"`
-	AudioTokens              int `json:"audio_tokens,omitempty"`
-	CacheCreationTokens      int `json:"cache_creation_tokens,omitempty"`
-	CacheWriteTokens         int `json:"cache_write_tokens,omitempty"`
-	ReasoningTokens          int `json:"reasoning_tokens,omitempty"`
-	AcceptedPredictionTokens int `json:"accepted_prediction_tokens,omitempty"`
-	RejectedPredictionTokens int `json:"rejected_prediction_tokens,omitempty"`
+	CachedTokens             int                      `json:"cached_tokens,omitempty"`
+	AudioTokens              int                      `json:"audio_tokens,omitempty"`
+	CacheCreationTokens      int                      `json:"cache_creation_tokens,omitempty"`
+	CacheWriteTokens         int                      `json:"cache_write_tokens,omitempty"`
+	CacheCreationInputTokens int                      `json:"cache_creation_input_tokens,omitempty"`
+	CacheWriteTokensDetails  *CacheWriteTokensDetails `json:"cache_write_tokens_details,omitempty"`
+	ReasoningTokens          int                      `json:"reasoning_tokens,omitempty"`
+	AcceptedPredictionTokens int                      `json:"accepted_prediction_tokens,omitempty"`
+	RejectedPredictionTokens int                      `json:"rejected_prediction_tokens,omitempty"`
 }
 
 // ChatCompletionsChunk is a single streaming chunk from POST /v1/chat/completions.
@@ -866,3 +973,48 @@ func (d ChatDelta) reasoningText() *string {
 const DefaultMinMaxOutputTokens = 128
 
 const minMaxOutputTokens = DefaultMinMaxOutputTokens
+
+// OpenAICacheCreationTokensFromUsage shares HTTP/WS cache-write accounting.
+// New API 9823ebc7e adds the explicit nested cache_creation_input_tokens alias:
+// duplicates take the maximum, never a sum. Without that alias, retain the
+// existing nested canonical presence (including zero) and top-level fallback.
+func OpenAICacheCreationTokensFromUsage(value gjson.Result) int {
+	fields := []string{"input_tokens_details.cache_write_tokens", "prompt_tokens_details.cache_write_tokens", "input_tokens_details.cache_creation_tokens", "prompt_tokens_details.cache_creation_tokens"}
+	base, reportedMax, found := 0, 0, false
+	for _, field := range fields {
+		v := value.Get(field)
+		if !found && v.Exists() {
+			base, found = max(int(v.Int()), 0), true
+		}
+		reportedMax = max(reportedMax, int(v.Int()))
+	}
+	if !found {
+		for _, field := range []string{"cache_write_tokens", "cache_creation_input_tokens", "cache_write_input_tokens", "cache_creation_tokens"} {
+			if v := int(value.Get(field).Int()); v > 0 {
+				base = v
+				break
+			}
+		}
+	}
+	alias := max(int(value.Get("input_tokens_details.cache_creation_input_tokens").Int()), int(value.Get("prompt_tokens_details.cache_creation_input_tokens").Int()))
+	return cacheCreationWithInputAlias(base, alias, reportedMax)
+}
+
+func cacheCreationWithInputAlias(base, alias int, other ...int) int {
+	if alias <= 0 {
+		return base
+	}
+	total := max(base, alias)
+	for _, v := range other {
+		total = max(total, v)
+	}
+	return total
+}
+
+func (d ChatTokenDetails) CacheCreationTokensTotal() int {
+	base := d.CacheCreationTokens
+	if d.CacheWriteTokens > 0 {
+		base = d.CacheWriteTokens
+	}
+	return cacheCreationWithInputAlias(base, d.CacheCreationInputTokens, d.CacheWriteTokens, d.CacheCreationTokens)
+}

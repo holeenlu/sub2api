@@ -3,6 +3,21 @@ export function normalizePlanType(value?: string | null): string {
   return (value || '').trim().toLowerCase().replace(/[\s_-]+/g, '')
 }
 
+/** Claude's rate tier distinguishes the two Max subscriptions. */
+export function accountSubscriptionPlan(platform: string, plan?: string, tier?: string, subscription?: string): string {
+  if (platform === 'anthropic') {
+    const tiers: Record<string, string> = {
+      default_claude_max_20x: 'Max 20x',
+      default_claude_max_5x: 'Max 5x',
+      default_claude_pro: 'Pro'
+    }
+    if (tier && tiers[tier]) return tiers[tier]
+    const value = plan?.trim() || subscription?.trim() || ''
+    return ({ claude_max: 'Max', claude_pro: 'Pro', claude_free: 'Free' } as Record<string, string>)[value] || value
+  }
+  return plan?.trim() || subscription?.trim() || ''
+}
+
 /** Canonical comparison key; labels may be shared by distinct SKUs. */
 export function openAIPlanTypeKey(value?: string | null): string {
   const key = normalizePlanType(value)

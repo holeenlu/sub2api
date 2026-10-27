@@ -58,9 +58,10 @@ func (s *simpleModeUsageBillingRepoStub) Apply(_ context.Context, cmd *UsageBill
 }
 
 func TestApplyUsageBillingSimpleModeDeduplicatesWithoutBalanceEffects(t *testing.T) {
+	const quote = 0.000078125
 	repo := &simpleModeUsageBillingRepoStub{}
 	p := &postUsageBillingParams{
-		Cost:                       &CostBreakdown{ActualCost: 3.25, TotalCost: 3.25},
+		Cost:                       &CostBreakdown{ActualCost: quote, TotalCost: quote},
 		User:                       &User{ID: 7, Balance: 0},
 		APIKey:                     &APIKey{ID: 13, Quota: 100, RateLimit5h: 10},
 		Account:                    &Account{ID: 9, Type: AccountTypeAPIKey},
@@ -75,12 +76,14 @@ func TestApplyUsageBillingSimpleModeDeduplicatesWithoutBalanceEffects(t *testing
 	require.NoError(t, err)
 	require.False(t, second)
 	require.Len(t, repo.cmds, 2)
+	require.Equal(t, quote, p.Cost.ActualCost, "retry must retain the original quote")
+	require.Equal(t, repo.cmds[0].RequestFingerprint, repo.cmds[1].RequestFingerprint)
 	for _, cmd := range repo.cmds {
 		require.Zero(t, cmd.BalanceCost)
 		require.Zero(t, cmd.SubscriptionCost)
 		require.Zero(t, cmd.APIKeyQuotaCost)
 		require.Zero(t, cmd.AccountQuotaCost)
-		require.Equal(t, 3.25, cmd.APIKeyRateLimitCost)
+		require.Equal(t, QuantizeUsageBillingAmount(quote), cmd.APIKeyRateLimitCost)
 	}
 }
 

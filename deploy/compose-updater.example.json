@@ -1,0 +1,14 @@
+{
+  "project_directory": "/opt/sub2api",
+  "project_name": "sub2api",
+  "compose_files": ["docker-compose.local.yml", "compose.updater-socket.yml"],
+  "service": "sub2api",
+  "repository": "holeenlu/sub2api",
+  "channel": "sub2api",
+  "image": "ghcr.io/holeenlu/sub2api",
+  "socket": "/run/sub2api-updater/updater.sock",
+  "socket_gid": 1000,
+  "state_file": "/opt/sub2api-updater/state.json",
+  "github_token_file": "/etc/sub2api-updater.github-token",
+  "health_timeout": 180
+}

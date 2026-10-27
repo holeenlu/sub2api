@@ -77,7 +77,7 @@ func (s *ScheduledTestRunnerService) Stop() {
 			ctx := s.cron.Stop()
 			select {
 			case <-ctx.Done():
-			case <-time.After(3 * time.Second):
+			case <-time.After(8 * time.Second):
 				logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] cron stop timed out")
 			}
 		}
@@ -120,6 +120,19 @@ func (s *ScheduledTestRunnerService) runScheduled() {
 }
 
 func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *ScheduledTestPlan) {
+	// Background plans do not run under the HTTP recovery middleware.
+	defer func() {
+		if recover() != nil {
+			logger.LegacyPrintf("service.scheduled_test_runner", "scheduled plan=%d account=%d panicked", plan.ID, plan.AccountID)
+		}
+	}()
+	if plan.PelicanConfig != nil {
+		// Never reinterpret a retired quality plan as a connectivity test.
+		return
+	}
+	if s.scheduledSvc == nil || s.scheduledSvc.CheckScheduledAuthorization(ctx, plan.Authorization) != nil {
+		return
+	}
 	result, err := s.accountTestSvc.RunTestBackground(ctx, plan.AccountID, plan.ModelID)
 	if err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d RunTestBackground error: %v", plan.ID, err)
@@ -131,7 +144,7 @@ func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *Sched
 	}
 
 	// Auto-recover account if test succeeded and auto_recover is enabled.
-	if result.Status == "success" && plan.AutoRecover {
+	if result.Status == "success" && plan.AutoRecover && s.scheduledSvc.CheckScheduledAuthorization(ctx, plan.Authorization) == nil {
 		s.tryRecoverAccount(ctx, plan.AccountID, plan.ID)
 	}
 
