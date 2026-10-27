@@ -160,6 +160,7 @@ type ChannelCachePubSub interface {
 
 // ChannelService 渠道管理服务
 type ChannelService struct {
+	modelSettings        *SettingService
 	repo                 ChannelRepository
 	groupRepo            GroupRepository
 	authCacheInvalidator APIKeyAuthCacheInvalidator
@@ -594,14 +595,37 @@ func (s *ChannelService) IsModelRestricted(ctx context.Context, groupID int64, m
 // 返回映射结果。模型限制检查已移至调度阶段（GatewayService.checkChannelPricingRestriction），
 // restricted 始终返回 false，保留签名兼容性。
 func (s *ChannelService) ResolveChannelMappingAndRestrict(ctx context.Context, groupID *int64, model string) (ChannelMappingResult, bool) {
+	result := ChannelMappingResult{MappedModel: model}
 	if groupID == nil {
-		return ChannelMappingResult{MappedModel: model}, false
+		return result, false
 	}
 	lk, _ := s.lookupGroupChannel(ctx, *groupID)
-	if lk == nil {
-		return ChannelMappingResult{MappedModel: model}, false
+	if lk != nil {
+		result = resolveMapping(lk, *groupID, model)
 	}
-	return resolveMapping(lk, *groupID, model), false
+	if result.Mapped || s.modelSettings == nil {
+		return result, false
+	}
+	group, err := s.groupRepo.GetByID(ctx, *groupID)
+	if err != nil || group == nil {
+		return result, false
+	}
+	platform := group.Platform
+	if platform == PlatformComposite {
+		platform = PlatformOpenAI
+	}
+	if platform != PlatformOpenAI && platform != PlatformAnthropic {
+		return result, false
+	}
+	target, err := s.modelSettings.ResolveManagedModel(ctx, platform, model)
+	if err != nil {
+		return result, true
+	}
+	if target != model {
+		result.MappedModel = target
+		result.Mapped = true
+	}
+	return result, false
 }
 
 // resolveMapping 基于已查找的渠道信息解析模型映射。

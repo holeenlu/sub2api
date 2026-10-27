@@ -274,12 +274,13 @@ type LiteLLMRawEntry struct {
 
 // PricingService 动态价格服务
 type PricingService struct {
-	cfg          *config.Config
-	remoteClient PricingRemoteClient
-	mu           sync.RWMutex
-	pricingData  map[string]*LiteLLMModelPricing
-	lastUpdated  time.Time
-	localHash    string
+	modelSettings *SettingService
+	cfg           *config.Config
+	remoteClient  PricingRemoteClient
+	mu            sync.RWMutex
+	pricingData   map[string]*LiteLLMModelPricing
+	lastUpdated   time.Time
+	localHash     string
 	// fallback/override 文件在最近一次成功重建时的内容指纹，定时器据此判断是否
 	// 需要从本地目录缓存重建叠加层。
 	customFilesHash string

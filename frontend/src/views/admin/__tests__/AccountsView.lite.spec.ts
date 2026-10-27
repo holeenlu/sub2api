@@ -10,6 +10,7 @@ const {
   listWithEtag,
   getById,
   getBatchTodayStats,
+  getBatchUsage,
   getUpstreamBillingProbeSettings,
   getAllProxies,
   getAllGroups,
@@ -21,6 +22,7 @@ const {
   listWithEtag: vi.fn(),
   getById: vi.fn(),
   getBatchTodayStats: vi.fn(),
+  getBatchUsage: vi.fn(),
   getUpstreamBillingProbeSettings: vi.fn(),
   getAllProxies: vi.fn(),
   getAllGroups: vi.fn(),
@@ -36,6 +38,7 @@ vi.mock('@/api/admin', () => ({
       getById,
       listWithEtag,
       getBatchTodayStats,
+      getBatchUsage,
       getUpstreamBillingProbeSettings,
       delete: vi.fn(),
       batchClearError: vi.fn(),
@@ -53,7 +56,7 @@ vi.mock('@/stores/app', () => ({
 }))
 
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ token: 'test-token', isSimpleMode: false })
+  useAuthStore: () => ({ token: 'test-token', isSimpleMode: false, isSuperAdmin: true, can: () => true })
 }))
 
 vi.mock('vue-i18n', async () => {
@@ -66,7 +69,9 @@ const DataTableStub = defineComponent({
   template: `
     <div>
       <div v-for="row in data" :key="row.id" :data-account-name="row.name">
+        <slot name="cell-name" :row="row" :value="row.name" />
         <slot name="cell-groups" :row="row" />
+        <slot name="cell-usage" :row="row" />
         <slot name="cell-actions" :row="row" />
       </div>
     </div>
@@ -107,6 +112,7 @@ function mountView(stubActionMenu = true) {
         Pagination: true,
         ConfirmDialog: true,
         AccountActionMenu: stubActionMenu,
+        CodexDiagnosticBadge: { props: ['summary'], template: '<button v-if="summary" data-test="codex-diagnostic-badge">{{ summary.status }}</button>' },
         ImportDataModal: true,
         ReAuthAccountModal: true,
         AccountTestModal: AccountTestModalStub,
@@ -163,6 +169,7 @@ describe('admin AccountsView lite account list', () => {
     listWithEtag.mockReset().mockResolvedValue({ notModified: true, etag: 'compact-etag', data: null })
     getById.mockReset().mockResolvedValue(fullAccount)
     getBatchTodayStats.mockReset().mockResolvedValue({ stats: {} })
+    getBatchUsage.mockReset().mockResolvedValue({ usage: {}, errors: {} })
     getUpstreamBillingProbeSettings.mockReset().mockResolvedValue({ enabled: true })
     getAllProxies.mockReset().mockResolvedValue([])
     getAllGroups.mockReset().mockResolvedValue([{ id: 7, name: 'codex', platform: 'openai' }])
@@ -197,6 +204,49 @@ describe('admin AccountsView lite account list', () => {
     wrapper.unmount()
   })
 
+  it('keeps direct reset usage when an older desktop batch finishes later', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(window, 'matchMedia').mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() } as unknown as MediaQueryList)
+    const oldUsage = { seven_day_fable: { utilization: 50, resets_at: null, remaining_seconds: 0 } }
+    const freshUsage = { seven_day_fable: { utilization: 0, resets_at: null, remaining_seconds: 0 } }
+    let finishBatch!: (value: { usage: Record<string, typeof oldUsage>; errors: Record<string, string> }) => void
+    getBatchUsage.mockReturnValueOnce(new Promise(resolve => { finishBatch = resolve }))
+    const row = { ...listRow, platform: 'anthropic' }
+    listAccounts.mockResolvedValue({ items: [row], total: 1, page: 1, page_size: 20, pages: 1 })
+    const wrapper = mountView()
+    await flushPromises()
+    const cell = wrapper.getComponent({ name: 'AccountUsageCell' })
+    cell.props('requestBatchedUsage')(row)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(getBatchUsage).toHaveBeenCalledTimes(1)
+    cell.vm.$emit('usage-loaded', freshUsage)
+    await flushPromises()
+    finishBatch({ usage: { '42': oldUsage }, errors: {} })
+    await flushPromises()
+    expect(cell.props('batchedUsage')).toEqual(freshUsage)
+    expect(cell.props('batchedUsageLoading')).toBe(false)
+    cell.props('requestBatchedUsage')(row)
+    await flushPromises()
+    expect(getBatchUsage).toHaveBeenCalledTimes(1)
+    expect(cell.props('batchedUsage')).toEqual(freshUsage)
+    wrapper.unmount()
+  })
+
+  it('renders the latest diagnostic conclusion beneath the account name', async () => {
+    listAccounts.mockResolvedValue({
+      items: [{ ...listRow, codex_diagnostic: { status: 'degraded', checked_at: '2026-10-05T02:00:00Z' } }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="codex-diagnostic-badge"]').text()).toBe('degraded')
+    wrapper.unmount()
+  })
+
   it('keeps the action menu open during internal scrolling but closes it on table scrolling', async () => {
     const wrapper = mountView(false)
     await flushPromises()
@@ -215,6 +265,22 @@ describe('admin AccountsView lite account list', () => {
     wrapper.getComponent(DataTableStub).element.dispatchEvent(new Event('scroll'))
     await flushPromises()
     expect(wrapper.findComponent(AccountActionMenu).props('show')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('refreshes BPS derived status when updated_at and all other row fields stay unchanged', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    localStorage.setItem('account-auto-refresh', JSON.stringify({ enabled: true, interval_seconds: 5 }))
+    const original = { ...listRow, updated_at: '2026-10-27T01:00:00Z', excel_bps_403_recovery: { state: 'pending', interval_minutes: 30 } }
+    listAccounts.mockResolvedValue({ items: [original], total: 1, page: 1, page_size: 20, pages: 1 })
+    const wrapper = mountView(); await flushPromises()
+    for (const state of [{ state: 'failed', interval_minutes: 30 }, { state: 'paused', reason: 'global_disabled', interval_minutes: 30 }, undefined]) {
+      const next = { ...original, excel_bps_403_recovery: state }
+      listWithEtag.mockResolvedValue({ notModified: false, etag: JSON.stringify(state), data: { items: [next], total: 1, page: 1, page_size: 20, pages: 1 } })
+      await vi.advanceTimersByTimeAsync(6000); await flushPromises()
+      expect((wrapper.getComponent(DataTableStub).props('data')[0] as any).excel_bps_403_recovery).toEqual(state)
+    }
     wrapper.unmount()
   })
 

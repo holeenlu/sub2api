@@ -10,6 +10,34 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestOpenAIWSStateStore_ConnectionCleanupDoesNotDeleteReplacement(t *testing.T) {
+	store := NewOpenAIWSStateStore(nil)
+	store.BindResponseConn("resp_1", "replacement", time.Hour, openAIWSResponseScopeConnectionLocal)
+	store.BindSessionConn(7, "session", "replacement", time.Hour)
+	store.BindSessionTurnState(7, "session", "new-state", time.Hour)
+	store.DeleteResponseConn("resp_1", "expired")
+	store.DeleteSessionConn(7, "session", "expired")
+	store.DeleteSessionTurnState(7, "session", "old-state")
+	conn, ok := store.GetResponseConn("resp_1")
+	require.True(t, ok)
+	require.Equal(t, "replacement", conn)
+	conn, ok = store.GetSessionConn(7, "session")
+	require.True(t, ok)
+	require.Equal(t, "replacement", conn)
+	state, ok := store.GetSessionTurnState(7, "session")
+	require.True(t, ok)
+	require.Equal(t, "new-state", state)
+	store.DeleteResponseConn("resp_1", "replacement")
+	store.DeleteSessionConn(7, "session", "replacement")
+	store.DeleteSessionTurnState(7, "session", "new-state")
+	_, ok = store.GetResponseConn("resp_1")
+	require.False(t, ok)
+	_, ok = store.GetSessionConn(7, "session")
+	require.False(t, ok)
+	_, ok = store.GetSessionTurnState(7, "session")
+	require.False(t, ok)
+}
+
 func TestOpenAIWSStateStore_BindGetDeleteResponseAccount(t *testing.T) {
 	cache := &stubGatewayCache{}
 	store := NewOpenAIWSStateStore(cache)
@@ -49,9 +77,73 @@ func TestOpenAIWSStateStore_HTTPResponseOwnerPersistsAcrossStoreInstances(t *tes
 	require.Equal(t, int64(301), apiKeyID)
 }
 
+func TestOpenAIWSStateStore_ResponseContinuationScope(t *testing.T) {
+	store := NewOpenAIWSStateStore(nil)
+	store.BindResponseConn("resp_unknown", "conn_1", time.Minute, openAIWSResponseScopeUnknown)
+	store.BindResponseConn("resp_local", "conn_1", time.Minute, openAIWSResponseScopeConnectionLocal)
+	store.BindResponseConn("resp_persisted", "conn_1", time.Minute, openAIWSResponseScopePersisted)
+	for id, want := range map[string]openAIWSResponseScope{
+		"resp_unknown":   openAIWSResponseScopeUnknown,
+		"resp_local":     openAIWSResponseScopeConnectionLocal,
+		"resp_persisted": openAIWSResponseScopePersisted,
+	} {
+		conn, scope, ok := store.GetResponseContinuation(id)
+		require.True(t, ok)
+		require.Equal(t, "conn_1", conn)
+		require.Equal(t, want, scope, "scope belongs to the producing response, not a later request")
+	}
+	store.BindResponseConn("resp_local", "conn_2", time.Minute, openAIWSResponseScopePersisted)
+	store.DeleteResponseConn("resp_local", "conn_1")
+	conn, scope, ok := store.GetResponseContinuation("resp_local")
+	require.True(t, ok)
+	require.Equal(t, "conn_2", conn)
+	require.Equal(t, openAIWSResponseScopePersisted, scope)
+	store.DeleteResponseConn("resp_local", "conn_2")
+	conn, scope, ok = store.GetResponseContinuation("resp_local")
+	require.True(t, ok)
+	require.Empty(t, conn)
+	require.Equal(t, openAIWSResponseScopePersisted, scope)
+	_, ok = store.GetResponseConn("resp_local")
+	require.False(t, ok, "scope knowledge does not imply a live connection")
+}
+
+func TestOpenAIWSStateStore_ConnectionInvalidationPreservesScopeUntilOriginalTTL(t *testing.T) {
+	for _, scope := range []openAIWSResponseScope{openAIWSResponseScopeUnknown, openAIWSResponseScopePersisted, openAIWSResponseScopeConnectionLocal} {
+		t.Run(fmt.Sprint(scope), func(t *testing.T) {
+			store := NewOpenAIWSStateStore(nil).(*defaultOpenAIWSStateStore)
+			store.BindResponseConn("resp_parent", "conn_old", time.Minute, scope)
+			expires := store.responseToConn["resp_parent"].expiresAt
+			store.DeleteResponseConn("resp_parent", "conn_old")
+			conn, gotScope, found := store.GetResponseContinuation("resp_parent")
+			require.Empty(t, conn)
+			require.Equal(t, scope, gotScope)
+			require.Equal(t, scope != openAIWSResponseScopeUnknown, found)
+			_, connected := store.GetResponseConn("resp_parent")
+			require.False(t, connected)
+			if scope != openAIWSResponseScopeUnknown {
+				binding := store.responseToConn["resp_parent"]
+				require.Equal(t, expires, binding.expiresAt, "invalidation must not prolong retained metadata")
+				binding.expiresAt = time.Now().Add(-time.Second)
+				store.responseToConn["resp_parent"] = binding
+				_, _, found = store.GetResponseContinuation("resp_parent")
+				require.False(t, found)
+			}
+		})
+	}
+
+	store := NewOpenAIWSStateStore(nil)
+	store.BindResponseConn("resp_cancelled", "", time.Minute, openAIWSResponseScopeConnectionLocal)
+	conn, scope, found := store.GetResponseContinuation("resp_cancelled")
+	require.True(t, found)
+	require.Empty(t, conn)
+	require.Equal(t, openAIWSResponseScopeConnectionLocal, scope)
+	_, connected := store.GetResponseConn("resp_cancelled")
+	require.False(t, connected, "a cancelled response is never a successful native anchor")
+}
+
 func TestOpenAIWSStateStore_ResponseConnTTL(t *testing.T) {
 	store := NewOpenAIWSStateStore(nil)
-	store.BindResponseConn("resp_conn", "conn_1", 30*time.Millisecond)
+	store.BindResponseConn("resp_conn", "conn_1", 30*time.Millisecond, openAIWSResponseScopeConnectionLocal)
 
 	connID, ok := store.GetResponseConn("resp_conn")
 	require.True(t, ok)
@@ -194,6 +286,10 @@ func (c *openAIWSStateStoreTimeoutProbeCache) GetSessionAccountID(ctx context.Co
 	return 123, nil
 }
 
+func (c *openAIWSStateStoreTimeoutProbeCache) CompareAndRefreshSessionAccountID(context.Context, int64, string, int64, time.Duration, bool) (bool, error) {
+	return true, nil
+}
+
 func (c *openAIWSStateStoreTimeoutProbeCache) SetSessionAccountID(ctx context.Context, _ int64, _ string, _ int64, _ time.Duration) error {
 	if deadline, ok := ctx.Deadline(); ok {
 		c.setHasDeadline = true
@@ -211,6 +307,17 @@ func (c *openAIWSStateStoreTimeoutProbeCache) DeleteSessionAccountID(ctx context
 		c.deleteHasDeadline = true
 		c.delDeadlineDelta = time.Until(deadline)
 	}
+	return nil
+}
+
+// 长周期亲和键：该 mock 不参与历史键行为，给出中性实现以满足接口。
+func (c *openAIWSStateStoreTimeoutProbeCache) GetSessionAccountHistory(_ context.Context, _ int64, _ string) (int64, error) {
+	return 0, ErrStickySessionNotFound
+}
+func (c *openAIWSStateStoreTimeoutProbeCache) SetSessionAccountHistoryIfAbsentOrSame(_ context.Context, _ int64, _ string, _ int64, _ time.Duration) (bool, error) {
+	return true, nil
+}
+func (c *openAIWSStateStoreTimeoutProbeCache) DeleteSessionAccountHistory(_ context.Context, _ int64, _ string) error {
 	return nil
 }
 
@@ -274,4 +381,33 @@ func TestWithOpenAIWSStateStoreRedisTimeout_WithParentContext(t *testing.T) {
 	require.NotNil(t, ctx)
 	_, ok := ctx.Deadline()
 	require.True(t, ok, "应附加短超时")
+}
+
+func TestSecurityContinuationJSONAndTenantPool(t *testing.T) {
+	for _, body := range []string{`{"previous_response_id":"","previous_response_id":"resp_victim"}`, `{"previous_response_id":"","previous_response_\u0069d":"resp_victim"}`, `{"Previous_Response_ID":"resp_victim"}`, `{"previous_response_id":123}`, `{"response":{"previous_response_id":"resp_victim"}}`} {
+		require.Error(t, ValidateGatewaySecurityJSON([]byte(body)), body)
+	}
+	require.NoError(t, ValidateGatewaySecurityJSON([]byte(`{"model":"gpt-5.4","previous_response_id":"resp_own","text":{"format":{"type":"json_schema","schema":{"type":"object"}}}}`)))
+	a := openAIWSAcquireRequest{TenantScope: "10/user/1"}
+	b := openAIWSAcquireRequest{TenantScope: "10/user/2"}
+	require.NotEqual(t, normalizeOpenAIWSAcquireCompatibility(a, nil), normalizeOpenAIWSAcquireCompatibility(b, nil))
+	svc := &OpenAIGatewayService{}
+	ctx := context.Background()
+	owner := securityVoiceContext(1, 11)
+	SetOpenAIHTTPResponseOwner(owner, 1, 11)
+	require.NoError(t, svc.BindOpenAIHTTPResponseOwner(ctx, 10, "resp_owned", 1, 11))
+	otherKey := securityVoiceContext(1, 99)
+	SetOpenAIHTTPResponseOwner(otherKey, 1, 99)
+	require.NoError(t, svc.validateWSContinuation(ctx, otherKey, []byte(`{"previous_response_id":"resp_owned"}`)))
+	require.Equal(t, openAIWSTenantScope(owner), openAIWSTenantScope(otherKey))
+	attacker := securityVoiceContext(2, 22)
+	SetOpenAIHTTPResponseOwner(attacker, 2, 22)
+	require.Error(t, svc.validateWSContinuation(ctx, attacker, []byte(`{"previous_response_id":"resp_owned"}`)))
+}
+
+func (c *openAIWSStateStoreTimeoutProbeCache) GetClaudeConversationState(context.Context, string, []string) (map[string]string, error) {
+	return nil, nil
+}
+func (c *openAIWSStateStoreTimeoutProbeCache) StoreClaudeConversationState(context.Context, string, map[string]string) error {
+	return nil
 }

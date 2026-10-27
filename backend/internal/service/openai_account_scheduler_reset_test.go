@@ -9,26 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func openAIResetTestScheduler(reset float64) *defaultOpenAIAccountScheduler {
-	cfg := &config.Config{}
-	cfg.Gateway.OpenAIWS.SchedulerScoreWeights = config.GatewayOpenAIWSSchedulerScoreWeights{
-		Priority:      1.0,
-		Load:          1.0,
-		Queue:         0.7,
-		ErrorRate:     0.8,
-		TTFT:          0.5,
-		Reset:         reset,
-		QuotaHeadroom: 0,
-	}
-	return &defaultOpenAIAccountScheduler{service: &OpenAIGatewayService{cfg: cfg}}
-}
-
-func openAIQuotaHeadroomTestScheduler(quotaHeadroom float64) *defaultOpenAIAccountScheduler {
-	cfg := &config.Config{}
-	cfg.Gateway.OpenAIWS.SchedulerScoreWeights = config.GatewayOpenAIWSSchedulerScoreWeights{
-		QuotaHeadroom: quotaHeadroom,
-	}
-	return &defaultOpenAIAccountScheduler{service: &OpenAIGatewayService{cfg: cfg}}
+func fixedSchedulerForTest() *defaultOpenAIAccountScheduler {
+	return &defaultOpenAIAccountScheduler{service: &OpenAIGatewayService{cfg: &config.Config{}}}
 }
 
 func openAIPlanScores(plan openAIAccountLoadPlan) map[int64]float64 {
@@ -39,7 +21,7 @@ func openAIPlanScores(plan openAIAccountLoadPlan) map[int64]float64 {
 	return scores
 }
 
-// Reset 权重 > 0 时，会话窗口最早重置的账号应获得更高分。
+// Subscription preference allows reset urgency to contribute to the fixed score.
 func TestBuildOpenAIAccountLoadPlan_ResetWeightPrefersSoonestReset(t *testing.T) {
 	now := time.Now()
 	soon := now.Add(1 * time.Hour)
@@ -48,14 +30,14 @@ func TestBuildOpenAIAccountLoadPlan_ResetWeightPrefersSoonestReset(t *testing.T)
 		{ID: 1, Priority: 0, SessionWindowEnd: &later},
 		{ID: 2, Priority: 0, SessionWindowEnd: &soon},
 	}
-	sched := openAIResetTestScheduler(5.0)
+	sched := fixedSchedulerForTest()
 
-	plan := sched.buildOpenAIAccountLoadPlan(context.Background(), OpenAIAccountScheduleRequest{}, filtered, map[int64]*AccountLoadInfo{})
+	plan := sched.buildOpenAIAccountLoadPlan(context.Background(), OpenAIAccountScheduleRequest{SubscriptionPriority: true}, filtered, map[int64]*AccountLoadInfo{})
 	scores := openAIPlanScores(plan)
 	require.Greater(t, scores[2], scores[1], "重置时间最早的账号（ID=2）得分更高")
 }
 
-// Reset 权重为 0（默认）时，窗口重置时间不应影响打分，保持原有行为。
+// Without subscription preference, reset urgency is neutral.
 func TestBuildOpenAIAccountLoadPlan_ResetWeightZeroNoEffect(t *testing.T) {
 	now := time.Now()
 	soon := now.Add(1 * time.Hour)
@@ -64,7 +46,7 @@ func TestBuildOpenAIAccountLoadPlan_ResetWeightZeroNoEffect(t *testing.T) {
 		{ID: 1, Priority: 0, SessionWindowEnd: &later},
 		{ID: 2, Priority: 0, SessionWindowEnd: &soon},
 	}
-	sched := openAIResetTestScheduler(0.0)
+	sched := fixedSchedulerForTest()
 
 	plan := sched.buildOpenAIAccountLoadPlan(context.Background(), OpenAIAccountScheduleRequest{}, filtered, map[int64]*AccountLoadInfo{})
 	scores := openAIPlanScores(plan)
@@ -79,9 +61,9 @@ func TestBuildOpenAIAccountLoadPlan_ResetWeightIgnoresNilWindow(t *testing.T) {
 		{ID: 1, Priority: 0, SessionWindowEnd: nil},
 		{ID: 2, Priority: 0, SessionWindowEnd: &soon},
 	}
-	sched := openAIResetTestScheduler(5.0)
+	sched := fixedSchedulerForTest()
 
-	plan := sched.buildOpenAIAccountLoadPlan(context.Background(), OpenAIAccountScheduleRequest{}, filtered, map[int64]*AccountLoadInfo{})
+	plan := sched.buildOpenAIAccountLoadPlan(context.Background(), OpenAIAccountScheduleRequest{SubscriptionPriority: true}, filtered, map[int64]*AccountLoadInfo{})
 	scores := openAIPlanScores(plan)
 	require.Greater(t, scores[2], scores[1], "拥有活跃窗口的账号得分高于无窗口账号")
 }
@@ -160,14 +142,14 @@ func TestBuildOpenAIAccountLoadPlan_QuotaHeadroomPrefersHigher7dRemaining(t *tes
 			},
 		},
 	}
-	sched := openAIQuotaHeadroomTestScheduler(1.0)
+	sched := fixedSchedulerForTest()
 
 	plan := sched.buildOpenAIAccountLoadPlan(context.Background(), OpenAIAccountScheduleRequest{}, filtered, map[int64]*AccountLoadInfo{})
 	scores := openAIPlanScores(plan)
 	require.Greater(t, scores[2], scores[1], "7d 剩余额度更高的账号得分应更高")
 }
 
-func TestBuildOpenAIAccountLoadPlan_QuotaHeadroomZeroNoEffect(t *testing.T) {
+func TestBuildOpenAIAccountLoadPlan_QuotaHeadroomAlwaysUsesFixedPolicy(t *testing.T) {
 	now := time.Now()
 	filtered := []*Account{
 		{
@@ -189,9 +171,9 @@ func TestBuildOpenAIAccountLoadPlan_QuotaHeadroomZeroNoEffect(t *testing.T) {
 			},
 		},
 	}
-	sched := openAIResetTestScheduler(0)
+	sched := fixedSchedulerForTest()
 
 	plan := sched.buildOpenAIAccountLoadPlan(context.Background(), OpenAIAccountScheduleRequest{}, filtered, map[int64]*AccountLoadInfo{})
 	scores := openAIPlanScores(plan)
-	require.Equal(t, scores[1], scores[2], "quota_headroom 权重为 0 时不应影响打分")
+	require.InDelta(t, 0.24, scores[2]-scores[1], 1e-9, "fixed quota factor must apply without an algorithm switch")
 }

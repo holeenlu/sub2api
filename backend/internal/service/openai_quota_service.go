@@ -160,6 +160,17 @@ func NewOpenAIQuotaService(
 	}
 }
 
+// queryOpenAIQuotaUsage is the shared authenticated wham/usage transport.
+// Callers own their headers, timeout, refresh and admission policies; quota-card
+// enrichment and account writes must never be performed by this read operation.
+// Return the original response even on failure so callers retain status/headers
+// without interpreting a non-success body as measured quota.
+func queryOpenAIQuotaUsage(ctx context.Context, client *req.Client, headers map[string]string) (*OpenAIQuotaUsage, *req.Response, error) {
+	var usage OpenAIQuotaUsage
+	response, err := client.R().SetContext(ctx).SetHeaders(headers).SetSuccessResult(&usage).Get(chatGPTUsageURL)
+	return &usage, response, err
+}
+
 // QueryUsage fetches the latest rate-limit/usage snapshot for the given OpenAI
 // OAuth account. Returns infraerrors so the handler layer can map them to
 // stable error codes / HTTP statuses.
@@ -178,17 +189,13 @@ func (s *OpenAIQuotaService) QueryUsage(ctx context.Context, accountID int64) (*
 	defer cancel()
 	agentIdentity := s.isAgentIdentityAccount(ctx, accountID)
 
-	var payload OpenAIQuotaUsage
+	var payload *OpenAIQuotaUsage
 	for recovered := false; ; {
 		quotaHeaders, expectedTaskID, headerErr := s.buildCodexQuotaHeaders(callCtx, accountID, accessToken, chatGPTAccountID, fedRAMP)
 		if headerErr != nil {
 			return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_QUOTA_AUTH_FAILED", "failed to build upstream authentication: %v", headerErr)
 		}
-		resp, err := client.R().
-			SetContext(callCtx).
-			SetHeaders(quotaHeaders).
-			SetSuccessResult(&payload).
-			Get(chatGPTUsageURL)
+		nextPayload, resp, err := queryOpenAIQuotaUsage(callCtx, client, quotaHeaders)
 		if err != nil {
 			return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_QUOTA_REQUEST_FAILED", "upstream request failed: %v", err)
 		}
@@ -200,6 +207,25 @@ func (s *OpenAIQuotaService) QueryUsage(ctx context.Context, accountID int64) (*
 				}
 				continue
 			}
+			if !agentIdentity && s.tokenProvider != nil {
+				ownerID := accountID
+				if a, e := s.accountRepo.GetByID(callCtx, accountID); e == nil && a != nil && a.ParentAccountID != nil {
+					ownerID = *a.ParentAccountID
+				}
+				retry, recoverErr := s.tokenProvider.recoverRejectedAccessToken(callCtx, ownerID, accessToken, resp.StatusCode, []byte(resp.String()), !recovered)
+				if retry && !recovered && recoverErr == nil {
+					recovered = true
+					accessToken, chatGPTAccountID, proxyURL, fedRAMP, err = s.prepareUpstreamCall(callCtx, accountID)
+					if err != nil {
+						return nil, err
+					}
+					client, err = s.privacyClientFactory(proxyURL)
+					if err != nil {
+						return nil, err
+					}
+					continue
+				}
+			}
 			status := resp.StatusCode
 			if isOpenAIAutoResetContext(ctx) {
 				slog.Warn("openai_quota_query_failed", "account_id", accountID, "status", status, "source", "auto_reset")
@@ -209,6 +235,7 @@ func (s *OpenAIQuotaService) QueryUsage(ctx context.Context, accountID int64) (*
 			slog.Warn("openai_quota_query_failed", "account_id", accountID, "status", status, "body", body)
 			return nil, infraerrors.Newf(mapUpstreamStatus(status), "OPENAI_QUOTA_UPSTREAM_ERROR", "upstream returned %d: %s", status, body)
 		}
+		payload = nextPayload
 		break
 	}
 
@@ -230,7 +257,7 @@ func (s *OpenAIQuotaService) QueryUsage(ctx context.Context, accountID int64) (*
 			payload.RateLimitResetCredits.AvailableCount = details.AvailableCreditCount
 		}
 	}
-	return &payload, nil
+	return payload, nil
 }
 
 // CacheResetCreditsSnapshot persists a complete reset-credit snapshot after an
