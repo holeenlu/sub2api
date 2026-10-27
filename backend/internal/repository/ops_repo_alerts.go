@@ -357,7 +357,7 @@ FROM ops_alert_events
 ORDER BY fired_at DESC, id DESC
 LIMIT ` + limitArg
 
-	rows, err := r.db.QueryContext(ctx, q, args...)
+	rows, err := r.queryOpsRows(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}

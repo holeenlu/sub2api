@@ -81,12 +81,7 @@ FROM (
 		service.RequestTypeSync, service.RequestTypeStream, service.RequestTypeWSV2, service.RequestTypeCyberBlocked) + `
 ) rates`
 	var stats service.OpsOutputTPS
-	if err := r.db.QueryRowContext(ctx, query, args...).Scan(&stats.P5, &stats.P10, &stats.P50, &stats.Avg, &stats.SampleCount); err != nil {
-		// lib/pq reports query cancellation without wrapping the context error.
-		// Preserve deadline vs caller cancellation for the overview's timeout policy.
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
-		}
+	if err := r.queryOpsRow(ctx, query, args...).Scan(&stats.P5, &stats.P10, &stats.P50, &stats.Avg, &stats.SampleCount); err != nil {
 		return nil, err
 	}
 	return &stats, nil
@@ -484,7 +479,7 @@ FROM ops_metrics_hourly
 WHERE ` + where + `
 ORDER BY bucket_start ASC`
 
-	rows, err := r.db.QueryContext(ctx, q, args...)
+	rows, err := r.queryOpsRows(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -726,7 +721,7 @@ func (r *opsRepository) rawOpsDataExists(ctx context.Context, filter *service.Op
 		join, where, args, _ := buildUsageWhere(filter, start, end, 1)
 		q := `SELECT EXISTS(SELECT 1 FROM usage_logs ul ` + join + ` ` + where + ` LIMIT 1)`
 		var exists bool
-		if err := r.db.QueryRowContext(ctx, q, args...).Scan(&exists); err != nil {
+		if err := r.queryOpsRow(ctx, q, args...).Scan(&exists); err != nil {
 			return false, err
 		}
 		if exists {
@@ -738,7 +733,7 @@ func (r *opsRepository) rawOpsDataExists(ctx context.Context, filter *service.Op
 		where, args, _ := buildErrorWhere(filter, start, end, 1)
 		q := `SELECT EXISTS(SELECT 1 FROM ops_error_logs ` + where + ` LIMIT 1)`
 		var exists bool
-		if err := r.db.QueryRowContext(ctx, q, args...).Scan(&exists); err != nil {
+		if err := r.queryOpsRow(ctx, q, args...).Scan(&exists); err != nil {
 			return false, err
 		}
 		return exists, nil
@@ -845,7 +840,7 @@ FROM usage_logs ul
 ` + where
 
 	var tokens sql.NullInt64
-	if err := r.db.QueryRowContext(ctx, q, args...).Scan(&successCount, &tokens); err != nil {
+	if err := r.queryOpsRow(ctx, q, args...).Scan(&successCount, &tokens); err != nil {
 		return 0, 0, err
 	}
 	if tokens.Valid {
@@ -882,7 +877,7 @@ FROM usage_logs ul
 	var tAvg sql.NullFloat64
 	var tMax sql.NullInt64
 	var tCount int64
-	if err := r.db.QueryRowContext(ctx, q, args...).Scan(
+	if err := r.queryOpsRow(ctx, q, args...).Scan(
 		&dP50, &dP90, &dP95, &dP99, &dAvg, &dMax,
 		&tP50, &tP90, &tP95, &tP99, &tAvg, &tMax, &tCount,
 	); err != nil {
@@ -926,15 +921,15 @@ func (r *opsRepository) queryErrorCounts(ctx context.Context, filter *service.Op
 	q := `
 SELECT
   COALESCE(COUNT(*) FILTER (WHERE COALESCE(status_code, 0) >= 400), 0) AS error_total,
-  COALESCE(COUNT(*) FILTER (WHERE COALESCE(status_code, 0) >= 400 AND is_business_limited), 0) AS business_limited,
-  COALESCE(COUNT(*) FILTER (WHERE COALESCE(status_code, 0) >= 400 AND NOT is_business_limited), 0) AS error_sla,
-  COALESCE(COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT is_business_limited AND COALESCE(upstream_status_code, status_code, 0) NOT IN (429, 529)), 0) AS upstream_excl,
-  COALESCE(COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT is_business_limited AND COALESCE(upstream_status_code, status_code, 0) = 429), 0) AS upstream_429,
-  COALESCE(COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT is_business_limited AND COALESCE(upstream_status_code, status_code, 0) = 529), 0) AS upstream_529
+  COALESCE(COUNT(*) FILTER (WHERE COALESCE(status_code, 0) >= 400 AND ` + service.OpsSLABusinessLimitedSQL("") + `), 0) AS business_limited,
+  COALESCE(COUNT(*) FILTER (WHERE COALESCE(status_code, 0) >= 400 AND NOT ` + service.OpsSLABusinessLimitedSQL("") + `), 0) AS error_sla,
+  COALESCE(COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT ` + service.OpsSLABusinessLimitedSQL("") + ` AND COALESCE(upstream_status_code, status_code, 0) NOT IN (429, 529)), 0) AS upstream_excl,
+  COALESCE(COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT ` + service.OpsSLABusinessLimitedSQL("") + ` AND COALESCE(upstream_status_code, status_code, 0) = 429), 0) AS upstream_429,
+  COALESCE(COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT ` + service.OpsSLABusinessLimitedSQL("") + ` AND COALESCE(upstream_status_code, status_code, 0) = 529), 0) AS upstream_529
 FROM ops_error_logs
 ` + where
 
-	if err := r.db.QueryRowContext(ctx, q, args...).Scan(
+	if err := r.queryOpsRow(ctx, q, args...).Scan(
 		&errorTotal,
 		&businessLimited,
 		&errorCountSLA,
@@ -1001,7 +996,7 @@ FROM combined`
 	args := append(usageArgs, errorArgs...)
 
 	var maxReqPerMinute, maxTokensPerMinute sql.NullInt64
-	if err := r.db.QueryRowContext(ctx, q, args...).Scan(&maxReqPerMinute, &maxTokensPerMinute); err != nil {
+	if err := r.queryOpsRow(ctx, q, args...).Scan(&maxReqPerMinute, &maxTokensPerMinute); err != nil {
 		return 0, 0, err
 	}
 	if maxReqPerMinute.Valid && maxReqPerMinute.Int64 > 0 {

@@ -1,5 +1,27 @@
 export default {
     ops: {
+      nodes: {
+        cluster: "集群",
+        clusterJobs: "后台任务为共享的集群任务状态，不是当前节点独占的任务。",
+        databasePool: "应用数据库连接池",
+        redisPool: "应用 Redis 连接池",
+        host: "宿主机",
+        container: "容器",
+        unknown: "口径未知",
+        cpuCapacity: "{count} 核 CPU",
+        online: "正常上报",
+        stale: "过期 / 离线",
+        lastKnown: "以下为最后一次数据，不能作为当前健康状态。",
+        sampledAt: "采样时间",
+        unavailable: "节点监控数据不完整或暂不可用，暂不能确认集群健康。",
+        waiting: "等待节点上报；各应用实例均需运行支持节点监控的版本。",
+        failed: "连接失败",
+        showingFirst: "当前显示 {shown} 台，共 {total} 台服务器",
+        viewAll: "查看全部服务器（{count}）",
+        allServers: "集群全部服务器（{count}）",
+      },
+
+
       title: '运维监控',
       description: '运维监控与排障',
       // Dashboard
@@ -145,7 +167,7 @@ export default {
       // Health Score & Diagnosis
       health: '健康',
       healthCondition: '健康状况',
-      healthHelp: '基于 SLA、错误率和资源使用情况的系统整体健康评分',
+      healthHelp: '按运维阈值评估请求错误、首 Token 耗时、资源和后台任务状态；SLA 与错误率不重复扣分',
       healthyStatus: '健康',
       riskyStatus: '风险',
       idleStatus: '待机',
@@ -214,7 +236,7 @@ export default {
         memoryHighAction: '监控内存趋势，检查是否有内存泄漏',
         ttftHigh: '首 Token 时间偏高 ({ttft}ms)',
         ttftHighImpact: '用户感知时长增加',
-        ttftHighAction: '优化请求处理流程，减少前置逻辑耗时',
+        ttftHighAction: '检查上游排队、模型推理耗时及网关前置处理，按模型类型评估',
         // Error rate diagnostics
         upstreamCritical: '上游错误率严重偏高 ({rate}%)',
         upstreamCriticalImpact: '可能影响大量用户请求',
@@ -235,6 +257,10 @@ export default {
         slaLow: 'SLA 低于目标 ({sla}%)',
         slaLowImpact: '需要关注服务质量',
         slaLowAction: '分析SLA下降原因，优化系统性能',
+        jobFailed: '后台任务执行失败 ({job})',
+        jobStale: '后台任务超过预期执行周期 ({job})',
+        jobImpact: '后台数据采集、聚合或维护可能延迟',
+        jobAction: '检查任务最近执行结果、执行周期和服务日志',
         // Health score diagnostics
         healthCritical: '综合健康评分过低 ({score})',
         healthCriticalImpact: '多个指标可能同时异常，建议优先排查错误与资源使用情况',
@@ -242,11 +268,12 @@ export default {
         healthLow: '综合健康评分偏低 ({score})',
         healthLowImpact: '可能存在轻度波动，建议关注 SLA 与错误率',
         healthLowAction: '监控指标趋势，预防问题恶化',
-        healthy: '所有系统指标正常',
+        healthy: '当前已采集指标无异常',
         healthyImpact: '服务运行稳定'
       },
       // Error Log
       errorLog: {
+        recovered: '已恢复',
         timeId: '时间 / ID',
         commonErrors: {
           contextDeadlineExceeded: '请求超时',
@@ -316,6 +343,9 @@ export default {
       },
       // Error Detail Modal
       errorDetail: {
+        exportDiagnostics: '导出完整信息',
+        exportFailed: '完整信息导出失败，请重试',
+        requestStatus: '请求状态码',
         title: '错误详情',
         titleWithId: '错误 #{id}',
         noErrorSelected: '未选择错误。',
@@ -360,7 +390,8 @@ export default {
           client: '客户端响应',
           upstream_message: '上游消息',
           upstream_detail: '上游详情',
-          upstream_events: '上游事件'
+          upstream_events: '上游事件',
+          scheduling_trace: '调度决策'
         },
         basicInfo: '基本信息',
         platform: '平台',
@@ -582,74 +613,8 @@ export default {
         }
       },
       runtime: {
-        title: '运维监控运行设置',
-        description: '配置存储在数据库中，无需修改 config 文件即可生效。',
-        loading: '加载中...',
-        noData: '暂无运行设置',
-        loadFailed: '加载运行设置失败',
-        saveSuccess: '运行设置已保存',
-        saveFailed: '保存运行设置失败',
-        alertTitle: '告警评估器',
-        groupAvailabilityTitle: '分组可用性监控',
-        evalIntervalSeconds: '评估间隔（秒）',
-        metricThresholds: '指标阈值配置',
-        metricThresholdsHint: '配置各项指标的告警阈值，超出阈值时将以红色显示',
-        slaMinPercent: 'SLA 最低百分比',
-        slaMinPercentHint: 'SLA 低于此值时显示为红色（默认：99.5%）',
-        ttftP99MaxMs: 'TTFT P99 最大值（毫秒）',
-        ttftP99MaxMsHint: 'TTFT P99 高于此值时显示为红色（默认：500ms）',
-        requestErrorRateMaxPercent: '请求错误率最大值（%）',
-        requestErrorRateMaxPercentHint: '请求错误率高于此值时显示为红色（默认：5%）',
-        upstreamErrorRateMaxPercent: '上游错误率最大值（%）',
-        upstreamErrorRateMaxPercentHint: '上游错误率高于此值时显示为红色（默认：5%）',
-        silencing: {
-          title: '告警静默（维护模式）',
-          enabled: '启用静默',
-          globalUntil: '静默截止时间（RFC3339）',
-          untilHint: '建议填写截止时间，避免忘记关闭静默。',
-          reason: '原因',
-          reasonPlaceholder: '例如：计划维护',
-          entries: {
-            title: '高级：定向静默',
-            hint: '可选：仅静默特定规则或特定级别。字段留空表示匹配全部。',
-            add: '新增条目',
-            empty: '暂无定向静默条目',
-            entryTitle: '条目 #{n}',
-            ruleId: '规则ID（可选）',
-            ruleIdPlaceholder: '例如：1',
-            severities: '级别（可选）',
-            severitiesPlaceholder: '例如：P0,P1（留空=全部）',
-            until: '截止时间（RFC3339）',
-            reason: '原因',
-            validation: {
-              untilRequired: '条目截止时间不能为空',
-              untilFormat: '条目截止时间必须为合法的 RFC3339 时间戳',
-              ruleIdPositive: '条目 rule_id 必须为正整数',
-              severitiesFormat: '条目级别必须为 P0..P3 的逗号分隔列表'
-            }
-          },
-          validation: {
-            timeFormat: '静默时间必须为合法的 RFC3339 时间戳'
-          }
-        },
-        lockEnabled: '启用分布式锁',
-        lockKey: '分布式锁 Key',
-        lockTTLSeconds: '分布式锁 TTL（秒）',
-        showAdvancedDeveloperSettings: '显示高级开发者设置 (Distributed Lock)',
-        advancedSettingsSummary: '高级设置 (分布式锁)',
-        evalIntervalHint: '检测任务的执行频率，建议保持默认。',
         validation: {
-          title: '请先修正以下问题',
-          invalid: '设置不合法',
-          evalIntervalRange: '评估间隔必须在 1 到 86400 秒之间',
-          lockKeyRequired: '启用分布式锁时必须填写 Lock Key',
-          lockKeyPrefix: '分布式锁 Key 必须以「{prefix}」开头',
-          lockKeyHint: '建议以「{prefix}」开头以避免冲突',
-          lockTtlRange: '分布式锁 TTL 必须在 1 到 86400 秒之间',
-          slaMinPercentRange: 'SLA 最低值必须在 0-100 之间',
-          ttftP99MaxRange: 'TTFT P99 最大值必须大于或等于 0',
-          requestErrorRateMaxRange: '请求错误率最大值必须在 0-100 之间',
-          upstreamErrorRateMaxRange: '上游错误率最大值必须在 0-100 之间'
+          evalIntervalRange: '评估间隔必须在 1 到 86400 秒之间'
         }
       },
       email: {
@@ -692,13 +657,18 @@ export default {
         }
       },
       settings: {
+        accountTelemetry: "账号遥测定时发送",
+        accountTelemetryHint: "默认关闭。仅已导入设备包的账号在开启后按十分钟活动窗口和所设上传间隔发送事件，GrowthBook 保持六小时周期；不发送设备硬件字段。关闭后停止定时发送并保留导入资料。未导入的账号保持等待，服务器不初始化 Claude Code。",
+        accountTelemetryInterval: "遥测上传间隔（秒）",
+        accountTelemetryIntervalHint: "60–86400 秒，默认 600 秒。首次立即发送；后续仅在十分钟活动窗口内按此间隔发送，不补发积压。",
+        accountTelemetryIntervalInvalid: "遥测上传间隔须为 60–86400 之间的整数。",
         title: '运维监控设置',
         loadFailed: '加载设置失败',
         saveSuccess: '运维监控设置保存成功',
         saveFailed: '保存设置失败',
-        dataCollection: '数据采集',
-        evaluationInterval: '评估间隔（秒）',
-        evaluationIntervalHint: '检测任务的执行频率，建议保持默认',
+        dataCollection: '预警评估',
+        evaluationInterval: '预警评估间隔（秒）',
+        evaluationIntervalHint: '后台检查预警规则的间隔，不控制页面刷新。',
         alertConfig: '预警配置',
         enableAlert: '开启预警',
         alertRecipients: '预警接收邮箱',
@@ -713,9 +683,9 @@ export default {
         metricThresholds: '指标阈值配置',
         metricThresholdsHint: '配置各项指标的告警阈值，超出阈值时将以红色显示',
         slaMinPercent: 'SLA最低百分比',
-        slaMinPercentHint: 'SLA低于此值时显示为红色（默认：99.5%）',
+        slaMinPercentHint: '低于目标时提示，低于目标超过 2 个百分点时标红（默认目标：99.5%）',
         ttftP99MaxMs: 'TTFT P99最大值（毫秒）',
-        ttftP99MaxMsHint: 'TTFT P99高于此值时显示为红色（默认：500ms）',
+        ttftP99MaxMsHint: '用于 TTFT 指标颜色、健康评分和诊断；默认 10,000ms，请按模型类型配置',
         requestErrorRateMaxPercent: '请求错误率最大值（%）',
         requestErrorRateMaxPercentHint: '请求错误率高于此值时显示为红色（默认：5%）',
         upstreamErrorRateMaxPercent: '上游错误率最大值（%）',
@@ -732,6 +702,21 @@ export default {
         aggregation: '预聚合任务',
         enableAggregation: '启用预聚合任务',
         aggregationHint: '预聚合可提升长时间窗口查询性能',
+        quotaProtection: {
+          "title": "额度临界保护",
+          "apply": "应用 vm2api 建议值",
+          "hint": "建议值：普通/Pro 账号 5h 85%、7d 80%，Max 账号均 95%；OpenAI 全局阈值设为 85%/80%。账号覆盖和更严格的管理员停调线仍优先，Fable 独立阈值保留。点击保存后生效。",
+          "tiers": "启用 Anthropic 套餐与窗口阈值",
+          "cold": "临界区拦截大额未缓存输入",
+          "anthropic_default_5h": "普通/Pro 5h 阈值 (%)",
+          "anthropic_default_7d": "普通/Pro 7d 阈值 (%)",
+          "anthropic_max_5h": "Max 5h 阈值 (%)",
+          "anthropic_max_7d": "Max 7d 阈值 (%)",
+          "critical_band_percent": "临界区宽度（百分点）",
+          "large_cold_input_tokens": "未缓存输入 token 上限",
+          "sample_max_age_seconds": "可信采样有效期（秒）",
+          "invalid": "请检查额度临界保护参数的有效范围"
+        },
         openaiQuotaAutoPause: 'OpenAI 账号配额自动暂停',
         openaiQuotaAutoPauseHint: '当 OpenAI 账号 5h / 7d 用量达到阈值时，调度会自动跳过该账号；窗口滚动后自动恢复。账号级阈值优先于此全局默认值。',
         openaiQuotaAutoPauseDefault5h: '默认 5h 用量阈值 (%)',
@@ -828,7 +813,7 @@ export default {
         errors: '错误统计，包括总错误数、错误率和上游错误率。',
         latency: '请求时长统计，包括 p50、p90、p95、p99 等百分位数。',
         ttft: '首 Token 延迟（Time To First Token），衡量流式响应的首 Token 返回速度。',
-        health: '系统健康评分（0-100），综合考虑 SLA、错误率和资源使用情况。'
+        health: '按运维阈值评估请求错误、首 Token 耗时、资源和后台任务状态；SLA 与错误率不重复扣分'
       },
       charts: {
         emptyRequest: '该时间窗口内暂无请求。',
