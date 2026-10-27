@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"net/http"
 	"net/url"
 	"os"
@@ -275,10 +276,11 @@ func (u *URLAvailability) GetAvailableURLsWithBase(baseURLs []string) []string {
 
 // OAuthSession 保存 OAuth 授权流程的临时状态
 type OAuthSession struct {
-	State        string    `json:"state"`
-	CodeVerifier string    `json:"code_verifier"`
-	ProxyURL     string    `json:"proxy_url,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
+	Authorization *authz.Lease `json:"authorization,omitempty"`
+	State         string       `json:"state"`
+	CodeVerifier  string       `json:"code_verifier"`
+	ProxyURL      string       `json:"proxy_url,omitempty"`
+	CreatedAt     time.Time    `json:"created_at"`
 }
 
 // SessionStore OAuth session 存储

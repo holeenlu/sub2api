@@ -125,3 +125,126 @@ func sanitizeOpenAIResponsesInputItemIDs(body []byte) ([]byte, bool, error) {
 	}
 	return replaceOpenAIRawInput(body, input, rebuiltItems), true, nil
 }
+
+// Only an explicit upstream lookup rejection permits removing valid IDs. A
+// reference or an incomplete item still needs persisted state: never turn it
+// into an empty item or silently drop it. Tool pairing uses call_id, not id.
+//
+// The third result explains why a repair was declined, and the caller logs it.
+// Without that line a declined repair looks exactly like "the upstream never
+// sent this rejection", which is how the rejection stayed unhandled unnoticed.
+// "unsupported item type" specifically means the switch below could grow to
+// cover it; "incomplete" means the payload genuinely cannot be replayed inline.
+func removeOpenAIResponsesSelfContainedItemIDs(body []byte, rejectedID ...string) ([]byte, bool, string, error) {
+	input := parseRawJSONView(body).Get("input")
+	if !input.IsArray() {
+		return body, false, "input is not an array", nil
+	}
+	items := input.Array()
+	targetID := firstNonEmpty(rejectedID...)
+	for index, item := range items {
+		typ := strings.TrimSpace(item.Get("type").String())
+		if targetID != "" && item.Get("id").String() != targetID {
+			continue
+		}
+		if typ == "item_reference" {
+			return body, false, fmt.Sprintf("item_reference at input[%d]", index), nil
+		}
+		if !item.Get("id").Exists() {
+			continue
+		}
+		known, selfContained := openAIResponsesSelfContainedInputItem(item)
+		if !selfContained {
+			if !known {
+				return body, false, fmt.Sprintf("unsupported item type %q at input[%d]", typ, index), nil
+			}
+			label := typ
+			if label == "" {
+				label = "message"
+			}
+			return body, false, fmt.Sprintf("incomplete %s at input[%d]", label, index), nil
+		}
+	}
+	changed := false
+	rebuilt := make([]string, 0, len(items))
+	for _, item := range items {
+		raw := item.Raw
+		if item.Get("id").Exists() && (targetID == "" || item.Get("id").String() == targetID) {
+			var err error
+			raw, err = sjson.Delete(raw, "id")
+			if err != nil {
+				return nil, false, "", fmt.Errorf("delete rejected input item id: %w", err)
+			}
+			changed = true
+		}
+		rebuilt = append(rebuilt, raw)
+	}
+	if !changed {
+		return body, false, "no input item ids to remove", nil
+	}
+	return replaceOpenAIRawInput(body, input, rebuilt), true, "", nil
+}
+
+// A replay item must carry its context inline. Share this boundary between
+// explicit lookup repair and connection-local fork history; a terminal event
+// alone does not make an opaque reference or an incomplete item replayable.
+func openAIResponsesSelfContainedInputItem(item gjson.Result) (known, selfContained bool) {
+	if !item.IsObject() {
+		return false, false
+	}
+	typ := strings.TrimSpace(item.Get("type").String())
+	known = true
+	selfContained = false
+	switch typ {
+	case "", "message":
+		selfContained = item.Get("role").String() != "" &&
+			(item.Get("content").Type == gjson.String || item.Get("content").IsArray())
+	case "reasoning", "compaction":
+		selfContained = item.Get("encrypted_content").Type == gjson.String && strings.TrimSpace(item.Get("encrypted_content").String()) != ""
+	case "function_call":
+		selfContained = item.Get("call_id").String() != "" && item.Get("name").String() != "" && item.Get("arguments").Type == gjson.String
+	case "custom_tool_call":
+		selfContained = item.Get("call_id").String() != "" && item.Get("name").String() != "" && item.Get("input").Type == gjson.String
+	case "function_call_output":
+		// Codex external-input messages use a named function_call_output without
+		// call_id. It is already inline context, not a reference to an upstream
+		// tool execution, so its item ID is safe to remove on a stateless retry.
+		hasCallID := strings.TrimSpace(item.Get("call_id").String()) != ""
+		hasNamedStandaloneOutput := strings.TrimSpace(item.Get("name").String()) != "" &&
+			(item.Get("output").Type == gjson.String || item.Get("output").IsArray())
+		hasInlineOutput := item.Get("output").Type == gjson.String || item.Get("output").IsArray()
+		selfContained = (hasCallID || hasNamedStandaloneOutput) && hasInlineOutput
+	case "custom_tool_call_output":
+		selfContained = strings.TrimSpace(item.Get("call_id").String()) != "" &&
+			(item.Get("output").Type == gjson.String || item.Get("output").IsArray())
+	case "agent_message":
+		// Codex multi-agent history is sent inline as content. rustponsesapi
+		// cannot resolve its client-supplied item ID as persisted state, but it
+		// can consume the item once that top-level ID is removed. Keep encrypted
+		// content inline; it is still part of this item and does not require a
+		// lookup.
+		content := item.Get("content")
+		selfContained = content.Type == gjson.String || (content.IsArray() && len(content.Array()) > 0)
+		if !selfContained {
+			encryptedContent := item.Get("encrypted_content")
+			selfContained = encryptedContent.Type == gjson.String && strings.TrimSpace(encryptedContent.String()) != ""
+		}
+	case "additional_tools":
+		// Responses Lite carries its client catalog inline in input.
+		selfContained = item.Get("tools").IsArray()
+	case "tool_search_call", "tool_search_output":
+		// Client discovery carries its arguments/definitions inline and is
+		// paired by call_id. Hosted discovery may still need stored state.
+		known = item.Get("execution").String() == "client"
+		callID := item.Get("call_id")
+		selfContained = known && callID.Type == gjson.String && strings.TrimSpace(callID.String()) != ""
+		if typ == "tool_search_call" {
+			selfContained = selfContained && item.Get("arguments").IsObject()
+		} else {
+			selfContained = selfContained && item.Get("tools").IsArray()
+		}
+	default:
+		known = false
+	}
+	return known, selfContained
+}

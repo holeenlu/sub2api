@@ -1,5 +1,27 @@
 export default {
     ops: {
+      nodes: {
+        cluster: "Cluster",
+        clusterJobs: "Background jobs are shared cluster jobs, not tasks owned exclusively by this node.",
+        databasePool: "Application DB pool",
+        redisPool: "Application Redis pool",
+        host: "Host",
+        container: "Container",
+        unknown: "Scope unknown",
+        cpuCapacity: "{count} CPU cores",
+        online: "Reporting",
+        stale: "Stale / offline",
+        lastKnown: "Last known values; do not interpret these as current healthy readings.",
+        sampledAt: "Sampled at",
+        unavailable: "Node monitoring is incomplete or unavailable. Cluster health cannot be confirmed.",
+        waiting: "Waiting for nodes to report. Every application replica must run a version that supports node metrics.",
+        failed: "Connection failed",
+        showingFirst: "Showing {shown} of {total} servers",
+        viewAll: "View all servers ({count})",
+        allServers: "All cluster servers ({count})",
+      },
+
+
       title: 'Ops Monitoring',
       description: 'Operational monitoring and troubleshooting',
       // Dashboard
@@ -145,7 +167,7 @@ export default {
       // Health Score & Diagnosis
       health: 'Health',
       healthCondition: 'Health Condition',
-      healthHelp: 'Overall system health score based on SLA, error rate, and resource usage',
+      healthHelp: 'Uses ops thresholds to assess request failures, TTFT, resources and background jobs; SLA and error rate are not penalized twice.',
       healthyStatus: 'Healthy',
       riskyStatus: 'At Risk',
       idleStatus: 'Idle',
@@ -214,7 +236,7 @@ export default {
         memoryHighAction: 'Monitor memory trends, check for memory leaks',
         ttftHigh: 'Time to first token elevated ({ttft}ms)',
         ttftHighImpact: 'User perceived latency increased',
-        ttftHighAction: 'Optimize request processing flow, reduce pre-processing time',
+        ttftHighAction: 'Check upstream queues, model reasoning time and gateway overhead for the selected model',
         // Error rate diagnostics
         upstreamCritical: 'Upstream error rate critically high ({rate}%)',
         upstreamCriticalImpact: 'May affect many user requests',
@@ -236,17 +258,22 @@ export default {
         slaLowImpact: 'Service quality needs attention',
         slaLowAction: 'Analyze SLA decline causes, optimize system performance',
         // Health score diagnostics
+        jobFailed: 'Background job failed ({job})',
+        jobStale: 'Background job missed its expected schedule ({job})',
+        jobImpact: 'Collection, aggregation or maintenance may be delayed',
+        jobAction: 'Check recent job results, schedule and service logs',
         healthCritical: 'Overall health score critically low ({score})',
         healthCriticalImpact: 'Multiple metrics may be degraded; prioritize error rate and latency investigation',
         healthCriticalAction: 'Comprehensive system check, prioritize critical-level issues',
         healthLow: 'Overall health score low ({score})',
         healthLowImpact: 'May indicate minor instability; monitor SLA and error rates',
         healthLowAction: 'Monitor metric trends, prevent issue escalation',
-        healthy: 'All system metrics normal',
+        healthy: 'No issues detected in the available metrics',
         healthyImpact: 'Service running stable'
       },
       // Error Log
       errorLog: {
+        recovered: 'Recovered',
         timeId: 'Time / ID',
         commonErrors: {
           contextDeadlineExceeded: 'context deadline exceeded',
@@ -316,6 +343,9 @@ export default {
       },
       // Error Detail Modal
       errorDetail: {
+        exportDiagnostics: 'Export full information',
+        exportFailed: 'Failed to export full information. Please try again.',
+        requestStatus: 'Request status code',
         title: 'Error Detail',
         titleWithId: 'Error #{id}',
         noErrorSelected: 'No error selected.',
@@ -360,7 +390,8 @@ export default {
           client: 'Client Response',
           upstream_message: 'Upstream Message',
           upstream_detail: 'Upstream Detail',
-          upstream_events: 'Upstream Events'
+          upstream_events: 'Upstream Events',
+          scheduling_trace: 'Scheduling Decisions'
         },
         basicInfo: 'Basic Info',
         platform: 'Platform',
@@ -582,74 +613,8 @@ export default {
         }
       },
       runtime: {
-        title: 'Ops Runtime Settings',
-        description: 'Stored in database; changes take effect without editing config files.',
-        loading: 'Loading...',
-        noData: 'No runtime settings available',
-        loadFailed: 'Failed to load runtime settings',
-        saveSuccess: 'Runtime settings saved',
-        saveFailed: 'Failed to save runtime settings',
-        alertTitle: 'Alert Evaluator',
-        groupAvailabilityTitle: 'Group Availability Monitor',
-        evalIntervalSeconds: 'Evaluation Interval (seconds)',
-        metricThresholds: 'Metric Thresholds',
-        metricThresholdsHint: 'Configure alert thresholds for metrics, values exceeding thresholds will be displayed in red',
-        slaMinPercent: 'SLA Minimum Percentage',
-        slaMinPercentHint: 'SLA below this value will be displayed in red (default: 99.5%)',
-        ttftP99MaxMs: 'TTFT P99 Maximum (ms)',
-        ttftP99MaxMsHint: 'TTFT P99 above this value will be displayed in red (default: 500ms)',
-        requestErrorRateMaxPercent: 'Request Error Rate Maximum (%)',
-        requestErrorRateMaxPercentHint: 'Request error rate above this value will be displayed in red (default: 5%)',
-        upstreamErrorRateMaxPercent: 'Upstream Error Rate Maximum (%)',
-        upstreamErrorRateMaxPercentHint: 'Upstream error rate above this value will be displayed in red (default: 5%)',
-        silencing: {
-          title: 'Alert Silencing (Maintenance Mode)',
-          enabled: 'Enable silencing',
-          globalUntil: 'Silence until (RFC3339)',
-          untilHint: 'Leave empty to only toggle silencing without an expiry (not recommended).',
-          reason: 'Reason',
-          reasonPlaceholder: 'e.g., planned maintenance',
-          entries: {
-            title: 'Advanced: targeted silencing',
-            hint: 'Optional: silence only certain rules or severities. Leave fields empty to match all.',
-            add: 'Add Entry',
-            empty: 'No targeted entries',
-            entryTitle: 'Entry #{n}',
-            ruleId: 'Rule ID (optional)',
-            ruleIdPlaceholder: 'e.g., 1',
-            severities: 'Severities (optional)',
-            severitiesPlaceholder: 'e.g., P0,P1 (empty = all)',
-            until: 'Until (RFC3339)',
-            reason: 'Reason',
-            validation: {
-              untilRequired: 'Entry until time is required',
-              untilFormat: 'Entry until time must be a valid RFC3339 timestamp',
-              ruleIdPositive: 'Entry rule_id must be a positive integer',
-              severitiesFormat: 'Entry severities must be a comma-separated list of P0..P3'
-            }
-          },
-          validation: {
-            timeFormat: 'Silence time must be a valid RFC3339 timestamp'
-          }
-        },
-        lockEnabled: 'Distributed Lock Enabled',
-        lockKey: 'Distributed Lock Key',
-        lockTTLSeconds: 'Distributed Lock TTL (seconds)',
-        showAdvancedDeveloperSettings: 'Show advanced developer settings (Distributed Lock)',
-        advancedSettingsSummary: 'Advanced settings (Distributed Lock)',
-        evalIntervalHint: 'How often the evaluator runs. Keeping the default is recommended.',
         validation: {
-          title: 'Please fix the following issues',
-          invalid: 'Invalid settings',
-          evalIntervalRange: 'Evaluation interval must be between 1 and 86400 seconds',
-          lockKeyRequired: 'Distributed lock key is required when lock is enabled',
-          lockKeyPrefix: 'Distributed lock key must start with "{prefix}"',
-          lockKeyHint: 'Recommended: start with "{prefix}" to avoid conflicts',
-          lockTtlRange: 'Distributed lock TTL must be between 1 and 86400 seconds',
-          slaMinPercentRange: 'SLA minimum percentage must be between 0 and 100',
-          ttftP99MaxRange: 'TTFT P99 maximum must be a number ≥ 0',
-          requestErrorRateMaxRange: 'Request error rate maximum must be between 0 and 100',
-          upstreamErrorRateMaxRange: 'Upstream error rate maximum must be between 0 and 100'
+          evalIntervalRange: 'Evaluation interval must be between 1 and 86400 seconds'
         }
       },
       email: {
@@ -692,13 +657,18 @@ export default {
         }
       },
       settings: {
+        accountTelemetry: "Scheduled account telemetry",
+        accountTelemetryHint: "Off by default. Accounts with an imported device bundle send events at the configured interval within a ten-minute activity window; GrowthBook remains every six hours. Device hardware fields are not sent. Turning this off stops scheduled sending and preserves imported data. Accounts without a bundle wait for import; the server does not initialize Claude Code.",
+        accountTelemetryInterval: "Telemetry upload interval (seconds)",
+        accountTelemetryIntervalHint: "60–86400 seconds; default 600. The first batch is immediate. Later batches follow this interval only within the ten-minute activity window, without catch-up.",
+        accountTelemetryIntervalInvalid: "Telemetry upload interval must be an integer between 60 and 86400.",
         title: 'Ops Monitoring Settings',
         loadFailed: 'Failed to load settings',
         saveSuccess: 'Ops monitoring settings saved successfully',
         saveFailed: 'Failed to save settings',
-        dataCollection: 'Data Collection',
-        evaluationInterval: 'Evaluation Interval (seconds)',
-        evaluationIntervalHint: 'Frequency of detection tasks, recommended to keep default',
+        dataCollection: 'Alert Evaluation',
+        evaluationInterval: 'Alert Evaluation Interval (seconds)',
+        evaluationIntervalHint: 'Interval between backend alert-rule checks. Does not control page refresh.',
         alertConfig: 'Alert Configuration',
         enableAlert: 'Enable Alerts',
         alertRecipients: 'Alert Recipient Emails',
@@ -713,9 +683,9 @@ export default {
         metricThresholds: 'Metric Thresholds',
         metricThresholdsHint: 'Configure alert thresholds for metrics, values exceeding thresholds will be displayed in red',
         slaMinPercent: 'SLA Minimum Percentage',
-        slaMinPercentHint: 'SLA below this value will be displayed in red (default: 99.5%)',
+        slaMinPercentHint: 'Warns below the target; turns red more than 2 percentage points below it (default target: 99.5%).',
         ttftP99MaxMs: 'TTFT P99 Maximum (ms)',
-        ttftP99MaxMsHint: 'TTFT P99 above this value will be displayed in red (default: 500ms)',
+        ttftP99MaxMsHint: 'Used for TTFT colors, health scoring and diagnosis; default 10,000ms. Configure for the model workload.',
         requestErrorRateMaxPercent: 'Request Error Rate Maximum (%)',
         requestErrorRateMaxPercentHint: 'Request error rate above this value will be displayed in red (default: 5%)',
         upstreamErrorRateMaxPercent: 'Upstream Error Rate Maximum (%)',
@@ -732,6 +702,21 @@ export default {
         aggregation: 'Pre-aggregation Tasks',
         enableAggregation: 'Enable Pre-aggregation',
         aggregationHint: 'Pre-aggregation improves query performance for long time windows',
+        quotaProtection: {
+          "title": "Quota protection near the limit",
+          "apply": "Apply vm2api suggested values",
+          "hint": "Suggested thresholds: default/Pro 85% for 5h and 80% for 7d; Max 95% for both. OpenAI defaults become 85%/80%. Account overrides and stricter administrator limits take precedence. The independent Fable threshold is preserved. Save to apply.",
+          "tiers": "Enable Anthropic plan and window thresholds",
+          "cold": "Block large uncached inputs near the limit",
+          "anthropic_default_5h": "Default/Pro 5h threshold (%)",
+          "anthropic_default_7d": "Default/Pro 7d threshold (%)",
+          "anthropic_max_5h": "Max 5h threshold (%)",
+          "anthropic_max_7d": "Max 7d threshold (%)",
+          "critical_band_percent": "Critical band (percentage points)",
+          "large_cold_input_tokens": "Uncached input token limit",
+          "sample_max_age_seconds": "Trusted sample lifetime (seconds)",
+          "invalid": "Check the allowed ranges for quota protection settings"
+        },
         openaiQuotaAutoPause: 'OpenAI Account Quota Auto-pause',
         openaiQuotaAutoPauseHint: 'When an OpenAI account reaches its 5h / 7d usage threshold, the scheduler skips it automatically and resumes once the window rolls over. Per-account thresholds take precedence over this global default.',
         openaiQuotaAutoPauseDefault5h: 'Default 5h usage threshold (%)',
@@ -827,7 +812,7 @@ export default {
         upstreamErrors: 'Upstream error statistics, excluding rate limit errors (429/529).',
         latency: 'Request duration statistics, including p50, p90, p95, p99 percentiles.',
         ttft: 'Time To First Token, measuring the speed of first token return in streaming responses.',
-        health: 'System health score (0-100), considering SLA, error rate, and resource usage.'
+        health: 'Uses ops thresholds to assess request failures, TTFT, resources and background jobs; SLA and error rate are not penalized twice.'
       },
       charts: {
         emptyRequest: 'No requests in this window.',

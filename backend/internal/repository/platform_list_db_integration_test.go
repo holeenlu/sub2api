@@ -27,6 +27,32 @@ WHERE ns.nspname = 'public' AND tbl.relname = $1 AND c.conname = $2`, table, con
 	return exists
 }
 
+func TestPlatformCatalogConstraintsAfterAllMigrations(t *testing.T) {
+	ctx := context.Background()
+	client := testEntTx(t).Client()
+	for _, table := range []struct{ name, constraint string }{
+		{"user_platform_quotas", "user_platform_quotas_platform_check"},
+		{"composite_model_routes", "composite_model_routes_target_platform_check"},
+	} {
+		require.False(t, platformConstraintExists(t, ctx, client, table.name, table.constraint))
+	}
+	// Reproduce an upgrade from the legacy fork schema, then finalize twice.
+	legacy, err := dbmigrations.FS.ReadFile("245_openai_bps_platform.sql")
+	require.NoError(t, err)
+	_, err = client.ExecContext(ctx, string(legacy))
+	require.NoError(t, err)
+	finalSQL, err := dbmigrations.FS.ReadFile("271_finalize_platform_catalog_constraints.sql")
+	require.NoError(t, err)
+	for range 2 {
+		_, err = client.ExecContext(ctx, string(finalSQL))
+		require.NoError(t, err)
+	}
+	require.False(t, platformConstraintExists(t, ctx, client, "user_platform_quotas", "user_platform_quotas_platform_check"))
+	require.False(t, platformConstraintExists(t, ctx, client, "composite_model_routes", "composite_model_routes_target_platform_check"))
+	require.True(t, platformConstraintExists(t, ctx, client, "channel_monitors", "channel_monitors_provider_check"))
+	require.True(t, platformConstraintExists(t, ctx, client, "channel_monitor_request_templates", "channel_monitor_request_templates_provider_check"))
+}
+
 // 迁移 242 删除平台白名单 CHECK 约束：旧库（约束仍在）上可重复执行，执行后
 // 新登记的平台无需再做数据库迁移即可写入。
 func TestMigration242DropsPlatformCheckConstraints(t *testing.T) {

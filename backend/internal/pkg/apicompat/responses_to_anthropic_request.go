@@ -14,15 +14,42 @@ import (
 // enables Anthropic platform groups to accept OpenAI Responses API requests
 // by converting them to the native /v1/messages format before forwarding upstream.
 func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, error) {
-	isOpus55 := claude.IsOpus55(req.Model)
-	isSonnet55 := claude.IsSonnet55(req.Model)
-	isHaiku55 := claude.IsHaiku55(req.Model)
-	system, messages, err := convertResponsesInputToAnthropic(req.Instructions, req.Input, isOpus55 || isSonnet55 || isHaiku55)
+	return responsesToAnthropicRequest(req, true)
+}
+
+// ResponsesToAnthropicIntermediateRequest uses Messages only as an intermediate
+// representation for Gemini/Antigravity. Those transports own their capabilities;
+// a client-visible Claude alias must not activate Messages API restrictions.
+func ResponsesToAnthropicIntermediateRequest(req *ResponsesRequest) (*AnthropicRequest, error) {
+	return responsesToAnthropicRequest(req, false)
+}
+
+func responsesToAnthropicRequest(req *ResponsesRequest, messagesUpstream bool) (result *AnthropicRequest, retErr error) {
+	defer func() {
+		if retErr == nil && result != nil {
+			retErr = preserveResponsesOutputFormat(req, result, messagesUpstream)
+		}
+	}()
+	isOpus55 := messagesUpstream && claude.IsOpus55(req.Model)
+	isSonnet55 := messagesUpstream && claude.IsSonnet55(req.Model)
+	isHaiku55 := messagesUpstream && claude.IsHaiku55(req.Model)
+	capabilities, knownClaude := claude.ThinkingCapabilitiesForModel(req.Model)
+	// Preserve the bridge's signed history independently of which transport
+	// owns thinking controls. Intermediate conversion must not drop a turn.
+	preserveThinking := knownClaude && capabilities.Adaptive
+	knownClaude = knownClaude && messagesUpstream
+	input := req.Input
+	var diagnostics ConversionDiagnostics
+	if !req.FromChatCompletions && ((messagesUpstream && claude.RejectsAssistantPrefill(req.Model)) || req.TargetRejectsAssistantPrefill) {
+		input = omitCompletedResponsesTail(input, &diagnostics)
+	}
+	system, messages, err := convertResponsesInputToAnthropic(req.Instructions, input, preserveThinking)
 	if err != nil {
 		return nil, err
 	}
 
 	out := &AnthropicRequest{
+		Diagnostics: diagnostics,
 		Model:       req.Model,
 		Messages:    messages,
 		Temperature: req.Temperature,
@@ -46,6 +73,18 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 	// Convert tools
 	if len(req.Tools) > 0 {
 		out.Tools = convertResponsesToAnthropicTools(req.Tools)
+		for i, tool := range req.Tools {
+			switch tool.Type {
+			case "function", "custom":
+				if !messagesUpstream && len(tool.Parameters) > 0 {
+					// Intermediate Messages is not the target schema dialect.
+					out.Tools[i].InputSchema = append(json.RawMessage(nil), tool.Parameters...)
+				}
+			case "web_search", "google_search", "web_search_20250305":
+			default:
+				out.Diagnostics.Add("unsupported_hosted_tool", "tools[].type")
+			}
+		}
 	}
 
 	// Convert tool_choice (reverse of convertAnthropicToolChoiceToResponses)
@@ -75,9 +114,7 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 		if (choice.Type == "any" || choice.Type == "tool") && !isHaiku55 {
 			return nil, fmt.Errorf("%s does not support forced tool_choice; use auto or none", req.Model)
 		}
-		effort := "medium"
 		if isSonnet55 {
-			effort = "high"
 			if req.Temperature != nil && *req.Temperature != 1 {
 				return nil, fmt.Errorf("claude-sonnet-5-5 does not support non-default temperature")
 			}
@@ -96,84 +133,94 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 				return nil, fmt.Errorf("claude-haiku-5-5 does not allow temperature and top_p together; omit both")
 			}
 		}
-		if req.Reasoning != nil && req.Reasoning.Effort != "" {
+	}
+
+	if knownClaude {
+		effort := ""
+		if req.Reasoning != nil {
 			effort = req.Reasoning.Effort
 		}
-		if isSonnet55 && effort == "none" {
-			// OpenAI's no-reasoning request maps to Sonnet 5.5's lowest
-			// thinking mode. between_tools still preserves signed progress
-			// blocks produced during tool use.
-			out.Thinking = &AnthropicThinking{Type: "between_tools"}
-			if out.OutputConfig == nil {
-				out.OutputConfig = &AnthropicOutputConfig{}
+		if effort == "" {
+			switch {
+			case isOpus55, isHaiku55:
+				effort = "medium"
+			case isSonnet55:
+				effort = "high"
+			default:
+				return out, nil
 			}
-			out.OutputConfig.Effort = "low"
-			return out, nil
 		}
-		if isHaiku55 && effort == "none" {
-			// Haiku 5.5's lowest thinking mode is disabled (valid at high
-			// effort or below); low keeps token spend minimal like Sonnet above.
+		if isOpus55 || isSonnet55 || isHaiku55 {
+			switch effort {
+			case "none", "low", "medium", "high", "xhigh", "max":
+			default:
+				return nil, fmt.Errorf("%s does not support reasoning effort %q; use low, medium, high, xhigh or max", req.Model, effort)
+			}
+		}
+		if effort == "none" {
 			out.Thinking = &AnthropicThinking{Type: "disabled"}
-			if out.OutputConfig == nil {
-				out.OutputConfig = &AnthropicOutputConfig{}
+			if capabilities.BetweenTools || isHaiku55 {
+				// Preserve explicit none's existing low-effort bridge contract;
+				// native disabled with omitted effort keeps the provider default.
+				out.OutputConfig = &AnthropicOutputConfig{Effort: "low"}
 			}
-			out.OutputConfig.Effort = "low"
-			return out, nil
+		} else {
+			out.OutputConfig = &AnthropicOutputConfig{Effort: effort}
+			out.Thinking = &AnthropicThinking{Type: "adaptive"}
 		}
-		switch effort {
-		case "low", "medium", "high", "xhigh", "max":
-		default:
-			return nil, fmt.Errorf("%s does not support reasoning effort %q; use low, medium, high, xhigh or max", req.Model, effort)
+
+		// Normalize just these controls, not messages or the full request. Both
+		// native and converted requests share the same capability decisions.
+		controls := struct {
+			MaxTokens    int                    `json:"max_tokens"`
+			Thinking     *AnthropicThinking     `json:"thinking,omitempty"`
+			OutputConfig *AnthropicOutputConfig `json:"output_config,omitempty"`
+		}{out.MaxTokens, out.Thinking, out.OutputConfig}
+		body, err := json.Marshal(controls)
+		if err != nil {
+			return nil, err
 		}
-		out.Thinking = &AnthropicThinking{Type: "adaptive"}
-		out.OutputConfig = &AnthropicOutputConfig{Effort: effort}
+		originalControls := string(body)
+		body, err = claude.NormalizeThinking(body, req.Model)
+		if string(body) != originalControls {
+			out.Diagnostics.Add("reasoning_controls_adjusted", "reasoning.effort")
+		}
+		if err != nil {
+			return nil, fmt.Errorf("convert reasoning effort %q: %w", effort, err)
+		}
+		if err := json.Unmarshal(body, &controls); err != nil {
+			return nil, err
+		}
+		out.Thinking, out.OutputConfig = controls.Thinking, controls.OutputConfig
+		if len(capabilities.EffortLevels) == 0 {
+			out.OutputConfig = nil
+		}
 		return out, nil
 	}
 
 	// reasoning.effort → output_config.effort + thinking
 	if req.Reasoning != nil && req.Reasoning.Effort != "" {
-		effort := mapResponsesEffortToAnthropic(req.Reasoning.Effort)
+		effort := req.Reasoning.Effort
+		if !messagesUpstream && effort == "none" {
+			out.Thinking = &AnthropicThinking{Type: "disabled"}
+			return out, nil
+		}
+		// Preserve the existing generic compatibility dialect for unknown
+		// providers; Claude uses the capability catalog above.
+		if effort == "xhigh" {
+			effort = "max"
+		}
 		out.OutputConfig = &AnthropicOutputConfig{Effort: effort}
 		// Enable thinking for non-low efforts
 		if effort != "low" {
 			out.Thinking = &AnthropicThinking{
 				Type:         "enabled",
-				BudgetTokens: defaultThinkingBudget(effort),
+				BudgetTokens: claude.ThinkingBudgetForEffort(effort),
 			}
 		}
 	}
 
 	return out, nil
-}
-
-// defaultThinkingBudget returns a sensible thinking budget based on effort level.
-func defaultThinkingBudget(effort string) int {
-	switch effort {
-	case "low":
-		return 1024
-	case "medium":
-		return 4096
-	case "high":
-		return 10240
-	case "max":
-		return 32768
-	default:
-		return 10240
-	}
-}
-
-// mapResponsesEffortToAnthropic converts OpenAI Responses reasoning effort to
-// Anthropic effort levels. Reverse of mapAnthropicEffortToResponses.
-//
-//	low    → low
-//	medium → medium
-//	high   → high
-//	xhigh  → max
-func mapResponsesEffortToAnthropic(effort string) string {
-	if effort == "xhigh" {
-		return "max"
-	}
-	return effort // low→low, medium→medium, high→high, unknown→passthrough
 }
 
 // convertResponsesInputToAnthropic extracts system prompt and messages from
@@ -730,23 +777,32 @@ func convertResponsesToAnthropicTools(tools []ResponsesTool) []AnthropicTool {
 			})
 		case "function":
 			out = append(out, AnthropicTool{
-				Name:        t.Name,
-				Description: t.Description,
-				InputSchema: normalizeAnthropicInputSchema(t.Parameters),
+				Name:                t.Name,
+				Description:         t.Description,
+				InputSchema:         normalizeAnthropicInputSchema(t.Parameters),
+				Strict:              t.Strict,
+				EagerInputStreaming: t.EagerInputStreaming,
+				CacheControl:        t.CacheControl,
 			})
 		case "custom":
 			out = append(out, AnthropicTool{
-				Name:        t.Name,
-				Description: t.Description,
-				InputSchema: normalizeAnthropicInputSchema(t.Parameters),
+				Name:                t.Name,
+				Description:         t.Description,
+				InputSchema:         normalizeAnthropicInputSchema(t.Parameters),
+				Strict:              t.Strict,
+				EagerInputStreaming: t.EagerInputStreaming,
+				CacheControl:        t.CacheControl,
 			})
 		default:
 			// Pass through unknown tool types
 			out = append(out, AnthropicTool{
-				Type:        t.Type,
-				Name:        t.Name,
-				Description: t.Description,
-				InputSchema: normalizeAnthropicInputSchema(t.Parameters),
+				Type:                t.Type,
+				Name:                t.Name,
+				Description:         t.Description,
+				InputSchema:         normalizeAnthropicInputSchema(t.Parameters),
+				Strict:              t.Strict,
+				EagerInputStreaming: t.EagerInputStreaming,
+				CacheControl:        t.CacheControl,
 			})
 		}
 	}
