@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -63,12 +64,16 @@ type openAIImagesFailoverHTTPUpstream struct {
 	service.HTTPUpstream
 	mu         sync.Mutex
 	accountIDs []int64
+	respond    func(*http.Request) (*http.Response, error)
 }
 
-func (u *openAIImagesFailoverHTTPUpstream) Do(_ *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
+func (u *openAIImagesFailoverHTTPUpstream) Do(req *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
 	u.mu.Lock()
 	u.accountIDs = append(u.accountIDs, accountID)
 	u.mu.Unlock()
+	if u.respond != nil {
+		return u.respond(req)
+	}
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Header: http.Header{
@@ -114,48 +119,8 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 			Credentials: map[string]any{"access_token": "token-2"},
 		},
 	}
-	accountRepo := openAIImagesFailoverAccountRepo{accounts: accounts}
 	upstream := &openAIImagesFailoverHTTPUpstream{}
-	cfg := &config.Config{RunMode: config.RunModeSimple}
-	gatewayService := service.NewOpenAIGatewayService(
-		accountRepo,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		cfg,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		upstream,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-	)
-	billingService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
-	t.Cleanup(billingService.Stop)
-	concurrencyService := service.NewConcurrencyService(nil)
-	handler := NewOpenAIGatewayHandler(
-		gatewayService,
-		concurrencyService,
-		billingService,
-		service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg),
-		nil,
-		nil,
-		nil,
-		nil,
-		cfg,
-	)
-	handler.maxAccountSwitches = 10
+	handler := newOpenAIEndpointRetryTestHandler(t, accounts, upstream, &config.Config{RunMode: config.RunModeSimple})
 
 	body := []byte(`{"model":"gpt-image-1","prompt":"draw a cat","quality":"high","size":"1536x1024"}`)
 	core, observedLogs := observer.New(zap.DebugLevel)
@@ -200,4 +165,161 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 	require.Len(t, events, 2)
 	require.Equal(t, "failover", events[0].Kind)
 	require.Equal(t, "failover", events[1].Kind)
+}
+
+func newOpenAIEndpointRetryTestHandler(t *testing.T, accounts []service.Account, upstream service.HTTPUpstream, cfg *config.Config) *OpenAIGatewayHandler {
+	t.Helper()
+	accountRepo := openAIImagesFailoverAccountRepo{accounts: accounts}
+	gatewayService := service.NewOpenAIGatewayService(
+		accountRepo,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		cfg,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		upstream,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	billingService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billingService.Stop)
+	concurrencyService := service.NewConcurrencyService(nil)
+	handler := NewOpenAIGatewayHandler(
+		gatewayService,
+		concurrencyService,
+		billingService,
+		service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg),
+		nil,
+		nil,
+		nil,
+		nil,
+		cfg,
+	)
+	handler.maxAccountSwitches = 10
+
+	return handler
+}
+
+func TestOpenAIGatewayHandlerRetryAfterWaitBoundaries(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, endpoint := range []struct {
+		name string
+		path string
+		body string
+	}{
+		{name: "images", path: "/v1/images/generations", body: `{"model":"gpt-image-1","prompt":"draw a cat","size":"1024x1024"}`},
+		{name: "alpha search", path: "/v1/alpha/search", body: `{"model":"gpt-5.6-sol","commands":{}}`},
+	} {
+		t.Run(endpoint.name, func(t *testing.T) {
+			for _, scenario := range []string{"long retry after", "first output deadline", "client cancels wait"} {
+				t.Run(scenario, func(t *testing.T) {
+					ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+					defer cancel()
+					cfg := &config.Config{RunMode: config.RunModeSimple}
+					retryAfter := "90"
+					if scenario == "first output deadline" {
+						cfg.Gateway.OpenAIFirstOutputTimeoutSeconds = 1
+						retryAfter = "2"
+					}
+					if scenario == "client cancels wait" {
+						retryAfter = "2"
+					}
+					upstream := &openAIImagesFailoverHTTPUpstream{}
+					upstream.respond = func(_ *http.Request) (*http.Response, error) {
+						if scenario == "client cancels wait" {
+							timer := time.AfterFunc(20*time.Millisecond, cancel)
+							t.Cleanup(func() { timer.Stop() })
+						}
+						return &http.Response{
+							StatusCode: http.StatusTooManyRequests,
+							Header:     http.Header{"Content-Type": {"application/json"}, "Retry-After": {retryAfter}},
+							Body:       io.NopCloser(bytes.NewBufferString(`{"error":{"code":"rate_limit_exceeded","message":"temporarily limited"}}`)),
+						}, nil
+					}
+					accounts := []service.Account{{
+						ID: 1, Name: "retry-account", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+						Status: service.StatusActive, Schedulable: true,
+						Credentials: map[string]any{"access_token": "token-1", "chatgpt_account_id": "chatgpt-account"},
+					}}
+					handler := newOpenAIEndpointRetryTestHandler(t, accounts, upstream, cfg)
+					rec := httptest.NewRecorder()
+					c, _ := gin.CreateTestContext(rec)
+					c.Request = httptest.NewRequest(http.MethodPost, endpoint.path, bytes.NewBufferString(endpoint.body)).WithContext(ctx)
+					c.Request.Header.Set("Content-Type", "application/json")
+					groupID := int64(3130)
+					c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+						ID: 99, GroupID: &groupID,
+						Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, AllowImageGeneration: true},
+						User:  &service.User{ID: 100},
+					})
+					c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 100, Concurrency: 0})
+					if endpoint.name == "images" {
+						handler.Images(c)
+					} else {
+						handler.AlphaSearch(c)
+					}
+					require.Equal(t, []int64{1}, upstream.calls(), "no upstream request may start after the wait is rejected or cancelled")
+					if scenario == "client cancels wait" {
+						require.ErrorIs(t, ctx.Err(), context.Canceled)
+						require.Equal(t, statusClientClosedRequest, c.Writer.Status())
+					} else {
+						require.NoError(t, ctx.Err(), "the handler must stop before the client timeout")
+						require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+						require.Equal(t, "retry_budget_exhausted", gjson.GetBytes(rec.Body.Bytes(), "error.code").String())
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestImagesRejectsBlockedCyberSessionBeforeScheduling(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("a locally blocked image request must not contact a provider")
+	}))
+	defer upstream.Close()
+	harness := newOpenAIWSPassthroughHandlerHarness(t, upstream.URL)
+	key := *harness.apiKey
+	group := *key.Group
+	group.AllowImageGeneration = true
+	key.Group = &group
+	body := []byte(`{"model":"gpt-image-2","prompt":"draw"}`)
+	makeContext := func(session string) (*gin.Context, *httptest.ResponseRecorder) {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+		c.Request.Header.Set("Content-Type", "application/json")
+		c.Request.Header.Set("session_id", session)
+		c.Set(string(middleware2.ContextKeyAPIKey), &key)
+		c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: key.UserID, Concurrency: 1})
+		return c, rec
+	}
+	marked, _ := makeContext("image-cyber-session")
+	service.MarkOpsCyberPolicy(marked, service.CyberPolicyMark{Code: "cyber_policy", Message: "provider policy rejection", UpstreamStatus: 400})
+	harness.handler.recordCyberPolicyIfMarked(marked, &key, nil, nil, "gpt-image-2", false, body, service.ChannelUsageFields{}, "test")
+	blocked, rec := makeContext("image-cyber-session")
+	harness.handler.Images(blocked)
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Equal(t, "session_blocked_by_cyber_policy", gjson.GetBytes(rec.Body.Bytes(), "error.code").String())
+	other, _ := makeContext("other-image-session")
+	require.False(t, harness.handler.rejectIfCyberSessionBlocked(other, &key, body, "gpt-image-2", cyberBlockFormatResponses))
+	_ = harness.clientConn.CloseNow()
+	select {
+	case <-harness.handlerDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("idle harness did not close")
+	}
 }

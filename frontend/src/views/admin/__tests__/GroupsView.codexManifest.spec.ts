@@ -86,6 +86,7 @@ const sourceGroup = {
   profit_safety_buffer: 0,
   allow_image_generation: false,
   allow_batch_image_generation: false,
+  image_count_billing: false,
   image_rate_independent: false,
   image_rate_multiplier: 1,
   batch_image_discount_multiplier: 0.5,
@@ -250,6 +251,27 @@ describe("GroupsView Codex manifest binding", () => {
     getLiveCapability.mockResolvedValue({ supported: false });
   });
 
+  it.each([['openai', true], ['composite', true], ['anthropic', false]])(
+    'keeps per-image billing off and limits its control to %s eligibility',
+    async (platform, visible) => {
+      listGroups.mockResolvedValue({ items: [{ ...sourceGroup, platform, allow_image_generation: true, image_count_billing: false }], total: 1, page: 1, page_size: 20, pages: 1 });
+      const wrapper = mountView();
+      await flushPromises();
+      const edit = wrapper.findAll('button').find(button => button.text().includes('common.edit'));
+      await edit!.trigger('click');
+      await flushPromises();
+      const label = wrapper.findAll('label').find(label => label.text().includes('perImageBilling'));
+      expect(Boolean(label)).toBe(visible);
+      if (label) {
+        const input = label.get('input');
+        expect((input.element as HTMLInputElement).checked).toBe(false);
+        await input.setValue(true);
+        expect((input.element as HTMLInputElement).checked).toBe(true);
+      }
+      wrapper.unmount();
+    },
+  );
+
   it("preserves consecutive child updates on the reactive edit config", async () => {
     const wrapper = mountView();
     await flushPromises();
@@ -286,3 +308,6 @@ describe("GroupsView Codex manifest binding", () => {
     wrapper.unmount();
   });
 });
+
+// These legacy functional cases exercise the migrated full administrator.
+vi.mock("@/stores/auth", () => ({ useAuthStore: () => ({ isSuperAdmin: true, isAdmin: true, isSimpleMode: false, can: () => true }) }))

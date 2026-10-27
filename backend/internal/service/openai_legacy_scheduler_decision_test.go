@@ -60,7 +60,7 @@ func TestLegacySchedulerDecision_StickySessionLayer(t *testing.T) {
 
 			selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
 				ctx, &groupID, "", sessionHash, "gpt-5.1", nil,
-				OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, false, true,
+				OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, true,
 			)
 			require.NoError(t, err)
 			require.NotNil(t, selection)
@@ -75,7 +75,7 @@ func TestLegacySchedulerDecision_StickySessionLayer(t *testing.T) {
 
 			selection, decision, err = svc.SelectAccountWithSchedulerForCapability(
 				ctx, &groupID, "", "", "gpt-5.1", nil,
-				OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, false, true,
+				OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, true,
 			)
 			require.NoError(t, err)
 			require.NotNil(t, selection)
@@ -94,6 +94,14 @@ func TestLegacySchedulerDecision_PreviousResponseRouting(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(38110)
 	responseID := "resp_legacy_route"
+	requireUnavailableOwner := func(t *testing.T, svc *OpenAIGatewayService, selection *AccountSelectionResult, err error) {
+		t.Helper()
+		require.ErrorIs(t, err, ErrOpenAIContinuationUnavailable)
+		require.Nil(t, selection, "a known previous response must not move to another account")
+		owner, lookupErr := svc.getOpenAIWSStateStore().GetResponseAccount(ctx, groupID, responseID)
+		require.NoError(t, lookupErr)
+		require.Equal(t, int64(38102), owner, "temporary owner ineligibility must preserve the response binding")
+	}
 
 	t.Run("routes to the account owning the response", func(t *testing.T) {
 		svc := newLegacySchedulerDecisionTestService(newLegacySchedulerDecisionTestAccounts(groupID, true), true, schedulerTestConcurrencyCache{})
@@ -101,7 +109,7 @@ func TestLegacySchedulerDecision_PreviousResponseRouting(t *testing.T) {
 
 		selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
 			ctx, &groupID, responseID, "legacy-prev-session", "gpt-5.1", nil,
-			OpenAIUpstreamTransportResponsesWebsocketV2Ingress, OpenAIEndpointCapabilityChatCompletions, false, true, true,
+			OpenAIUpstreamTransportResponsesWebsocketV2Ingress, OpenAIEndpointCapabilityChatCompletions, false, true,
 		)
 		require.NoError(t, err)
 		require.NotNil(t, selection)
@@ -114,13 +122,19 @@ func TestLegacySchedulerDecision_PreviousResponseRouting(t *testing.T) {
 		require.Equal(t, int64(38102), decision.SelectedAccountID)
 	})
 
-	t.Run("excluded owner falls back to load balance", func(t *testing.T) {
+	t.Run("excluded owner requires client recovery", func(t *testing.T) {
 		svc := newLegacySchedulerDecisionTestService(newLegacySchedulerDecisionTestAccounts(groupID, true), true, schedulerTestConcurrencyCache{})
 		require.NoError(t, svc.getOpenAIWSStateStore().BindResponseAccount(ctx, groupID, responseID, 38102, time.Hour))
 
 		selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
 			ctx, &groupID, responseID, "", "gpt-5.1", map[int64]struct{}{38102: {}},
-			OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, true, true,
+			OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, true,
+		)
+		requireUnavailableOwner(t, svc, selection, err)
+
+		selection, decision, err = svc.SelectAccountWithSchedulerForCapability(
+			ctx, &groupID, "", "", "gpt-5.1", map[int64]struct{}{38102: {}},
+			OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, true,
 		)
 		require.NoError(t, err)
 		require.NotNil(t, selection)
@@ -131,14 +145,21 @@ func TestLegacySchedulerDecision_PreviousResponseRouting(t *testing.T) {
 		require.False(t, decision.StickyPreviousHit)
 	})
 
-	t.Run("transport-incompatible owner releases its slot and falls back", func(t *testing.T) {
+	t.Run("transport-incompatible owner releases its slot and requires recovery", func(t *testing.T) {
 		released := make([]int64, 0)
 		svc := newLegacySchedulerDecisionTestService(newLegacySchedulerDecisionTestAccounts(groupID, false), true, schedulerTestConcurrencyCache{releasedIDs: &released})
 		require.NoError(t, svc.getOpenAIWSStateStore().BindResponseAccount(ctx, groupID, responseID, 38102, time.Hour))
 
 		selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
 			ctx, &groupID, responseID, "", "gpt-5.1", nil,
-			OpenAIUpstreamTransportResponsesWebsocketV2Ingress, OpenAIEndpointCapabilityChatCompletions, false, true, true,
+			OpenAIUpstreamTransportResponsesWebsocketV2Ingress, OpenAIEndpointCapabilityChatCompletions, false, true,
+		)
+		requireUnavailableOwner(t, svc, selection, err)
+		require.Contains(t, released, int64(38102), "the owning account's slot must be released after the transport check fails")
+
+		selection, decision, err = svc.SelectAccountWithSchedulerForCapability(
+			ctx, &groupID, "", "", "gpt-5.1", nil,
+			OpenAIUpstreamTransportResponsesWebsocketV2Ingress, OpenAIEndpointCapabilityChatCompletions, false, true,
 		)
 		require.NoError(t, err)
 		require.NotNil(t, selection)
@@ -147,7 +168,6 @@ func TestLegacySchedulerDecision_PreviousResponseRouting(t *testing.T) {
 		require.Equal(t, int64(38101), selection.Account.ID)
 		require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 		require.False(t, decision.StickyPreviousHit)
-		require.Contains(t, released, int64(38102), "the owning account's slot must be released after the transport check fails")
 	})
 
 	t.Run("channel-restricted request model fails before routing", func(t *testing.T) {
@@ -166,7 +186,7 @@ func TestLegacySchedulerDecision_PreviousResponseRouting(t *testing.T) {
 
 		selection, _, err := svc.SelectAccountWithSchedulerForCapability(
 			ctx, &groupID, responseID, "", "gpt-5.1", nil,
-			OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, true, true,
+			OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, true,
 		)
 		require.ErrorIs(t, err, ErrNoAvailableAccounts)
 		require.Contains(t, err.Error(), "channel pricing restriction")
@@ -174,7 +194,7 @@ func TestLegacySchedulerDecision_PreviousResponseRouting(t *testing.T) {
 		require.Empty(t, released, "the owning account's slot must not be touched for a channel-restricted model")
 	})
 
-	t.Run("channel-restricted upstream model of the owner releases its slot and falls back", func(t *testing.T) {
+	t.Run("channel-restricted upstream model of the owner releases its slot and requires recovery", func(t *testing.T) {
 		released := make([]int64, 0)
 		accounts := newLegacySchedulerDecisionTestAccounts(groupID, true)
 		accounts[1].Credentials = map[string]any{"model_mapping": map[string]any{"gpt-5.1": "o3-mini"}}
@@ -191,7 +211,14 @@ func TestLegacySchedulerDecision_PreviousResponseRouting(t *testing.T) {
 
 		selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
 			ctx, &groupID, responseID, "", "gpt-5.1", nil,
-			OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, true, true,
+			OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, true,
+		)
+		requireUnavailableOwner(t, svc, selection, err)
+		require.Contains(t, released, int64(38102), "the owning account's slot must be released after the upstream model restriction check fails")
+
+		selection, decision, err = svc.SelectAccountWithSchedulerForCapability(
+			ctx, &groupID, "", "", "gpt-5.1", nil,
+			OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, true,
 		)
 		require.NoError(t, err)
 		require.NotNil(t, selection)
@@ -200,10 +227,9 @@ func TestLegacySchedulerDecision_PreviousResponseRouting(t *testing.T) {
 		require.Equal(t, int64(38101), selection.Account.ID)
 		require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 		require.False(t, decision.StickyPreviousHit)
-		require.Contains(t, released, int64(38102), "the owning account's slot must be released after the upstream model restriction check fails")
 	})
 
-	t.Run("quarantined owner proxy releases its slot and falls back", func(t *testing.T) {
+	t.Run("quarantined owner proxy releases its slot and requires recovery", func(t *testing.T) {
 		released := make([]int64, 0)
 		healthyProxy, quarantinedProxy := int64(38113), int64(38114)
 		accounts := newLegacySchedulerDecisionTestAccounts(groupID, true)
@@ -222,7 +248,14 @@ func TestLegacySchedulerDecision_PreviousResponseRouting(t *testing.T) {
 
 		selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
 			ctx, &groupID, responseID, "", "gpt-5.1", nil,
-			OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, true, true,
+			OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, true,
+		)
+		requireUnavailableOwner(t, svc, selection, err)
+		require.Contains(t, released, int64(38102), "the owning account's slot must be released after the proxy quarantine check fails")
+
+		selection, decision, err = svc.SelectAccountWithSchedulerForCapability(
+			ctx, &groupID, "", "", "gpt-5.1", nil,
+			OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, true,
 		)
 		require.NoError(t, err)
 		require.NotNil(t, selection)
@@ -231,10 +264,9 @@ func TestLegacySchedulerDecision_PreviousResponseRouting(t *testing.T) {
 		require.Equal(t, int64(38101), selection.Account.ID)
 		require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 		require.False(t, decision.StickyPreviousHit)
-		require.Contains(t, released, int64(38102), "the owning account's slot must be released after the proxy quarantine check fails")
 	})
 
-	t.Run("all proxies quarantined fails open to the owner", func(t *testing.T) {
+	t.Run("quarantine also protects the previous response owner", func(t *testing.T) {
 		proxy := int64(38115)
 		accounts := newLegacySchedulerDecisionTestAccounts(groupID, true)
 		accounts[0].ProxyID = &proxy
@@ -250,16 +282,17 @@ func TestLegacySchedulerDecision_PreviousResponseRouting(t *testing.T) {
 		require.True(t, tripped)
 		require.NoError(t, svc.getOpenAIWSStateStore().BindResponseAccount(ctx, groupID, responseID, 38102, time.Hour))
 
-		selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
+		selection, _, err := svc.SelectAccountWithSchedulerForCapability(
 			ctx, &groupID, responseID, "", "gpt-5.1", nil,
-			OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, true, true,
+			OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, true,
 		)
-		require.NoError(t, err, "quarantine must fail open instead of returning no available accounts")
-		require.NotNil(t, selection)
-		require.NotNil(t, selection.Account)
-		releaseLegacySchedulerDecisionSelection(selection)
-		require.Equal(t, int64(38102), selection.Account.ID)
-		require.Equal(t, openAIAccountScheduleLayerPreviousResponse, decision.Layer)
-		require.True(t, decision.StickyPreviousHit)
+		requireUnavailableOwner(t, svc, selection, err)
+
+		selection, _, err = svc.SelectAccountWithSchedulerForCapability(
+			ctx, &groupID, "", "", "gpt-5.1", nil,
+			OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, true,
+		)
+		require.ErrorIs(t, err, ErrNoAvailableAccounts)
+		require.Nil(t, selection)
 	})
 }

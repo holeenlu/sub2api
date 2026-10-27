@@ -11,7 +11,7 @@ const props = withDefaults(defineProps<Props>(), {
 <template>
   <div class="space-y-6">
     <!-- Header (matches OpsDashboardHeader + overview blocks) -->
-    <div :class="['rounded-3xl bg-white shadow-sm ring-1 ring-gray-900/5 dark:bg-dark-800 dark:ring-dark-700', props.fullscreen ? 'p-8' : 'p-6']">
+    <div :class="['ops-skeleton-header rounded-3xl bg-white shadow-sm ring-1 ring-gray-900/5 dark:bg-dark-800 dark:ring-dark-700', props.fullscreen ? 'p-8' : 'p-6']">
       <div class="flex flex-wrap items-center justify-between gap-4 border-b border-gray-100 pb-4 dark:border-dark-700">
         <div class="space-y-2">
           <div class="h-6 w-44 animate-pulse rounded bg-gray-200 dark:bg-dark-700"></div>
@@ -28,24 +28,20 @@ const props = withDefaults(defineProps<Props>(), {
         </div>
       </div>
 
-      <div class="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-12">
-        <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-900/30 lg:col-span-5">
-          <div class="grid h-full grid-cols-1 gap-6 md:grid-cols-[200px_1fr] md:items-center">
-            <div class="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-dark-700/70"></div>
-            <div class="space-y-4">
+      <div class="ops-skeleton-overview mt-4">
+        <div class="ops-skeleton-realtime rounded-2xl bg-gray-50 p-4 dark:bg-dark-900/30">
+          <div class="grid grid-cols-[76px_minmax(0,1fr)] items-center gap-3">
+            <div class="h-20 animate-pulse rounded-xl bg-gray-100 dark:bg-dark-700/70"></div>
+            <div class="space-y-3">
               <div class="h-4 w-32 animate-pulse rounded bg-gray-200 dark:bg-dark-700"></div>
               <div class="grid grid-cols-2 gap-3">
-                <div v-for="i in 4" :key="i" class="h-14 animate-pulse rounded-xl bg-gray-100 dark:bg-dark-700/70"></div>
+                <div v-for="i in 2" :key="i" class="h-14 animate-pulse rounded-xl bg-gray-100 dark:bg-dark-700/70"></div>
               </div>
             </div>
           </div>
         </div>
 
-        <div class="lg:col-span-7">
-          <div class="grid h-full grid-cols-1 content-center gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <div v-for="i in 7" :key="i" class="h-20 animate-pulse rounded-2xl bg-gray-50 dark:bg-dark-900/30"></div>
-          </div>
-        </div>
+        <div v-for="i in 7" :key="i" class="h-40 animate-pulse rounded-2xl bg-gray-50 dark:bg-dark-900/30"></div>
       </div>
     </div>
 
@@ -100,3 +96,16 @@ const props = withDefaults(defineProps<Props>(), {
     </div>
   </div>
 </template>
+
+<style scoped>
+.ops-skeleton-header { container-type: inline-size; }
+.ops-skeleton-overview { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+@container (min-width: 640px) {
+  .ops-skeleton-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ops-skeleton-realtime { grid-column: 1 / -1; }
+}
+@container (min-width: 960px) {
+  .ops-skeleton-overview { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .ops-skeleton-realtime { grid-column: span 3; }
+}
+</style>

@@ -7,7 +7,6 @@ import (
 	"context"
 	"log"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/ent"
@@ -28,7 +27,9 @@ type Application struct {
 	Server        *http.Server
 	PromptAudit   *securityaudit.PromptService
 	PluginManager *service.PluginManager
-	Cleanup       func()
+	// Cloud is a gateway runtime dependency, independent of admin status routes.
+	Cloud   *service.OpenAICloudService
+	Cleanup func()
 }
 
 func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
@@ -58,7 +59,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 		provideCleanup,
 
 		// Application struct
-		wire.Struct(new(Application), "Server", "PromptAudit", "PluginManager", "Cleanup"),
+		wire.Struct(new(Application), "Server", "PromptAudit", "PluginManager", "Cloud", "Cleanup"),
 	)
 	return nil, nil
 }
@@ -69,8 +70,10 @@ func providePrivacyClientFactory() service.PrivacyClientFactory {
 
 func provideServiceBuildInfo(buildInfo handler.BuildInfo) service.BuildInfo {
 	return service.BuildInfo{
-		Version:   buildInfo.Version,
-		BuildType: buildInfo.BuildType,
+		UpstreamVersion: buildInfo.UpstreamVersion,
+		BuildCommit:     buildInfo.BuildCommit,
+		Version:         buildInfo.Version,
+		BuildType:       buildInfo.BuildType,
 	}
 }
 
@@ -118,12 +121,12 @@ func provideCleanup(
 	antigravityOAuth *service.AntigravityOAuthService,
 	grokOAuth *service.GrokOAuthService,
 	openAIGateway *service.OpenAIGatewayService,
+	accountTelemetry *service.GatewayService,
 	scheduledTestRunner *service.ScheduledTestRunnerService,
 	backupSvc *service.BackupService,
 	paymentOrderExpiry *service.PaymentOrderExpiryService,
 	channelMonitorRunner *service.ChannelMonitorRunner,
 	channelMonitorV2Aggregator *service.ChannelMonitorV2Aggregator,
-	quotaFlusher *service.UserPlatformQuotaUsageFlusher,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
 	ollamaCloudUsage *service.OllamaCloudUsageService,
 	opencodeGoUsage *service.OpenCodeGoUsageService,
@@ -136,13 +139,12 @@ func provideCleanup(
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		type cleanupStep struct {
-			name string
-			fn   func() error
-		}
-
 		// 应用层清理步骤可并行执行，基础设施资源（Redis/Ent）最后按顺序关闭。
 		parallelSteps := []cleanupStep{
+			{"AccountTelemetry", func() error {
+				accountTelemetry.StopAccountTelemetry()
+				return nil
+			}},
 			{"PluginManager", func() error {
 				if pluginManager != nil {
 					pluginManager.Stop()
@@ -341,6 +343,8 @@ func provideCleanup(
 			}},
 			{"OpenAIWSPool", func() error {
 				if openAIGateway != nil {
+					openAIGateway.StopBPS403Recovery()
+					_ = openAIGateway.CloseExcelBPSImages()
 					openAIGateway.CloseOpenAIWSPool()
 				}
 				return nil
@@ -376,9 +380,6 @@ func provideCleanup(
 				return nil
 			}},
 			{"UserPlatformQuotaUsageFlusher", func() error {
-				if quotaFlusher != nil {
-					quotaFlusher.Stop()
-				}
 				return nil
 			}},
 			{"UpstreamBillingProbeService", func() error {
@@ -416,43 +417,14 @@ func provideCleanup(
 			}},
 		}
 
-		runParallel := func(steps []cleanupStep) {
-			var wg sync.WaitGroup
-			for i := range steps {
-				step := steps[i]
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					if err := step.fn(); err != nil {
-						log.Printf("[Cleanup] %s failed: %v", step.name, err)
-						return
-					}
-					log.Printf("[Cleanup] %s succeeded", step.name)
-				}()
-			}
-			wg.Wait()
+		if !runCleanupSteps(ctx, parallelSteps, true) {
+			log.Printf("[Cleanup] worker cleanup incomplete; shared infrastructure retained until process exit")
+			return
 		}
-
-		runSequential := func(steps []cleanupStep) {
-			for i := range steps {
-				step := steps[i]
-				if err := step.fn(); err != nil {
-					log.Printf("[Cleanup] %s failed: %v", step.name, err)
-					continue
-				}
-				log.Printf("[Cleanup] %s succeeded", step.name)
-			}
+		if !runCleanupSteps(ctx, infraSteps, false) {
+			log.Printf("[Cleanup] infrastructure cleanup incomplete")
+			return
 		}
-
-		runParallel(parallelSteps)
-		runSequential(infraSteps)
-
-		// Check if context timed out
-		select {
-		case <-ctx.Done():
-			log.Printf("[Cleanup] Warning: cleanup timed out after 10 seconds")
-		default:
-			log.Printf("[Cleanup] All cleanup steps completed")
-		}
+		log.Printf("[Cleanup] All cleanup steps completed")
 	}
 }

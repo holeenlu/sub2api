@@ -14,6 +14,7 @@ import (
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/accountgroup"
+	"github.com/Wei-Shaw/sub2api/ent/accountsupplyidentityclaim"
 	"github.com/Wei-Shaw/sub2api/ent/announcement"
 	"github.com/Wei-Shaw/sub2api/ent/announcementread"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
@@ -35,8 +36,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
 	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
-	"github.com/Wei-Shaw/sub2api/ent/promocode"
-	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
@@ -51,6 +50,12 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/userattributevalue"
 	"github.com/Wei-Shaw/sub2api/ent/userplatformquota"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
+	"github.com/Wei-Shaw/sub2api/ent/vendor"
+	"github.com/Wei-Shaw/sub2api/ent/vendorgroup"
+	"github.com/Wei-Shaw/sub2api/ent/vendorsettlement"
+	"github.com/Wei-Shaw/sub2api/ent/vendorsettlementallocation"
+	"github.com/Wei-Shaw/sub2api/ent/vendorsettlementline"
+	"github.com/Wei-Shaw/sub2api/ent/vendorsettlementpayment"
 )
 
 // ent aliases to avoid import conflicts in user's code.
@@ -114,6 +119,7 @@ func checkColumn(t, c string) error {
 			apikey.Table:                        apikey.ValidColumn,
 			account.Table:                       account.ValidColumn,
 			accountgroup.Table:                  accountgroup.ValidColumn,
+			accountsupplyidentityclaim.Table:    accountsupplyidentityclaim.ValidColumn,
 			announcement.Table:                  announcement.ValidColumn,
 			announcementread.Table:              announcementread.ValidColumn,
 			authidentity.Table:                  authidentity.ValidColumn,
@@ -134,8 +140,6 @@ func checkColumn(t, c string) error {
 			paymentorder.Table:                  paymentorder.ValidColumn,
 			paymentproviderinstance.Table:       paymentproviderinstance.ValidColumn,
 			pendingauthsession.Table:            pendingauthsession.ValidColumn,
-			promocode.Table:                     promocode.ValidColumn,
-			promocodeusage.Table:                promocodeusage.ValidColumn,
 			proxy.Table:                         proxy.ValidColumn,
 			redeemcode.Table:                    redeemcode.ValidColumn,
 			securitysecret.Table:                securitysecret.ValidColumn,
@@ -150,6 +154,12 @@ func checkColumn(t, c string) error {
 			userattributevalue.Table:            userattributevalue.ValidColumn,
 			userplatformquota.Table:             userplatformquota.ValidColumn,
 			usersubscription.Table:              usersubscription.ValidColumn,
+			vendor.Table:                        vendor.ValidColumn,
+			vendorgroup.Table:                   vendorgroup.ValidColumn,
+			vendorsettlement.Table:              vendorsettlement.ValidColumn,
+			vendorsettlementallocation.Table:    vendorsettlementallocation.ValidColumn,
+			vendorsettlementline.Table:          vendorsettlementline.ValidColumn,
+			vendorsettlementpayment.Table:       vendorsettlementpayment.ValidColumn,
 		})
 	})
 	return columnCheck(t, c)
