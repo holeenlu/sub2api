@@ -100,3 +100,23 @@ func TestAccountFromServiceShallow_NilCredentialsOmitsStatus(t *testing.T) {
 	require.Nil(t, got.Credentials)
 	require.Nil(t, got.CredentialsStatus)
 }
+
+func TestAccountFromServiceShallow_HidesInternalAnthropicObservations(t *testing.T) {
+	src := &service.Account{ID: 1, Platform: service.PlatformAnthropic, Type: service.AccountTypeOAuth, Extra: map[string]any{
+		"anthropic_observation_profile.rate_limit_tier": map[string]any{"value": "old-tier", "identity": "private-hash"},
+		"anthropic_observation_seven_day.utilization":   map[string]any{"value": 40, "identity": "private-hash"},
+		"passive_usage_7d_utilization":                  0.4,
+		service.AccountTelemetryExtraKey:                map[string]any{"status": "ready", "revision": "old", "profile": map[string]any{"source": "official-cc-init", "payload_json": "old-private", "headers": map[string]any{"Authorization": "secret"}}},
+	}}
+	got := AccountFromServiceShallow(src)
+	require.Equal(t, 0.4, got.Extra["passive_usage_7d_utilization"])
+	state, ok := got.Extra[service.AccountTelemetryExtraKey].(service.AccountTelemetryState)
+	require.True(t, ok)
+	require.Equal(t, "waiting_import", state.Status)
+	raw, err := json.Marshal(got.Extra)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "old-private")
+	require.NotContains(t, string(raw), "Authorization")
+	require.Equal(t, got.Extra, AccountListItemFromAccount(got).Extra)
+	require.Len(t, src.Extra, 4, "projection must not delete stored data")
+}

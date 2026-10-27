@@ -35,13 +35,13 @@ func (c *openAIWSSlowPongCaptureConn) Ping(ctx context.Context) error {
 	}
 }
 
-// 轮次间隔后的预检 ping 经代理可能 2 秒多才回 pong：慢 pong 不应被判为连接失效而换连。
-func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PreflightPingToleratesSlowPong(t *testing.T) {
+// 慢 pong 在轮间后台等待；下一轮到达会取消并回收探活，不能阻塞发送或误换连。
+func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_IdlePingDoesNotDelayNextTurn(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	prevPreflightPingIdle := openAIWSIngressPreflightPingIdle
-	openAIWSIngressPreflightPingIdle = 0
+	prevIdlePingInterval := openAIWSIngressIdlePingInterval
+	openAIWSIngressIdlePingInterval = time.Millisecond
 	defer func() {
-		openAIWSIngressPreflightPingIdle = prevPreflightPingIdle
+		openAIWSIngressIdlePingInterval = prevIdlePingInterval
 	}()
 
 	cfg := &config.Config{}
@@ -148,8 +148,11 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PreflightPingTol
 
 	writeMessage(`{"type":"response.create","model":"gpt-5.1","stream":false,"input":[{"type":"input_text","text":"hello"}]}`)
 	require.Equal(t, "resp_slow_pong_1", gjson.GetBytes(readMessage(), "response.id").String())
+	require.Eventually(t, func() bool { return slowConn.pings.Load() > 0 }, time.Second, time.Millisecond)
+	started := time.Now()
 	writeMessage(`{"type":"response.create","model":"gpt-5.1","stream":false,"input":[{"type":"input_text","text":"world"}]}`)
 	require.Equal(t, "resp_slow_pong_2", gjson.GetBytes(readMessage(), "response.id").String(), "慢 pong 的健康会话连接应继续使用")
+	require.Less(t, time.Since(started), time.Second, "next turn must not wait for the 2.5s pong")
 
 	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
 	select {
@@ -158,8 +161,8 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PreflightPingTol
 	case <-time.After(5 * time.Second):
 		t.Fatal("等待 ingress websocket 结束超时")
 	}
-	require.GreaterOrEqual(t, slowConn.pings.Load(), int32(1), "第二轮前应执行预检 ping")
-	require.Equal(t, 1, dialer.DialCount(), "预检 ping 慢于 2 秒不应换连")
+	require.GreaterOrEqual(t, slowConn.pings.Load(), int32(1), "轮间应执行后台 ping")
+	require.Equal(t, 1, dialer.DialCount(), "后台 ping 取消不应换连")
 }
 
 // 场景：池内两条空闲连接同批陈旧（首读即失败）。首轮拿到其一失败后重试，
@@ -271,7 +274,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_TurnRetryForcesF
 		}()
 
 		writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
-		err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false}`))
+		err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false,"input":[{"role":"user","content":"hello"}]}`))
 		cancelWrite()
 		require.NoError(t, err)
 

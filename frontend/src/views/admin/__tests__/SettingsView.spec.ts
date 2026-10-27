@@ -79,6 +79,7 @@ const {
   showSuccess: vi.fn(),
 }));
 
+const roleLeave = vi.hoisted(() => vi.fn().mockResolvedValue(true));
 const localeRef = vi.hoisted(() => ({ value: "zh-CN" }));
 
 vi.mock("@/api", () => ({
@@ -120,6 +121,18 @@ vi.mock("@/api", () => ({
 }));
 
 vi.mock("@/stores", () => ({
+  useAppStore: () => ({
+    showError,
+    showSuccess,
+    showWarning: vi.fn(),
+    showInfo: vi.fn(),
+    fetchPublicSettings,
+  }),
+}));
+
+// Nested model selectors use the direct store import. Share the same fixture
+// callbacks so mounting settings does not instantiate an unconfigured Pinia.
+vi.mock("@/stores/app", () => ({
   useAppStore: () => ({
     showError,
     showSuccess,
@@ -196,32 +209,32 @@ vi.mock("vue-i18n", async () => {
     "admin.settings.paymentVisibleMethods.sourceRequiredError": "{title} 已启用，请先选择支付来源。",
     "admin.settings.payment.configGuide": "查看支付配置说明",
     "admin.settings.payment.findProvider": "查看支持的支付方式",
-    "admin.settings.openaiExperimentalScheduler.title": "OpenAI 实验调度策略",
-    "admin.settings.openaiExperimentalScheduler.description": "默认关闭。开启后仅影响本网关在 OpenAI 账号间的实验性调度选择逻辑，不代表上游 OpenAI 官方能力。",
-    "admin.settings.openaiExperimentalScheduler.lowRatePriorityTitle": "低倍率优先",
-    "admin.settings.openaiExperimentalScheduler.lowRatePriorityDescription": "开启后优先选择计费倍率较低的账号；倍率相同时，再比较账号优先级和当前负载等。启用实验调度策略后，此开关不生效。",
-    "admin.settings.openaiExperimentalScheduler.oauthRateTitle": "OAuth 调度参考倍率",
-    "admin.settings.openaiExperimentalScheduler.oauthRatePriorityDescription": "OAuth 账号按此参考倍率参与低倍率优先排序；留空时使用各自的账号倍率。API Key 账号优先使用有效探测倍率，无有效探测时使用账号倍率。",
-    "admin.settings.openaiExperimentalScheduler.oauthRateWeightedDescription": "计算“计费倍率”得分时，OAuth 账号使用此参考倍率；留空时使用各自的账号倍率。API Key 账号优先使用有效探测倍率，无有效探测时使用账号倍率。",
-    "admin.settings.openaiExperimentalScheduler.oauthRateInvalid": "OAuth 调度参考倍率必须是非负数字，或留空以使用账号倍率。",
-    "admin.settings.openaiExperimentalScheduler.stickyWeightedTitle": "粘性加权",
-    "admin.settings.openaiExperimentalScheduler.stickyWeightedDescription": "开启后 previous_response_id 和 session_hash 粘性进入高级调度打分；关闭时仍按旧逻辑硬命中粘性账号。",
-    "admin.settings.openaiExperimentalScheduler.subscriptionPriorityTitle": "订阅优先",
-    "admin.settings.openaiExperimentalScheduler.subscriptionPriorityDescription": "开启后先在 ChatGPT 订阅账号池中按权值选取；订阅池拿不到席位时再回退到非订阅账号池。",
-    "admin.settings.openaiExperimentalScheduler.weightsTitle": "调度权值覆盖",
-    "admin.settings.openaiExperimentalScheduler.weightsDescription": "留空时使用配置/环境变量值；配置未设置时使用内置默认值。页面非空设置优先。",
-    "admin.settings.openaiExperimentalScheduler.defaultPlaceholder": "配置/默认：{value}",
-    "admin.settings.openaiExperimentalScheduler.topKLabel": "TopK",
-    "admin.settings.openaiExperimentalScheduler.priorityWeight": "优先级",
-    "admin.settings.openaiExperimentalScheduler.loadWeight": "负载",
-    "admin.settings.openaiExperimentalScheduler.queueWeight": "排队",
-    "admin.settings.openaiExperimentalScheduler.errorRateWeight": "错误率",
-    "admin.settings.openaiExperimentalScheduler.ttftWeight": "首包延迟",
-    "admin.settings.openaiExperimentalScheduler.resetWeight": "重置窗口",
-    "admin.settings.openaiExperimentalScheduler.quotaHeadroomWeight": "额度余量",
-    "admin.settings.openaiExperimentalScheduler.upstreamCostWeight": "计费倍率",
-    "admin.settings.openaiExperimentalScheduler.previousResponseWeight": "previous_response 粘性",
-    "admin.settings.openaiExperimentalScheduler.sessionStickyWeight": "session_hash 粘性",
+    "admin.settings.openaiScheduler.title": "OpenAI 实验调度策略",
+    "admin.settings.openaiScheduler.description": "默认关闭。开启后仅影响本网关在 OpenAI 账号间的实验性调度选择逻辑，不代表上游 OpenAI 官方能力。",
+    "admin.settings.openaiScheduler.lowRatePriorityTitle": "低倍率优先",
+    "admin.settings.openaiScheduler.lowRatePriorityDescription": "开启后优先选择计费倍率较低的账号；倍率相同时，再比较账号优先级和当前负载等。启用实验调度策略后，此开关不生效。",
+    "admin.settings.openaiScheduler.oauthRateTitle": "OAuth 调度参考倍率",
+    "admin.settings.openaiScheduler.oauthRatePriorityDescription": "OAuth 账号按此参考倍率参与低倍率优先排序；留空时使用各自的账号倍率。API Key 账号优先使用有效探测倍率，无有效探测时使用账号倍率。",
+    "admin.settings.openaiScheduler.oauthRateWeightedDescription": "计算“计费倍率”得分时，OAuth 账号使用此参考倍率；留空时使用各自的账号倍率。API Key 账号优先使用有效探测倍率，无有效探测时使用账号倍率。",
+    "admin.settings.openaiScheduler.oauthRateInvalid": "OAuth 调度参考倍率必须是非负数字，或留空以使用账号倍率。",
+    "admin.settings.openaiScheduler.stickyWeightedTitle": "粘性加权",
+    "admin.settings.openaiScheduler.stickyWeightedDescription": "开启后 previous_response_id 和 session_hash 粘性进入高级调度打分；关闭时仍按旧逻辑硬命中粘性账号。",
+    "admin.settings.openaiScheduler.subscriptionPriorityTitle": "订阅优先",
+    "admin.settings.openaiScheduler.subscriptionPriorityDescription": "开启后先在 ChatGPT 订阅账号池中按权值选取；订阅池拿不到席位时再回退到非订阅账号池。",
+    "admin.settings.openaiScheduler.weightsTitle": "调度权值覆盖",
+    "admin.settings.openaiScheduler.weightsDescription": "留空时使用配置/环境变量值；配置未设置时使用内置默认值。页面非空设置优先。",
+    "admin.settings.openaiScheduler.defaultPlaceholder": "配置/默认：{value}",
+    "admin.settings.openaiScheduler.topKLabel": "TopK",
+    "admin.settings.openaiScheduler.priorityWeight": "优先级",
+    "admin.settings.openaiScheduler.loadWeight": "负载",
+    "admin.settings.openaiScheduler.queueWeight": "排队",
+    "admin.settings.openaiScheduler.errorRateWeight": "错误率",
+    "admin.settings.openaiScheduler.ttftWeight": "首包延迟",
+    "admin.settings.openaiScheduler.resetWeight": "重置窗口",
+    "admin.settings.openaiScheduler.quotaHeadroomWeight": "额度余量",
+    "admin.settings.openaiScheduler.upstreamCostWeight": "计费倍率",
+    "admin.settings.openaiScheduler.previousResponseWeight": "previous_response 粘性",
+    "admin.settings.openaiScheduler.sessionStickyWeight": "session_hash 粘性",
     "admin.settings.upstreamBillingProbe.title": "上游倍率自动探测",
     "admin.settings.upstreamBillingProbe.description": "定期获取 OpenAI API Key 所连接上游 Sub2API 站点声明的计费倍率。",
     "admin.settings.upstreamBillingProbe.enabled": "启用全局自动探测",
@@ -369,7 +382,6 @@ const baseSettingsResponse = {
   registration_enabled: true,
   email_verify_enabled: false,
   registration_email_suffix_whitelist: [],
-  promo_code_enabled: true,
   invitation_code_enabled: false,
   password_reset_enabled: false,
   totp_enabled: false,
@@ -389,7 +401,7 @@ const baseSettingsResponse = {
   doc_url: "",
   home_content: "",
   compact_home_enabled: false,
-  hide_ccs_import_button: false,
+
   table_default_page_size: 20,
   table_page_size_options: [10, 20, 50, 100],
   backend_mode_enabled: false,
@@ -507,31 +519,7 @@ const baseSettingsResponse = {
   payment_visible_method_wxpay_enabled: true,
   openai_low_upstream_rate_priority_enabled: false,
   openai_oauth_scheduling_rate_multiplier: 1,
-  openai_advanced_scheduler_enabled: false,
-  openai_advanced_scheduler_sticky_weighted_enabled: false,
   openai_advanced_scheduler_subscription_priority_enabled: false,
-  openai_advanced_scheduler_lb_top_k: "",
-  openai_advanced_scheduler_weight_priority: "",
-  openai_advanced_scheduler_weight_load: "",
-  openai_advanced_scheduler_weight_queue: "",
-  openai_advanced_scheduler_weight_error_rate: "",
-  openai_advanced_scheduler_weight_ttft: "",
-  openai_advanced_scheduler_weight_reset: "",
-  openai_advanced_scheduler_weight_quota_headroom: "",
-  openai_advanced_scheduler_weight_upstream_cost: "",
-  openai_advanced_scheduler_weight_previous_response: "",
-  openai_advanced_scheduler_weight_session_sticky: "",
-  openai_advanced_scheduler_effective_lb_top_k: "7",
-  openai_advanced_scheduler_effective_weight_priority: "1",
-  openai_advanced_scheduler_effective_weight_load: "1",
-  openai_advanced_scheduler_effective_weight_queue: "0.7",
-  openai_advanced_scheduler_effective_weight_error_rate: "0.8",
-  openai_advanced_scheduler_effective_weight_ttft: "0.5",
-  openai_advanced_scheduler_effective_weight_reset: "0",
-  openai_advanced_scheduler_effective_weight_quota_headroom: "0",
-  openai_advanced_scheduler_effective_weight_upstream_cost: "0",
-  openai_advanced_scheduler_effective_weight_previous_response: "5",
-  openai_advanced_scheduler_effective_weight_session_sticky: "3",
   balance_low_notify_enabled: false,
   balance_low_notify_threshold: 0,
   balance_low_notify_recharge_url: "",
@@ -562,7 +550,11 @@ function mountView() {
         GroupOptionItem: true,
         ProxySelector: true,
         ImageUpload: ImageUploadStub,
+        AdminRolePermissions: defineComponent({
+          setup(_, { expose }) { expose({ confirmLeave: roleLeave }); return () => h('div', { 'data-role-editor': '' }); }
+        }),
         BackupSettings: true,
+        EmailTemplateEditor: true,
       },
     },
   });
@@ -609,6 +601,7 @@ async function openUsersTab(wrapper: ReturnType<typeof mountView>) {
 }
 
 describe("admin SettingsView email domain quota copy", () => {
+
   it("documents the email domain quota and empty-whitelist behavior in both locales", () => {
     expect(zhCommon.auth.emailDomainRegistrationLimit).toContain("主流邮箱");
     expect(zhCommon.auth.emailDomainRegistrationLimit).toContain("联系客服");
@@ -722,6 +715,118 @@ describe("admin SettingsView payment visible method controls", () => {
     });
     fetchPublicSettings.mockResolvedValue(undefined);
     adminSettingsFetch.mockResolvedValue(undefined);
+  });
+
+
+
+
+  it("protects unsaved role permissions on settings tab changes", async () => {
+    const wrapper = mountView(); await flushPromises();
+    await wrapper.get('#settings-tab-roles').trigger('click'); await flushPromises();
+    roleLeave.mockResolvedValueOnce(false);
+    await wrapper.get('#settings-tab-general').trigger('click'); await flushPromises();
+    expect(wrapper.get('#settings-tab-roles').attributes('aria-selected')).toBe('true');
+    roleLeave.mockResolvedValueOnce(true);
+    await wrapper.get('#settings-tab-general').trigger('click'); await flushPromises();
+    expect(wrapper.get('#settings-tab-general').attributes('aria-selected')).toBe('true');
+    wrapper.unmount();
+  });
+  it("removes the BPS template tab while retaining site-wide runtime controls in features", async () => {
+    const wrapper = mountView(); await flushPromises();
+    expect(wrapper.find('#settings-tab-bps').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="bps-defaults-panel"]').exists()).toBe(false);
+    await wrapper.get('#settings-tab-features').trigger('click');
+    expect(wrapper.get('[data-testid="excel-bps-gateway-settings"]').isVisible()).toBe(true);
+    expect(wrapper.get('[data-testid="excel-bps-image-settings"]').isVisible()).toBe(true);
+    await wrapper.get('#excel-bps-global-enabled').setValue(false);
+    await wrapper.get('form').trigger('submit.prevent'); await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ excel_bps_enabled: false }));
+    wrapper.unmount();
+  });
+
+  it.each([true, false])("preserves loaded BPS and image switches set to %s", async (enabled) => {
+    getSettings.mockResolvedValue({ ...baseSettingsResponse, excel_bps_enabled: enabled, excel_bps_image_relay_enabled: enabled });
+    const wrapper = mountView();
+    await flushPromises();
+    expect(wrapper.get<HTMLInputElement>('#excel-bps-global-enabled').element.checked).toBe(enabled);
+    expect(wrapper.get<HTMLInputElement>('#excel-bps-image-enabled').element.checked).toBe(enabled);
+    await wrapper.get('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ excel_bps_enabled: enabled, excel_bps_image_relay_enabled: enabled }));
+    wrapper.unmount();
+  });
+
+  it.each([undefined, "off", "warn", "auto_compact"])("applies the BPS image policy default while preserving %s", async (policy) => {
+    getSettings.mockResolvedValue({ ...baseSettingsResponse, ...(policy ? { excel_bps_image_limit_policy: policy } : {}) });
+    const wrapper = mountView();
+    await flushPromises();
+    const expected = policy ?? "auto_compact";
+    expect(wrapper.get<HTMLSelectElement>('#bps-image-limit-policy').element.value).toBe(expected);
+    expect(wrapper.find('[data-testid="bps-image-auto-compact-disabled"]').exists()).toBe(expected !== 'auto_compact');
+    await wrapper.get('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ excel_bps_image_limit_policy: expected }));
+    wrapper.unmount();
+  });
+
+  it("previews the effective BPS budget without rewriting saved inputs", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    expect(wrapper.get<HTMLInputElement>('#excel-bps-global-enabled').element.checked).toBe(true);
+    expect(wrapper.get('[data-testid="bps-effective-budget"]').text()).toBe('1024 MiB');
+    expect(wrapper.get('[data-testid="bps-full-body-requests"]').text()).toBe('1');
+    await wrapper.get('#excel-bps-image-max-requests').setValue(4096);
+    expect(wrapper.get('[data-testid="bps-effective-budget"]').text()).toBe('32768 MiB');
+    expect(wrapper.get('[data-testid="bps-slot-budget"]').text()).toBe('32768 MiB');
+    expect(wrapper.find('[data-testid="bps-budget-raised"]').exists()).toBe(true);
+    expect(wrapper.get<HTMLInputElement>('#excel-bps-image-budget').element.value).toBe('1024');
+    await wrapper.get('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ excel_bps_image_budget_mib: 1024, excel_bps_image_max_requests: 4096 }));
+    await wrapper.get('#excel-bps-image-budget').setValue(65536);
+    expect(wrapper.get('[data-testid="bps-effective-budget"]').text()).toBe('65536 MiB');
+    expect(wrapper.find('[data-testid="bps-budget-raised"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("shows the minimum BPS budget and rejects invalid capacity inputs", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.get('#excel-bps-image-body-limit').setValue(1024);
+    expect(wrapper.get('#excel-bps-image-budget').attributes('min')).toBe('8192');
+    expect(wrapper.find('[data-testid="bps-budget-invalid"]').exists()).toBe(true);
+    await wrapper.get('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings).not.toHaveBeenCalled();
+    await wrapper.get('#excel-bps-image-budget').setValue(8192);
+    expect(wrapper.find('[data-testid="bps-budget-invalid"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="bps-full-body-requests"]').text()).toBe('1');
+    await wrapper.get('#excel-bps-image-max-requests').setValue('');
+    expect(wrapper.find('[data-testid="bps-capacity-preview"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("keeps native image counts independent of relay storage and validates a relay switch", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    expect(wrapper.find('#excel-bps-image-storage-entries').exists()).toBe(false);
+    await wrapper.get('#excel-bps-image-max-images').setValue(1024);
+    await wrapper.get('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ excel_bps_image_mode: 'native', excel_bps_image_max_images: 1024, excel_bps_image_storage_entries: 512 }));
+    updateSettings.mockClear();
+    await wrapper.get('#excel-bps-image-mode').setValue('relay');
+    await wrapper.get('#excel-bps-image-base-url').setValue('https://images.example');
+    await wrapper.get('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings).not.toHaveBeenCalled();
+    await wrapper.get('#excel-bps-image-storage-entries').setValue(1024);
+    await wrapper.get('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ excel_bps_image_mode: 'relay', excel_bps_image_storage_entries: 1024 }));
+    await wrapper.get('#excel-bps-global-enabled').setValue(false);
+    expect(wrapper.find('[data-testid="bps-global-disabled"]').exists()).toBe(true);
+    wrapper.unmount();
   });
 
   it("loads and saves the open button visibility for each custom menu", async () => {
@@ -1158,7 +1263,7 @@ describe("admin SettingsView payment visible method controls", () => {
     );
   });
 
-  it("links payment guidance to README sections instead of removed payment docs", async () => {
+   it("links payment guidance to the Tokensavy docs site", async () => {
     const wrapper = mountView();
 
     await flushPromises();
@@ -1172,13 +1277,13 @@ describe("admin SettingsView payment visible method controls", () => {
 
     expect(paymentLinks).toHaveLength(2);
     expect(paymentLinks[0]?.attributes("href")).toBe(
-      "https://github.com/Wei-Shaw/sub2api/blob/main/docs/PAYMENT_CN.md",
+      "/guides/payment.zh.md",
     );
     expect(paymentLinks[1]?.attributes("href")).toBe(
-      "https://github.com/Wei-Shaw/sub2api/blob/main/docs/PAYMENT_CN.md#支持的支付方式",
+      "/guides/payment.zh.md",
     );
     for (const link of paymentLinks) {
-      expect(link.attributes("href")).toContain("docs/PAYMENT");
+      expect(link.attributes("href")).toContain("/guides/");
     }
   });
 
@@ -1198,25 +1303,55 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(payload).not.toHaveProperty("payment_visible_method_wxpay_enabled");
   });
 
-  it("submits the admin recharge affiliate rebate setting", async () => {
+  it("loads and saves the Fable model threshold independently from Anthropic", async () => {
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, account_scheduling_thresholds: { openai: 100, anthropic: 70, anthropic_fable: 95, grok: 100 } });
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    const editor = wrapper.get('[data-testid="account-scheduling-threshold-anthropic_fable"]');
+    expect((editor.element as HTMLInputElement).value).toBe('95');
+    await editor.setValue(90);
+    await wrapper.get('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings.mock.lastCall?.[0]?.account_scheduling_thresholds).toEqual(expect.objectContaining({ anthropic: 70, anthropic_fable: 90 }));
+    wrapper.unmount();
+  });
+
+  it("loads, edits and restores the Codex diagnostic template", async () => {
+    const defaultTemplate = '{"type":"session_meta","payload":{"base_instructions":{"text":"Default instructions"}}}\n';
+    const customTemplate = defaultTemplate.replace("Default instructions", "Custom instructions");
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
-      affiliate_enabled: true,
-      affiliate_admin_recharge_enabled: true,
+      openai_codex_diagnostic_prompt_template: defaultTemplate,
+      openai_codex_diagnostic_prompt_template_default: defaultTemplate,
     });
-
+    updateSettings.mockImplementation(async (payload) => ({
+      ...baseSettingsResponse,
+      ...payload,
+      openai_codex_diagnostic_prompt_template: payload.openai_codex_diagnostic_prompt_template || defaultTemplate,
+      openai_codex_diagnostic_prompt_template_default: defaultTemplate,
+    }));
     const wrapper = mountView();
-
     await flushPromises();
-    await wrapper.find("form").trigger("submit.prevent");
+    await openGatewayTab(wrapper);
+    const editor = wrapper.get('[data-testid="codex-probe-template"]');
+    expect((editor.element as HTMLTextAreaElement).value).toBe(defaultTemplate);
+    expect(wrapper.text()).toContain("{{TIMEZONE}}");
+    await editor.setValue(customTemplate);
+    await wrapper.get("form").trigger("submit.prevent");
     await flushPromises();
-
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({
+      openai_codex_diagnostic_prompt_template: customTemplate,
+    }));
+    expect(updateSettings.mock.lastCall?.[0]).not.toHaveProperty("openai_codex_diagnostic_prompt_template_default");
+    await wrapper.get('[data-testid="codex-probe-template-reset"]').trigger("click");
+    expect((editor.element as HTMLTextAreaElement).value).toBe(defaultTemplate);
     expect(updateSettings).toHaveBeenCalledTimes(1);
-    expect(updateSettings).toHaveBeenCalledWith(
-      expect.objectContaining({
-        affiliate_admin_recharge_enabled: true,
-      }),
-    );
+    await wrapper.get("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({ openai_codex_diagnostic_prompt_template: "" }));
+    expect((editor.element as HTMLTextAreaElement).value).toBe(defaultTemplate);
+    wrapper.unmount();
   });
 
   it("submits Anthropic cache TTL injection gateway setting", async () => {
@@ -1295,6 +1430,41 @@ describe("admin SettingsView payment visible method controls", () => {
     ]);
   });
 
+  it.each(["official", "official_full", "zero"])("saves and reloads the %s prompt preset through existing settings", async (preset) => {
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    await wrapper.get('[data-testid="claude-prompt-preset"]').setValue(preset);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    const payload = updateSettings.mock.lastCall?.[0];
+    expect(payload.enable_claude_oauth_system_prompt_injection).toBe(true);
+    const blocks = JSON.parse(payload.claude_oauth_system_prompt_blocks);
+    expect(blocks).toHaveLength(preset === "zero" ? 0 : preset === "official" ? 3 : preset === "official_full" ? 7 : 5);
+    if (preset === "official_full") expect(blocks.at(-2)).toEqual(expect.objectContaining({ text: "{env_official}", cache_control: { type: "ephemeral", ttl: "1h" } }));
+    if (preset !== "zero") expect(blocks.at(-1).text).toBe("{caller_system}");
+    wrapper.unmount();
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, ...payload });
+    const restored = mountView();
+    await flushPromises();
+    expect((restored.get('[data-testid="claude-prompt-preset"]').element as HTMLSelectElement).value).toBe(preset);
+    expect(restored.findAll('[data-testid="claude-prompt-block"]')).toHaveLength(blocks.length);
+    restored.unmount();
+  });
+
+  it("blocks invalid template saves without overwriting the JSON with defaults", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    const raw = '[{"text":"x","cache_control":{"type":"ephemeral","ttl":"2h"}}]';
+    await wrapper.get('[data-testid="claude-prompt-json"]').setValue(raw);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-testid="claude-prompt-error"]').exists()).toBe(true);
+    expect((wrapper.get('[data-testid="claude-prompt-json"]').element as HTMLTextAreaElement).value).toBe(raw);
+    wrapper.unmount();
+  });
+
   it("submits Antigravity user agent version gateway setting", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
@@ -1364,7 +1534,10 @@ describe("admin SettingsView payment visible method controls", () => {
           GroupOptionItem: true,
           ProxySelector: true,
           ImageUpload: ImageUploadStub,
-          BackupSettings: true,
+          AdminRolePermissions: defineComponent({
+          setup(_, { expose }) { expose({ confirmLeave: roleLeave }); return () => h('div', { 'data-role-editor': '' }); }
+        }),
+        BackupSettings: true,
         },
       },
     });
@@ -1535,11 +1708,11 @@ describe("admin SettingsView payment visible method controls", () => {
     });
   });
 
-  it.each([false, true])("clears the OAuth rate without losing zero (weighted=%s)", async (weighted) => {
+  it.each([false, true])("clears the OAuth rate without losing zero (subscription=%s)", async (subscription) => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
-      openai_low_upstream_rate_priority_enabled: !weighted,
-      openai_advanced_scheduler_enabled: weighted,
+      openai_low_upstream_rate_priority_enabled: true,
+      openai_advanced_scheduler_subscription_priority_enabled: subscription,
       openai_oauth_scheduling_rate_multiplier: 0.7,
     });
     const wrapper = mountView();
@@ -1569,7 +1742,7 @@ describe("admin SettingsView payment visible method controls", () => {
   it("loads and preserves an explicitly cleared OAuth rate", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
-      openai_advanced_scheduler_enabled: true,
+      openai_low_upstream_rate_priority_enabled: true,
       openai_oauth_scheduling_rate_multiplier: null,
     });
     const wrapper = mountView();
@@ -1583,66 +1756,25 @@ describe("admin SettingsView payment visible method controls", () => {
     }));
   });
 
-  it("places and explains rate controls for both scheduling modes", async () => {
+  it("uses one scheduler and saves only business preferences", async () => {
     const wrapper = mountView();
-
     await flushPromises();
-    expect(
-      wrapper.find('[data-testid="openai-oauth-scheduling-rate-multiplier"]').exists(),
-    ).toBe(false);
-
-    const lowRateToggle = wrapper.get('[data-testid="openai-low-rate-priority-toggle"]');
-    await lowRateToggle.setValue(true);
-    const priorityModeText = wrapper.text();
-    expect(priorityModeText).toContain(
-      "OAuth 账号按此参考倍率参与低倍率优先排序；留空时使用各自的账号倍率。",
-    );
-    expect(priorityModeText.indexOf("低倍率优先")).toBeLessThan(
-      priorityModeText.indexOf("OAuth 调度参考倍率"),
-    );
-    expect(priorityModeText.indexOf("OAuth 调度参考倍率")).toBeLessThan(
-      priorityModeText.indexOf("OpenAI 实验调度策略"),
-    );
-
-    const oauthRateInput = wrapper.get(
-      '[data-testid="openai-oauth-scheduling-rate-multiplier"]',
-    );
-    await oauthRateInput.setValue("0.05");
+    expect(wrapper.find('[data-testid="openai-unified-scheduler"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="openai-advanced-scheduler-toggle"]').exists()).toBe(false);
+    await wrapper.get('[data-testid="openai-low-rate-priority-toggle"]').setValue(true);
+    await wrapper.get('[data-testid="openai-subscription-priority-toggle"]').setValue(true);
+    await wrapper.get('[data-testid="openai-oauth-scheduling-rate-multiplier"]').setValue("0.05");
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
-
-    expect(updateSettings).toHaveBeenCalledWith(
-      expect.objectContaining({
-        openai_low_upstream_rate_priority_enabled: true,
-        openai_oauth_scheduling_rate_multiplier: 0.05,
-      }),
-    );
-
-    await wrapper
-      .get('[data-testid="openai-advanced-scheduler-toggle"]')
-      .setValue(true);
-    expect(
-      wrapper.find('[data-testid="openai-low-rate-priority-toggle"]').exists(),
-    ).toBe(false);
-    expect(
-      wrapper.find('[data-testid="openai-oauth-scheduling-rate-multiplier"]').exists(),
-    ).toBe(true);
-    const weightedModeText = wrapper.text();
-    expect(weightedModeText).toContain(
-      "计算“计费倍率”得分时，OAuth 账号使用此参考倍率；留空时使用各自的账号倍率。",
-    );
-    expect(weightedModeText).not.toContain(
-      "OAuth 账号按此参考倍率参与低倍率优先排序；",
-    );
-    expect(weightedModeText.indexOf("订阅优先")).toBeLessThan(
-      weightedModeText.indexOf("OAuth 调度参考倍率"),
-    );
-    expect(weightedModeText.indexOf("OAuth 调度参考倍率")).toBeLessThan(
-      weightedModeText.indexOf("调度权值覆盖"),
-    );
-    expect(weightedModeText).toContain("计费倍率");
+    const payload = updateSettings.mock.calls.at(-1)?.[0];
+    expect(payload).toEqual(expect.objectContaining({
+      openai_low_upstream_rate_priority_enabled: true,
+      openai_advanced_scheduler_subscription_priority_enabled: true,
+      openai_oauth_scheduling_rate_multiplier: 0.05,
+    }));
+    expect(Object.keys(payload).filter(key => key.startsWith("openai_advanced_scheduler_")))
+      .toEqual(["openai_advanced_scheduler_subscription_priority_enabled"]);
   });
-
   it("passes translated upload and remove labels to the payment help image uploader", async () => {
     const wrapper = mountView();
 
@@ -1710,7 +1842,10 @@ describe("admin SettingsView payment visible method controls", () => {
           GroupOptionItem: true,
           ProxySelector: true,
           ImageUpload: ImageUploadStub,
-          BackupSettings: true,
+          AdminRolePermissions: defineComponent({
+          setup(_, { expose }) { expose({ confirmLeave: roleLeave }); return () => h('div', { 'data-role-editor': '' }); }
+        }),
+        BackupSettings: true,
         },
       },
     });
@@ -1839,7 +1974,7 @@ describe("admin SettingsView wechat connect controls", () => {
       wrapper
         .get('[data-testid="wechat-connect-mp-app-secret"]')
         .attributes("placeholder"),
-    ).toContain("密钥已配置");
+    ).toContain("ui.secretConfiguredLeaveEmptyToKeepTheCurrentValue");
     expect(
       (
         wrapper.get('[data-testid="wechat-connect-frontend-redirect-url"]')
@@ -1917,7 +2052,7 @@ describe("admin SettingsView wechat connect controls", () => {
       wrapper
         .get('[data-testid="wechat-connect-mp-app-secret"]')
         .attributes("placeholder"),
-    ).toContain("密钥已配置");
+    ).toContain("ui.secretConfiguredLeaveEmptyToKeepTheCurrentValue");
   });
 
   it("collapses auth source defaults until the source is enabled", async () => {
@@ -2127,3 +2262,6 @@ describe("admin SettingsView platform quota matrix", () => {
     expect(quotas["anthropic"]?.["daily"]).toBe(null);
   });
 });
+
+// These legacy functional cases exercise the migrated full administrator.
+vi.mock("@/stores/auth", () => ({ useAuthStore: () => ({ isSuperAdmin: true, isAdmin: true, isSimpleMode: false, can: () => true }) }))
