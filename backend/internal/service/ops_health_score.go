@@ -9,61 +9,115 @@ import (
 //
 // Design goals:
 // - Backend-owned scoring (UI only displays).
-// - Layered scoring: Business Health (70%) + Infrastructure Health (30%)
+// - Layered scoring: Request health (70%) + Infrastructure Health (30%)
 // - Avoids double-counting (e.g., DB failure affects both infra and business metrics)
 // - Conservative + stable: penalize clear degradations; avoid overreacting to missing/idle data.
-func computeDashboardHealthScore(now time.Time, overview *OpsDashboardOverview) int {
+func computeDashboardHealthScore(now time.Time, overview *OpsDashboardOverview, thresholds *OpsMetricThresholds) int {
 	if overview == nil {
 		return 0
 	}
 
-	// Idle/no-data: avoid showing a "bad" score when there is no traffic.
-	// UI can still render a gray/idle state based on QPS + error rate.
-	if overview.RequestCountSLA <= 0 && overview.RequestCountTotal <= 0 && overview.ErrorCountTotal <= 0 {
-		return 100
-	}
-
-	businessHealth := computeBusinessHealth(overview)
+	// No traffic does not imply that storage or background jobs are healthy.
+	businessHealth := computeBusinessHealth(overview, thresholds)
 	infraHealth := computeInfraHealth(now, overview)
 
 	// Weighted combination: 70% business + 30% infrastructure
 	score := businessHealth*0.7 + infraHealth*0.3
+	// Storage outages must never appear healthy just because recent traffic succeeded.
+	if sm := overview.SystemMetrics; sm != nil {
+		if sm.DBOK != nil && !*sm.DBOK {
+			score = math.Min(score, 49)
+		} else if sm.RedisOK != nil && !*sm.RedisOK {
+			score = math.Min(score, 89)
+		}
+		if (sm.CPUUsagePercent != nil && *sm.CPUUsagePercent > 90) ||
+			(sm.MemoryUsagePercent != nil && *sm.MemoryUsagePercent > 90) {
+			score = math.Min(score, 89)
+		}
+	}
+	if overview.SystemMetricsUnavailable {
+		score = math.Min(score, 89)
+	}
+	for _, node := range overview.SystemMetricsNodes {
+		if node.Stale {
+			score = math.Min(score, 89)
+		}
+	}
+	for _, hb := range overview.JobHeartbeats {
+		if status := opsJobHealthStatus(now, hb); status == "failed" || status == "stale" {
+			score = math.Min(score, 89)
+		}
+	}
 	return int(math.Round(clampFloat64(score, 0, 100)))
 }
 
-// computeBusinessHealth calculates business health score (0-100)
-// Components: Error Rate (50%) + TTFT (50%)
-func computeBusinessHealth(overview *OpsDashboardOverview) float64 {
-	// Error rate score: 1% → 100, 10% → 0 (linear)
-	// Combines request errors and upstream errors
-	errorScore := 100.0
-	errorPct := clampFloat64(overview.ErrorRate*100, 0, 100)
-	upstreamPct := clampFloat64(overview.UpstreamErrorRate*100, 0, 100)
-	combinedErrorPct := math.Max(errorPct, upstreamPct) // Use worst case
-	if combinedErrorPct > 1.0 {
-		if combinedErrorPct <= 10.0 {
-			errorScore = (10.0 - combinedErrorPct) / 9.0 * 100
-		} else {
-			errorScore = 0
-		}
+// computeBusinessHealth gives reliability 80% of request health and TTFT 20%.
+// Whole-response duration is not scored: generation length and reasoning effort
+// legitimately vary. Request/upstream failures overlap, so use the worse normalized
+// rate rather than adding them or counting the complementary SLA again.
+func computeBusinessHealth(overview *OpsDashboardOverview, thresholds *OpsMetricThresholds) float64 {
+	defaults := defaultOpsMetricThresholds()
+	if thresholds == nil {
+		thresholds = defaults
 	}
+	requestLimit := opsHealthThreshold(thresholds.RequestErrorRatePercentMax, *defaults.RequestErrorRatePercentMax)
+	upstreamLimit := opsHealthThreshold(thresholds.UpstreamErrorRatePercentMax, *defaults.UpstreamErrorRatePercentMax)
+	errorPressure := math.Max(
+		clampFloat64(overview.ErrorRate*100, 0, 100)/requestLimit,
+		clampFloat64(overview.UpstreamErrorRate*100, 0, 100)/upstreamLimit,
+	)
+	// At the configured failure-rate limit reliability is 50, at twice it 0.
+	errorScore := clampFloat64(100-50*errorPressure, 0, 100)
 
-	// TTFT score: 1s → 100, 3s → 0 (linear)
-	// Time to first token is critical for user experience
 	ttftScore := 100.0
 	if overview.TTFT.P99 != nil {
-		p99 := float64(*overview.TTFT.P99)
-		if p99 > 1000 {
-			if p99 <= 3000 {
-				ttftScore = (3000 - p99) / 2000 * 100
-			} else {
-				ttftScore = 0
-			}
-		}
+		limit := opsHealthThreshold(thresholds.TTFTp99MsMax, *defaults.TTFTp99MsMax)
+		pressure := float64(*overview.TTFT.P99) / limit
+		// Match the metric warning boundary (80% of its limit), with a gradual
+		// penalty up to twice the limit, instead of wiping out half the score at 3s.
+		ttftScore = clampFloat64(100-(pressure-0.8)/1.2*100, 0, 100)
 	}
+	return errorScore*0.8 + ttftScore*0.2
+}
 
-	// Weighted combination: 50% error rate + 50% TTFT
-	return errorScore*0.5 + ttftScore*0.5
+func opsHealthThreshold(value *float64, fallback float64) float64 {
+	if value == nil || math.IsNaN(*value) || math.IsInf(*value, 0) || *value < 0 {
+		return fallback
+	}
+	// Zero means no tolerance, not disabled. Avoid division by zero while still
+	// penalizing any nonzero error/latency, consistent with the metric indicator.
+	return math.Max(*value, 0.000001)
+}
+
+// opsJobHealthStatus is shared by scoring and the dashboard job diagnostics.
+func opsJobHealthStatus(now time.Time, hb *OpsJobHeartbeat) string {
+	if hb == nil {
+		return "unknown"
+	}
+	if hb.LastErrorAt != nil && (hb.LastSuccessAt == nil || hb.LastErrorAt.After(*hb.LastSuccessAt)) {
+		return "failed"
+	}
+	if hb.JobName == "ops_scheduled_reports" && hb.LastResult != nil && *hb.LastResult == "skipped: no scheduled reports enabled" {
+		return "unknown"
+	}
+	lastRun := hb.LastSuccessAt
+	if hb.LastRunAt != nil && (lastRun == nil || hb.LastRunAt.After(*lastRun)) {
+		lastRun = hb.LastRunAt
+	}
+	if lastRun == nil {
+		return "unknown"
+	}
+	grace := 15 * time.Minute // Legacy/missing interval: keep the previous bound.
+	if hb.ExpectedIntervalSeconds > 0 {
+		// Three missed cycles, with at least two minutes for scheduler jitter.
+		seconds := math.Max(120, float64(hb.ExpectedIntervalSeconds)*3)
+		if now.Sub(*lastRun).Seconds() > seconds {
+			return "stale"
+		}
+	} else if now.Sub(*lastRun) > grace {
+		return "stale"
+	}
+	return "healthy"
 }
 
 // computeInfraHealth calculates infrastructure health score (0-100)
@@ -117,10 +171,12 @@ func computeInfraHealth(now time.Time, overview *OpsDashboardOverview) float64 {
 		if hb == nil {
 			continue
 		}
+		status := opsJobHealthStatus(now, hb)
+		if status == "unknown" {
+			continue
+		}
 		totalJobs++
-		if hb.LastErrorAt != nil && (hb.LastSuccessAt == nil || hb.LastErrorAt.After(*hb.LastSuccessAt)) {
-			failedJobs++
-		} else if hb.LastSuccessAt != nil && now.Sub(*hb.LastSuccessAt) > 15*time.Minute {
+		if status == "failed" || status == "stale" {
 			failedJobs++
 		}
 	}

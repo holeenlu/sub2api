@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  addCustomModelAllowlistItem,
-  createModelAllowlistState,
-  type ModelAllowlistAddError,
-} from "../groupModelAllowlist";
-
-import {
   buildModelAllowlistConfig,
   createModelAllowlistState,
   hydrateModelAllowlistState,
@@ -18,6 +12,18 @@ import {
 } from "../groupModelAllowlist";
 
 describe("groupModelAllowlist", () => {
+  it("keeps saved legacy and custom rules when the bundled catalog is pruned", () => {
+    const config = { enabled: true, models: ["gemini-2.0-flash", "private-*"] };
+    const state = hydrateModelAllowlistState(config, ["gemini-3.8-flash"]);
+
+    expect(state.items).toEqual([
+      { id: "gemini-2.0-flash", selected: true },
+      { id: "private-*", selected: true },
+      { id: "gemini-3.8-flash", selected: false },
+    ]);
+    expect(buildModelAllowlistConfig(state)).toEqual(config);
+  });
+
   it("selects all default candidates for a new disabled config", () => {
     const state = createModelAllowlistState();
 
@@ -127,38 +133,5 @@ describe("groupModelAllowlist", () => {
       { id: "gpt-5.4", selected: true },
       { id: "gpt-5.4-mini", selected: true },
     ]);
-  });
-});
-
-describe("addCustomModelAllowlistItem", () => {
-  const state = () => createModelAllowlistState({ enabled: true, models: ["gpt-5.4"] });
-
-  it("appends a trimmed entry as selected", () => {
-    const s = state();
-    expect(addCustomModelAllowlistItem(s, "  claude-sonnet-4.5  ")).toBeNull();
-    expect(s.items.at(-1)).toEqual({ id: "claude-sonnet-4.5", selected: true });
-  });
-
-  it("accepts trailing wildcard entries", () => {
-    const s = state();
-    expect(addCustomModelAllowlistItem(s, "gpt-5.5-*")).toBeNull();
-    expect(s.items.at(-1)?.id).toBe("gpt-5.5-*");
-  });
-
-  it("rejects blank input", () => {
-    expect(addCustomModelAllowlistItem(state(), "   ")).toBe<ModelAllowlistAddError>("empty");
-  });
-
-  it("accepts wildcards at any position", () => {
-    const s = state();
-    expect(addCustomModelAllowlistItem(s, "gpt-*-5.4")).toBeNull();
-    expect(addCustomModelAllowlistItem(s, "*codex")).toBeNull();
-    expect(addCustomModelAllowlistItem(s, "gpt-*-codex-*")).toBeNull();
-    expect(buildModelAllowlistConfig(s).models).toEqual(["gpt-*-5.4", "*codex", "gpt-*-codex-*"]);
-  });
-
-  it("rejects duplicates case-insensitively", () => {
-    const s = state();
-    expect(addCustomModelAllowlistItem(s, "GPT-5.4")).toBe<ModelAllowlistAddError>("duplicate");
   });
 });

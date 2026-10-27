@@ -5,11 +5,16 @@ package handler
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	coderws "github.com/coder/websocket"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -26,6 +31,8 @@ type openAIResponsesFailoverCancelUpstream struct {
 	mu         sync.Mutex
 	accountIDs []int64
 	onFirstDo  func()
+	firstError error
+	status     int
 }
 
 func (u *openAIResponsesFailoverCancelUpstream) Do(_ *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
@@ -36,8 +43,15 @@ func (u *openAIResponsesFailoverCancelUpstream) Do(_ *http.Request, _ string, ac
 	if first && u.onFirstDo != nil {
 		u.onFirstDo()
 	}
+	if first && u.firstError != nil {
+		return nil, u.firstError
+	}
+	status := u.status
+	if status == 0 {
+		status = 520
+	}
 	return &http.Response{
-		StatusCode: 520,
+		StatusCode: status,
 		Header:     http.Header{"Content-Type": []string{"text/html"}},
 		Body:       io.NopCloser(bytes.NewBufferString("<html>520: unknown error</html>")),
 	}, nil
@@ -49,7 +63,7 @@ func (u *openAIResponsesFailoverCancelUpstream) calls() []int64 {
 	return append([]int64(nil), u.accountIDs...)
 }
 
-func newOpenAIResponsesFailoverTestHandler(t *testing.T, upstream service.HTTPUpstream) *OpenAIGatewayHandler {
+func newOpenAIResponsesFailoverTestHandler(t *testing.T, upstream service.HTTPUpstream, override ...[]service.Account) *OpenAIGatewayHandler {
 	t.Helper()
 	accounts := []service.Account{
 		{
@@ -74,6 +88,9 @@ func newOpenAIResponsesFailoverTestHandler(t *testing.T, upstream service.HTTPUp
 			Priority:    1,
 			Credentials: map[string]any{"access_token": "token-2"},
 		},
+	}
+	if len(override) > 0 {
+		accounts = override[0]
 	}
 	accountRepo := openAIImagesFailoverAccountRepo{accounts: accounts}
 	cfg := &config.Config{RunMode: config.RunModeSimple}
@@ -188,7 +205,188 @@ func TestOpenAIGatewayHandlerResponses_FailoverContinuesForConnectedClient(t *te
 
 	handler.Responses(c)
 
-	require.Equal(t, []int64{1, 2}, upstream.calls(), "在线客户端应正常切换账号")
+	require.Equal(t, []int64{1, 1, 2, 2}, upstream.calls(), "先原账号重试，再切换账号")
 	require.Equal(t, http.StatusBadGateway, rec.Code)
 	require.Equal(t, "upstream_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
+}
+
+func TestOpenAIHostedToolsFailoverRequiresSendEvidence(t *testing.T) {
+	for _, unsent := range []bool{false, true} {
+		for _, plugin := range []bool{false, true} {
+			upstream := &openAIResponsesFailoverCancelUpstream{firstError: &service.OpenAITransportAttemptError{Cause: errors.New("dial tcp: i/o timeout"), Unsent: unsent}}
+			if plugin {
+				upstream.firstError = &service.PluginTransportError{Code: "dial_failure", Message: "dial tcp: i/o timeout", RequestSent: !unsent}
+			}
+			h := newOpenAIResponsesFailoverTestHandler(t, upstream)
+			c, _ := newOpenAIResponsesFailoverTestContext(t, nil)
+			c.Request.Body = io.NopCloser(bytes.NewBufferString(`{"model":"gpt-5.1","stream":false,"input":"hello","tools":[{"type":"code_interpreter","container":{"type":"auto"}}]}`))
+			h.Responses(c)
+			if unsent {
+				require.Equal(t, []int64{1, 1}, upstream.calls(), "the unsent attempt repeats on its owner; the following ambiguous tool attempt must stop")
+			} else {
+				require.Equal(t, []int64{1}, upstream.calls())
+			}
+		}
+	}
+}
+
+func TestOpenAIResponsesReadOnlySearchFailoverStopReasons(t *testing.T) {
+	for _, tc := range []struct {
+		name, tools string
+		budget      int
+		switchLimit int
+		calls       []int64
+		reason      service.OpenAIRetryStopReason
+	}{
+		{"web search", `[{"type":"web_search"}]`, 0, 10, []int64{1, 1, 2, 2}, service.OpenAIRetryStopNoAvailableAccount},
+		{"file search", `[{"type":"file_search","vector_store_ids":["vs_test"]}]`, 0, 10, []int64{1, 1}, service.OpenAIRetryStopContextNotPortable},
+		{"local namespace", `[{"type":"namespace","name":"functions","tools":[{"type":"function","name":"shell"},{"type":"custom","name":"apply_patch"}]}]`, 0, 10, []int64{1, 1, 2, 2}, service.OpenAIRetryStopNoAvailableAccount},
+		{"preview search", `[{"type":"web_search_preview"}]`, 0, 10, []int64{1, 1, 2, 2}, service.OpenAIRetryStopNoAvailableAccount},
+		{"versioned preview search", `[{"type":"web_search_preview_2025_03_11"}]`, 0, 10, []int64{1, 1, 2, 2}, service.OpenAIRetryStopNoAvailableAccount},
+		{"namespace containing mcp", `[{"type":"namespace","name":"functions","tools":[{"type":"function","name":"shell"},{"type":"mcp"}]}]`, 0, 10, []int64{1}, service.OpenAIRetryStopReplayUnsafe},
+		{"mixed read-only and mcp", `[{"type":"web_search"},{"type":"mcp"}]`, 0, 10, []int64{1}, service.OpenAIRetryStopReplayUnsafe},
+		{"unknown tool", `[{"type":"future_tool"}]`, 0, 10, []int64{1}, service.OpenAIRetryStopReplayUnsafe},
+		{"turn budget", `[{"type":"web_search"}]`, 1, 10, []int64{1}, service.OpenAIRetryStopTurnBudget},
+		{"switch limit", `[{"type":"web_search"}]`, 0, 1, []int64{1, 1, 2, 2}, service.OpenAIRetryStopAccountSwitchLimit},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := &openAIResponsesFailoverCancelUpstream{status: http.StatusInternalServerError}
+			h := newOpenAIResponsesFailoverTestHandler(t, upstream)
+			h.cfg.Gateway.OpenAITurnMaxAttempts = tc.budget
+			h.maxAccountSwitches = tc.switchLimit
+			c, _ := newOpenAIResponsesFailoverTestContext(t, nil)
+			c.Request.Body = io.NopCloser(bytes.NewBufferString(`{"model":"gpt-5.1","stream":true,"input":"hello","tools":` + tc.tools + `}`))
+			h.Responses(c)
+			require.Equal(t, tc.calls, upstream.calls())
+			raw, ok := c.Get(service.OpsUpstreamErrorsKey)
+			require.True(t, ok)
+			events := raw.([]*service.OpsUpstreamErrorEvent)
+			require.Len(t, events, len(tc.calls)+1)
+			stop := events[len(events)-1]
+			require.Equal(t, service.OpsUpstreamRetryStopped, stop.Kind)
+			require.Equal(t, string(tc.reason), stop.Reason)
+			if tc.reason == service.OpenAIRetryStopReplayUnsafe {
+				want := "mcp"
+				if tc.name == "unknown tool" {
+					want = "unknown_tool"
+				}
+				require.Equal(t, want, gjson.Get(stop.Detail, "blocking_tool_kind").String())
+				require.NotContains(t, stop.Detail, "future_tool")
+			}
+			require.Zero(t, stop.UpstreamStatusCode, "a stop decision is not another provider failure")
+			require.Equal(t, http.StatusInternalServerError, service.LastOpsUpstreamAttempt(events).UpstreamStatusCode)
+		})
+	}
+}
+
+func TestOpenAIMessagesCanceledFailoverDoesNotMarkExhaustion(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	upstream := &openAIResponsesFailoverCancelUpstream{onFirstDo: cancel}
+	h := newOpenAIResponsesFailoverTestHandler(t, upstream)
+	h.cfg.Gateway.OpenAITurnMaxAttempts = 3
+	c, rec := newOpenAIResponsesFailoverTestContext(t, ctx)
+	key, _ := middleware2.GetAPIKeyFromContext(c)
+	key.Group.AllowMessagesDispatch = true
+	c.Request.Body = io.NopCloser(bytes.NewBufferString(`{"model":"gpt-5.1","max_tokens":100,"messages":[{"role":"user","content":"hello"}]}`))
+	h.Messages(c)
+	require.Equal(t, []int64{1}, upstream.calls())
+	require.Equal(t, statusClientClosedRequest, c.Writer.Status())
+	require.Zero(t, rec.Body.Len())
+	require.Empty(t, service.GetOpsStreamErrors(c))
+	_, final := c.Get(service.OpsUpstreamStatusCodeKey)
+	require.False(t, final)
+}
+
+func TestOpenAIResponsesHTTPUpstreamWSRateLimitRecoveryAndSingleTerminal(t *testing.T) {
+	for _, started := range []bool{false, true} {
+		name := "before_output"
+		if started {
+			name = "after_output"
+		}
+		t.Run(name, func(t *testing.T) {
+			var mu sync.Mutex
+			var calls []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				conn, err := coderws.Accept(w, r, nil)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				defer conn.CloseNow()
+				ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+				defer cancel()
+				if _, _, err := conn.Read(ctx); err != nil {
+					t.Error(err)
+					return
+				}
+				mu.Lock()
+				calls = append(calls, r.Header.Get("Authorization"))
+				mu.Unlock()
+				if started {
+					_ = conn.Write(ctx, coderws.MessageText, []byte(`{"type":"response.output_text.delta","response_id":"resp_started","delta":"partial"}`))
+				}
+				_ = conn.Write(ctx, coderws.MessageText, []byte(`{"type":"error","status":429,"headers":{"Retry-After":"67"},"error":{"type":"rate_limit_error","code":"turn_rate_limit_exceeded","message":"Codex is at capacity, please try again later"}}`))
+			}))
+			defer server.Close()
+			// Preserve the production OAuth route and redirect only its test
+			// transport to loopback. Standard API-key HTTP intentionally stays HTTP.
+			originalClient := http.DefaultClient
+			http.DefaultClient = &http.Client{Transport: nativeCapacityLocalWSTransport{target: strings.TrimPrefix(server.URL, "http://"), base: server.Client().Transport}}
+			t.Cleanup(func() { http.DefaultClient = originalClient })
+			accounts := []service.Account{
+				{ID: 1, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"access_token": "key1", "chatgpt_account_id": "owner1"}, Extra: map[string]any{"responses_websockets_v2_enabled": true, "codex_image_generation_bridge": false}},
+				{ID: 2, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"access_token": "key2", "chatgpt_account_id": "owner2"}, Extra: map[string]any{"responses_websockets_v2_enabled": true, "codex_image_generation_bridge": false}},
+			}
+			h := newOpenAIResponsesFailoverTestHandler(t, &openAIResponsesFailoverCancelUpstream{}, accounts)
+			h.cfg.Security.URLAllowlist.Enabled = false
+			h.cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+			h.cfg.Gateway.OpenAIWS.Enabled = true
+			h.cfg.Gateway.OpenAIWS.OAuthEnabled = true
+			t.Cleanup(h.gatewayService.CloseOpenAIWSPool)
+			h.cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+			h.cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
+			h.cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+			h.cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
+			c, rec := newOpenAIResponsesFailoverTestContext(t, nil)
+			c.Request.Body = io.NopCloser(bytes.NewBufferString(`{"model":"gpt-6-astra","stream":true,"input":"hello"}`))
+			h.Responses(c)
+			mu.Lock()
+			gotCalls := append([]string(nil), calls...)
+			mu.Unlock()
+			if started {
+				require.Equal(t, []string{"Bearer key1"}, gotCalls)
+				require.Equal(t, 1, strings.Count(rec.Body.String(), `"code":"turn_rate_limit_exceeded"`))
+				require.NotContains(t, rec.Body.String(), "Upstream request failed")
+				require.NotContains(t, rec.Body.String(), `"type":"response.failed"`)
+				failure, ok := service.GetOpsStreamError(c)
+				require.True(t, ok)
+				require.Equal(t, 429, failure.IntendedStatus)
+			} else {
+				require.Equal(t, []string{"Bearer key1", "Bearer key2"}, gotCalls)
+				require.Equal(t, 429, rec.Code)
+				require.Equal(t, "67", rec.Header().Get("Retry-After"))
+				require.Contains(t, rec.Header().Get("Content-Type"), "application/json", "pre-output exhaustion must not advertise SSE for a JSON error")
+				require.NotContains(t, rec.Body.String(), `"type":"response.failed"`)
+			}
+		})
+	}
+}
+
+// Only this sequential test's default client is replaced; unknown hosts fail
+// closed so the OAuth fixture can never contact a real provider.
+type nativeCapacityLocalWSTransport struct {
+	target string
+	base   http.RoundTripper
+}
+
+func (t nativeCapacityLocalWSTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Host != "chatgpt.com" {
+		return nil, errors.New("unexpected host in native capacity fixture")
+	}
+	copied := req.Clone(req.Context())
+	copied.URL.Scheme = "http"
+	copied.URL.Host = t.target
+	copied.Host = t.target
+	return t.base.RoundTrip(copied)
 }

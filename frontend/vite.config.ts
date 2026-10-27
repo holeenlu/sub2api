@@ -3,6 +3,12 @@ import vue from '@vitejs/plugin-vue'
 import checker from 'vite-plugin-checker'
 import { resolve } from 'path'
 
+// Duplicated on purpose: tsconfig.node.json is a `composite` project scoped to
+// vite.config.ts, so importing src/config/brand.ts here would emit brand.js /
+// brand.d.ts into the source tree. Keep in sync with BRAND_TITLE_SUFFIX_EN in
+// src/config/brand.ts.
+const BRAND_TITLE_SUFFIX_EN = 'Pick a model. Start building.'
+
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => ({
     '&': '&amp;',
@@ -32,7 +38,7 @@ function injectBranding(html: string, config: { site_name?: string; site_logo?: 
   if (siteName) {
     brandedHtml = brandedHtml.replace(
       /<title>[^<]*<\/title>/i,
-      `<title>${escapeHtml(siteName)} - AI API Gateway</title>`,
+      `<title>${escapeHtml(siteName)} - ${escapeHtml(BRAND_TITLE_SUFFIX_EN)}</title>`,
     )
   }
 
@@ -77,6 +83,21 @@ function injectPublicSettings(backendUrl: string): Plugin {
   }
 }
 
+// Static portals cannot receive the backend's injected HTML branding.
+function vendorFavicon(enabled: boolean): Plugin {
+  return {
+    name: 'vendor-favicon',
+    transformIndexHtml: {
+      order: 'pre',
+      handler(html) {
+        return enabled
+          ? html.replace(/<link\s+rel=["']icon["'][^>]*>/i, '<link rel="icon" href="/api/v1/settings/favicon" />')
+          : html
+      }
+    }
+  }
+}
+
 export default defineConfig(({ mode }) => {
   // 加载环境变量
   const env = loadEnv(mode, process.cwd(), '')
@@ -87,8 +108,11 @@ export default defineConfig(({ mode }) => {
     plugins: [
       vue(),
       checker({
+        // Production entrypoints run vue-tsc before Vite; keep live dev checks.
+        enableBuild: false,
         vueTsc: true
       }),
+      vendorFavicon(env.VITE_VENDOR_PORTAL === 'true'),
       injectPublicSettings(backendUrl)
     ],
   resolve: {

@@ -2,11 +2,14 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyutil"
 	"io"
+	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,10 +17,11 @@ import (
 
 	openaiwsv2 "github.com/Wei-Shaw/sub2api/internal/service/openai_ws_v2"
 	coderws "github.com/coder/websocket"
-	"github.com/coder/websocket/wsjson"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
-const openAIWSMessageReadLimitBytes int64 = 16 * 1024 * 1024
+const openAIWSMessageReadLimitBytes int64 = 64 * 1024 * 1024
 const (
 	openAIWSProxyTransportMaxIdleConns        = 128
 	openAIWSProxyTransportMaxIdleConnsPerHost = 64
@@ -174,7 +178,7 @@ func (d *coderOpenAIWSClientDialer) proxyHTTPClient(proxy string) (*http.Client,
 	if normalizedProxy == "" {
 		return nil, errors.New("proxy url is empty")
 	}
-	parsedProxyURL, err := url.Parse(normalizedProxy)
+	_, parsedProxyURL, err := proxyurl.Parse(normalizedProxy)
 	if err != nil {
 		return nil, fmt.Errorf("invalid proxy url: %w", err)
 	}
@@ -189,6 +193,7 @@ func (d *coderOpenAIWSClientDialer) proxyHTTPClient(proxy string) (*http.Client,
 	}
 	d.cleanupProxyClientsLocked(now)
 	transport := &http.Transport{
+		DialContext:         (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 		Proxy:               http.ProxyURL(parsedProxyURL),
 		MaxIdleConns:        openAIWSProxyTransportMaxIdleConns,
 		MaxIdleConnsPerHost: openAIWSProxyTransportMaxIdleConnsPerHost,
@@ -197,6 +202,12 @@ func (d *coderOpenAIWSClientDialer) proxyHTTPClient(proxy string) (*http.Client,
 		ForceAttemptHTTP2:   true,
 	}
 	client := &http.Client{Transport: transport}
+	if err := proxyutil.ConfigureTransportProxy(transport, parsedProxyURL); err != nil {
+		return nil, err
+	}
+	if proxyutil.IsVendorProxy(parsedProxyURL) {
+		client.CheckRedirect = proxyutil.VendorRedirectPolicy(client.CheckRedirect)
+	}
 	d.proxyClients[normalizedProxy] = &openAIWSProxyClientEntry{
 		client:           client,
 		lastUsedUnixNano: now,
@@ -309,7 +320,19 @@ func (c *coderOpenAIWSClientConn) WriteJSON(ctx context.Context, value any) erro
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return wsjson.Write(ctx, c.conn, value)
+	// 转发器已生成最终 JSON，直接写入同一帧，避免再次编码整份长对话。
+	// 保持 WriteJSON 的合法 JSON 合同，不能把无效 RawMessage 发到上游。
+	if raw, ok := value.(json.RawMessage); ok && raw != nil {
+		if !json.Valid(raw) {
+			return errors.New("invalid websocket JSON payload")
+		}
+		return c.WriteFrame(ctx, coderws.MessageText, raw)
+	}
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return c.WriteFrame(ctx, coderws.MessageText, payload)
 }
 
 func (c *coderOpenAIWSClientConn) ReadMessage(ctx context.Context) ([]byte, error) {
@@ -352,6 +375,16 @@ func (c *coderOpenAIWSClientConn) WriteFrame(ctx context.Context, msgType coderw
 	}
 	if ctx == nil {
 		ctx = context.Background()
+	}
+
+	// Each upstream socket carries one lane. Strip only at this final boundary:
+	// local cancellation, history and ownership still need the original envelope.
+	if (msgType == coderws.MessageText || msgType == coderws.MessageBinary) && gjson.GetBytes(payload, "stream_id").Exists() {
+		var err error
+		payload, err = sjson.DeleteBytes(payload, "stream_id")
+		if err != nil {
+			return err
+		}
 	}
 	return c.conn.Write(ctx, msgType, payload)
 }

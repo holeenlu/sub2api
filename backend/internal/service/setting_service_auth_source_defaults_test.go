@@ -51,7 +51,7 @@ func (s *authSourceDefaultsRepoStub) SetMultiple(ctx context.Context, settings m
 }
 
 func (s *authSourceDefaultsRepoStub) GetAll(ctx context.Context) (map[string]string, error) {
-	panic("unexpected GetAll call")
+	return s.values, nil
 }
 
 func (s *authSourceDefaultsRepoStub) Delete(ctx context.Context, key string) error {

@@ -103,23 +103,6 @@ export async function getById(id: number): Promise<AdminGroup> {
 }
 
 /**
- * Get candidate models for the group model allowlist.
- * id=0 returns platform default models for create flow.
- */
-export async function getModelAllowlistCandidates(
-  id: number,
-  platform?: GroupPlatform
-): Promise<string[]> {
-  const { data } = await apiClient.get<{ models: string[] }>(
-    `/admin/groups/${id}/model-allowlist-candidates`,
-    {
-      params: platform ? { platform } : undefined
-    }
-  )
-  return data.models || []
-}
-
-/**
  * Create new group
  * @param groupData - Group data
  * @returns Created group
@@ -449,6 +432,13 @@ export async function clearGroupRPMOverrides(id: number): Promise<{ message: str
  * Get usage summary (today + yesterday + cumulative cost) for all groups
  * @returns Array of group usage summaries
  */
+/** @deprecated Model references are sourced from the unified model module. */
+export async function getModelAllowlistCandidates(_id: number, platform?: GroupPlatform): Promise<string[]> {
+  const { modelsAPI } = await import('@/api/admin/models')
+  const rows = await modelsAPI.catalog(platform || 'anthropic')
+  return rows.map(row => row.id)
+}
+
 export async function getUsageSummary(): Promise<
   { group_id: number; today_cost: number; yesterday_cost: number; total_cost: number }[]
 > {
@@ -471,13 +461,13 @@ export async function getCapacitySummary(): Promise<
 }
 
 export const groupsAPI = {
+  getModelAllowlistCandidates,
   list,
   getAll,
   getByPlatform,
   getAllIncludingInactive,
   getLiveCapability,
   getById,
-  getModelAllowlistCandidates,
   create,
   duplicate,
   update,
