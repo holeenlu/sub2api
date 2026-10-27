@@ -77,8 +77,8 @@ func TestCalculateOpenAIRecordUsageCost_EmptyCandidatesIsPricingUnavailable(t *t
 		1.0, 1.0, 1.0, 1.0, UsageTokens{InputTokens: 100}, "", nil, false, time.Time{},
 	)
 	require.Error(t, err)
-	require.True(t, isUsagePricingUnavailableError(err),
-		"空候选必须按无价可循处理（上层零成本落账），而不是丢弃整条 usage 记录: %v", err)
+	require.ErrorIs(t, err, ErrModelPricingUnavailable,
+		"空候选必须按无价可循处理（上层保留待定价事件），而不是丢弃整条 usage 记录: %v", err)
 }
 
 func TestResponsesStreamingFromNativeAnthropic_ClientDisconnectDrainsUsage(t *testing.T) {
@@ -152,11 +152,18 @@ func TestResponsesStreamingFromNativeAnthropic_NormalizesTerminalUsage(t *testin
 				rec := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(rec)
 				c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
-				resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(strings.Join(lines, "\n")))}
+				resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(strings.Join(lines, "\n") + "\n"))}
 
 				result, err := (&OpenAIGatewayService{}).handleResponsesStreamingFromNativeAnthropic(
 					resp, c, "k3", "k3", "k3", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
-				require.NoError(t, err)
+				wantTerminal := "response.completed"
+				if terminal == "eof" {
+					require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+					wantTerminal = "response.failed"
+					require.NotContains(t, rec.Body.String(), "response.completed")
+				} else {
+					require.NoError(t, err)
+				}
 				require.Equal(t, tt.wantInput+tt.wantCached+tt.wantCacheCreation, result.Usage.InputTokens)
 				require.Equal(t, tt.wantOutput, result.Usage.OutputTokens)
 				require.Equal(t, tt.wantCached, result.Usage.CacheReadInputTokens)
@@ -169,7 +176,7 @@ func TestResponsesStreamingFromNativeAnthropic_NormalizesTerminalUsage(t *testin
 					}
 					var event apicompat.ResponsesStreamEvent
 					require.NoError(t, json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event))
-					if event.Type == "response.completed" {
+					if event.Type == wantTerminal {
 						completed = event
 					}
 				}

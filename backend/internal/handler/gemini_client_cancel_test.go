@@ -92,7 +92,18 @@ func (f *geminiClientCancelFixture) serve(t *testing.T, route, path, body string
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
-	return rec, OpsErrorLogQueueLength()
+	// Scheduling observations now share the queue but never persist an error
+	// row. Assert the cancellation contract on actual error jobs.
+	var failures int64
+	for len(opsErrorLogQueue) > 0 {
+		job := <-opsErrorLogQueue
+		opsErrorLogQueueLen.Add(-1)
+		opsErrorLogQueueBytes.Add(-job.queuedBytes)
+		if job.entry != nil {
+			failures++
+		}
+	}
+	return rec, failures
 }
 
 // 原生入口：上游响应前客户端断开，响应未提交，标记 499；纯客户端取消不落 ops 错误日志。

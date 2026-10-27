@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { AccountPlatform } from '@/types'
 import PlatformTypeBadge from '../PlatformTypeBadge.vue'
+import { accountSubscriptionPlan } from '@/utils/planType'
 
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
@@ -19,6 +20,61 @@ function mountPlan(platform: AccountPlatform, planType: string) {
 }
 
 describe('PlatformTypeBadge ChatGPT plan tiers', () => {
+  it('uses Claude rate tiers without applying ChatGPT Pro naming', () => {
+    for (const [tier, label] of [['default_claude_max_20x', 'Max 20x'], ['default_claude_max_5x', 'Max 5x'], ['default_claude_pro', 'Pro']]) {
+      const plan = accountSubscriptionPlan('anthropic', '', tier, 'claude_max')
+      const wrapper = mount(PlatformTypeBadge, { props: { platform: 'anthropic', type: 'oauth', planType: plan, billingType: 'apple_subscription' } })
+      expect(wrapper.text()).toContain(label)
+      expect(wrapper.text()).toContain('apple_subscription')
+      expect(wrapper.text()).not.toContain('Pro 200')
+      wrapper.unmount()
+    }
+  })
+
+  it('combines subscription, privacy, authentication method and compact state', async () => {
+    const wrapper = mount(PlatformTypeBadge, { props: {
+      platform: 'openai', type: 'oauth', planType: 'pro',
+      subscriptionExpiresAt: '2026-11-26T00:00:00Z', privacyMode: 'training_set_failed',
+      compact: { mode: 'force_off', supported: true }
+    } })
+    expect(wrapper.text()).toContain('Pro 200')
+    expect(wrapper.text()).toContain('2026-11-26')
+    expect(wrapper.text()).toContain('Fail')
+    expect(wrapper.text()).toContain('admin.accounts.openai.compactUnsupported')
+    await wrapper.setProps({ compact: { supported: true } })
+    expect(wrapper.text()).toContain('admin.accounts.openai.compactSupported')
+    await wrapper.setProps({ compact: {} })
+    expect(wrapper.text()).toContain('admin.accounts.openai.compactAuto')
+    await wrapper.setProps({ platform: 'anthropic', method: 'setup-token-manual' })
+    expect(wrapper.text()).toContain('Setup Token')
+    expect(wrapper.text()).not.toContain('compactAuto')
+    wrapper.unmount()
+  })
+  it('hides legacy upstream plan and expiration metadata for OpenAI API keys', async () => {
+    const wrapper = mount(PlatformTypeBadge, {
+      props: {
+        platform: 'openai',
+        type: 'apikey',
+        planType: 'pro',
+        subscriptionExpiresAt: '2027-01-01T00:00:00Z',
+      },
+    })
+
+    for (const planType of ['pro', 'chatgptpro', 'plus', 'team', 'free', 'future_sku']) {
+      await wrapper.setProps({ planType })
+      expect(wrapper.text().replace(/\s+/g, '')).toBe('OpenAIKey')
+      expect(wrapper.text()).not.toContain('admin.accounts.subscriptionExpires')
+      expect(wrapper.text()).not.toContain('2027-01-01')
+    }
+
+    await wrapper.setProps({ type: 'oauth', planType: 'pro' })
+    expect(wrapper.text()).toContain('Pro 200')
+    expect(wrapper.text()).toContain('admin.accounts.subscriptionExpires')
+
+    await wrapper.setProps({ type: 'apikey' })
+    expect(wrapper.text().replace(/\s+/g, '')).toBe('OpenAIKey')
+  })
+
   it('labels pro / chatgptpro as Pro 200 with the Pro color', () => {
     for (const planType of ['pro', 'chatgptpro', 'PRO']) {
       const wrapper = mountPlan('openai', planType)

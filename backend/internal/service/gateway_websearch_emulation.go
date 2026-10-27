@@ -232,6 +232,7 @@ func resolveAccountProxyURL(account *Account) string {
 func writeWebSearchStreamResponse(
 	c *gin.Context, query string, resp *websearch.SearchResponse, model string, startTime time.Time,
 ) (*ForwardResult, error) {
+	defer GuardSSEWrites(c)()
 	msgID := webSearchMsgIDPrefix + uuid.New().String()
 	toolUseID := webSearchToolUseIDPrefix + uuid.New().String()[:16]
 	textSummary := buildTextSummary(query, resp.Results)
@@ -339,8 +340,10 @@ func flushSSEJSON(w http.ResponseWriter, event string, data any) error {
 	if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b); err != nil {
 		return fmt.Errorf("write: %w", err)
 	}
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
+	if _, ok := w.(http.Flusher); ok {
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
