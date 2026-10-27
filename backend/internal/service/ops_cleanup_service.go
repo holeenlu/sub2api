@@ -49,15 +49,14 @@ type OpsCleanupService struct {
 	channelMonitorSvc *ChannelMonitorService
 	settingRepo       SettingRepository
 
-	instanceID string
+	// 生命周期切换单独串行化；运行任务不获取此锁，等待退出时不占用配置锁。
+	scheduleMu sync.Mutex
+	cron       *cron.Cron
+	cronCancel context.CancelFunc
+	started    bool
+	stopped    bool
 
-	// mu 守护 cron 实例切换 + effective 配置切换。
-	// 这里不再用 startOnce/stopOnce，是因为 Reload 需要"停旧 cron 重启新 cron"，
-	// 而 Once 一旦触发就无法再次执行；改为 started/stopped 布尔配合 mu。
 	mu        sync.Mutex
-	cron      *cron.Cron
-	started   bool
-	stopped   bool
 	effective opsCleanupEffectiveConfig
 
 	warnNoRedisOnce sync.Once
@@ -83,7 +82,6 @@ func NewOpsCleanupService(
 		cfg:               cfg,
 		channelMonitorSvc: channelMonitorSvc,
 		settingRepo:       settingRepo,
-		instanceID:        uuid.NewString(),
 	}
 }
 
@@ -101,8 +99,8 @@ func (s *OpsCleanupService) Start() {
 		return
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.scheduleMu.Lock()
+	defer s.scheduleMu.Unlock()
 	if s.started || s.stopped {
 		return
 	}
@@ -117,41 +115,53 @@ func (s *OpsCleanupService) Stop() {
 	if s == nil {
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.stopped {
-		return
-	}
+	s.scheduleMu.Lock()
+	defer s.scheduleMu.Unlock()
 	s.stopped = true
-	s.stopCronLocked()
+	if err := s.stopCronLocked(); err != nil {
+		logger.LegacyPrintf("service.ops_cleanup", "[OpsCleanup] %v", err)
+	}
 }
 
-// stopCronLocked 停掉当前 cron 实例（带 3s 超时）。调用方持锁。
-func (s *OpsCleanupService) stopCronLocked() {
+// stopCronLocked 取消当前代次后等待任务退出；只持调度切换锁，不持配置锁。
+// 超时保留句柄供下次关闭重试，禁止启动与旧任务重叠的新代次。
+func (s *OpsCleanupService) stopCronLocked() error {
 	if s.cron == nil {
-		return
+		return nil
+	}
+	if s.cronCancel != nil {
+		s.cronCancel()
 	}
 	ctx := s.cron.Stop()
+	timer := time.NewTimer(opsCleanupCronStopTimeout)
+	defer timer.Stop()
 	select {
 	case <-ctx.Done():
-	case <-time.After(opsCleanupCronStopTimeout):
-		logger.LegacyPrintf("service.ops_cleanup", "[OpsCleanup] cron stop timed out")
+		s.cron = nil
+		s.cronCancel = nil
+		return nil
+	case <-timer.C:
+		return fmt.Errorf("cron stop timed out; cleanup tasks are still exiting")
 	}
-	s.cron = nil
 }
 
-// applyScheduleLocked 重新计算 effective 配置并按其 schedule 重建 cron。调用方持锁。
+// applyScheduleLocked 重新计算 effective 配置并按其 schedule 重建 cron。调用方持调度切换锁。
 // 若 effective.Enabled=false（用户在 UI 关闭清理），停旧 cron 后直接返回，不创建新 cron。
 func (s *OpsCleanupService) applyScheduleLocked(ctx context.Context) error {
+	if err := s.stopCronLocked(); err != nil {
+		return err
+	}
+	s.mu.Lock()
 	s.computeEffectiveLocked(ctx)
-	s.stopCronLocked()
+	effective := s.effective
+	s.mu.Unlock()
 
-	if !s.effective.Enabled {
+	if !effective.Enabled {
 		logger.LegacyPrintf("service.ops_cleanup", "[OpsCleanup] cron disabled by settings")
 		return nil
 	}
 
-	schedule := strings.TrimSpace(s.effective.Schedule)
+	schedule := strings.TrimSpace(effective.Schedule)
 	if schedule == "" {
 		schedule = opsCleanupDefaultSchedule
 	}
@@ -164,18 +174,21 @@ func (s *OpsCleanupService) applyScheduleLocked(ctx context.Context) error {
 	}
 
 	c := cron.New(cron.WithParser(opsCleanupCronParser), cron.WithLocation(loc))
-	if _, err := c.AddFunc(schedule, func() { s.runScheduled() }); err != nil {
+	runCtx, cancel := context.WithCancel(context.Background())
+	if _, err := c.AddFunc(schedule, func() { s.runScheduled(runCtx) }); err != nil {
+		cancel()
 		return fmt.Errorf("invalid schedule %q: %w", schedule, err)
 	}
 	c.Start()
 	s.cron = c
+	s.cronCancel = cancel
 	logger.LegacyPrintf("service.ops_cleanup",
 		"[OpsCleanup] scheduled (schedule=%q tz=%s retention_days=err:%d/system:%d/min:%d/hour:%d)",
 		schedule, loc.String(),
-		s.effective.ErrorLogRetentionDays,
-		s.effective.SystemLogRetentionDays,
-		s.effective.MinuteMetricsRetentionDays,
-		s.effective.HourlyMetricsRetentionDays,
+		effective.ErrorLogRetentionDays,
+		effective.SystemLogRetentionDays,
+		effective.MinuteMetricsRetentionDays,
+		effective.HourlyMetricsRetentionDays,
 	)
 	return nil
 }
@@ -188,8 +201,8 @@ func (s *OpsCleanupService) Reload(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.scheduleMu.Lock()
+	defer s.scheduleMu.Unlock()
 	if !s.started || s.stopped {
 		return nil
 	}
@@ -281,16 +294,19 @@ func (s *OpsCleanupService) refreshEffectiveBeforeRun(ctx context.Context) {
 	s.computeEffectiveLocked(ctx)
 }
 
-func (s *OpsCleanupService) runScheduled() {
+func (s *OpsCleanupService) runScheduled(parent context.Context) {
 	if s == nil || s.db == nil || s.opsRepo == nil {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), opsCleanupRunTimeout)
+	ctx, cancel := context.WithTimeout(parent, opsCleanupRunTimeout)
 	defer cancel()
 
 	// 让 retention 改动当次生效（schedule/enabled 改动需要 Reload）。
 	s.refreshEffectiveBeforeRun(ctx)
+	if ctx.Err() != nil || !s.snapshotEffective().Enabled {
+		return
+	}
 
 	release, ok := s.tryAcquireLeaderLock(ctx)
 	if !ok {
@@ -304,6 +320,10 @@ func (s *OpsCleanupService) runScheduled() {
 	runAt := startedAt
 
 	counts, err := s.runCleanupOnce(ctx)
+	// 管理停用和进程关闭不是清理故障，不再用独立心跳写入延长关闭时间。
+	if parent.Err() != nil {
+		return
+	}
 	if err != nil {
 		s.recordHeartbeatError(runAt, time.Since(startedAt), err)
 		logger.LegacyPrintf("service.ops_cleanup", "[OpsCleanup] cleanup failed: %v", err)
@@ -318,7 +338,7 @@ func (s *OpsCleanupService) runScheduled() {
 
 func (s *OpsCleanupService) runCleanupOnce(ctx context.Context) (opsCleanupDeletedCounts, error) {
 	out := opsCleanupDeletedCounts{}
-	if s == nil || s.db == nil || s.cfg == nil {
+	if s == nil || s.opsRepo == nil || s.cfg == nil {
 		return out, nil
 	}
 
@@ -326,38 +346,52 @@ func (s *OpsCleanupService) runCleanupOnce(ctx context.Context) (opsCleanupDelet
 	now := time.Now().UTC()
 
 	targets := []opsCleanupTarget{
-		{effective.ErrorLogRetentionDays, "ops_error_logs", "created_at", false, &out.errorLogs},
-		{effective.ErrorLogRetentionDays, "ops_ingress_reject_aggregates", "bucket_start", false, &out.ingressRejects},
-		{effective.ErrorLogRetentionDays, "ops_alert_events", "created_at", false, &out.alertEvents},
-		{effective.SystemLogRetentionDays, "ops_system_logs", "created_at", false, &out.systemLogs},
-		{effective.SystemLogRetentionDays, "ops_system_log_cleanup_audits", "created_at", false, &out.logAudits},
-		{effective.MinuteMetricsRetentionDays, "ops_system_metrics", "created_at", false, &out.systemMetrics},
-		{effective.HourlyMetricsRetentionDays, "ops_metrics_hourly", "bucket_start", false, &out.hourlyPreagg},
-		{effective.HourlyMetricsRetentionDays, "ops_metrics_daily", "bucket_date", true, &out.dailyPreagg},
+		{effective.ErrorLogRetentionDays, "ops_error_logs", &out.errorLogs},
+		{effective.ErrorLogRetentionDays, "ops_ingress_reject_aggregates", &out.ingressRejects},
+		{effective.ErrorLogRetentionDays, "ops_alert_events", &out.alertEvents},
+		{effective.SystemLogRetentionDays, "ops_system_logs", &out.systemLogs},
+		{effective.SystemLogRetentionDays, "ops_system_log_cleanup_audits", &out.logAudits},
+		{effective.MinuteMetricsRetentionDays, "ops_system_metrics", &out.systemMetrics},
+		{effective.HourlyMetricsRetentionDays, "ops_metrics_hourly", &out.hourlyPreagg},
+		{effective.HourlyMetricsRetentionDays, "ops_metrics_daily", &out.dailyPreagg},
 	}
 
-	for _, t := range targets {
-		cutoff, truncate, ok := opsCleanupPlan(now, t.retentionDays)
-		if !ok {
-			continue
+	// 各表每轮只执行一批，避免首表积压耗尽整轮期限而饿死后续表。
+	for len(targets) > 0 {
+		pending := targets[:0]
+		for _, t := range targets {
+			if err := ctx.Err(); err != nil {
+				return out, err
+			}
+			cutoff, truncate, ok := opsCleanupPlan(now, t.retentionDays)
+			if !ok {
+				continue
+			}
+			n, err := s.opsRepo.CleanupOpsTable(ctx, t.table, cutoff, truncate, opsCleanupBatchSize)
+			*t.counter += n
+			if err != nil {
+				return out, err
+			}
+			if !truncate && n == opsCleanupBatchSize {
+				pending = append(pending, t)
+			}
 		}
-		n, err := opsCleanupRunOne(ctx, s.db, truncate, cutoff, t.table, t.timeCol, t.castDate, opsCleanupBatchSize)
-		if err != nil {
-			return out, err
-		}
-		*t.counter = n
+		targets = pending
 	}
 
 	// Channel monitor 每日维护（聚合昨日明细 + 软删过期明细/聚合）。
 	// 失败只记日志，不影响 ops 清理的成功状态（与 ops 各步骤风格一致）；
 	// 维护本身已经把每步错误打到 slog，heartbeat result 不再分项记录。
+	if err := ctx.Err(); err != nil {
+		return out, err
+	}
 	if s.channelMonitorSvc != nil {
 		if err := s.channelMonitorSvc.RunDailyMaintenance(ctx); err != nil {
 			logger.LegacyPrintf("service.ops_cleanup", "[OpsCleanup] channel monitor maintenance failed: %v", err)
 		}
 	}
 
-	return out, nil
+	return out, ctx.Err()
 }
 
 func (s *OpsCleanupService) tryAcquireLeaderLock(ctx context.Context) (func(), bool) {
@@ -375,13 +409,17 @@ func (s *OpsCleanupService) tryAcquireLeaderLock(ctx context.Context) (func(), b
 	// Prefer Redis leader lock when available, but avoid stampeding the DB when Redis is flaky by
 	// falling back to a DB advisory lock.
 	if s.redisClient != nil {
-		ok, err := s.redisClient.SetNX(ctx, key, s.instanceID, ttl).Result()
+		// 绑定本次租约，旧轮退出不能释放 TTL 后同实例重新取得的锁。
+		token := uuid.NewString()
+		ok, err := s.redisClient.SetNX(ctx, key, token, ttl).Result()
 		if err == nil {
 			if !ok {
 				return nil, false
 			}
 			return func() {
-				_, _ = opsCleanupReleaseScript.Run(ctx, s.redisClient, []string{key}, s.instanceID).Result()
+				unlockCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				_, _ = opsCleanupReleaseScript.Run(unlockCtx, s.redisClient, []string{key}, token).Result()
 			}, true
 		}
 		// Redis error: fall back to DB advisory lock.

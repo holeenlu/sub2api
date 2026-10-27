@@ -26,6 +26,7 @@ type rateLimitAccountRepoStub struct {
 	lastTempReason         string
 	lastErrorID            int64
 	lastTempID             int64
+	lastTempUntil          time.Time
 	lastRateLimitedID      int64
 	lastRateLimitedAt      time.Time
 	tempErr                error
@@ -41,6 +42,7 @@ func (r *rateLimitAccountRepoStub) SetError(ctx context.Context, id int64, error
 func (r *rateLimitAccountRepoStub) SetTempUnschedulable(ctx context.Context, id int64, until time.Time, reason string) error {
 	r.tempCalls++
 	r.lastTempID = id
+	r.lastTempUntil = until
 	r.lastTempReason = reason
 	return r.tempErr
 }
@@ -95,6 +97,85 @@ func (s *openAI403CounterCacheStub) ResetOpenAI403Count(_ context.Context, accou
 func (r *tokenCacheInvalidatorRecorder) InvalidateToken(ctx context.Context, account *Account) error {
 	r.accounts = append(r.accounts, account)
 	return r.err
+}
+
+func TestRateLimitService_HandleUpstreamError_OpenAI401CredentialRecovery(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		accountType       string
+		refreshToken      string
+		body              string
+		wantError         bool
+		wantInvalidation  bool
+		wantErrorContains string
+	}{
+		{
+			name: "refreshable_unauthorized", accountType: AccountTypeOAuth,
+			refreshToken: "rt-100", body: `{"detail":"Unauthorized"}`, wantInvalidation: true,
+		},
+		{
+			name: "unauthorized_without_refresh_token", accountType: AccountTypeOAuth,
+			body: `{"detail":"Unauthorized"}`, wantError: true, wantInvalidation: true,
+			wantErrorContains: "no refresh_token",
+		},
+		{
+			name: "unauthorized_with_blank_refresh_token", accountType: AccountTypeOAuth,
+			refreshToken: "   ", body: `{"detail":"Unauthorized"}`, wantError: true, wantInvalidation: true,
+			wantErrorContains: "no refresh_token",
+		},
+		{
+			name: "token_revoked", accountType: AccountTypeOAuth, refreshToken: "rt-100",
+			body: `{"detail":"Unauthorized","error":{"code":"token_revoked"}}`, wantError: true,
+			wantErrorContains: "Token revoked",
+		},
+		{
+			name: "token_invalidated", accountType: AccountTypeOAuth, refreshToken: "rt-100",
+			body: `{"error":{"code":"token_invalidated"}}`, wantError: true,
+			wantErrorContains: "Token revoked",
+		},
+		{
+			name: "apikey_unauthorized", accountType: AccountTypeAPIKey,
+			body: `{"detail":"Unauthorized"}`, wantError: true,
+			wantErrorContains: "Unauthorized (401)",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &rateLimitAccountRepoStub{}
+			invalidator := &tokenCacheInvalidatorRecorder{}
+			cfg := &config.Config{}
+			cfg.RateLimit.OAuth401CooldownMinutes = 3
+			service := NewRateLimitService(repo, nil, cfg, nil, nil)
+			service.SetTokenCacheInvalidator(invalidator)
+			account := &Account{
+				ID: 100, Platform: PlatformOpenAI, Type: tc.accountType, Status: StatusActive,
+				Credentials: map[string]any{"access_token": "rejected-at", "refresh_token": tc.refreshToken},
+			}
+			before := time.Now()
+
+			shouldDisable := service.HandleUpstreamError(context.Background(), account, http.StatusUnauthorized, http.Header{}, []byte(tc.body))
+
+			require.True(t, shouldDisable)
+			if tc.wantError {
+				require.Equal(t, 1, repo.setErrorCalls)
+				require.Equal(t, account.ID, repo.lastErrorID)
+				require.Contains(t, repo.lastErrorMsg, tc.wantErrorContains)
+				require.Zero(t, repo.tempCalls)
+			} else {
+				require.Zero(t, repo.setErrorCalls, "generic Unauthorized does not prove the refresh token was revoked")
+				require.Equal(t, 1, repo.tempCalls)
+				require.Equal(t, account.ID, repo.lastTempID)
+				require.False(t, repo.lastTempUntil.Before(before.Add(3*time.Minute)))
+				require.False(t, repo.lastTempUntil.After(time.Now().Add(3*time.Minute)))
+			}
+			if tc.wantInvalidation {
+				require.Equal(t, []*Account{account}, invalidator.accounts)
+			} else {
+				require.Empty(t, invalidator.accounts)
+			}
+			require.Zero(t, repo.updateCredentialsCalls, "401 must not overwrite a concurrent refresh with the request snapshot")
+			require.Zero(t, repo.updateExtraCalls)
+		})
+	}
 }
 
 func TestRateLimitService_HandleUpstreamError_OAuth401SetsTempUnschedulable(t *testing.T) {
@@ -190,7 +271,7 @@ func TestRateLimitService_HandleUpstreamError_SparkShadow401RedirectsToParent(t 
 		// 影子不持凭据:GetCredential("refresh_token") == ""
 	}
 
-	shouldDisable := service.HandleUpstreamError(context.Background(), shadow, 401, http.Header{}, []byte("unauthorized"))
+	shouldDisable := service.HandleUpstreamError(context.Background(), shadow, 401, http.Header{}, []byte(`{"detail":"Unauthorized"}`))
 
 	require.True(t, shouldDisable)
 	require.Equal(t, 0, repo.setErrorCalls, "spark shadow must not be permanently disabled on a parent-token 401")

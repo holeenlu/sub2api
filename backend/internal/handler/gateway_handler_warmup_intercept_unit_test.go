@@ -116,6 +116,8 @@ func (f *fakeGroupRepo) UpdateSortOrders(context.Context, []service.GroupSortOrd
 
 type fakeConcurrencyCache struct{}
 
+func (*fakeConcurrencyCache) ConcurrencySlotTTL() time.Duration { return 0 }
+
 func (f *fakeConcurrencyCache) AcquireAccountSlot(context.Context, int64, int, string) (bool, error) {
 	return true, nil
 }
@@ -154,7 +156,6 @@ func (f *fakeConcurrencyCache) GetAccountConcurrencyBatch(_ context.Context, acc
 }
 func (f *fakeConcurrencyCache) CleanupExpiredAccountSlots(context.Context, int64) error { return nil }
 func (f *fakeConcurrencyCache) CleanupExpiredAccountSlotKeys(context.Context) error     { return nil }
-func (f *fakeConcurrencyCache) CleanupStaleProcessSlots(context.Context, string) error  { return nil }
 
 func newTestGatewayHandler(t *testing.T, group *service.Group, accounts []*service.Account) (*GatewayHandler, func()) {
 	t.Helper()

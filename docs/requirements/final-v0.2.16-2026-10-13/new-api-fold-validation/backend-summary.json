@@ -1,0 +1,41 @@
+[
+  {
+    "name": "main-unit",
+    "command": [
+      "go",
+      "test",
+      "-p",
+      "2",
+      "-tags=unit",
+      "./...",
+      "-count=1"
+    ],
+    "exit": 0,
+    "seconds": 333.13
+  },
+  {
+    "name": "main-build",
+    "command": [
+      "go",
+      "build",
+      "-p",
+      "2",
+      "./..."
+    ],
+    "exit": 0,
+    "seconds": 6.15
+  },
+  {
+    "name": "main-vet",
+    "command": [
+      "go",
+      "vet",
+      "-p",
+      "2",
+      "-tags=unit",
+      "./..."
+    ],
+    "exit": 0,
+    "seconds": 9.43
+  }
+]

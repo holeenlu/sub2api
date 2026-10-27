@@ -838,6 +838,9 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 ) error {
 	var lastErr error
 	maxRetries := s.maxRetries()
+	if isNativeOpenAIOAuthRefresh(account) && (s.refreshAPI == nil || executor == nil) {
+		return &providerConfigurationRefreshError{err: errors.New("OpenAI OAuth requires the unified conditional refresh API")}
+	}
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		if err := ctx.Err(); err != nil {
@@ -899,7 +902,10 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 				releaseRate, err = acquireRate(attemptCtx)
 			}
 			if err == nil {
-				newCredentials, err = refresher.Refresh(attemptCtx, account)
+				err = validateVendorOAuthRefresh(attemptCtx, s.accountRepo, account)
+				if err == nil {
+					newCredentials, err = refresher.Refresh(attemptCtx, account)
+				}
 			}
 			if releaseRate != nil {
 				releaseRate()
@@ -907,7 +913,11 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 			attemptTimedOut := errors.Is(attemptCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
 			if err == nil && newCredentials != nil && !attemptTimedOut {
 				newCredentials["_token_version"] = time.Now().UnixMilli()
-				if saveErr := persistAccountCredentials(attemptCtx, s.accountRepo, account, newCredentials); saveErr != nil {
+				persist := persistAccountCredentials
+				if isVendorOpenAIRefresh(account) {
+					persist = persistVendorOAuthRefresh
+				}
+				if saveErr := persist(attemptCtx, s.accountRepo, account, newCredentials); saveErr != nil {
 					err = fmt.Errorf("failed to save credentials: %w", saveErr)
 				} else {
 					credentialsPersisted = true
@@ -960,6 +970,9 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 		if errors.Is(err, errRefreshSkipped) {
 			return errRefreshSkipped
 		}
+		if isVendorOpenAIRefresh(account) && errors.Is(err, ErrVendorSupplyUnavailable) {
+			return errRefreshSkipped
+		}
 		if isProviderScopedTerminalRefreshError(err) {
 			return err
 		}
@@ -984,15 +997,28 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 
 		// 不可重试错误（invalid_grant/invalid_client 等）直接标记 error 状态并返回
 		if isNonRetryableRefreshError(err) {
+			if isVendorOpenAIRefresh(account) {
+				return s.disableVendorOAuthRefreshGrant(ctx, account, err)
+			}
 			errorMsg := "Token refresh failed (non-retryable): " + logredact.RedactText(err.Error())
 			isGrokOAuth := account.IsGrokOAuth()
-			if !isGrokOAuth {
+			isNativeOpenAI := isNativeOpenAIOAuthRefresh(account)
+			if !isGrokOAuth && !isNativeOpenAI {
 				s.notifyAccountSchedulingBlocked(account, time.Time{}, "token_refresh_non_retryable")
 			}
 			s.clearAntigravityForceTokenRefresh(ctx, account, "non_retryable")
 			persistentlyBlocked := false
 			var setErr error
-			if isGrokOAuth {
+			if isNativeOpenAI {
+				conditional, err := nativeOpenAIRefreshRepository(s.accountRepo)
+				if err != nil {
+					return err
+				}
+				persistentlyBlocked, setErr = conditional.SetOpenAIOAuthRefreshErrorIfUnchanged(ctx, account, errorMsg)
+				if setErr == nil && !persistentlyBlocked {
+					return errRefreshSkipped
+				}
+			} else if isGrokOAuth {
 				conditionalRepo, ok := s.accountRepo.(GrokOAuthRefreshMutationRepository)
 				if !ok {
 					return &providerConfigurationRefreshError{
@@ -1020,16 +1046,16 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 					"account_id", account.ID,
 					"error", setErr,
 				)
-				if isGrokOAuth {
+				if isGrokOAuth || isNativeOpenAI {
 					return &providerCycleContainmentRefreshError{
-						err: fmt.Errorf("failed to conditionally persist Grok OAuth refresh failure: %w", setErr),
+						err: fmt.Errorf("failed to conditionally persist OAuth refresh failure: %w", setErr),
 					}
 				}
-			} else if isGrokOAuth && persistentlyBlocked {
+			} else if (isGrokOAuth || isNativeOpenAI) && persistentlyBlocked {
 				s.notifyAccountSchedulingBlocked(account, time.Time{}, "token_refresh_non_retryable")
 			}
 			cacheInvalidationFailed := false
-			if account.Type == AccountTypeOAuth && (!isGrokOAuth || persistentlyBlocked) {
+			if account.Type == AccountTypeOAuth && (!(isGrokOAuth || isNativeOpenAI) || persistentlyBlocked) {
 				if s.cacheInvalidator == nil {
 					cacheInvalidationFailed = true
 				} else if invalidateErr := s.cacheInvalidator.InvalidateToken(ctx, account); invalidateErr != nil {
@@ -1081,11 +1107,33 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 		"error", logredact.RedactText(lastErr.Error()),
 	)
 
+	// A transient failure of one supplier grant is not evidence that its other
+	// grant is unusable. Retry at the next bounded refresh cycle, without placing
+	// an account-wide cooldown on the independent authorization.
+	if isVendorOpenAIRefresh(account) {
+		return lastErr
+	}
+
 	// 设置临时不可调度 10 分钟（不标记 error，保持 status=active 让下个刷新周期能继续尝试）
 	until := time.Now().Add(tokenRefreshTempUnschedDuration)
 	reason := "token refresh retry exhausted"
 	if lastErr != nil {
 		reason += ": " + logredact.RedactText(lastErr.Error())
+	}
+	if isNativeOpenAIOAuthRefresh(account) {
+		conditional, err := nativeOpenAIRefreshRepository(s.accountRepo)
+		if err != nil {
+			return err
+		}
+		applied, err := conditional.SetOpenAIOAuthRefreshTempUnschedulableIfUnchanged(ctx, account, until, reason)
+		if err != nil {
+			return &providerCycleContainmentRefreshError{err: fmt.Errorf("failed to conditionally persist OpenAI OAuth refresh cooldown: %w", err)}
+		}
+		if !applied {
+			return errRefreshSkipped
+		}
+		s.notifyAccountSchedulingBlocked(account, until, "token_refresh_retry_exhausted")
+		return lastErr
 	}
 	if account.IsGrokOAuth() {
 		conditionalRepo, ok := s.accountRepo.(GrokOAuthRefreshMutationRepository)
@@ -1158,6 +1206,27 @@ func (s *TokenRefreshService) retryBackoff(accountID int64, attempt int) time.Du
 
 // postRefreshActions 刷新成功后的后续动作（清除错误状态、缓存失效、调度器同步等）
 func (s *TokenRefreshService) postRefreshActions(ctx context.Context, account *Account) {
+	if isVendorOpenAIRefresh(account) {
+		// A mode refresh cannot clear an unrelated account cooldown or run
+		// native privacy calls with a BPS grant.
+		s.postRefreshStateSync(ctx, account)
+		return
+	}
+	if isNativeOpenAIOAuthRefresh(account) {
+		// Refresh CAS clears only the cooldown observed by that exchange.
+		// Never clear a newer failure from this post-commit snapshot.
+		if account.TempUnschedulableUntil == nil {
+			s.notifyAccountSchedulingBlockCleared(account.ID)
+			if s.tempUnschedCache != nil {
+				_ = s.tempUnschedCache.DeleteTempUnsched(ctx, account.ID)
+			}
+		}
+		s.postRefreshStateSync(ctx, account)
+		if account.IsActive() {
+			s.ensureOpenAIPrivacy(ctx, account)
+		}
+		return
+	}
 	s.clearAntigravityForceTokenRefresh(ctx, account, "success")
 
 	// Antigravity 账户：如果之前是因为缺少 project_id 而标记为 error，现在成功获取到了，清除错误状态
@@ -1217,6 +1286,15 @@ func (s *TokenRefreshService) postRefreshStateSyncWithCleanup(parent context.Con
 }
 
 func (s *TokenRefreshService) postRefreshStateSync(ctx context.Context, account *Account) {
+	if isVendorOpenAIRefresh(account) || isNativeOpenAIOAuthRefresh(account) {
+		// Also covers detached cleanup after a committed refresh: do not publish
+		// a pre-refresh snapshot over a concurrent policy or scheduling change.
+		current, err := s.accountRepo.GetByID(ctx, account.ID)
+		if err != nil || current == nil {
+			return
+		}
+		account = current
+	}
 	// 对所有 OAuth 账号调用缓存失效（InvalidateToken 内部根据平台判断是否需要处理）
 	if s.cacheInvalidator != nil && account.Type == AccountTypeOAuth {
 		if err := s.cacheInvalidator.InvalidateToken(ctx, account); err != nil {

@@ -1,0 +1,723 @@
+source_file	line	registration_function	receiver	method	local_path	handler_expression
+backend/internal/server/routes/admin.go	23	RegisterAdminRoutes	v1	GET	/plugin-ui/:token/*path	h.Admin.Plugin.ServeUIAsset
+backend/internal/server/routes/admin.go	36	RegisterAdminRoutes	admin	GET	/roles/admin/permissions	h.Admin.Setting.GetAdminRolePermissions
+backend/internal/server/routes/admin.go	37	RegisterAdminRoutes	admin	PUT	/roles/admin/permissions	h.Admin.Setting.UpdateAdminRolePermissions
+backend/internal/server/routes/admin.go	139	registerPromptAuditRoutes	promptAudit	GET	/config	h.Admin.PromptAudit.GetConfig
+backend/internal/server/routes/admin.go	140	registerPromptAuditRoutes	promptAudit	PUT	/config	h.Admin.PromptAudit.UpdateConfig
+backend/internal/server/routes/admin.go	141	registerPromptAuditRoutes	promptAudit	POST	/endpoints/probe	h.Admin.PromptAudit.ProbeEndpoint
+backend/internal/server/routes/admin.go	142	registerPromptAuditRoutes	promptAudit	GET	/runtime	h.Admin.PromptAudit.GetRuntime
+backend/internal/server/routes/admin.go	143	registerPromptAuditRoutes	promptAudit	GET	/events	h.Admin.PromptAudit.ListEvents
+backend/internal/server/routes/admin.go	144	registerPromptAuditRoutes	promptAudit	GET	/events/:id	h.Admin.PromptAudit.GetEvent
+backend/internal/server/routes/admin.go	145	registerPromptAuditRoutes	promptAudit	DELETE	/events/:id	h.Admin.PromptAudit.DeleteEvent
+backend/internal/server/routes/admin.go	146	registerPromptAuditRoutes	promptAudit	POST	/events/batch-delete	h.Admin.PromptAudit.BatchDelete
+backend/internal/server/routes/admin.go	147	registerPromptAuditRoutes	promptAudit	POST	/events/delete-preview	h.Admin.PromptAudit.DeletePreview
+backend/internal/server/routes/admin.go	148	registerPromptAuditRoutes	promptAudit	POST	/events/delete-by-filter	h.Admin.PromptAudit.DeleteByFilter
+backend/internal/server/routes/admin.go	155	registerAuditLogRoutes	auditLogs	GET		h.Admin.AuditLog.List
+backend/internal/server/routes/admin.go	156	registerAuditLogRoutes	auditLogs	GET	/:id	h.Admin.AuditLog.Get
+backend/internal/server/routes/admin.go	158	registerAuditLogRoutes	auditLogs	POST	/clear	h.Admin.AuditLog.Clear
+backend/internal/server/routes/admin.go	165	registerAdminComplianceRoutes	compliance	GET		h.Admin.Compliance.GetStatus
+backend/internal/server/routes/admin.go	166	registerAdminComplianceRoutes	compliance	POST	/accept	h.Admin.Compliance.Accept
+backend/internal/server/routes/admin.go	173	registerContentModerationRoutes	risk	GET	/config	h.Admin.ContentModeration.GetConfig
+backend/internal/server/routes/admin.go	174	registerContentModerationRoutes	risk	PUT	/config	h.Admin.ContentModeration.UpdateConfig
+backend/internal/server/routes/admin.go	175	registerContentModerationRoutes	risk	POST	/api-keys/test	h.Admin.ContentModeration.TestAPIKeys
+backend/internal/server/routes/admin.go	176	registerContentModerationRoutes	risk	GET	/status	h.Admin.ContentModeration.GetStatus
+backend/internal/server/routes/admin.go	177	registerContentModerationRoutes	risk	GET	/logs	h.Admin.ContentModeration.ListLogs
+backend/internal/server/routes/admin.go	178	registerContentModerationRoutes	risk	POST	/users/:user_id/unban	h.Admin.ContentModeration.UnbanUser
+backend/internal/server/routes/admin.go	179	registerContentModerationRoutes	risk	DELETE	/hashes	h.Admin.ContentModeration.DeleteFlaggedHash
+backend/internal/server/routes/admin.go	180	registerContentModerationRoutes	risk	DELETE	/hashes/all	h.Admin.ContentModeration.ClearFlaggedHashes
+backend/internal/server/routes/admin.go	187	registerAdminAPIKeyRoutes	apiKeys	PUT	/:id	h.Admin.APIKey.UpdateGroup
+backend/internal/server/routes/admin.go	195	registerOpsRoutes	ops	GET	/concurrency	h.Admin.Ops.GetConcurrencyStats
+backend/internal/server/routes/admin.go	196	registerOpsRoutes	ops	GET	/user-concurrency	h.Admin.Ops.GetUserConcurrencyStats
+backend/internal/server/routes/admin.go	197	registerOpsRoutes	ops	GET	/account-availability	h.Admin.Ops.GetAccountAvailability
+backend/internal/server/routes/admin.go	198	registerOpsRoutes	ops	GET	/realtime-traffic	h.Admin.Ops.GetRealtimeTrafficSummary
+backend/internal/server/routes/admin.go	201	registerOpsRoutes	ops	GET	/alert-rules	h.Admin.Ops.ListAlertRules
+backend/internal/server/routes/admin.go	202	registerOpsRoutes	ops	POST	/alert-rules	h.Admin.Ops.CreateAlertRule
+backend/internal/server/routes/admin.go	203	registerOpsRoutes	ops	PUT	/alert-rules/:id	h.Admin.Ops.UpdateAlertRule
+backend/internal/server/routes/admin.go	204	registerOpsRoutes	ops	DELETE	/alert-rules/:id	h.Admin.Ops.DeleteAlertRule
+backend/internal/server/routes/admin.go	205	registerOpsRoutes	ops	GET	/alert-events	h.Admin.Ops.ListAlertEvents
+backend/internal/server/routes/admin.go	206	registerOpsRoutes	ops	GET	/alert-events/:id	h.Admin.Ops.GetAlertEvent
+backend/internal/server/routes/admin.go	207	registerOpsRoutes	ops	PUT	/alert-events/:id/status	h.Admin.Ops.UpdateAlertEventStatus
+backend/internal/server/routes/admin.go	208	registerOpsRoutes	ops	POST	/alert-silences	h.Admin.Ops.CreateAlertSilence
+backend/internal/server/routes/admin.go	211	registerOpsRoutes	ops	GET	/email-notification/config	h.Admin.Ops.GetEmailNotificationConfig
+backend/internal/server/routes/admin.go	212	registerOpsRoutes	ops	PUT	/email-notification/config	h.Admin.Ops.UpdateEmailNotificationConfig
+backend/internal/server/routes/admin.go	217	registerOpsRoutes	runtime	GET	/alert	h.Admin.Ops.GetAlertRuntimeSettings
+backend/internal/server/routes/admin.go	218	registerOpsRoutes	runtime	PUT	/alert	h.Admin.Ops.UpdateAlertRuntimeSettings
+backend/internal/server/routes/admin.go	219	registerOpsRoutes	runtime	GET	/logging	h.Admin.Ops.GetRuntimeLogConfig
+backend/internal/server/routes/admin.go	220	registerOpsRoutes	runtime	PUT	/logging	h.Admin.Ops.UpdateRuntimeLogConfig
+backend/internal/server/routes/admin.go	221	registerOpsRoutes	runtime	POST	/logging/reset	h.Admin.Ops.ResetRuntimeLogConfig
+backend/internal/server/routes/admin.go	225	registerOpsRoutes	ops	GET	/advanced-settings	h.Admin.Ops.GetAdvancedSettings
+backend/internal/server/routes/admin.go	226	registerOpsRoutes	ops	PUT	/advanced-settings	h.Admin.Ops.UpdateAdvancedSettings
+backend/internal/server/routes/admin.go	231	registerOpsRoutes	settings	GET	/metric-thresholds	h.Admin.Ops.GetMetricThresholds
+backend/internal/server/routes/admin.go	232	registerOpsRoutes	settings	PUT	/metric-thresholds	h.Admin.Ops.UpdateMetricThresholds
+backend/internal/server/routes/admin.go	238	registerOpsRoutes	ws	GET	/qps	h.Admin.Ops.QPSWSHandler
+backend/internal/server/routes/admin.go	242	registerOpsRoutes	ops	GET	/errors	h.Admin.Ops.GetErrorLogs
+backend/internal/server/routes/admin.go	243	registerOpsRoutes	ops	GET	/errors/:id	h.Admin.Ops.GetErrorLogByID
+backend/internal/server/routes/admin.go	244	registerOpsRoutes	ops	PUT	/errors/:id/resolve	h.Admin.Ops.UpdateErrorResolution
+backend/internal/server/routes/admin.go	247	registerOpsRoutes	ops	GET	/request-errors	h.Admin.Ops.ListRequestErrors
+backend/internal/server/routes/admin.go	248	registerOpsRoutes	ops	GET	/request-errors/:id	h.Admin.Ops.GetRequestError
+backend/internal/server/routes/admin.go	249	registerOpsRoutes	ops	GET	/request-errors/:id/upstream-errors	h.Admin.Ops.ListRequestErrorUpstreamErrors
+backend/internal/server/routes/admin.go	250	registerOpsRoutes	ops	PUT	/request-errors/:id/resolve	h.Admin.Ops.ResolveRequestError
+backend/internal/server/routes/admin.go	253	registerOpsRoutes	ops	GET	/ingress-rejections	h.Admin.Ops.ListIngressRejects
+backend/internal/server/routes/admin.go	254	registerOpsRoutes	ops	GET	/ingress-rejections/health	h.Admin.Ops.GetIngressRejectHealth
+backend/internal/server/routes/admin.go	255	registerOpsRoutes	ops	GET	/auth-cache-invalidation/health	h.Admin.Ops.GetAuthCacheInvalidationHealth
+backend/internal/server/routes/admin.go	258	registerOpsRoutes	ops	GET	/upstream-errors	h.Admin.Ops.ListUpstreamErrors
+backend/internal/server/routes/admin.go	259	registerOpsRoutes	ops	GET	/upstream-errors/:id	h.Admin.Ops.GetUpstreamError
+backend/internal/server/routes/admin.go	260	registerOpsRoutes	ops	PUT	/upstream-errors/:id/resolve	h.Admin.Ops.ResolveUpstreamError
+backend/internal/server/routes/admin.go	263	registerOpsRoutes	ops	GET	/requests	h.Admin.Ops.ListRequestDetails
+backend/internal/server/routes/admin.go	266	registerOpsRoutes	ops	GET	/system-logs	h.Admin.Ops.ListSystemLogs
+backend/internal/server/routes/admin.go	267	registerOpsRoutes	ops	POST	/system-logs/cleanup	h.Admin.Ops.CleanupSystemLogs
+backend/internal/server/routes/admin.go	268	registerOpsRoutes	ops	GET	/system-logs/health	h.Admin.Ops.GetSystemLogIngestionHealth
+backend/internal/server/routes/admin.go	271	registerOpsRoutes	ops	GET	/dashboard/snapshot-v2	h.Admin.Ops.GetDashboardSnapshotV2
+backend/internal/server/routes/admin.go	272	registerOpsRoutes	ops	GET	/dashboard/overview	h.Admin.Ops.GetDashboardOverview
+backend/internal/server/routes/admin.go	273	registerOpsRoutes	ops	GET	/dashboard/throughput-trend	h.Admin.Ops.GetDashboardThroughputTrend
+backend/internal/server/routes/admin.go	274	registerOpsRoutes	ops	GET	/dashboard/latency-histogram	h.Admin.Ops.GetDashboardLatencyHistogram
+backend/internal/server/routes/admin.go	275	registerOpsRoutes	ops	GET	/dashboard/error-trend	h.Admin.Ops.GetDashboardErrorTrend
+backend/internal/server/routes/admin.go	276	registerOpsRoutes	ops	GET	/dashboard/error-distribution	h.Admin.Ops.GetDashboardErrorDistribution
+backend/internal/server/routes/admin.go	277	registerOpsRoutes	ops	GET	/dashboard/openai-token-stats	h.Admin.Ops.GetDashboardOpenAITokenStats
+backend/internal/server/routes/admin.go	284	registerDashboardRoutes	dashboard	GET	/snapshot-v2	h.Admin.Dashboard.GetSnapshotV2
+backend/internal/server/routes/admin.go	285	registerDashboardRoutes	dashboard	GET	/stats	h.Admin.Dashboard.GetStats
+backend/internal/server/routes/admin.go	286	registerDashboardRoutes	dashboard	GET	/realtime	h.Admin.Dashboard.GetRealtimeMetrics
+backend/internal/server/routes/admin.go	287	registerDashboardRoutes	dashboard	GET	/trend	h.Admin.Dashboard.GetUsageTrend
+backend/internal/server/routes/admin.go	288	registerDashboardRoutes	dashboard	GET	/models	h.Admin.Dashboard.GetModelStats
+backend/internal/server/routes/admin.go	289	registerDashboardRoutes	dashboard	GET	/groups	h.Admin.Dashboard.GetGroupStats
+backend/internal/server/routes/admin.go	290	registerDashboardRoutes	dashboard	GET	/api-keys-trend	h.Admin.Dashboard.GetAPIKeyUsageTrend
+backend/internal/server/routes/admin.go	291	registerDashboardRoutes	dashboard	GET	/users-trend	h.Admin.Dashboard.GetUserUsageTrend
+backend/internal/server/routes/admin.go	292	registerDashboardRoutes	dashboard	GET	/users-ranking	h.Admin.Dashboard.GetUserSpendingRanking
+backend/internal/server/routes/admin.go	293	registerDashboardRoutes	dashboard	POST	/users-usage	h.Admin.Dashboard.GetBatchUsersUsage
+backend/internal/server/routes/admin.go	294	registerDashboardRoutes	dashboard	POST	/api-keys-usage	h.Admin.Dashboard.GetBatchAPIKeysUsage
+backend/internal/server/routes/admin.go	295	registerDashboardRoutes	dashboard	GET	/user-breakdown	h.Admin.Dashboard.GetUserBreakdown
+backend/internal/server/routes/admin.go	296	registerDashboardRoutes	dashboard	GET	/api-key-breakdown	h.Admin.Dashboard.GetAPIKeyBreakdown
+backend/internal/server/routes/admin.go	297	registerDashboardRoutes	dashboard	POST	/aggregation/backfill	h.Admin.Dashboard.BackfillAggregation
+backend/internal/server/routes/admin.go	304	registerUserManagementRoutes	users	GET		h.Admin.User.List
+backend/internal/server/routes/admin.go	305	registerUserManagementRoutes	users	GET	/:id	h.Admin.User.GetByID
+backend/internal/server/routes/admin.go	306	registerUserManagementRoutes	users	POST	/:id/auth-identities	h.Admin.User.BindAuthIdentity
+backend/internal/server/routes/admin.go	307	registerUserManagementRoutes	users	POST		h.Admin.User.Create
+backend/internal/server/routes/admin.go	308	registerUserManagementRoutes	users	PUT	/:id	h.Admin.User.Update
+backend/internal/server/routes/admin.go	309	registerUserManagementRoutes	users	DELETE	/:id	h.Admin.User.Delete
+backend/internal/server/routes/admin.go	310	registerUserManagementRoutes	users	POST	/batch-delete	h.Admin.User.DeleteBatch
+backend/internal/server/routes/admin.go	311	registerUserManagementRoutes	users	POST	/:id/balance	h.Admin.User.UpdateBalance
+backend/internal/server/routes/admin.go	312	registerUserManagementRoutes	users	GET	/:id/api-keys	h.Admin.User.GetUserAPIKeys
+backend/internal/server/routes/admin.go	313	registerUserManagementRoutes	users	GET	/:id/usage	h.Admin.User.GetUserUsage
+backend/internal/server/routes/admin.go	314	registerUserManagementRoutes	users	GET	/:id/balance-history	h.Admin.User.GetBalanceHistory
+backend/internal/server/routes/admin.go	315	registerUserManagementRoutes	users	POST	/:id/replace-group	h.Admin.User.ReplaceGroup
+backend/internal/server/routes/admin.go	316	registerUserManagementRoutes	users	GET	/:id/rpm-status	h.Admin.User.GetUserRPMStatus
+backend/internal/server/routes/admin.go	317	registerUserManagementRoutes	users	POST	/batch-concurrency	h.Admin.User.BatchUpdateConcurrency
+backend/internal/server/routes/admin.go	318	registerUserManagementRoutes	users	POST	/batch-limits	h.Admin.User.BatchUpdateLimits
+backend/internal/server/routes/admin.go	319	registerUserManagementRoutes	users	GET	/:id/platform-quotas	h.Admin.User.GetUserPlatformQuotas
+backend/internal/server/routes/admin.go	320	registerUserManagementRoutes	users	PUT	/:id/platform-quotas	h.Admin.User.UpdateUserPlatformQuotas
+backend/internal/server/routes/admin.go	321	registerUserManagementRoutes	users	POST	/:id/platform-quotas/reset	h.Admin.User.ResetUserPlatformQuotaWindow
+backend/internal/server/routes/admin.go	324	registerUserManagementRoutes	users	GET	/:id/attributes	h.Admin.UserAttribute.GetUserAttributes
+backend/internal/server/routes/admin.go	325	registerUserManagementRoutes	users	PUT	/:id/attributes	h.Admin.UserAttribute.UpdateUserAttributes
+backend/internal/server/routes/admin.go	333	registerGroupRoutes	groups	GET		h.Admin.Group.List
+backend/internal/server/routes/admin.go	334	registerGroupRoutes	groups	GET	/all	h.Admin.Group.GetAll
+backend/internal/server/routes/admin.go	335	registerGroupRoutes	groups	GET	/usage-summary	h.Admin.Group.GetUsageSummary
+backend/internal/server/routes/admin.go	336	registerGroupRoutes	groups	GET	/capacity-summary	h.Admin.Group.GetCapacitySummary
+backend/internal/server/routes/admin.go	337	registerGroupRoutes	groups	GET	/live-capability	h.Admin.Group.GetLiveCapability
+backend/internal/server/routes/admin.go	338	registerGroupRoutes	groups	PUT	/sort-order	h.Admin.Group.UpdateSortOrder
+backend/internal/server/routes/admin.go	339	registerGroupRoutes	groups	GET	/:id/model-allowlist-candidates	h.Admin.Group.GetGroupModelAllowlistCandidates
+backend/internal/server/routes/admin.go	340	registerGroupRoutes	groups	GET	/:id/composite-routes	h.Admin.Group.ListCompositeRoutes
+backend/internal/server/routes/admin.go	341	registerGroupRoutes	groups	POST	/:id/composite-routes	h.Admin.Group.CreateCompositeRoute
+backend/internal/server/routes/admin.go	342	registerGroupRoutes	groups	POST	/:id/composite-routes/preview	h.Admin.Group.PreviewCompositeRoute
+backend/internal/server/routes/admin.go	343	registerGroupRoutes	groups	PUT	/:id/composite-routes/:route_id	h.Admin.Group.UpdateCompositeRoute
+backend/internal/server/routes/admin.go	344	registerGroupRoutes	groups	DELETE	/:id/composite-routes/:route_id	h.Admin.Group.DeleteCompositeRoute
+backend/internal/server/routes/admin.go	345	registerGroupRoutes	groups	GET	/:id	h.Admin.Group.GetByID
+backend/internal/server/routes/admin.go	346	registerGroupRoutes	groups	POST		h.Admin.Group.Create
+backend/internal/server/routes/admin.go	347	registerGroupRoutes	groups	POST	/:id/duplicate	h.Admin.Group.Duplicate
+backend/internal/server/routes/admin.go	348	registerGroupRoutes	groups	PUT	/:id	h.Admin.Group.Update
+backend/internal/server/routes/admin.go	349	registerGroupRoutes	groups	DELETE	/:id	h.Admin.Group.Delete
+backend/internal/server/routes/admin.go	350	registerGroupRoutes	groups	GET	/:id/stats	h.Admin.Group.GetStats
+backend/internal/server/routes/admin.go	351	registerGroupRoutes	groups	GET	/:id/rate-multipliers	h.Admin.Group.GetGroupRateMultipliers
+backend/internal/server/routes/admin.go	352	registerGroupRoutes	groups	PUT	/:id/rate-multipliers	h.Admin.Group.BatchSetGroupRateMultipliers
+backend/internal/server/routes/admin.go	353	registerGroupRoutes	groups	DELETE	/:id/rate-multipliers	h.Admin.Group.ClearGroupRateMultipliers
+backend/internal/server/routes/admin.go	354	registerGroupRoutes	groups	PUT	/:id/rpm-overrides	h.Admin.Group.BatchSetGroupRPMOverrides
+backend/internal/server/routes/admin.go	355	registerGroupRoutes	groups	DELETE	/:id/rpm-overrides	h.Admin.Group.ClearGroupRPMOverrides
+backend/internal/server/routes/admin.go	356	registerGroupRoutes	groups	GET	/:id/api-keys	h.Admin.Group.GetGroupAPIKeys
+backend/internal/server/routes/admin.go	363	registerAccountRoutes	accounts	GET		"h.Vendor.Dispatch(""accounts"", h.Admin.Account.List, h.VendorAccount.List"
+backend/internal/server/routes/admin.go	364	registerAccountRoutes	accounts	GET	/defaults	h.Admin.Account.CreationDefaults
+backend/internal/server/routes/admin.go	365	registerAccountRoutes	accounts	GET	/upstream-billing-rates	h.Admin.Account.GetUpstreamBillingRates
+backend/internal/server/routes/admin.go	366	registerAccountRoutes	accounts	GET	/upstream-billing-probe/settings	h.Admin.Account.GetUpstreamBillingProbeSettings
+backend/internal/server/routes/admin.go	367	registerAccountRoutes	accounts	PUT	/upstream-billing-probe/settings	h.Admin.Account.UpdateUpstreamBillingProbeSettings
+backend/internal/server/routes/admin.go	368	registerAccountRoutes	accounts	POST	/upstream-billing-probe/batch	h.Admin.Account.ProbeUpstreamBillingBatch
+backend/internal/server/routes/admin.go	369	registerAccountRoutes	accounts	GET	/ollama-cloud-usage/settings	h.Admin.Account.GetOllamaCloudUsageSettings
+backend/internal/server/routes/admin.go	370	registerAccountRoutes	accounts	PUT	/ollama-cloud-usage/settings	h.Admin.Account.UpdateOllamaCloudUsageSettings
+backend/internal/server/routes/admin.go	371	registerAccountRoutes	accounts	GET	/opencode-go-usage/settings	h.Admin.Account.GetOpenCodeGoUsageSettings
+backend/internal/server/routes/admin.go	372	registerAccountRoutes	accounts	PUT	/opencode-go-usage/settings	h.Admin.Account.UpdateOpenCodeGoUsageSettings
+backend/internal/server/routes/admin.go	373	registerAccountRoutes	accounts	POST	/codex-diagnostic-fingerprint/refresh	h.Admin.Account.RefreshDiagnosticFingerprint
+backend/internal/server/routes/admin.go	374	registerAccountRoutes	accounts	GET	/:id	"h.Vendor.Dispatch(""accounts"", h.Admin.Account.GetByID, h.VendorAccount.Get"
+backend/internal/server/routes/admin.go	375	registerAccountRoutes	accounts	POST	/:id/telemetry/import	h.Admin.Account.ImportAccountTelemetry
+backend/internal/server/routes/admin.go	376	registerAccountRoutes	accounts	POST	/:id/codex-diagnostic	h.Admin.Account.StartCodexDiagnosticRun
+backend/internal/server/routes/admin.go	377	registerAccountRoutes	accounts	GET	/:id/codex-diagnostic	h.Admin.Account.GetCodexDiagnosticPlan
+backend/internal/server/routes/admin.go	378	registerAccountRoutes	accounts	PUT	/:id/codex-diagnostic	h.Admin.Account.SaveCodexDiagnosticPlan
+backend/internal/server/routes/admin.go	379	registerAccountRoutes	accounts	GET	/:id/codex-diagnostic/history	h.Admin.Account.ListCodexDiagnosticRuns
+backend/internal/server/routes/admin.go	380	registerAccountRoutes	accounts	POST	/:id/codex-diagnostic/:run_id/cancel	h.Admin.Account.CancelCodexDiagnosticRun
+backend/internal/server/routes/admin.go	381	registerAccountRoutes	accounts	GET	/:id/claude/reset-credits	h.Admin.Account.ClaudeResetCredits
+backend/internal/server/routes/admin.go	383	registerAccountRoutes	accounts	POST	/:id/claude/reset-credits/redeem	h.Admin.Account.RedeemClaudeResetCredit
+backend/internal/server/routes/admin.go	384	registerAccountRoutes	accounts	POST		"h.Vendor.Dispatch(""accounts"", h.Admin.Account.Create, h.VendorAccount.Create"
+backend/internal/server/routes/admin.go	385	registerAccountRoutes	accounts	POST	/:id/duplicate	h.Admin.Account.Duplicate
+backend/internal/server/routes/admin.go	386	registerAccountRoutes	accounts	POST	/check-mixed-channel	h.Admin.Account.CheckMixedChannel
+backend/internal/server/routes/admin.go	387	registerAccountRoutes	accounts	POST	/import/codex-session	h.Admin.Account.ImportCodexSession
+backend/internal/server/routes/admin.go	388	registerAccountRoutes	accounts	POST	/sync/crs	h.Admin.Account.SyncFromCRS
+backend/internal/server/routes/admin.go	389	registerAccountRoutes	accounts	POST	/sync/crs/preview	h.Admin.Account.PreviewFromCRS
+backend/internal/server/routes/admin.go	390	registerAccountRoutes	accounts	PUT	/:id	"h.Vendor.Dispatch(""accounts"", h.Admin.Account.Update, h.VendorAccount.Update"
+backend/internal/server/routes/admin.go	391	registerAccountRoutes	accounts	GET	/:id/grok-media-eligibility	h.Admin.Account.GetGrokMediaEligibility
+backend/internal/server/routes/admin.go	392	registerAccountRoutes	accounts	PUT	/:id/grok-media-eligibility	h.Admin.Account.UpdateGrokMediaEligibility
+backend/internal/server/routes/admin.go	393	registerAccountRoutes	accounts	PUT	/:id/upstream-billing-probe	h.Admin.Account.SetUpstreamBillingProbeEnabled
+backend/internal/server/routes/admin.go	394	registerAccountRoutes	accounts	POST	/:id/upstream-billing-probe	h.Admin.Account.ProbeUpstreamBilling
+backend/internal/server/routes/admin.go	395	registerAccountRoutes	accounts	GET	/:id/ollama-cloud-usage	h.Admin.Account.GetOllamaCloudUsage
+backend/internal/server/routes/admin.go	396	registerAccountRoutes	accounts	PUT	/:id/ollama-cloud-usage/session	h.Admin.Account.SaveOllamaCloudUsageSession
+backend/internal/server/routes/admin.go	397	registerAccountRoutes	accounts	DELETE	/:id/ollama-cloud-usage/session	h.Admin.Account.DeleteOllamaCloudUsageSession
+backend/internal/server/routes/admin.go	398	registerAccountRoutes	accounts	PUT	/:id/ollama-cloud-usage/auto-refresh	h.Admin.Account.SetOllamaCloudUsageAutoRefresh
+backend/internal/server/routes/admin.go	399	registerAccountRoutes	accounts	POST	/:id/ollama-cloud-usage/refresh	h.Admin.Account.RefreshOllamaCloudUsage
+backend/internal/server/routes/admin.go	400	registerAccountRoutes	accounts	GET	/:id/opencode-go-usage	h.Admin.Account.GetOpenCodeGoUsage
+backend/internal/server/routes/admin.go	401	registerAccountRoutes	accounts	PUT	/:id/opencode-go-usage/auto-refresh	h.Admin.Account.SetOpenCodeGoUsageAutoRefresh
+backend/internal/server/routes/admin.go	402	registerAccountRoutes	accounts	POST	/:id/opencode-go-usage/refresh	h.Admin.Account.RefreshOpenCodeGoUsage
+backend/internal/server/routes/admin.go	403	registerAccountRoutes	accounts	DELETE	/:id	"h.Vendor.Dispatch(""accounts"", h.Admin.Account.Delete, h.VendorAccount.Delete"
+backend/internal/server/routes/admin.go	404	registerAccountRoutes	accounts	POST	/:id/test	h.Admin.Account.Test
+backend/internal/server/routes/admin.go	405	registerAccountRoutes	accounts	POST	/:id/recover-state	h.Admin.Account.RecoverState
+backend/internal/server/routes/admin.go	406	registerAccountRoutes	accounts	POST	/:id/refresh	"h.Vendor.Dispatch(""accounts"", h.Admin.Account.Refresh, h.VendorAccount.Refresh"
+backend/internal/server/routes/admin.go	407	registerAccountRoutes	accounts	POST	/:id/apply-oauth-credentials	h.Admin.Account.ApplyOAuthCredentials
+backend/internal/server/routes/admin.go	408	registerAccountRoutes	accounts	POST	/:id/set-privacy	h.Admin.Account.SetPrivacy
+backend/internal/server/routes/admin.go	409	registerAccountRoutes	accounts	POST	/:id/refresh-tier	h.Admin.Account.RefreshTier
+backend/internal/server/routes/admin.go	410	registerAccountRoutes	accounts	GET	/:id/stats	h.Admin.Account.GetStats
+backend/internal/server/routes/admin.go	411	registerAccountRoutes	accounts	POST	/:id/clear-error	h.Admin.Account.ClearError
+backend/internal/server/routes/admin.go	412	registerAccountRoutes	accounts	POST	/:id/revert-proxy-fallback	h.Admin.Account.RevertProxyFallback
+backend/internal/server/routes/admin.go	413	registerAccountRoutes	accounts	GET	/:id/usage	"h.Vendor.Dispatch(""accounts"", h.Admin.Account.GetUsage, h.VendorUsage.AccountUsage"
+backend/internal/server/routes/admin.go	414	registerAccountRoutes	accounts	GET	/:id/today-stats	h.Admin.Account.GetTodayStats
+backend/internal/server/routes/admin.go	415	registerAccountRoutes	accounts	POST	/usage/batch	h.Admin.Account.GetBatchUsage
+backend/internal/server/routes/admin.go	416	registerAccountRoutes	accounts	POST	/today-stats/batch	h.Admin.Account.GetBatchTodayStats
+backend/internal/server/routes/admin.go	417	registerAccountRoutes	accounts	POST	/:id/clear-rate-limit	h.Admin.Account.ClearRateLimit
+backend/internal/server/routes/admin.go	418	registerAccountRoutes	accounts	POST	/:id/reset-quota	h.Admin.Account.ResetQuota
+backend/internal/server/routes/admin.go	419	registerAccountRoutes	accounts	GET	/:id/temp-unschedulable	h.Admin.Account.GetTempUnschedulable
+backend/internal/server/routes/admin.go	420	registerAccountRoutes	accounts	DELETE	/:id/temp-unschedulable	h.Admin.Account.ClearTempUnschedulable
+backend/internal/server/routes/admin.go	421	registerAccountRoutes	accounts	POST	/:id/schedulable	"h.Vendor.Dispatch(""accounts"", h.Admin.Account.SetSchedulable, h.Admin.Account.SetSchedulable"
+backend/internal/server/routes/admin.go	422	registerAccountRoutes	accounts	POST	/models/sync-upstream-preview	h.Admin.Account.SyncUpstreamModelsPreview
+backend/internal/server/routes/admin.go	423	registerAccountRoutes	accounts	GET	/:id/models	h.Admin.Account.GetAvailableModels
+backend/internal/server/routes/admin.go	424	registerAccountRoutes	accounts	POST	/:id/models/sync-upstream	h.Admin.Account.SyncUpstreamModels
+backend/internal/server/routes/admin.go	425	registerAccountRoutes	accounts	POST	/batch	h.Admin.Account.BatchCreate
+backend/internal/server/routes/admin.go	427	registerAccountRoutes	accounts	GET	/data	gin.HandlerFunc(stepUpAuth), h.Admin.Account.ExportData
+backend/internal/server/routes/admin.go	428	registerAccountRoutes	accounts	POST	/data	h.Admin.Account.ImportData
+backend/internal/server/routes/admin.go	429	registerAccountRoutes	accounts	POST	/batch-update-credentials	h.Admin.Account.BatchUpdateCredentials
+backend/internal/server/routes/admin.go	430	registerAccountRoutes	accounts	POST	/batch-refresh-tier	h.Admin.Account.BatchRefreshTier
+backend/internal/server/routes/admin.go	431	registerAccountRoutes	accounts	POST	/bulk-update	h.Vendor.OptionalAdminAccountScope, h.Admin.Account.BulkUpdate
+backend/internal/server/routes/admin.go	432	registerAccountRoutes	accounts	POST	/batch-delete	h.Admin.Account.BatchDelete
+backend/internal/server/routes/admin.go	433	registerAccountRoutes	accounts	POST	/batch-clear-error	h.Admin.Account.BatchClearError
+backend/internal/server/routes/admin.go	434	registerAccountRoutes	accounts	POST	/batch-refresh	h.Admin.Account.BatchRefresh
+backend/internal/server/routes/admin.go	437	registerAccountRoutes	accounts	GET	/antigravity/default-model-mapping	h.Admin.Account.GetAntigravityDefaultModelMapping
+backend/internal/server/routes/admin.go	440	registerAccountRoutes	accounts	POST	/:id/shadow	h.Admin.OpenAIOAuth.CreateShadow
+backend/internal/server/routes/admin.go	443	registerAccountRoutes	accounts	POST	/generate-auth-url	h.Admin.OAuth.GenerateAuthURL
+backend/internal/server/routes/admin.go	444	registerAccountRoutes	accounts	POST	/generate-setup-token-url	h.Admin.OAuth.GenerateSetupTokenURL
+backend/internal/server/routes/admin.go	445	registerAccountRoutes	accounts	POST	/exchange-code	h.Admin.OAuth.ExchangeCode
+backend/internal/server/routes/admin.go	446	registerAccountRoutes	accounts	POST	/exchange-setup-token-code	h.Admin.OAuth.ExchangeSetupTokenCode
+backend/internal/server/routes/admin.go	447	registerAccountRoutes	accounts	POST	/cookie-auth	h.Admin.OAuth.CookieAuth
+backend/internal/server/routes/admin.go	448	registerAccountRoutes	accounts	POST	/setup-token-cookie-auth	h.Admin.OAuth.SetupTokenCookieAuth
+backend/internal/server/routes/admin.go	455	registerAnnouncementRoutes	announcements	GET		h.Admin.Announcement.List
+backend/internal/server/routes/admin.go	456	registerAnnouncementRoutes	announcements	POST		h.Admin.Announcement.Create
+backend/internal/server/routes/admin.go	457	registerAnnouncementRoutes	announcements	GET	/:id	h.Admin.Announcement.GetByID
+backend/internal/server/routes/admin.go	458	registerAnnouncementRoutes	announcements	PUT	/:id	h.Admin.Announcement.Update
+backend/internal/server/routes/admin.go	459	registerAnnouncementRoutes	announcements	DELETE	/:id	h.Admin.Announcement.Delete
+backend/internal/server/routes/admin.go	460	registerAnnouncementRoutes	announcements	GET	/:id/read-status	h.Admin.Announcement.ListReadStatus
+backend/internal/server/routes/admin.go	467	registerOpenAIOAuthRoutes	openai	POST	/generate-auth-url	h.Admin.OpenAIOAuth.GenerateAuthURL
+backend/internal/server/routes/admin.go	468	registerOpenAIOAuthRoutes	openai	GET	/accounts/:id/excel-authorization	h.Admin.OpenAIOAuth.GetExcelAuthorization
+backend/internal/server/routes/admin.go	469	registerOpenAIOAuthRoutes	openai	POST	/accounts/:id/excel-authorization	h.Admin.OpenAIOAuth.ImportExcelAuthorization
+backend/internal/server/routes/admin.go	470	registerOpenAIOAuthRoutes	openai	DELETE	/accounts/:id/excel-authorization	h.Admin.OpenAIOAuth.DeleteExcelAuthorization
+backend/internal/server/routes/admin.go	471	registerOpenAIOAuthRoutes	openai	POST	/exchange-code	h.Admin.OpenAIOAuth.ExchangeCode
+backend/internal/server/routes/admin.go	472	registerOpenAIOAuthRoutes	openai	POST	/refresh-token	h.Admin.OpenAIOAuth.RefreshToken
+backend/internal/server/routes/admin.go	473	registerOpenAIOAuthRoutes	openai	POST	/accounts/:id/refresh	h.Admin.OpenAIOAuth.RefreshAccountToken
+backend/internal/server/routes/admin.go	474	registerOpenAIOAuthRoutes	openai	POST	/create-from-oauth	h.Admin.OpenAIOAuth.CreateAccountFromOAuth
+backend/internal/server/routes/admin.go	475	registerOpenAIOAuthRoutes	openai	POST	/create-from-codex-pat	h.Admin.OpenAIOAuth.CreateAccountFromCodexPAT
+backend/internal/server/routes/admin.go	476	registerOpenAIOAuthRoutes	openai	GET	/accounts/:id/quota	h.Admin.OpenAIOAuth.QueryQuota
+backend/internal/server/routes/admin.go	477	registerOpenAIOAuthRoutes	openai	POST	/accounts/:id/quota/refresh	h.Admin.OpenAIOAuth.RefreshQuota
+backend/internal/server/routes/admin.go	478	registerOpenAIOAuthRoutes	openai	POST	/accounts/:id/reset-quota	h.Admin.OpenAIOAuth.ResetQuota
+backend/internal/server/routes/admin.go	479	registerOpenAIOAuthRoutes	openai	POST	/accounts/:id/referrals/refresh	h.Admin.OpenAIOAuth.RefreshReferrals
+backend/internal/server/routes/admin.go	480	registerOpenAIOAuthRoutes	openai	POST	/accounts/:id/referrals/invite	h.Admin.OpenAIOAuth.SendReferralInvite
+backend/internal/server/routes/admin.go	487	registerGeminiOAuthRoutes	gemini	POST	/oauth/auth-url	h.Admin.GeminiOAuth.GenerateAuthURL
+backend/internal/server/routes/admin.go	488	registerGeminiOAuthRoutes	gemini	POST	/oauth/exchange-code	h.Admin.GeminiOAuth.ExchangeCode
+backend/internal/server/routes/admin.go	489	registerGeminiOAuthRoutes	gemini	GET	/oauth/capabilities	h.Admin.GeminiOAuth.GetCapabilities
+backend/internal/server/routes/admin.go	496	registerAntigravityOAuthRoutes	antigravity	POST	/oauth/auth-url	h.Admin.AntigravityOAuth.GenerateAuthURL
+backend/internal/server/routes/admin.go	497	registerAntigravityOAuthRoutes	antigravity	POST	/oauth/exchange-code	h.Admin.AntigravityOAuth.ExchangeCode
+backend/internal/server/routes/admin.go	498	registerAntigravityOAuthRoutes	antigravity	POST	/oauth/refresh-token	h.Admin.AntigravityOAuth.RefreshToken
+backend/internal/server/routes/admin.go	505	registerGrokOAuthRoutes	grok	GET	/oauth/capabilities	h.Admin.GrokOAuth.GetCapabilities
+backend/internal/server/routes/admin.go	506	registerGrokOAuthRoutes	grok	POST	/oauth/auth-url	h.Admin.GrokOAuth.GenerateAuthURL
+backend/internal/server/routes/admin.go	507	registerGrokOAuthRoutes	grok	POST	/oauth/exchange-code	h.Admin.GrokOAuth.ExchangeCode
+backend/internal/server/routes/admin.go	508	registerGrokOAuthRoutes	grok	POST	/oauth/refresh-token	h.Admin.GrokOAuth.RefreshToken
+backend/internal/server/routes/admin.go	509	registerGrokOAuthRoutes	grok	POST	/oauth/sso-token	h.Admin.GrokOAuth.ValidateSSOToken
+backend/internal/server/routes/admin.go	510	registerGrokOAuthRoutes	grok	POST	/oauth/password	h.Admin.GrokOAuth.AuthorizePassword
+backend/internal/server/routes/admin.go	511	registerGrokOAuthRoutes	grok	POST	/oauth/create-from-oauth	h.Admin.GrokOAuth.CreateAccountFromOAuth
+backend/internal/server/routes/admin.go	512	registerGrokOAuthRoutes	grok	POST	/sso-to-oauth	h.Admin.GrokOAuth.CreateAccountsFromSSO
+backend/internal/server/routes/admin.go	513	registerGrokOAuthRoutes	grok	POST	/oauth/reconcile	h.Admin.GrokOAuth.ReconcileOAuthAccounts
+backend/internal/server/routes/admin.go	514	registerGrokOAuthRoutes	grok	POST	/accounts/:id/refresh	h.Admin.GrokOAuth.RefreshAccountToken
+backend/internal/server/routes/admin.go	515	registerGrokOAuthRoutes	grok	GET	/accounts/:id/quota	h.Admin.GrokOAuth.QueryQuota
+backend/internal/server/routes/admin.go	516	registerGrokOAuthRoutes	grok	POST	/accounts/:id/reset-quota	h.Admin.GrokOAuth.ResetQuota
+backend/internal/server/routes/admin.go	517	registerGrokOAuthRoutes	grok	GET	/runtime-sanity	h.Admin.GrokOAuth.RuntimeSanity
+backend/internal/server/routes/admin.go	526	registerCNProviderRoutes	cn	GET	/accounts/:id/quota	h.Admin.CNProvider.QueryQuota
+backend/internal/server/routes/admin.go	528	registerCNProviderRoutes	cn	GET	/accounts/:id/balance	h.Admin.CNProvider.QueryBalance
+backend/internal/server/routes/admin.go	535	registerProxyRoutes	proxies	GET		"h.Vendor.Dispatch(""proxies"", h.Admin.Proxy.List, h.VendorProxy.List"
+backend/internal/server/routes/admin.go	536	registerProxyRoutes	proxies	GET	/all	h.Admin.Proxy.GetAll
+backend/internal/server/routes/admin.go	538	registerProxyRoutes	proxies	GET	/data	gin.HandlerFunc(stepUpAuth), h.Admin.Proxy.ExportData
+backend/internal/server/routes/admin.go	539	registerProxyRoutes	proxies	POST	/data	h.Admin.Proxy.ImportData
+backend/internal/server/routes/admin.go	540	registerProxyRoutes	proxies	GET	/:id	"h.Vendor.Dispatch(""proxies"", h.Admin.Proxy.GetByID, h.VendorProxy.Get"
+backend/internal/server/routes/admin.go	541	registerProxyRoutes	proxies	POST		"h.Vendor.Dispatch(""proxies"", h.Admin.Proxy.Create, h.VendorProxy.Create"
+backend/internal/server/routes/admin.go	542	registerProxyRoutes	proxies	PUT	/:id	"h.Vendor.Dispatch(""proxies"", h.Admin.Proxy.Update, h.VendorProxy.Update"
+backend/internal/server/routes/admin.go	543	registerProxyRoutes	proxies	DELETE	/:id	"h.Vendor.Dispatch(""proxies"", h.Admin.Proxy.Delete, h.VendorProxy.Delete"
+backend/internal/server/routes/admin.go	544	registerProxyRoutes	proxies	POST	/:id/test	"h.Vendor.Dispatch(""proxies"", h.Admin.Proxy.Test, h.VendorProxy.Test"
+backend/internal/server/routes/admin.go	545	registerProxyRoutes	proxies	POST	/:id/quality-check	"h.Vendor.Dispatch(""proxies"", h.Admin.Proxy.CheckQuality, h.VendorProxy.QualityCheck"
+backend/internal/server/routes/admin.go	546	registerProxyRoutes	proxies	GET	/:id/stats	h.Admin.Proxy.GetStats
+backend/internal/server/routes/admin.go	547	registerProxyRoutes	proxies	GET	/:id/accounts	h.Admin.Proxy.GetProxyAccounts
+backend/internal/server/routes/admin.go	548	registerProxyRoutes	proxies	POST	/batch-delete	"h.Vendor.Dispatch(""proxies"", h.Admin.Proxy.BatchDelete, h.VendorProxy.BatchDelete"
+backend/internal/server/routes/admin.go	549	registerProxyRoutes	proxies	POST	/batch	h.Admin.Proxy.BatchCreate
+backend/internal/server/routes/admin.go	557	registerSettingsRoutes	adminSettings	GET		h.Admin.Setting.GetSettings
+backend/internal/server/routes/admin.go	558	registerSettingsRoutes	adminSettings	PUT		h.Admin.Setting.UpdateSettings
+backend/internal/server/routes/admin.go	559	registerSettingsRoutes	adminSettings	GET	/excel-bps-defaults	h.Admin.Setting.GetExcelBPSDefaults
+backend/internal/server/routes/admin.go	560	registerSettingsRoutes	adminSettings	PUT	/excel-bps-defaults	h.Admin.Setting.UpdateExcelBPSDefaults
+backend/internal/server/routes/admin.go	561	registerSettingsRoutes	adminSettings	POST	/test-smtp	h.Admin.Setting.TestSMTPConnection
+backend/internal/server/routes/admin.go	562	registerSettingsRoutes	adminSettings	POST	/send-test-email	h.Admin.Setting.SendTestEmail
+backend/internal/server/routes/admin.go	563	registerSettingsRoutes	adminSettings	GET	/email-templates	h.Admin.Setting.ListEmailTemplates
+backend/internal/server/routes/admin.go	564	registerSettingsRoutes	adminSettings	POST	/email-template-preview	h.Admin.Setting.PreviewEmailTemplate
+backend/internal/server/routes/admin.go	565	registerSettingsRoutes	adminSettings	GET	/email-templates/:event/:locale	h.Admin.Setting.GetEmailTemplate
+backend/internal/server/routes/admin.go	566	registerSettingsRoutes	adminSettings	PUT	/email-templates/:event/:locale	h.Admin.Setting.UpdateEmailTemplate
+backend/internal/server/routes/admin.go	567	registerSettingsRoutes	adminSettings	POST	/email-templates/:event/:locale/restore-official	h.Admin.Setting.RestoreOfficialEmailTemplate
+backend/internal/server/routes/admin.go	569	registerSettingsRoutes	adminSettings	GET	/admin-api-key	h.Admin.Setting.GetAdminAPIKey
+backend/internal/server/routes/admin.go	570	registerSettingsRoutes	adminSettings	POST	/admin-api-key/regenerate	gin.HandlerFunc(stepUpAuth), h.Admin.Setting.RegenerateAdminAPIKey
+backend/internal/server/routes/admin.go	571	registerSettingsRoutes	adminSettings	DELETE	/admin-api-key	gin.HandlerFunc(stepUpAuth), h.Admin.Setting.DeleteAdminAPIKey
+backend/internal/server/routes/admin.go	573	registerSettingsRoutes	adminSettings	GET	/overload-cooldown	h.Admin.Setting.GetOverloadCooldownSettings
+backend/internal/server/routes/admin.go	574	registerSettingsRoutes	adminSettings	PUT	/overload-cooldown	h.Admin.Setting.UpdateOverloadCooldownSettings
+backend/internal/server/routes/admin.go	576	registerSettingsRoutes	adminSettings	GET	/rate-limit-429-cooldown	h.Admin.Setting.GetRateLimit429CooldownSettings
+backend/internal/server/routes/admin.go	577	registerSettingsRoutes	adminSettings	PUT	/rate-limit-429-cooldown	h.Admin.Setting.UpdateRateLimit429CooldownSettings
+backend/internal/server/routes/admin.go	579	registerSettingsRoutes	adminSettings	GET	/openai-images-oauth-unavailable-cooldown	h.Admin.Setting.GetOpenAIImagesOAuthUnavailableCooldownSettings
+backend/internal/server/routes/admin.go	580	registerSettingsRoutes	adminSettings	PUT	/openai-images-oauth-unavailable-cooldown	h.Admin.Setting.UpdateOpenAIImagesOAuthUnavailableCooldownSettings
+backend/internal/server/routes/admin.go	582	registerSettingsRoutes	adminSettings	GET	/panel-rate-limit	h.Admin.Setting.GetPanelRateLimitSettings
+backend/internal/server/routes/admin.go	583	registerSettingsRoutes	adminSettings	PUT	/panel-rate-limit	h.Admin.Setting.UpdatePanelRateLimitSettings
+backend/internal/server/routes/admin.go	585	registerSettingsRoutes	adminSettings	GET	/stream-timeout	h.Admin.Setting.GetStreamTimeoutSettings
+backend/internal/server/routes/admin.go	586	registerSettingsRoutes	adminSettings	PUT	/stream-timeout	h.Admin.Setting.UpdateStreamTimeoutSettings
+backend/internal/server/routes/admin.go	588	registerSettingsRoutes	adminSettings	GET	/rectifier	h.Admin.Setting.GetRectifierSettings
+backend/internal/server/routes/admin.go	589	registerSettingsRoutes	adminSettings	PUT	/rectifier	h.Admin.Setting.UpdateRectifierSettings
+backend/internal/server/routes/admin.go	591	registerSettingsRoutes	adminSettings	GET	/beta-policy	h.Admin.Setting.GetBetaPolicySettings
+backend/internal/server/routes/admin.go	592	registerSettingsRoutes	adminSettings	PUT	/beta-policy	h.Admin.Setting.UpdateBetaPolicySettings
+backend/internal/server/routes/admin.go	594	registerSettingsRoutes	adminSettings	GET	/web-search-emulation	h.Admin.Setting.GetWebSearchEmulationConfig
+backend/internal/server/routes/admin.go	595	registerSettingsRoutes	adminSettings	PUT	/web-search-emulation	h.Admin.Setting.UpdateWebSearchEmulationConfig
+backend/internal/server/routes/admin.go	596	registerSettingsRoutes	adminSettings	POST	/web-search-emulation/test	h.Admin.Setting.TestWebSearchEmulation
+backend/internal/server/routes/admin.go	597	registerSettingsRoutes	adminSettings	POST	/web-search-emulation/reset-usage	h.Admin.Setting.ResetWebSearchUsage
+backend/internal/server/routes/admin.go	605	registerBackupRoutes	backup	GET	/s3-config	h.Admin.Backup.GetS3Config
+backend/internal/server/routes/admin.go	607	registerBackupRoutes	backup	PUT	/s3-config	gin.HandlerFunc(stepUpAuth), h.Admin.Backup.UpdateS3Config
+backend/internal/server/routes/admin.go	608	registerBackupRoutes	backup	POST	/s3-config/test	h.Admin.Backup.TestS3Connection
+backend/internal/server/routes/admin.go	611	registerBackupRoutes	backup	GET	/image-storage	h.Admin.Backup.GetImageStorageConfig
+backend/internal/server/routes/admin.go	613	registerBackupRoutes	backup	PUT	/image-storage	gin.HandlerFunc(stepUpAuth), h.Admin.Backup.UpdateImageStorageConfig
+backend/internal/server/routes/admin.go	614	registerBackupRoutes	backup	POST	/image-storage/test	h.Admin.Backup.TestImageStorageConnection
+backend/internal/server/routes/admin.go	617	registerBackupRoutes	backup	GET	/schedule	h.Admin.Backup.GetSchedule
+backend/internal/server/routes/admin.go	618	registerBackupRoutes	backup	PUT	/schedule	h.Admin.Backup.UpdateSchedule
+backend/internal/server/routes/admin.go	621	registerBackupRoutes	backup	POST		gin.HandlerFunc(stepUpAuth), h.Admin.Backup.CreateBackup
+backend/internal/server/routes/admin.go	622	registerBackupRoutes	backup	GET		h.Admin.Backup.ListBackups
+backend/internal/server/routes/admin.go	623	registerBackupRoutes	backup	GET	/:id	h.Admin.Backup.GetBackup
+backend/internal/server/routes/admin.go	624	registerBackupRoutes	backup	DELETE	/:id	h.Admin.Backup.DeleteBackup
+backend/internal/server/routes/admin.go	626	registerBackupRoutes	backup	GET	/:id/download-url	gin.HandlerFunc(stepUpAuth), h.Admin.Backup.GetDownloadURL
+backend/internal/server/routes/admin.go	629	registerBackupRoutes	backup	POST	/:id/restore	gin.HandlerFunc(stepUpAuth), h.Admin.Backup.RestoreBackup
+backend/internal/server/routes/admin.go	636	registerSystemRoutes	system	GET	/version	h.Admin.System.GetVersion
+backend/internal/server/routes/admin.go	637	registerSystemRoutes	system	GET	/check-updates	h.Admin.System.CheckUpdates
+backend/internal/server/routes/admin.go	638	registerSystemRoutes	system	GET	/rollback-versions	h.Admin.System.GetRollbackVersions
+backend/internal/server/routes/admin.go	639	registerSystemRoutes	system	POST	/update	h.Admin.System.PerformUpdate
+backend/internal/server/routes/admin.go	640	registerSystemRoutes	system	POST	/rollback	h.Admin.System.Rollback
+backend/internal/server/routes/admin.go	641	registerSystemRoutes	system	POST	/restart	h.Admin.System.RestartService
+backend/internal/server/routes/admin.go	648	registerSubscriptionRoutes	subscriptions	GET		h.Admin.Subscription.List
+backend/internal/server/routes/admin.go	649	registerSubscriptionRoutes	subscriptions	GET	/:id	h.Admin.Subscription.GetByID
+backend/internal/server/routes/admin.go	650	registerSubscriptionRoutes	subscriptions	GET	/:id/progress	h.Admin.Subscription.GetProgress
+backend/internal/server/routes/admin.go	651	registerSubscriptionRoutes	subscriptions	POST	/assign	h.Admin.Subscription.Assign
+backend/internal/server/routes/admin.go	652	registerSubscriptionRoutes	subscriptions	POST	/bulk-assign	h.Admin.Subscription.BulkAssign
+backend/internal/server/routes/admin.go	653	registerSubscriptionRoutes	subscriptions	POST	/bulk-action	h.Admin.Subscription.BulkAction
+backend/internal/server/routes/admin.go	654	registerSubscriptionRoutes	subscriptions	POST	/:id/extend	h.Admin.Subscription.Extend
+backend/internal/server/routes/admin.go	655	registerSubscriptionRoutes	subscriptions	POST	/:id/reset-quota	h.Admin.Subscription.ResetQuota
+backend/internal/server/routes/admin.go	656	registerSubscriptionRoutes	subscriptions	POST	/:id/revoke	h.Admin.Subscription.Revoke
+backend/internal/server/routes/admin.go	657	registerSubscriptionRoutes	subscriptions	POST	/:id/restore	h.Admin.Subscription.Restore
+backend/internal/server/routes/admin.go	658	registerSubscriptionRoutes	subscriptions	DELETE	/:id	h.Admin.Subscription.Revoke
+backend/internal/server/routes/admin.go	662	registerSubscriptionRoutes	admin	GET	/groups/:id/subscriptions	h.Admin.Subscription.ListByGroup
+backend/internal/server/routes/admin.go	665	registerSubscriptionRoutes	admin	GET	/users/:id/subscriptions	h.Admin.Subscription.ListByUser
+backend/internal/server/routes/admin.go	671	registerUsageRoutes	usage	GET		h.Admin.Usage.List
+backend/internal/server/routes/admin.go	672	registerUsageRoutes	usage	GET	/export	h.Admin.Usage.Export
+backend/internal/server/routes/admin.go	673	registerUsageRoutes	usage	GET	/stats	h.Admin.Usage.Stats
+backend/internal/server/routes/admin.go	674	registerUsageRoutes	usage	GET	/search-users	h.Admin.Usage.SearchUsers
+backend/internal/server/routes/admin.go	675	registerUsageRoutes	usage	GET	/search-api-keys	h.Admin.Usage.SearchAPIKeys
+backend/internal/server/routes/admin.go	676	registerUsageRoutes	usage	GET	/cleanup-tasks	h.Admin.Usage.ListCleanupTasks
+backend/internal/server/routes/admin.go	677	registerUsageRoutes	usage	POST	/cleanup-tasks	h.Admin.Usage.CreateCleanupTask
+backend/internal/server/routes/admin.go	678	registerUsageRoutes	usage	POST	/cleanup-tasks/:id/cancel	h.Admin.Usage.CancelCleanupTask
+backend/internal/server/routes/admin.go	685	registerUserAttributeRoutes	attrs	GET		h.Admin.UserAttribute.ListDefinitions
+backend/internal/server/routes/admin.go	686	registerUserAttributeRoutes	attrs	POST		h.Admin.UserAttribute.CreateDefinition
+backend/internal/server/routes/admin.go	687	registerUserAttributeRoutes	attrs	POST	/batch	h.Admin.UserAttribute.GetBatchUserAttributes
+backend/internal/server/routes/admin.go	688	registerUserAttributeRoutes	attrs	PUT	/reorder	h.Admin.UserAttribute.ReorderDefinitions
+backend/internal/server/routes/admin.go	689	registerUserAttributeRoutes	attrs	PUT	/:id	h.Admin.UserAttribute.UpdateDefinition
+backend/internal/server/routes/admin.go	690	registerUserAttributeRoutes	attrs	DELETE	/:id	h.Admin.UserAttribute.DeleteDefinition
+backend/internal/server/routes/admin.go	697	registerScheduledTestRoutes	plans	POST		h.Admin.ScheduledTest.Create
+backend/internal/server/routes/admin.go	698	registerScheduledTestRoutes	plans	PUT	/:id	h.Admin.ScheduledTest.Update
+backend/internal/server/routes/admin.go	699	registerScheduledTestRoutes	plans	DELETE	/:id	h.Admin.ScheduledTest.Delete
+backend/internal/server/routes/admin.go	700	registerScheduledTestRoutes	plans	GET	/:id/results	h.Admin.ScheduledTest.ListResults
+backend/internal/server/routes/admin.go	703	registerScheduledTestRoutes	admin	GET	/accounts/:id/scheduled-test-plans	h.Admin.ScheduledTest.ListByAccount
+backend/internal/server/routes/admin.go	709	registerErrorPassthroughRoutes	rules	GET		h.Admin.ErrorPassthrough.List
+backend/internal/server/routes/admin.go	710	registerErrorPassthroughRoutes	rules	GET	/:id	h.Admin.ErrorPassthrough.GetByID
+backend/internal/server/routes/admin.go	711	registerErrorPassthroughRoutes	rules	POST		h.Admin.ErrorPassthrough.Create
+backend/internal/server/routes/admin.go	712	registerErrorPassthroughRoutes	rules	PUT	/:id	h.Admin.ErrorPassthrough.Update
+backend/internal/server/routes/admin.go	713	registerErrorPassthroughRoutes	rules	DELETE	/:id	h.Admin.ErrorPassthrough.Delete
+backend/internal/server/routes/admin.go	720	registerTLSFingerprintProfileRoutes	profiles	GET		h.Admin.TLSFingerprintProfile.List
+backend/internal/server/routes/admin.go	721	registerTLSFingerprintProfileRoutes	profiles	GET	/:id	h.Admin.TLSFingerprintProfile.GetByID
+backend/internal/server/routes/admin.go	722	registerTLSFingerprintProfileRoutes	profiles	POST		h.Admin.TLSFingerprintProfile.Create
+backend/internal/server/routes/admin.go	723	registerTLSFingerprintProfileRoutes	profiles	PUT	/:id	h.Admin.TLSFingerprintProfile.Update
+backend/internal/server/routes/admin.go	724	registerTLSFingerprintProfileRoutes	profiles	DELETE	/:id	h.Admin.TLSFingerprintProfile.Delete
+backend/internal/server/routes/admin.go	731	registerPluginRoutes	plugins	GET		h.Admin.Plugin.List
+backend/internal/server/routes/admin.go	732	registerPluginRoutes	plugins	GET	/:id	h.Admin.Plugin.Get
+backend/internal/server/routes/admin.go	733	registerPluginRoutes	plugins	POST	/upload	gin.HandlerFunc(stepUpAuth), h.Admin.Plugin.Upload
+backend/internal/server/routes/admin.go	734	registerPluginRoutes	plugins	POST	/:id/enable	gin.HandlerFunc(stepUpAuth), h.Admin.Plugin.Enable
+backend/internal/server/routes/admin.go	735	registerPluginRoutes	plugins	POST	/:id/disable	gin.HandlerFunc(stepUpAuth), h.Admin.Plugin.Disable
+backend/internal/server/routes/admin.go	736	registerPluginRoutes	plugins	DELETE	/:id	gin.HandlerFunc(stepUpAuth), h.Admin.Plugin.Delete
+backend/internal/server/routes/admin.go	737	registerPluginRoutes	plugins	GET	/:id/config	h.Admin.Plugin.GetConfig
+backend/internal/server/routes/admin.go	738	registerPluginRoutes	plugins	GET	/:id/status	h.Admin.Plugin.Status
+backend/internal/server/routes/admin.go	739	registerPluginRoutes	plugins	PUT	/:id/config	gin.HandlerFunc(stepUpAuth), h.Admin.Plugin.SaveConfig
+backend/internal/server/routes/admin.go	740	registerPluginRoutes	plugins	POST	/:id/test	gin.HandlerFunc(stepUpAuth), h.Admin.Plugin.Test
+backend/internal/server/routes/admin.go	741	registerPluginRoutes	plugins	POST	/:id/ui-session	h.Admin.Plugin.CreateUISession
+backend/internal/server/routes/admin.go	748	registerChannelRoutes	channels	GET		h.Admin.Channel.List
+backend/internal/server/routes/admin.go	749	registerChannelRoutes	channels	GET	/model-pricing	h.Admin.Channel.GetModelDefaultPricing
+backend/internal/server/routes/admin.go	750	registerChannelRoutes	channels	GET	/pricing/sync-models	h.Admin.Channel.SyncPricingModels
+backend/internal/server/routes/admin.go	751	registerChannelRoutes	channels	GET	/:id	h.Admin.Channel.GetByID
+backend/internal/server/routes/admin.go	752	registerChannelRoutes	channels	POST		h.Admin.Channel.Create
+backend/internal/server/routes/admin.go	753	registerChannelRoutes	channels	PUT	/:id	h.Admin.Channel.Update
+backend/internal/server/routes/admin.go	754	registerChannelRoutes	channels	DELETE	/:id	h.Admin.Channel.Delete
+backend/internal/server/routes/admin.go	763	registerChannelMonitorRoutes	monitors	GET		h.Admin.ChannelMonitor.List
+backend/internal/server/routes/admin.go	764	registerChannelMonitorRoutes	monitors	POST		h.Admin.ChannelMonitor.Create
+backend/internal/server/routes/admin.go	765	registerChannelMonitorRoutes	monitors	GET	/:id	h.Admin.ChannelMonitor.Get
+backend/internal/server/routes/admin.go	766	registerChannelMonitorRoutes	monitors	POST	/:id/duplicate	h.Admin.ChannelMonitor.Duplicate
+backend/internal/server/routes/admin.go	767	registerChannelMonitorRoutes	monitors	PUT	/:id	h.Admin.ChannelMonitor.Update
+backend/internal/server/routes/admin.go	768	registerChannelMonitorRoutes	monitors	DELETE	/:id	h.Admin.ChannelMonitor.Delete
+backend/internal/server/routes/admin.go	769	registerChannelMonitorRoutes	monitors	POST	/:id/run	h.Admin.ChannelMonitor.Run
+backend/internal/server/routes/admin.go	770	registerChannelMonitorRoutes	monitors	GET	/:id/history	h.Admin.ChannelMonitor.History
+backend/internal/server/routes/admin.go	776	registerChannelMonitorRoutes	templates	GET		h.Admin.ChannelMonitorTemplate.List
+backend/internal/server/routes/admin.go	777	registerChannelMonitorRoutes	templates	POST		h.Admin.ChannelMonitorTemplate.Create
+backend/internal/server/routes/admin.go	778	registerChannelMonitorRoutes	templates	GET	/:id	h.Admin.ChannelMonitorTemplate.Get
+backend/internal/server/routes/admin.go	779	registerChannelMonitorRoutes	templates	PUT	/:id	h.Admin.ChannelMonitorTemplate.Update
+backend/internal/server/routes/admin.go	780	registerChannelMonitorRoutes	templates	DELETE	/:id	h.Admin.ChannelMonitorTemplate.Delete
+backend/internal/server/routes/admin.go	781	registerChannelMonitorRoutes	templates	GET	/:id/monitors	h.Admin.ChannelMonitorTemplate.AssociatedMonitors
+backend/internal/server/routes/admin.go	782	registerChannelMonitorRoutes	templates	POST	/:id/apply	h.Admin.ChannelMonitorTemplate.Apply
+backend/internal/server/routes/admin.go	797	registerChannelMonitorV2Routes	config	GET	/config	h.ChannelMonitorV2.GetConfig
+backend/internal/server/routes/admin.go	798	registerChannelMonitorV2Routes	config	PUT	/config	h.ChannelMonitorV2.UpdateConfig
+backend/internal/server/routes/admin.go	803	registerChannelMonitorV2Routes	reads	GET	/dimensions	h.ChannelMonitorV2.Dimensions
+backend/internal/server/routes/admin.go	804	registerChannelMonitorV2Routes	reads	GET	/snapshot	h.ChannelMonitorV2.AdminSnapshot
+backend/internal/server/routes/admin.go	805	registerChannelMonitorV2Routes	reads	GET	/models	h.ChannelMonitorV2.AdminModels
+backend/internal/server/routes/admin.go	806	registerChannelMonitorV2Routes	reads	GET	/matrix	h.ChannelMonitorV2.AdminMatrix
+backend/internal/server/routes/admin.go	807	registerChannelMonitorV2Routes	reads	GET	/errors	h.ChannelMonitorV2.Errors
+backend/internal/server/routes/admin.go	808	registerChannelMonitorV2Routes	reads	GET	/users	h.ChannelMonitorV2.AdminUsers
+backend/internal/server/routes/auth.go	35	RegisterAuthRoutes	auth	POST	/register	"rateLimiter.LimitWithOptions(""auth-register"", 5, time.Minute, middleware.RateLimitOptions{"
+backend/internal/server/routes/auth.go	38	RegisterAuthRoutes	auth	POST	/login	"rateLimiter.LimitWithOptions(""auth-login"", 20, time.Minute, middleware.RateLimitOptions{"
+backend/internal/server/routes/auth.go	41	RegisterAuthRoutes	auth	POST	/login/2fa	"rateLimiter.LimitWithOptions(""auth-login-2fa"", 20, time.Minute, middleware.RateLimitOptions{"
+backend/internal/server/routes/auth.go	44	RegisterAuthRoutes	auth	POST	/passkey/login/begin	"rateLimiter.LimitWithOptions(""passkey-login-begin"", 20, time.Minute, middleware.RateLimitOptions{"
+backend/internal/server/routes/auth.go	47	RegisterAuthRoutes	auth	POST	/passkey/login/finish	"rateLimiter.LimitWithOptions(""passkey-login-finish"", 20, time.Minute, middleware.RateLimitOptions{"
+backend/internal/server/routes/auth.go	50	RegisterAuthRoutes	auth	POST	/send-verify-code	"rateLimiter.LimitWithOptions(""auth-send-verify-code"", 5, time.Minute, middleware.RateLimitOptions{"
+backend/internal/server/routes/auth.go	54	RegisterAuthRoutes	auth	POST	/refresh	"rateLimiter.LimitWithOptions(""refresh-token"", 30, time.Minute, middleware.RateLimitOptions{"
+backend/internal/server/routes/auth.go	58	RegisterAuthRoutes	auth	POST	/logout	h.Auth.Logout
+backend/internal/server/routes/auth.go	60	RegisterAuthRoutes	auth	POST	/forgot-password	"rateLimiter.LimitWithOptions(""forgot-password"", 5, time.Minute, middleware.RateLimitOptions{"
+backend/internal/server/routes/auth.go	64	RegisterAuthRoutes	auth	POST	/reset-password	"rateLimiter.LimitWithOptions(""reset-password"", 10, time.Minute, middleware.RateLimitOptions{"
+backend/internal/server/routes/auth.go	67	RegisterAuthRoutes	auth	GET	/oauth/linuxdo/start	h.Auth.LinuxDoOAuthStart
+backend/internal/server/routes/auth.go	68	RegisterAuthRoutes	auth	POST	/oauth/linuxdo/start	"rateLimiter.LimitWithOptions(""oauth-linuxdo-start"", 20, time.Minute, middleware.RateLimitOptions{"
+backend/internal/server/routes/auth.go	71	RegisterAuthRoutes	auth	GET	/oauth/github/start	h.Auth.GitHubOAuthStart
+backend/internal/server/routes/auth.go	72	RegisterAuthRoutes	auth	POST	/oauth/github/start	"rateLimiter.LimitWithOptions(""oauth-github-start"", 20, time.Minute, middleware.RateLimitOptions{"
+backend/internal/server/routes/auth.go	75	RegisterAuthRoutes	auth	GET	/oauth/github/callback	h.Auth.GitHubOAuthCallback
+backend/internal/server/routes/auth.go	76	RegisterAuthRoutes	auth	POST	/oauth/github/complete-registration	
+backend/internal/server/routes/auth.go	82	RegisterAuthRoutes	auth	GET	/oauth/google/start	h.Auth.GoogleOAuthStart
+backend/internal/server/routes/auth.go	83	RegisterAuthRoutes	auth	POST	/oauth/google/start	"rateLimiter.LimitWithOptions(""oauth-google-start"", 20, time.Minute, middleware.RateLimitOptions{"
+backend/internal/server/routes/auth.go	86	RegisterAuthRoutes	auth	GET	/oauth/google/callback	h.Auth.GoogleOAuthCallback
+backend/internal/server/routes/auth.go	87	RegisterAuthRoutes	auth	POST	/oauth/google/complete-registration	
+backend/internal/server/routes/auth.go	93	RegisterAuthRoutes	auth	GET	/oauth/linuxdo/bind/start	func(c *gin.Context) {
+backend/internal/server/routes/auth.go	99	RegisterAuthRoutes	auth	GET	/oauth/linuxdo/callback	h.Auth.LinuxDoOAuthCallback
+backend/internal/server/routes/auth.go	100	RegisterAuthRoutes	auth	GET	/oauth/wechat/start	h.Auth.WeChatOAuthStart
+backend/internal/server/routes/auth.go	101	RegisterAuthRoutes	auth	POST	/oauth/wechat/start	"rateLimiter.LimitWithOptions(""oauth-wechat-start"", 20, time.Minute, middleware.RateLimitOptions{"
+backend/internal/server/routes/auth.go	104	RegisterAuthRoutes	auth	GET	/oauth/wechat/bind/start	func(c *gin.Context) {
+backend/internal/server/routes/auth.go	110	RegisterAuthRoutes	auth	GET	/oauth/wechat/callback	h.Auth.WeChatOAuthCallback
+backend/internal/server/routes/auth.go	111	RegisterAuthRoutes	auth	GET	/oauth/wechat/payment/start	h.Auth.WeChatPaymentOAuthStart
+backend/internal/server/routes/auth.go	112	RegisterAuthRoutes	auth	GET	/oauth/wechat/payment/callback	h.Auth.WeChatPaymentOAuthCallback
+backend/internal/server/routes/auth.go	113	RegisterAuthRoutes	auth	POST	/oauth/pending/exchange	
+backend/internal/server/routes/auth.go	119	RegisterAuthRoutes	auth	POST	/oauth/pending/send-verify-code	
+backend/internal/server/routes/auth.go	125	RegisterAuthRoutes	auth	POST	/oauth/pending/create-account	
+backend/internal/server/routes/auth.go	131	RegisterAuthRoutes	auth	POST	/oauth/pending/bind-login	
+backend/internal/server/routes/auth.go	137	RegisterAuthRoutes	auth	POST	/oauth/linuxdo/bind-login	
+backend/internal/server/routes/auth.go	143	RegisterAuthRoutes	auth	POST	/oauth/linuxdo/create-account	
+backend/internal/server/routes/auth.go	149	RegisterAuthRoutes	auth	POST	/oauth/wechat/bind-login	
+backend/internal/server/routes/auth.go	155	RegisterAuthRoutes	auth	POST	/oauth/wechat/create-account	
+backend/internal/server/routes/auth.go	161	RegisterAuthRoutes	auth	GET	/oauth/oidc/start	h.Auth.OIDCOAuthStart
+backend/internal/server/routes/auth.go	162	RegisterAuthRoutes	auth	POST	/oauth/oidc/start	"rateLimiter.LimitWithOptions(""oauth-oidc-start"", 20, time.Minute, middleware.RateLimitOptions{"
+backend/internal/server/routes/auth.go	165	RegisterAuthRoutes	auth	GET	/oauth/oidc/bind/start	func(c *gin.Context) {
+backend/internal/server/routes/auth.go	171	RegisterAuthRoutes	auth	GET	/oauth/oidc/callback	h.Auth.OIDCOAuthCallback
+backend/internal/server/routes/auth.go	172	RegisterAuthRoutes	auth	POST	/oauth/oidc/bind-login	
+backend/internal/server/routes/auth.go	178	RegisterAuthRoutes	auth	POST	/oauth/oidc/create-account	
+backend/internal/server/routes/auth.go	184	RegisterAuthRoutes	auth	GET	/oauth/dingtalk/start	h.Auth.DingTalkOAuthStart
+backend/internal/server/routes/auth.go	185	RegisterAuthRoutes	auth	POST	/oauth/dingtalk/start	"rateLimiter.LimitWithOptions(""oauth-dingtalk-start"", 20, time.Minute, middleware.RateLimitOptions{"
+backend/internal/server/routes/auth.go	188	RegisterAuthRoutes	auth	GET	/oauth/dingtalk/bind/start	func(c *gin.Context) {
+backend/internal/server/routes/auth.go	194	RegisterAuthRoutes	auth	GET	/oauth/dingtalk/callback	h.Auth.DingTalkOAuthCallback
+backend/internal/server/routes/auth.go	195	RegisterAuthRoutes	auth	POST	/oauth/dingtalk/bind-login	
+backend/internal/server/routes/auth.go	201	RegisterAuthRoutes	auth	POST	/oauth/dingtalk/create-account	
+backend/internal/server/routes/auth.go	214	RegisterAuthRoutes	settings	GET	/public	h.Setting.GetPublicSettings
+backend/internal/server/routes/auth.go	215	RegisterAuthRoutes	settings	GET	/email-unsubscribe	h.Setting.UnsubscribeNotificationEmail
+backend/internal/server/routes/auth.go	225	RegisterAuthRoutes	authenticated	GET	/auth/me	h.Auth.GetCurrentUser
+backend/internal/server/routes/auth.go	227	RegisterAuthRoutes	authenticated	POST	/auth/revoke-all-sessions	h.Auth.RevokeAllSessions
+backend/internal/server/routes/auth.go	228	RegisterAuthRoutes	authenticated	POST	/auth/oauth/bind-token	h.Auth.PrepareOAuthBindAccessTokenCookie
+backend/internal/server/routes/common.go	16	RegisterCommonRoutes	r	GET	/health	func(c *gin.Context) {
+backend/internal/server/routes/common.go	22	RegisterCommonRoutes	r	GET	/setup/status	func(c *gin.Context) {
+backend/internal/server/routes/custom_admin_keys.go	12	registerScopedAdminKeyRoutes	keys	GET		h.Admin.Setting.ListScopedAdminKeys
+backend/internal/server/routes/custom_admin_keys.go	13	registerScopedAdminKeyRoutes	keys	POST		gin.HandlerFunc(stepUp), h.Admin.Setting.CreateScopedAdminKey
+backend/internal/server/routes/custom_admin_keys.go	14	registerScopedAdminKeyRoutes	keys	PUT	/:id	gin.HandlerFunc(stepUp), h.Admin.Setting.UpdateScopedAdminKey
+backend/internal/server/routes/custom_admin_keys.go	15	registerScopedAdminKeyRoutes	keys	POST	/:id/rotate	gin.HandlerFunc(stepUp), h.Admin.Setting.RotateScopedAdminKey
+backend/internal/server/routes/custom_admin_keys.go	16	registerScopedAdminKeyRoutes	keys	DELETE	/:id	gin.HandlerFunc(stepUp), h.Admin.Setting.RevokeScopedAdminKey
+backend/internal/server/routes/custom_admin_keys.go	17	registerScopedAdminKeyRoutes	keys	DELETE	/:id/record	gin.HandlerFunc(stepUp), h.Admin.Setting.DeleteScopedAdminKeyRecord
+backend/internal/server/routes/gateway.go	33	RegisterGatewayRoutes	r	GET	/api/bps-images/:token	h.OpenAIGateway.ExcelBPSImage
+backend/internal/server/routes/gateway.go	34	RegisterGatewayRoutes	r	HEAD	/api/bps-images/:token	h.OpenAIGateway.ExcelBPSImage
+backend/internal/server/routes/gateway.go	194	RegisterGatewayRoutes	gateway	GET	/sub2api/billing	h.Gateway.KeyBillingInfo
+backend/internal/server/routes/gateway.go	201	RegisterGatewayRoutes	gateway	POST	/messages	func(c *gin.Context) {
+backend/internal/server/routes/gateway.go	209	RegisterGatewayRoutes	gateway	POST	/systemone	textBodyLimit, h.Gateway.SystemOne
+backend/internal/server/routes/gateway.go	212	RegisterGatewayRoutes	gateway	POST	/messages/count_tokens	countTokensHandler
+backend/internal/server/routes/gateway.go	216	RegisterGatewayRoutes	gateway	GET	/models	modelsHandler
+backend/internal/server/routes/gateway.go	218	RegisterGatewayRoutes	gateway	GET	/models/:model	h.Gateway.Models
+backend/internal/server/routes/gateway.go	219	RegisterGatewayRoutes	gateway	GET	/usage	h.Gateway.Usage
+backend/internal/server/routes/gateway.go	220	RegisterGatewayRoutes	gateway	POST	/live	h.OpenAIGateway.Live
+backend/internal/server/routes/gateway.go	221	RegisterGatewayRoutes	gateway	GET	/live/:call_id	h.OpenAIGateway.LiveSideband
+backend/internal/server/routes/gateway.go	223	RegisterGatewayRoutes	gateway	POST	/responses	func(c *gin.Context) {
+backend/internal/server/routes/gateway.go	230	RegisterGatewayRoutes	gateway	POST	/responses/*subpath	guardResponsesSubpath(func(c *gin.Context) {
+backend/internal/server/routes/gateway.go	237	RegisterGatewayRoutes	gateway	POST	/alpha/search	textBodyLimit, h.OpenAIGateway.AlphaSearch
+backend/internal/server/routes/gateway.go	238	RegisterGatewayRoutes	gateway	GET	/responses	func(c *gin.Context) {
+backend/internal/server/routes/gateway.go	242	RegisterGatewayRoutes	gateway	POST	/chat/completions	func(c *gin.Context) {
+backend/internal/server/routes/gateway.go	249	RegisterGatewayRoutes	gateway	POST	/embeddings	textBodyLimit, func(c *gin.Context) {
+backend/internal/server/routes/gateway.go	262	RegisterGatewayRoutes	gateway	POST	/images/generations	imagesHandler
+backend/internal/server/routes/gateway.go	263	RegisterGatewayRoutes	gateway	POST	/images/edits	imagesHandler
+backend/internal/server/routes/gateway.go	264	RegisterGatewayRoutes	gateway	POST	/images/generations/async	h.AsyncImage.Submit
+backend/internal/server/routes/gateway.go	265	RegisterGatewayRoutes	gateway	POST	/images/edits/async	h.AsyncImage.Submit
+backend/internal/server/routes/gateway.go	266	RegisterGatewayRoutes	gateway	GET	/images/tasks/:task_id	h.AsyncImage.Get
+backend/internal/server/routes/gateway.go	267	RegisterGatewayRoutes	gateway	POST	/images/batches	h.BatchImage.Submit
+backend/internal/server/routes/gateway.go	268	RegisterGatewayRoutes	gateway	GET	/images/batches	h.BatchImage.List
+backend/internal/server/routes/gateway.go	269	RegisterGatewayRoutes	gateway	GET	/images/batches/models	h.BatchImage.Models
+backend/internal/server/routes/gateway.go	270	RegisterGatewayRoutes	gateway	GET	/images/batches/:id	h.BatchImage.Get
+backend/internal/server/routes/gateway.go	271	RegisterGatewayRoutes	gateway	GET	/images/batches/:id/items	h.BatchImage.Items
+backend/internal/server/routes/gateway.go	272	RegisterGatewayRoutes	gateway	GET	/images/batches/:id/items/:custom_id/content	h.BatchImage.ItemContent
+backend/internal/server/routes/gateway.go	273	RegisterGatewayRoutes	gateway	GET	/images/batches/:id/download	h.BatchImage.Download
+backend/internal/server/routes/gateway.go	274	RegisterGatewayRoutes	gateway	POST	/images/batches/:id/cancel	h.BatchImage.Cancel
+backend/internal/server/routes/gateway.go	275	RegisterGatewayRoutes	gateway	DELETE	/images/batches/:id	h.BatchImage.DeleteRecord
+backend/internal/server/routes/gateway.go	276	RegisterGatewayRoutes	gateway	DELETE	/images/batches/:id/outputs	h.BatchImage.DeleteOutputs
+backend/internal/server/routes/gateway.go	279	RegisterGatewayRoutes	gateway	POST	/videos	videoGenerationHandler
+backend/internal/server/routes/gateway.go	280	RegisterGatewayRoutes	gateway	POST	/videos/generations	videoGenerationHandler
+backend/internal/server/routes/gateway.go	281	RegisterGatewayRoutes	gateway	POST	/videos/edits	videoEditHandler
+backend/internal/server/routes/gateway.go	282	RegisterGatewayRoutes	gateway	POST	/videos/extensions	videoExtensionHandler
+backend/internal/server/routes/gateway.go	283	RegisterGatewayRoutes	gateway	GET	/videos/generations/:request_id/content	videoContentHandler
+backend/internal/server/routes/gateway.go	284	RegisterGatewayRoutes	gateway	GET	/videos/edits/:request_id/content	videoContentHandler
+backend/internal/server/routes/gateway.go	285	RegisterGatewayRoutes	gateway	GET	/videos/extensions/:request_id/content	videoContentHandler
+backend/internal/server/routes/gateway.go	286	RegisterGatewayRoutes	gateway	GET	/videos/generations/:request_id	videoStatusHandler
+backend/internal/server/routes/gateway.go	287	RegisterGatewayRoutes	gateway	GET	/videos/edits/:request_id	videoStatusHandler
+backend/internal/server/routes/gateway.go	288	RegisterGatewayRoutes	gateway	GET	/videos/extensions/:request_id	videoStatusHandler
+backend/internal/server/routes/gateway.go	289	RegisterGatewayRoutes	gateway	GET	/videos/:request_id	videoStatusHandler
+backend/internal/server/routes/gateway.go	290	RegisterGatewayRoutes	gateway	GET	/videos/:request_id/content	videoContentHandler
+backend/internal/server/routes/gateway.go	304	RegisterGatewayRoutes	gateway	POST	/tts	"voiceHandler(""tts"""
+backend/internal/server/routes/gateway.go	305	RegisterGatewayRoutes	gateway	POST	/stt	"voiceHandler(""stt"""
+backend/internal/server/routes/gateway.go	306	RegisterGatewayRoutes	gateway	POST	/custom-voices	"voiceHandler(""custom-voices"""
+backend/internal/server/routes/gateway.go	315	RegisterGatewayRoutes	gateway	GET	/custom-voices	"voiceHandler(""custom-voices"""
+backend/internal/server/routes/gateway.go	316	RegisterGatewayRoutes	gateway	GET	/custom-voices/:voice_id/audio	customVoicePathHandler
+backend/internal/server/routes/gateway.go	317	RegisterGatewayRoutes	gateway	GET	/custom-voices/:voice_id	customVoicePathHandler
+backend/internal/server/routes/gateway.go	318	RegisterGatewayRoutes	gateway	PATCH	/custom-voices/:voice_id	customVoicePathHandler
+backend/internal/server/routes/gateway.go	319	RegisterGatewayRoutes	gateway	DELETE	/custom-voices/:voice_id	customVoicePathHandler
+backend/internal/server/routes/gateway.go	320	RegisterGatewayRoutes	gateway	GET	/realtime	func(c *gin.Context) {
+backend/internal/server/routes/gateway.go	328	RegisterGatewayRoutes	gateway	POST	/web_search	func(c *gin.Context) {
+backend/internal/server/routes/gateway.go	336	RegisterGatewayRoutes	gateway	POST	/x_search	func(c *gin.Context) {
+backend/internal/server/routes/gateway.go	357	RegisterGatewayRoutes	gemini	GET	/models	h.Gateway.GeminiV1BetaListModels
+backend/internal/server/routes/gateway.go	358	RegisterGatewayRoutes	gemini	GET	/models/:model	h.Gateway.GeminiV1BetaGetModel
+backend/internal/server/routes/gateway.go	360	RegisterGatewayRoutes	gemini	POST	/models/*modelAction	h.Gateway.GeminiV1BetaModels
+backend/internal/server/routes/gateway.go	362	RegisterGatewayRoutes	gemini	POST	/cachedContents	h.Gateway.GeminiCachedContentsCreate
+backend/internal/server/routes/gateway.go	363	RegisterGatewayRoutes	gemini	GET	/cachedContents	h.Gateway.GeminiCachedContentsList
+backend/internal/server/routes/gateway.go	364	RegisterGatewayRoutes	gemini	GET	/cachedContents/:cacheID	h.Gateway.GeminiCachedContentsGet
+backend/internal/server/routes/gateway.go	365	RegisterGatewayRoutes	gemini	PATCH	/cachedContents/:cacheID	h.Gateway.GeminiCachedContentsPatch
+backend/internal/server/routes/gateway.go	366	RegisterGatewayRoutes	gemini	DELETE	/cachedContents/:cacheID	h.Gateway.GeminiCachedContentsDelete
+backend/internal/server/routes/gateway.go	399	RegisterGatewayRoutes	codexDirect	POST	/realtime/calls	h.OpenAIGateway.Live
+backend/internal/server/routes/gateway.go	400	RegisterGatewayRoutes	codexDirect	GET	/:call_id	h.OpenAIGateway.LiveSideband
+backend/internal/server/routes/gateway.go	401	RegisterGatewayRoutes	codexDirect	POST	/responses	responsesHandler
+backend/internal/server/routes/gateway.go	402	RegisterGatewayRoutes	codexDirect	POST	/responses/*subpath	guardResponsesSubpath(responsesHandler
+backend/internal/server/routes/gateway.go	403	RegisterGatewayRoutes	codexDirect	POST	/alpha/search	textBodyLimit, h.OpenAIGateway.AlphaSearch
+backend/internal/server/routes/gateway.go	404	RegisterGatewayRoutes	codexDirect	GET	/responses	func(c *gin.Context) {
+backend/internal/server/routes/gateway.go	407	RegisterGatewayRoutes	codexDirect	GET	/models	codexModelsHandler
+backend/internal/server/routes/gateway.go	500	RegisterGatewayRoutes	r	GET	/antigravity/models	gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, h.Gateway.AntigravityModels
+backend/internal/server/routes/gateway.go	513	RegisterGatewayRoutes	antigravityV1	POST	/messages	h.Gateway.Messages
+backend/internal/server/routes/gateway.go	514	RegisterGatewayRoutes	antigravityV1	POST	/messages/count_tokens	h.Gateway.CountTokens
+backend/internal/server/routes/gateway.go	515	RegisterGatewayRoutes	antigravityV1	GET	/models	h.Gateway.AntigravityModels
+backend/internal/server/routes/gateway.go	516	RegisterGatewayRoutes	antigravityV1	GET	/usage	h.Gateway.Usage
+backend/internal/server/routes/gateway.go	529	RegisterGatewayRoutes	antigravityV1Beta	GET	/models	h.Gateway.GeminiV1BetaListModels
+backend/internal/server/routes/gateway.go	530	RegisterGatewayRoutes	antigravityV1Beta	GET	/models/:model	h.Gateway.GeminiV1BetaGetModel
+backend/internal/server/routes/gateway.go	531	RegisterGatewayRoutes	antigravityV1Beta	POST	/models/*modelAction	h.Gateway.GeminiV1BetaModels
+backend/internal/server/routes/model_plaza.go	28	RegisterModelPlazaRoutes	plaza	GET		h.ModelPlaza.Get
+backend/internal/server/routes/payment.go	47	RegisterPaymentRoutes	authenticated	GET	/config	paymentHandler.GetPaymentConfig
+backend/internal/server/routes/payment.go	48	RegisterPaymentRoutes	authenticated	GET	/checkout-info	paymentHandler.GetCheckoutInfo
+backend/internal/server/routes/payment.go	49	RegisterPaymentRoutes	authenticated	GET	/plans	paymentHandler.GetPlans
+backend/internal/server/routes/payment.go	50	RegisterPaymentRoutes	authenticated	GET	/limits	paymentHandler.GetLimits
+backend/internal/server/routes/payment.go	54	RegisterPaymentRoutes	orders	POST		paymentHandler.CreateOrder
+backend/internal/server/routes/payment.go	55	RegisterPaymentRoutes	orders	POST	/verify	paymentHandler.VerifyOrder
+backend/internal/server/routes/payment.go	56	RegisterPaymentRoutes	orders	GET	/my	paymentHandler.GetMyOrders
+backend/internal/server/routes/payment.go	57	RegisterPaymentRoutes	orders	GET	/:id	paymentHandler.GetOrder
+backend/internal/server/routes/payment.go	58	RegisterPaymentRoutes	orders	POST	/:id/cancel	paymentHandler.CancelOrder
+backend/internal/server/routes/payment.go	59	RegisterPaymentRoutes	orders	POST	/:id/refund-request	paymentHandler.RequestRefund
+backend/internal/server/routes/payment.go	60	RegisterPaymentRoutes	orders	GET	/refund-eligible-providers	paymentHandler.GetRefundEligibleProviders
+backend/internal/server/routes/payment.go	74	RegisterPaymentRoutes	public	POST	/orders/verify	
+backend/internal/server/routes/payment.go	77	RegisterPaymentRoutes	public	POST	/orders/resolve	paymentHandler.ResolveOrderPublicByResumeToken
+backend/internal/server/routes/payment.go	84	RegisterPaymentRoutes	webhook	GET	/easypay	webhookHandler.EasyPayNotify
+backend/internal/server/routes/payment.go	85	RegisterPaymentRoutes	webhook	POST	/easypay	webhookHandler.EasyPayNotify
+backend/internal/server/routes/payment.go	86	RegisterPaymentRoutes	webhook	POST	/alipay	webhookHandler.AlipayNotify
+backend/internal/server/routes/payment.go	87	RegisterPaymentRoutes	webhook	POST	/wxpay	webhookHandler.WxpayNotify
+backend/internal/server/routes/payment.go	88	RegisterPaymentRoutes	webhook	POST	/stripe	webhookHandler.StripeWebhook
+backend/internal/server/routes/payment.go	89	RegisterPaymentRoutes	webhook	POST	/airwallex	webhookHandler.AirwallexWebhook
+backend/internal/server/routes/payment.go	101	RegisterPaymentRoutes	adminGroup	GET	/dashboard	adminPaymentHandler.GetDashboard
+backend/internal/server/routes/payment.go	104	RegisterPaymentRoutes	adminGroup	GET	/config	adminPaymentHandler.GetConfig
+backend/internal/server/routes/payment.go	109	RegisterPaymentRoutes	adminOrders	GET		adminPaymentHandler.ListOrders
+backend/internal/server/routes/payment.go	110	RegisterPaymentRoutes	adminOrders	GET	/:id	adminPaymentHandler.GetOrderDetail
+backend/internal/server/routes/payment.go	111	RegisterPaymentRoutes	adminOrders	POST	/:id/cancel	adminPaymentHandler.CancelOrder
+backend/internal/server/routes/payment.go	112	RegisterPaymentRoutes	adminOrders	POST	/:id/retry	adminPaymentHandler.RetryFulfillment
+backend/internal/server/routes/payment.go	113	RegisterPaymentRoutes	adminOrders	POST	/:id/refund	adminPaymentHandler.ProcessRefund
+backend/internal/server/routes/payment.go	114	RegisterPaymentRoutes	adminOrders	POST	/:id/refund/query	adminPaymentHandler.QueryAndFinalizeRefund
+backend/internal/server/routes/payment.go	115	RegisterPaymentRoutes	adminOrders	POST	/:id/refund/resolve	adminPaymentHandler.ResolvePendingRefund
+backend/internal/server/routes/payment.go	121	RegisterPaymentRoutes	plans	GET		adminPaymentHandler.ListPlans
+backend/internal/server/routes/payment.go	122	RegisterPaymentRoutes	plans	POST		adminPaymentHandler.CreatePlan
+backend/internal/server/routes/payment.go	123	RegisterPaymentRoutes	plans	PUT	/:id	adminPaymentHandler.UpdatePlan
+backend/internal/server/routes/payment.go	124	RegisterPaymentRoutes	plans	DELETE	/:id	adminPaymentHandler.DeletePlan
+backend/internal/server/routes/payment.go	130	RegisterPaymentRoutes	providers	GET		adminPaymentHandler.ListProviders
+backend/internal/server/routes/payment.go	131	RegisterPaymentRoutes	providers	POST		adminPaymentHandler.CreateProvider
+backend/internal/server/routes/payment.go	132	RegisterPaymentRoutes	providers	PUT	/:id	adminPaymentHandler.UpdateProvider
+backend/internal/server/routes/payment.go	133	RegisterPaymentRoutes	providers	DELETE	/:id	adminPaymentHandler.DeleteProvider
+backend/internal/server/routes/user.go	30	RegisterUserRoutes	user	GET	/profile	h.User.GetProfile
+backend/internal/server/routes/user.go	31	RegisterUserRoutes	user	GET	/balance-history	h.User.GetBalanceHistory
+backend/internal/server/routes/user.go	32	RegisterUserRoutes	user	PUT	/password	h.User.ChangePassword
+backend/internal/server/routes/user.go	33	RegisterUserRoutes	user	PUT		h.User.UpdateProfile
+backend/internal/server/routes/user.go	34	RegisterUserRoutes	user	POST	/account-bindings/email/send-code	h.User.SendEmailBindingCode
+backend/internal/server/routes/user.go	35	RegisterUserRoutes	user	POST	/account-bindings/email	h.User.BindEmailIdentity
+backend/internal/server/routes/user.go	36	RegisterUserRoutes	user	DELETE	/account-bindings/:provider	h.User.UnbindIdentity
+backend/internal/server/routes/user.go	37	RegisterUserRoutes	user	POST	/auth-identities/bind/start	h.User.StartIdentityBinding
+backend/internal/server/routes/user.go	38	RegisterUserRoutes	user	GET	/api-keys/:id/usage/daily	panelRateLimiter.Heavy(), h.Usage.GetMyAPIKeyDailyUsage
+backend/internal/server/routes/user.go	39	RegisterUserRoutes	user	GET	/platform-quotas	h.User.GetMyPlatformQuotas
+backend/internal/server/routes/user.go	44	RegisterUserRoutes	notifyEmail	POST	/send-code	h.User.SendNotifyEmailCode
+backend/internal/server/routes/user.go	45	RegisterUserRoutes	notifyEmail	POST	/verify	h.User.VerifyNotifyEmail
+backend/internal/server/routes/user.go	46	RegisterUserRoutes	notifyEmail	PUT	/toggle	h.User.ToggleNotifyEmail
+backend/internal/server/routes/user.go	47	RegisterUserRoutes	notifyEmail	DELETE		h.User.RemoveNotifyEmail
+backend/internal/server/routes/user.go	53	RegisterUserRoutes	totp	GET	/status	h.Totp.GetStatus
+backend/internal/server/routes/user.go	54	RegisterUserRoutes	totp	GET	/verification-method	h.Totp.GetVerificationMethod
+backend/internal/server/routes/user.go	55	RegisterUserRoutes	totp	POST	/send-code	h.Totp.SendVerifyCode
+backend/internal/server/routes/user.go	56	RegisterUserRoutes	totp	POST	/setup	h.Totp.InitiateSetup
+backend/internal/server/routes/user.go	57	RegisterUserRoutes	totp	POST	/enable	h.Totp.Enable
+backend/internal/server/routes/user.go	58	RegisterUserRoutes	totp	POST	/disable	h.Totp.Disable
+backend/internal/server/routes/user.go	60	RegisterUserRoutes	totp	POST	/step-up	h.Totp.StepUp
+backend/internal/server/routes/user.go	65	RegisterUserRoutes	passkeys	GET		h.Passkey.List
+backend/internal/server/routes/user.go	66	RegisterUserRoutes	passkeys	POST	/register/begin	h.Passkey.BeginRegistration
+backend/internal/server/routes/user.go	67	RegisterUserRoutes	passkeys	POST	/register/finish	h.Passkey.FinishRegistration
+backend/internal/server/routes/user.go	68	RegisterUserRoutes	passkeys	PATCH	/:id	h.Passkey.Rename
+backend/internal/server/routes/user.go	69	RegisterUserRoutes	passkeys	DELETE	/:id	h.Passkey.Delete
+backend/internal/server/routes/user.go	76	RegisterUserRoutes	keys	GET		h.APIKey.List
+backend/internal/server/routes/user.go	77	RegisterUserRoutes	keys	GET	/export	panelRateLimiter.Heavy(), h.APIKey.ExportData
+backend/internal/server/routes/user.go	78	RegisterUserRoutes	keys	POST	/import	panelRateLimiter.Heavy(), h.APIKey.ImportData
+backend/internal/server/routes/user.go	79	RegisterUserRoutes	keys	GET	/:id	h.APIKey.GetByID
+backend/internal/server/routes/user.go	80	RegisterUserRoutes	keys	POST		h.APIKey.Create
+backend/internal/server/routes/user.go	81	RegisterUserRoutes	keys	PUT	/:id	h.APIKey.Update
+backend/internal/server/routes/user.go	82	RegisterUserRoutes	keys	DELETE	/:id	h.APIKey.Delete
+backend/internal/server/routes/user.go	88	RegisterUserRoutes	groups	GET	/available	h.APIKey.GetAvailableGroups
+backend/internal/server/routes/user.go	89	RegisterUserRoutes	groups	GET	/rates	h.APIKey.GetUserGroupRates
+backend/internal/server/routes/user.go	95	RegisterUserRoutes	channels	GET	/available	h.AvailableChannel.List
+backend/internal/server/routes/user.go	102	RegisterUserRoutes	usage	GET		h.Usage.List
+backend/internal/server/routes/user.go	103	RegisterUserRoutes	usage	GET	/export	h.Usage.Export
+backend/internal/server/routes/user.go	104	RegisterUserRoutes	usage	GET	/errors	h.Usage.ListErrors
+backend/internal/server/routes/user.go	105	RegisterUserRoutes	usage	GET	/errors/:id	h.Usage.GetErrorDetail
+backend/internal/server/routes/user.go	106	RegisterUserRoutes	usage	GET	/:id	h.Usage.GetByID
+backend/internal/server/routes/user.go	107	RegisterUserRoutes	usage	GET	/stats	h.Usage.Stats
+backend/internal/server/routes/user.go	109	RegisterUserRoutes	usage	GET	/dashboard/stats	h.Usage.DashboardStats
+backend/internal/server/routes/user.go	110	RegisterUserRoutes	usage	GET	/dashboard/trend	h.Usage.DashboardTrend
+backend/internal/server/routes/user.go	111	RegisterUserRoutes	usage	GET	/dashboard/models	h.Usage.DashboardModels
+backend/internal/server/routes/user.go	112	RegisterUserRoutes	usage	GET	/dashboard/snapshot-v2	h.Usage.DashboardSnapshotV2
+backend/internal/server/routes/user.go	113	RegisterUserRoutes	usage	GET	/dashboard/api-key-breakdown	h.Usage.DashboardAPIKeyBreakdown
+backend/internal/server/routes/user.go	114	RegisterUserRoutes	usage	POST	/dashboard/api-keys-usage	h.Usage.DashboardAPIKeysUsage
+backend/internal/server/routes/user.go	120	RegisterUserRoutes	announcements	GET		h.Announcement.List
+backend/internal/server/routes/user.go	121	RegisterUserRoutes	announcements	POST	/:id/read	h.Announcement.MarkRead
+backend/internal/server/routes/user.go	129	RegisterUserRoutes	subscriptions	GET		h.Subscription.List
+backend/internal/server/routes/user.go	130	RegisterUserRoutes	subscriptions	GET	/active	h.Subscription.GetActive
+backend/internal/server/routes/user.go	131	RegisterUserRoutes	subscriptions	GET	/progress	h.Subscription.GetProgress
+backend/internal/server/routes/user.go	132	RegisterUserRoutes	subscriptions	GET	/summary	h.Subscription.GetSummary
+backend/internal/server/routes/user.go	138	RegisterUserRoutes	monitors	GET		h.ChannelMonitor.List
+backend/internal/server/routes/user.go	139	RegisterUserRoutes	monitors	GET	/:id/status	h.ChannelMonitor.GetStatus
+backend/internal/server/routes/user.go	147	RegisterUserRoutes	monitorV2	GET	/dimensions	h.ChannelMonitorV2.Dimensions
+backend/internal/server/routes/user.go	148	RegisterUserRoutes	monitorV2	GET	/snapshot	h.ChannelMonitorV2.Snapshot
+backend/internal/server/routes/user.go	149	RegisterUserRoutes	monitorV2	GET	/models	h.ChannelMonitorV2.Models
+backend/internal/server/routes/user.go	150	RegisterUserRoutes	monitorV2	GET	/matrix	h.ChannelMonitorV2.Matrix
+backend/internal/server/routes/user.go	151	RegisterUserRoutes	monitorV2	GET	/errors	h.ChannelMonitorV2.Errors
+backend/internal/server/routes/user.go	152	RegisterUserRoutes	monitorV2	GET	/users	h.ChannelMonitorV2.Users
+backend/internal/server/routes/vendor.go	14	RegisterVendorRoutes	v	GET	/me	h.Vendor.Me
+backend/internal/server/routes/vendor.go	16	RegisterVendorRoutes	children	GET		h.Vendor.List
+backend/internal/server/routes/vendor.go	17	RegisterVendorRoutes	children	POST		h.Vendor.Create
+backend/internal/server/routes/vendor.go	18	RegisterVendorRoutes	children	GET	/:id	h.Vendor.Get
+backend/internal/server/routes/vendor.go	19	RegisterVendorRoutes	children	PATCH	/:id	h.Vendor.Update
+backend/internal/server/routes/vendor.go	21	RegisterVendorRoutes	a	GET		h.VendorAccount.List
+backend/internal/server/routes/vendor.go	22	RegisterVendorRoutes	a	POST		h.VendorAccount.Create
+backend/internal/server/routes/vendor.go	23	RegisterVendorRoutes	a	POST	/import/preview	h.VendorAccount.ImportPreview
+backend/internal/server/routes/vendor.go	24	RegisterVendorRoutes	a	POST	/import	h.VendorAccount.Import
+backend/internal/server/routes/vendor.go	25	RegisterVendorRoutes	a	POST	/export	h.Vendor.ExportStepUp, h.VendorAccount.Export
+backend/internal/server/routes/vendor.go	26	RegisterVendorRoutes	a	GET	/:id	h.VendorAccount.Get
+backend/internal/server/routes/vendor.go	27	RegisterVendorRoutes	a	PATCH	/:id	h.VendorAccount.Update
+backend/internal/server/routes/vendor.go	28	RegisterVendorRoutes	a	DELETE	/:id	h.VendorAccount.Delete
+backend/internal/server/routes/vendor.go	29	RegisterVendorRoutes	a	DELETE	/:id/authorizations/:mode	h.VendorAccount.RevokeAuthorization
+backend/internal/server/routes/vendor.go	30	RegisterVendorRoutes	a	POST	/:id/pause	h.VendorAccount.Pause
+backend/internal/server/routes/vendor.go	31	RegisterVendorRoutes	a	POST	/:id/resume	h.VendorAccount.Resume
+backend/internal/server/routes/vendor.go	32	RegisterVendorRoutes	a	POST	/:id/refresh	h.VendorAccount.Refresh
+backend/internal/server/routes/vendor.go	33	RegisterVendorRoutes	a	POST	/:id/usage-refresh	h.VendorAccount.UsageRefresh
+backend/internal/server/routes/vendor.go	34	RegisterVendorRoutes	a	POST	/:id/probe	h.VendorAccount.Probe
+backend/internal/server/routes/vendor.go	35	RegisterVendorRoutes	a	POST	/:id/sync	h.VendorAccount.Sync
+backend/internal/server/routes/vendor.go	36	RegisterVendorRoutes	a	GET	/:id/usage	h.VendorUsage.AccountUsage
+backend/internal/server/routes/vendor.go	39	RegisterVendorRoutes	p	GET		h.VendorProxy.List
+backend/internal/server/routes/vendor.go	40	RegisterVendorRoutes	p	POST		h.VendorProxy.Create
+backend/internal/server/routes/vendor.go	41	RegisterVendorRoutes	p	POST	/import/preview	h.VendorProxy.ImportPreview
+backend/internal/server/routes/vendor.go	42	RegisterVendorRoutes	p	POST	/import	h.VendorProxy.Import
+backend/internal/server/routes/vendor.go	43	RegisterVendorRoutes	p	POST	/export	h.VendorProxy.Export
+backend/internal/server/routes/vendor.go	44	RegisterVendorRoutes	p	POST	/batch-delete	h.VendorProxy.BatchDelete
+backend/internal/server/routes/vendor.go	45	RegisterVendorRoutes	p	GET	/:id	h.VendorProxy.Get
+backend/internal/server/routes/vendor.go	46	RegisterVendorRoutes	p	PATCH	/:id	h.VendorProxy.Update
+backend/internal/server/routes/vendor.go	47	RegisterVendorRoutes	p	DELETE	/:id	h.VendorProxy.Delete
+backend/internal/server/routes/vendor.go	48	RegisterVendorRoutes	p	POST	/:id/test	h.VendorProxy.Test
+backend/internal/server/routes/vendor.go	49	RegisterVendorRoutes	p	POST	/:id/quality-check	h.VendorProxy.QualityCheck
+backend/internal/server/routes/vendor.go	50	RegisterVendorRoutes	v	GET	/usage/summary	h.VendorUsage.Summary
+backend/internal/server/routes/vendor.go	51	RegisterVendorRoutes	v	GET	/usage/trend	h.VendorUsage.Trend
+backend/internal/server/routes/vendor.go	52	RegisterVendorRoutes	v	GET	/usage/accounts	h.VendorUsage.Accounts
+backend/internal/server/routes/vendor.go	53	RegisterVendorRoutes	v	GET	/audit-logs	h.Vendor.Audit
+backend/internal/server/routes/vendor.go	54	RegisterVendorRoutes	v	GET	/payables	h.VendorSettlement.PayableList
+backend/internal/server/routes/vendor.go	55	RegisterVendorRoutes	v	GET	/payables/:id	h.VendorSettlement.PayableGet
+backend/internal/server/routes/vendor.go	56	RegisterVendorRoutes	v	GET	/payables/:id/export	h.VendorSettlement.PayableExport
+backend/internal/server/routes/vendor.go	57	RegisterVendorRoutes	v	GET	/settlements	h.VendorSettlement.List
+backend/internal/server/routes/vendor.go	58	RegisterVendorRoutes	v	POST	/payables/preview	h.VendorSettlement.Preview
+backend/internal/server/routes/vendor.go	59	RegisterVendorRoutes	v	POST	/payables	h.VendorSettlement.Create
+backend/internal/server/routes/vendor.go	60	RegisterVendorRoutes	v	POST	/payables/:id/confirm	h.VendorSettlement.Confirm
+backend/internal/server/routes/vendor.go	61	RegisterVendorRoutes	v	POST	/payables/:id/void	h.VendorSettlement.Void
+backend/internal/server/routes/vendor.go	62	RegisterVendorRoutes	v	POST	/payables/:id/payments	h.VendorSettlement.Payment
+backend/internal/server/routes/vendor.go	63	RegisterVendorRoutes	v	POST	/payables/:id/payments/:payment_id/reverse	h.VendorSettlement.Reverse
+backend/internal/server/routes/vendor.go	64	RegisterVendorRoutes	v	POST	/payables/:id/adjustments	h.VendorSettlement.Adjustment
+backend/internal/server/routes/vendor.go	65	RegisterVendorRoutes	v	GET	/settlements/:id	h.VendorSettlement.Get
+backend/internal/server/routes/vendor.go	66	RegisterVendorRoutes	v	GET	/settlements/:id/export	h.VendorSettlement.Export
+backend/internal/server/routes/vendor.go	69	registerVendorOAuth	v	POST	/oauth/:platform/sessions	h.VendorAccount.StartOAuth
+backend/internal/server/routes/vendor.go	70	registerVendorOAuth	v	POST	/oauth/:platform/sessions/:session_id/complete	h.VendorAccount.CompleteOAuth
+backend/internal/server/routes/vendor.go	71	registerVendorOAuth	v	PATCH	/oauth/:platform/sessions/:session_id/proxy	h.VendorAccount.RebindOAuthProxy
+backend/internal/server/routes/vendor.go	78	registerVendorAdminRoutes	v	GET		h.Vendor.List
+backend/internal/server/routes/vendor.go	79	registerVendorAdminRoutes	v	POST		h.Vendor.Create
+backend/internal/server/routes/vendor.go	80	registerVendorAdminRoutes	v	GET	/group-supply	h.Vendor.GroupSupply
+backend/internal/server/routes/vendor.go	81	registerVendorAdminRoutes	v	GET	/audit-logs	h.Vendor.Audit
+backend/internal/server/routes/vendor.go	82	registerVendorAdminRoutes	v	GET	/usage	h.VendorUsage.AdminUsage
+backend/internal/server/routes/vendor.go	83	registerVendorAdminRoutes	v	POST	/identity-reconciliation	h.VendorAccount.ReconcileIdentity
+backend/internal/server/routes/vendor.go	84	registerVendorAdminRoutes	v	GET	/usage/export	h.VendorUsage.AdminExport
+backend/internal/server/routes/vendor.go	85	registerVendorAdminRoutes	v	GET	/settlements	h.VendorSettlement.AdminList
+backend/internal/server/routes/vendor.go	86	registerVendorAdminRoutes	v	POST	/settlements/preview	h.VendorSettlement.Preview
+backend/internal/server/routes/vendor.go	87	registerVendorAdminRoutes	v	POST	/settlements	h.VendorSettlement.Create
+backend/internal/server/routes/vendor.go	88	registerVendorAdminRoutes	v	GET	/settlements/:id	h.VendorSettlement.AdminGet
+backend/internal/server/routes/vendor.go	89	registerVendorAdminRoutes	v	POST	/settlements/:id/confirm	h.VendorSettlement.Confirm
+backend/internal/server/routes/vendor.go	90	registerVendorAdminRoutes	v	POST	/settlements/:id/void	h.VendorSettlement.Void
+backend/internal/server/routes/vendor.go	91	registerVendorAdminRoutes	v	POST	/settlements/:id/payments	h.VendorSettlement.Payment
+backend/internal/server/routes/vendor.go	92	registerVendorAdminRoutes	v	POST	/settlements/:id/payments/:payment_id/reverse	h.VendorSettlement.Reverse
+backend/internal/server/routes/vendor.go	93	registerVendorAdminRoutes	v	POST	/settlements/:id/adjustments	h.VendorSettlement.Adjustment
+backend/internal/server/routes/vendor.go	94	registerVendorAdminRoutes	v	GET	/settlements/:id/export	h.VendorSettlement.AdminExport
+backend/internal/server/routes/vendor.go	95	registerVendorAdminRoutes	v	GET	/:id	h.Vendor.Get
+backend/internal/server/routes/vendor.go	96	registerVendorAdminRoutes	v	PATCH	/:id	h.Vendor.Update
+backend/internal/server/routes/vendor.go	100	registerVendorAdminRoutes	a	POST	/import/preview	h.VendorAccount.ImportPreview
+backend/internal/server/routes/vendor.go	101	registerVendorAdminRoutes	a	POST	/import	h.VendorAccount.Import
+backend/internal/server/routes/vendor.go	102	registerVendorAdminRoutes	a	POST	/export	h.Vendor.ExportStepUp, h.VendorAccount.Export
+backend/internal/server/routes/vendor.go	103	registerVendorAdminRoutes	a	DELETE	/:id/authorizations/:mode	h.VendorAccount.RevokeAuthorization
+backend/internal/server/routes/vendor.go	104	registerVendorAdminRoutes	a	POST	/:id/pause	h.VendorAccount.Pause
+backend/internal/server/routes/vendor.go	105	registerVendorAdminRoutes	a	POST	/:id/resume	h.VendorAccount.Resume
+backend/internal/server/routes/vendor.go	106	registerVendorAdminRoutes	a	POST	/:id/usage-refresh	h.VendorAccount.UsageRefresh
+backend/internal/server/routes/vendor.go	107	registerVendorAdminRoutes	a	POST	/:id/probe	h.VendorAccount.Probe
+backend/internal/server/routes/vendor.go	108	registerVendorAdminRoutes	a	POST	/:id/sync	h.VendorAccount.Sync
+backend/internal/server/routes/vendor.go	110	registerVendorAdminRoutes	p	POST	/import/preview	h.VendorProxy.ImportPreview
+backend/internal/server/routes/vendor.go	111	registerVendorAdminRoutes	p	POST	/import	h.VendorProxy.Import
+backend/internal/server/routes/vendor.go	112	registerVendorAdminRoutes	admin	POST	/proxies/export	h.Vendor.SuperOnly, h.Vendor.AdminReadScope, h.VendorProxy.Export

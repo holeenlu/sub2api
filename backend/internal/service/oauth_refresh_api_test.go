@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"reflect"
 	"sync"
 	"testing"
@@ -14,6 +15,15 @@ import (
 )
 
 // ---------- mock helpers ----------
+
+func TestOAuthRefreshAPIArchivedAccountDoesNotContactProvider(t *testing.T) {
+	repo := &refreshAPIAccountRepo{account: &Account{ID: 1, Status: StatusActive, Extra: map[string]any{VendorArchivedAtKey: "2026-10-17T00:00:00Z"}}}
+	executor := &refreshAPIExecutorStub{needsRefresh: true}
+	_, err := NewOAuthRefreshAPI(repo, nil).RefreshIfNeeded(context.Background(), &Account{ID: 1}, executor, time.Minute)
+	require.ErrorIs(t, err, ErrVendorAccountArchived)
+	require.Zero(t, executor.refreshCalls)
+	require.Zero(t, repo.updateCalls)
+}
 
 // refreshAPIAccountRepo implements AccountRepository for OAuthRefreshAPI tests.
 type refreshAPIAccountRepo struct {
@@ -103,6 +113,78 @@ func (r *refreshAPIAccountRepo) UpdateGrokOAuthCredentialsIfUnchanged(
 	return true, nil
 }
 
+// These mocks model grant ownership; PostgreSQL integration tests exercise the
+// actual JSONB predicate, transaction, identity claim and outbox behavior.
+func nativeRefreshTestGrantMatches(current, expected *Account) bool {
+	if (!isNativeOpenAIOAuthRefresh(current) && !(current != nil && current.IsExcelOAuth() && current.VendorID == nil)) || current.ID != expected.ID {
+		return false
+	}
+	for _, key := range []string{"access_token", "refresh_token", "id_token", "client_id", "auth_mode", "openai_auth_mode", "chatgpt_account_id", "chatgpt_user_id", "organization_id", "_token_version"} {
+		if !reflect.DeepEqual(current.Credentials[key], expected.Credentials[key]) {
+			return false
+		}
+	}
+	return true
+}
+
+func applyNativeRefreshTestPatch(current, expected *Account, credentials map[string]any) {
+	patch := shallowCopyMap(current.Credentials)
+	for key, value := range credentials {
+		if old, exists := expected.Credentials[key]; !exists || !reflect.DeepEqual(old, value) {
+			patch[key] = value
+		}
+	}
+	current.Credentials = patch
+	if expected.TempUnschedulableUntil != nil && reflect.DeepEqual(current.TempUnschedulableUntil, expected.TempUnschedulableUntil) && current.TempUnschedulableReason == expected.TempUnschedulableReason {
+		current.TempUnschedulableUntil = nil
+		current.TempUnschedulableReason = ""
+	}
+}
+
+func (r *refreshAPIAccountRepo) UpdateOpenAIOAuthCredentialsIfUnchanged(_ context.Context, expected *Account, credentials map[string]any) (bool, error) {
+	r.successCASCalls++
+	if r.beforeSuccessCAS != nil {
+		r.beforeSuccessCAS(r)
+	}
+	if r.updateErr != nil {
+		return false, r.updateErr
+	}
+	if !nativeRefreshTestGrantMatches(r.account, expected) {
+		return false, nil
+	}
+	r.updateCalls++
+	r.updateCredentialsCalls++
+	applyNativeRefreshTestPatch(r.account, expected, credentials)
+	return true, nil
+}
+
+func (r *refreshAPIAccountRepo) SetOpenAIOAuthRefreshErrorIfUnchanged(_ context.Context, expected *Account, reason string) (bool, error) {
+	if r.beforeSuccessCAS != nil {
+		r.beforeSuccessCAS(r)
+	}
+	if !nativeRefreshTestGrantMatches(r.account, expected) || !r.account.IsActive() {
+		return false, nil
+	}
+	r.account.Status = StatusError
+	r.account.ErrorMessage = reason
+	r.account.Schedulable = false
+	return true, nil
+}
+
+func (r *refreshAPIAccountRepo) SetOpenAIOAuthRefreshTempUnschedulableIfUnchanged(_ context.Context, expected *Account, until time.Time, reason string) (bool, error) {
+	if !nativeRefreshTestGrantMatches(r.account, expected) || !r.account.IsActive() {
+		return false, nil
+	}
+	r.account.TempUnschedulableUntil = &until
+	r.account.TempUnschedulableReason = reason
+	return true, nil
+}
+
+func nativeRefreshTestAccount() *Account {
+	return &Account{ID: 7001, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
+		Credentials: map[string]any{"access_token": "old-at", "refresh_token": "old-rt", "expires_at": time.Now().Add(time.Minute).Format(time.RFC3339), "_token_version": int64(1)}}
+}
+
 // refreshAPIExecutorStub implements OAuthRefreshExecutor for tests.
 type refreshAPIExecutorStub struct {
 	needsRefresh  bool
@@ -156,6 +238,7 @@ type refreshAPICacheStub struct {
 	deleteCalls   int
 	deleteKey     string
 	deleteCtxErr  error
+	deleteErr     error
 }
 
 func (c *refreshAPICacheStub) GetAccessToken(context.Context, string) (string, error) {
@@ -170,7 +253,7 @@ func (c *refreshAPICacheStub) DeleteAccessToken(ctx context.Context, key string)
 	c.deleteCalls++
 	c.deleteKey = key
 	c.deleteCtxErr = ctx.Err()
-	return nil
+	return c.deleteErr
 }
 
 func (c *refreshAPICacheStub) AcquireRefreshLock(context.Context, string, time.Duration) (bool, error) {
@@ -1106,4 +1189,146 @@ func TestAntigravityProviderRefreshPolicy(t *testing.T) {
 	require.Equal(t, ProviderRefreshErrorReturn, p.OnRefreshError)
 	require.Equal(t, ProviderLockHeldUseExistingToken, p.OnLockHeld)
 	require.Equal(t, time.Duration(0), p.FailureTTL)
+}
+
+func TestRefreshIfNeeded_NativeOpenAIDurableCAS(t *testing.T) {
+	for _, scenario := range []string{"settings", "reauthorized", "paused", "new_cooldown"} {
+		t.Run(scenario, func(t *testing.T) {
+			account := nativeRefreshTestAccount()
+			account.Credentials["model_mapping"] = "original"
+			repo := &refreshAPIAccountRepo{account: account}
+			executor := &refreshAPIExecutorStub{needsRefresh: true, credentials: shallowCopyMap(account.Credentials)}
+			executor.credentials["access_token"], executor.credentials["refresh_token"] = "rotated-at", "rotated-rt"
+			repo.beforeSuccessCAS = func(r *refreshAPIAccountRepo) {
+				r.account = snapshotOAuthRefreshAccount(r.account)
+				r.account.Credentials["model_mapping"] = "concurrent"
+				switch scenario {
+				case "reauthorized":
+					r.account.Credentials["access_token"], r.account.Credentials["refresh_token"] = "new-login-at", "new-login-rt"
+				case "paused":
+					r.account.Status, r.account.Schedulable = StatusDisabled, false
+				case "new_cooldown":
+					until := time.Now().Add(time.Hour)
+					r.account.TempUnschedulableUntil, r.account.TempUnschedulableReason = &until, "new failure"
+				}
+			}
+			cache := &refreshAPICacheStub{lockResult: true}
+			result, err := NewOAuthRefreshAPI(repo, cache).RefreshIfNeeded(context.Background(), account, executor, time.Minute)
+			require.NoError(t, err)
+			require.Same(t, repo.account, result.Account)
+			require.Equal(t, "concurrent", result.Account.Credentials["model_mapping"])
+			require.Equal(t, 1, cache.deleteCalls)
+			if scenario == "reauthorized" {
+				require.False(t, result.Refreshed)
+				require.Equal(t, "new-login-at", result.Account.GetCredential("access_token"))
+			} else {
+				require.True(t, result.Refreshed)
+				require.Equal(t, "rotated-rt", result.Account.GetCredential("refresh_token"))
+			}
+			if scenario == "paused" {
+				require.Equal(t, StatusDisabled, result.Account.Status)
+				require.False(t, result.Account.Schedulable)
+			}
+			if scenario == "new_cooldown" {
+				require.Equal(t, "new failure", result.Account.TempUnschedulableReason)
+				require.NotNil(t, result.Account.TempUnschedulableUntil)
+			}
+		})
+	}
+}
+
+func TestRefreshIfNeeded_NativeOpenAIContainmentAndDetachedCleanup(t *testing.T) {
+	for _, scenario := range []string{"persist_error", "cache_error", "read_error", "cancel_after_commit", "cancel_after_exchange"} {
+		t.Run(scenario, func(t *testing.T) {
+			account := nativeRefreshTestAccount()
+			repo := &refreshAPIAccountRepo{account: account}
+			cache := &refreshAPICacheStub{lockResult: true}
+			executor := &refreshAPIExecutorStub{needsRefresh: true, credentials: map[string]any{"access_token": "rotated-at", "refresh_token": "rotated-rt"}}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			switch scenario {
+			case "persist_error":
+				repo.updateErr = errors.New("ambiguous commit")
+			case "cache_error":
+				cache.deleteErr = errors.New("cache unavailable")
+			case "read_error":
+				repo.getByIDErrAfterCall, repo.getByIDErrAfterCallErr = 2, errors.New("read unavailable")
+			case "cancel_after_commit":
+				repo.beforeSuccessCAS = func(*refreshAPIAccountRepo) { cancel() }
+			case "cancel_after_exchange":
+				executor.onRefresh = cancel
+			}
+			result, err := NewOAuthRefreshAPI(repo, cache).RefreshIfNeeded(ctx, account, executor, time.Minute)
+			if scenario == "cancel_after_commit" {
+				require.NoError(t, err)
+				require.True(t, result.Refreshed)
+				require.NoError(t, cache.deleteCtxErr)
+				require.NoError(t, cache.releaseCtxErr)
+			} else {
+				var containment *providerCycleContainmentRefreshError
+				require.ErrorAs(t, err, &containment)
+				require.Nil(t, result)
+			}
+			require.Equal(t, 1, executor.refreshCalls)
+		})
+	}
+}
+
+func TestRefreshIfNeeded_NativeOpenAIRequiresCASBeforeExchange(t *testing.T) {
+	account := nativeRefreshTestAccount()
+	repo := &mockAccountRepoForGemini{accountsByID: map[int64]*Account{account.ID: account}}
+	executor := &refreshAPIExecutorStub{needsRefresh: true}
+	_, err := NewOAuthRefreshAPI(repo, nil).RefreshIfNeeded(context.Background(), account, executor, time.Minute)
+	var configuration *providerConfigurationRefreshError
+	require.ErrorAs(t, err, &configuration)
+	require.Zero(t, executor.refreshCalls)
+}
+
+func TestNativeRejectedGrantPersistsPermanentFailureWithCredentialCAS(t *testing.T) {
+	for _, kind := range []string{"revoked", "primary_excel", "concurrent_authorization", "transport", "shared_client", "provider_5xx"} {
+		t.Run(kind, func(t *testing.T) {
+			a := nativeRefreshTestAccount()
+			repo := &refreshAPIAccountRepo{account: a}
+			api := NewOAuthRefreshAPI(repo, nil)
+			executor := &refreshAPIExecutorStub{needsRefresh: true, err: OpenAIOAuthTokenRefreshFailure(400, []byte(`{"error":"invalid_grant"}`))}
+			switch kind {
+			case "primary_excel":
+				a.Credentials["client_id"] = openai.ExcelClientID
+			case "concurrent_authorization":
+				executor.onRefresh = func() {
+					repo.account = snapshotOAuthRefreshAccount(a)
+					repo.account.Credentials["access_token"] = "new-at"
+					repo.account.Credentials["refresh_token"] = "new-rt"
+				}
+			case "transport":
+				executor.err = errors.New("network unavailable")
+			case "shared_client":
+				executor.err = OpenAIOAuthTokenRefreshFailure(400, []byte(`{"error":"invalid_client"}`))
+			case "provider_5xx":
+				executor.err = OpenAIOAuthTokenRefreshFailure(503, []byte(`{"error":"invalid_grant"}`))
+			}
+			_, err := api.RefreshRejected(t.Context(), a, executor, "old-at")
+			if kind == "revoked" || kind == "primary_excel" {
+				require.Error(t, err)
+				require.Equal(t, StatusError, repo.account.Status)
+				require.False(t, repo.account.Schedulable)
+			} else {
+				require.Equal(t, StatusActive, repo.account.Status)
+				require.True(t, repo.account.Schedulable)
+			}
+		})
+	}
+}
+
+func TestOpenAITokenProviderDoesNotReuseATAfterPermanentRefreshRejection(t *testing.T) {
+	a := nativeRefreshTestAccount()
+	repo := &refreshAPIAccountRepo{account: a}
+	executor := &refreshAPIExecutorStub{needsRefresh: true, err: OpenAIOAuthTokenRefreshFailure(400, []byte(`{"error":"invalid_grant"}`))}
+	provider := NewOpenAITokenProvider(repo, nil, nil)
+	provider.refreshAPI = NewOAuthRefreshAPI(repo, nil)
+	provider.executor = executor
+	token, err := provider.GetAccessToken(t.Context(), a)
+	require.Error(t, err)
+	require.Empty(t, token)
+	require.Equal(t, StatusError, a.Status)
 }

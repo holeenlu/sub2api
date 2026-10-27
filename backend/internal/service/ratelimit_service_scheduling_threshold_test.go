@@ -5,12 +5,66 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
+
+type interleavedFableThresholdRepo struct {
+	fableSchedulingThresholdRepoStub
+	stored      Account
+	beforeWrite func()
+}
+
+func (r *interleavedFableThresholdRepo) SetModelRateLimit(ctx context.Context, id int64, scope string, until time.Time, reasons ...string) error {
+	setAccountModelRateLimitSnapshot(&r.stored, scope, until, reasons[0], time.Now())
+	return nil
+}
+
+func (r *interleavedFableThresholdRepo) SetModelRateLimitIfNotActive(ctx context.Context, id int64, scope string, until time.Time, reason string) (bool, error) {
+	if r.beforeWrite != nil {
+		before := r.beforeWrite
+		r.beforeWrite = nil
+		before()
+	}
+	if r.stored.isRateLimitActiveForKey(scope) {
+		return false, nil
+	}
+	return true, r.SetModelRateLimit(ctx, id, scope, until, reason)
+}
+
+func (r *interleavedFableThresholdRepo) ClearModelRateLimit(ctx context.Context, id int64, scope, expected string) (bool, error) {
+	if r.stored.modelRateLimitReason(scope) != expected {
+		return false, nil
+	}
+	clearAccountModelRateLimitSnapshot(&r.stored, scope)
+	return true, nil
+}
+
+func TestRateLimitServiceFableThresholdPreservesConcurrentUpstream429(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	until := now.Add(6 * 24 * time.Hour)
+	account := &Account{ID: 12, Platform: PlatformAnthropic, Type: AccountTypeSetupToken,
+		Status: StatusActive, Schedulable: true,
+		Extra: map[string]any{"passive_usage_7d_oi_utilization": .9, "passive_usage_7d_oi_reset": until.Unix()}}
+	repo := &interleavedFableThresholdRepo{stored: Account{ID: 12, Platform: PlatformAnthropic, Type: AccountTypeSetupToken}}
+	limiter := &RateLimitService{accountRepo: repo}
+	repo.beforeWrite = func() {
+		headers := http.Header{}
+		headers.Set("anthropic-ratelimit-unified-7d_oi-status", "rejected")
+		headers.Set("anthropic-ratelimit-unified-7d_oi-reset", strconv.FormatInt(until.Unix(), 10))
+		require.True(t, limiter.persistAnthropicFableWindowLimit(t.Context(), &repo.stored, headers))
+	}
+	limiter.applyAnthropicFableSchedulingThreshold(t.Context(), account, map[string]int{PlatformAnthropic: 100, SchedulingThresholdScopeAnthropicFable: 80}, true, now)
+	require.Equal(t, anthropicFableWindowReason, repo.stored.modelRateLimitReason(anthropicFableRateLimitKey))
+	require.Empty(t, account.modelRateLimitReason(anthropicFableRateLimitKey))
+	limiter.applyAnthropicFableSchedulingThreshold(t.Context(), &repo.stored, map[string]int{PlatformAnthropic: 100, SchedulingThresholdScopeAnthropicFable: 100}, true, now)
+	require.True(t, repo.stored.isRateLimitActiveForKey(anthropicFableRateLimitKey))
+}
 
 func TestRateLimitService_ApplyAccountSchedulingThreshold_SetsTempUnschedulable(t *testing.T) {
 	accountSchedulingThresholdsSF.Forget(SettingKeyAccountSchedulingThresholds)
@@ -96,6 +150,12 @@ type fableSchedulingThresholdRepoStub struct {
 	lastModelScope  string
 	lastModelReset  time.Time
 	lastModelReason string
+	clearCalls      int
+	clearReason     string
+}
+
+func (r *fableSchedulingThresholdRepoStub) SetModelRateLimitIfNotActive(ctx context.Context, id int64, scope string, resetAt time.Time, reason string) (bool, error) {
+	return true, r.SetModelRateLimit(ctx, id, scope, resetAt, reason)
 }
 
 func (r *fableSchedulingThresholdRepoStub) SetModelRateLimit(_ context.Context, _ int64, scope string, resetAt time.Time, reason ...string) error {
@@ -227,4 +287,31 @@ func TestRateLimitService_ApplyAccountSchedulingThreshold_UnsupportedPlatformDoe
 	require.Equal(t, 0, accountRepo.tempCalls)
 	require.Nil(t, account.TempUnschedulableUntil)
 	require.Empty(t, account.TempUnschedulableReason)
+}
+
+func (r *fableSchedulingThresholdRepoStub) ClearModelRateLimit(_ context.Context, _ int64, _ string, reason string) (bool, error) {
+	r.clearCalls++
+	r.clearReason = reason
+	return true, nil
+}
+
+func TestFableThresholdReleaseRequiresEvidenceAndPreservesUpstreamLimit(t *testing.T) {
+	now := time.Now()
+	repo := &fableSchedulingThresholdRepoStub{}
+	rl := &RateLimitService{accountRepo: repo}
+	account := &Account{ID: 7, Platform: PlatformAnthropic, Extra: map[string]any{}}
+	reason := BuildAccountSchedulingThresholdReason("threshold")
+	setAccountModelRateLimitSnapshot(account, anthropicFableRateLimitKey, now.Add(time.Hour), reason, now)
+	rl.applyAnthropicFableSchedulingThreshold(context.Background(), account, map[string]int{PlatformAnthropic: 100}, false, now)
+	require.Zero(t, repo.clearCalls, "storage fallback must not be treated as disabling the threshold")
+	account.PrepareSharedSnapshot()
+	sibling := *account
+	rl.applyAnthropicFableSchedulingThreshold(context.Background(), account, map[string]int{PlatformAnthropic: 100}, true, now)
+	require.Equal(t, 1, repo.clearCalls)
+	require.Equal(t, reason, repo.clearReason)
+	require.Empty(t, account.modelRateLimitReason(anthropicFableRateLimitKey))
+	require.Equal(t, reason, sibling.modelRateLimitReason(anthropicFableRateLimitKey))
+	setAccountModelRateLimitSnapshot(account, anthropicFableRateLimitKey, now.Add(time.Hour), "anthropic_7d_oi_window_exhausted", now)
+	rl.applyAnthropicFableSchedulingThreshold(context.Background(), account, map[string]int{PlatformAnthropic: 100}, true, now)
+	require.Equal(t, 1, repo.clearCalls, "upstream 429 must retain its limit")
 }

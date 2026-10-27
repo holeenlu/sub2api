@@ -4,6 +4,7 @@ package ent
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"strings"
 	"time"
@@ -23,12 +24,26 @@ type UsageLog struct {
 	config `json:"-"`
 	// ID of the ent.
 	ID int64 `json:"id,omitempty"`
+	// BillingStatus holds the value of the "billing_status" field.
+	BillingStatus string `json:"billing_status,omitempty"`
 	// UserID holds the value of the "user_id" field.
 	UserID int64 `json:"user_id,omitempty"`
 	// APIKeyID holds the value of the "api_key_id" field.
 	APIKeyID int64 `json:"api_key_id,omitempty"`
 	// AccountID holds the value of the "account_id" field.
 	AccountID int64 `json:"account_id,omitempty"`
+	// VendorIDSnapshot holds the value of the "vendor_id_snapshot" field.
+	VendorIDSnapshot *int64 `json:"vendor_id_snapshot,omitempty"`
+	// VendorRootIDSnapshot holds the value of the "vendor_root_id_snapshot" field.
+	VendorRootIDSnapshot *int64 `json:"vendor_root_id_snapshot,omitempty"`
+	// VendorParentIDSnapshot holds the value of the "vendor_parent_id_snapshot" field.
+	VendorParentIDSnapshot *int64 `json:"vendor_parent_id_snapshot,omitempty"`
+	// AccountNameSnapshot holds the value of the "account_name_snapshot" field.
+	AccountNameSnapshot *string `json:"account_name_snapshot,omitempty"`
+	// GroupNameSnapshot holds the value of the "group_name_snapshot" field.
+	GroupNameSnapshot *string `json:"group_name_snapshot,omitempty"`
+	// PlatformSnapshot holds the value of the "platform_snapshot" field.
+	PlatformSnapshot *string `json:"platform_snapshot,omitempty"`
 	// RequestID holds the value of the "request_id" field.
 	RequestID string `json:"request_id,omitempty"`
 	// Model holds the value of the "model" field.
@@ -91,6 +106,10 @@ type UsageLog struct {
 	DurationMs *int `json:"duration_ms,omitempty"`
 	// FirstTokenMs holds the value of the "first_token_ms" field.
 	FirstTokenMs *int `json:"first_token_ms,omitempty"`
+	// SamplingDetails holds the value of the "sampling_details" field.
+	SamplingDetails jsontext.Value `json:"sampling_details,omitempty"`
+	// LatencyMetrics holds the value of the "latency_metrics" field.
+	LatencyMetrics jsontext.Value `json:"latency_metrics,omitempty"`
 	// UserAgent holds the value of the "user_agent" field.
 	UserAgent *string `json:"user_agent,omitempty"`
 	// IPAddress holds the value of the "ip_address" field.
@@ -117,6 +136,12 @@ type UsageLog struct {
 	CacheTTLOverridden bool `json:"cache_ttl_overridden,omitempty"`
 	// CreatedAt holds the value of the "created_at" field.
 	CreatedAt time.Time `json:"created_at,omitempty"`
+	// AuthorizationMode holds the value of the "authorization_mode" field.
+	AuthorizationMode *string `json:"authorization_mode,omitempty"`
+	// CacheCreation30mTokens holds the value of the "cache_creation_30m_tokens" field.
+	CacheCreation30mTokens int `json:"cache_creation_30m_tokens,omitempty"`
+	// CacheCreation12hTokens holds the value of the "cache_creation_12h_tokens" field.
+	CacheCreation12hTokens int `json:"cache_creation_12h_tokens,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the UsageLogQuery when eager-loading is set.
 	Edges        UsageLogEdges `json:"edges"`
@@ -200,15 +225,15 @@ func (*UsageLog) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case usagelog.FieldImageSizeBreakdown:
+		case usagelog.FieldSamplingDetails, usagelog.FieldLatencyMetrics, usagelog.FieldImageSizeBreakdown:
 			values[i] = new([]byte)
 		case usagelog.FieldUpstreamModelMismatch, usagelog.FieldLongContextBillingApplied, usagelog.FieldStream, usagelog.FieldCacheTTLOverridden:
 			values[i] = new(sql.NullBool)
 		case usagelog.FieldInputCost, usagelog.FieldOutputCost, usagelog.FieldCacheCreationCost, usagelog.FieldCacheReadCost, usagelog.FieldTotalCost, usagelog.FieldActualCost, usagelog.FieldRateMultiplier, usagelog.FieldAccountRateMultiplier:
 			values[i] = new(sql.NullFloat64)
-		case usagelog.FieldID, usagelog.FieldUserID, usagelog.FieldAPIKeyID, usagelog.FieldAccountID, usagelog.FieldChannelID, usagelog.FieldGroupID, usagelog.FieldSubscriptionID, usagelog.FieldInputTokens, usagelog.FieldOutputTokens, usagelog.FieldCacheCreationTokens, usagelog.FieldCacheReadTokens, usagelog.FieldCacheCreation5mTokens, usagelog.FieldCacheCreation1hTokens, usagelog.FieldBillingType, usagelog.FieldDurationMs, usagelog.FieldFirstTokenMs, usagelog.FieldImageCount, usagelog.FieldVideoCount, usagelog.FieldVideoDurationSeconds:
+		case usagelog.FieldID, usagelog.FieldUserID, usagelog.FieldAPIKeyID, usagelog.FieldAccountID, usagelog.FieldVendorIDSnapshot, usagelog.FieldVendorRootIDSnapshot, usagelog.FieldVendorParentIDSnapshot, usagelog.FieldChannelID, usagelog.FieldGroupID, usagelog.FieldSubscriptionID, usagelog.FieldInputTokens, usagelog.FieldOutputTokens, usagelog.FieldCacheCreationTokens, usagelog.FieldCacheReadTokens, usagelog.FieldCacheCreation5mTokens, usagelog.FieldCacheCreation1hTokens, usagelog.FieldBillingType, usagelog.FieldDurationMs, usagelog.FieldFirstTokenMs, usagelog.FieldImageCount, usagelog.FieldVideoCount, usagelog.FieldVideoDurationSeconds, usagelog.FieldCacheCreation30mTokens, usagelog.FieldCacheCreation12hTokens:
 			values[i] = new(sql.NullInt64)
-		case usagelog.FieldRequestID, usagelog.FieldModel, usagelog.FieldRequestedModel, usagelog.FieldUpstreamModel, usagelog.FieldUpstreamResponseModel, usagelog.FieldModelMappingChain, usagelog.FieldBillingTier, usagelog.FieldBillingMode, usagelog.FieldUserAgent, usagelog.FieldIPAddress, usagelog.FieldImageSize, usagelog.FieldImageInputSize, usagelog.FieldImageOutputSize, usagelog.FieldImageSizeSource, usagelog.FieldVideoResolution:
+		case usagelog.FieldBillingStatus, usagelog.FieldAccountNameSnapshot, usagelog.FieldGroupNameSnapshot, usagelog.FieldPlatformSnapshot, usagelog.FieldRequestID, usagelog.FieldModel, usagelog.FieldRequestedModel, usagelog.FieldUpstreamModel, usagelog.FieldUpstreamResponseModel, usagelog.FieldModelMappingChain, usagelog.FieldBillingTier, usagelog.FieldBillingMode, usagelog.FieldUserAgent, usagelog.FieldIPAddress, usagelog.FieldImageSize, usagelog.FieldImageInputSize, usagelog.FieldImageOutputSize, usagelog.FieldImageSizeSource, usagelog.FieldVideoResolution, usagelog.FieldAuthorizationMode:
 			values[i] = new(sql.NullString)
 		case usagelog.FieldCreatedAt:
 			values[i] = new(sql.NullTime)
@@ -233,6 +258,12 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field id", value)
 			}
 			_m.ID = int64(value.Int64)
+		case usagelog.FieldBillingStatus:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field billing_status", values[i])
+			} else if value.Valid {
+				_m.BillingStatus = value.String
+			}
 		case usagelog.FieldUserID:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
 				return fmt.Errorf("unexpected type %T for field user_id", values[i])
@@ -250,6 +281,48 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field account_id", values[i])
 			} else if value.Valid {
 				_m.AccountID = value.Int64
+			}
+		case usagelog.FieldVendorIDSnapshot:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field vendor_id_snapshot", values[i])
+			} else if value.Valid {
+				_m.VendorIDSnapshot = new(int64)
+				*_m.VendorIDSnapshot = value.Int64
+			}
+		case usagelog.FieldVendorRootIDSnapshot:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field vendor_root_id_snapshot", values[i])
+			} else if value.Valid {
+				_m.VendorRootIDSnapshot = new(int64)
+				*_m.VendorRootIDSnapshot = value.Int64
+			}
+		case usagelog.FieldVendorParentIDSnapshot:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field vendor_parent_id_snapshot", values[i])
+			} else if value.Valid {
+				_m.VendorParentIDSnapshot = new(int64)
+				*_m.VendorParentIDSnapshot = value.Int64
+			}
+		case usagelog.FieldAccountNameSnapshot:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field account_name_snapshot", values[i])
+			} else if value.Valid {
+				_m.AccountNameSnapshot = new(string)
+				*_m.AccountNameSnapshot = value.String
+			}
+		case usagelog.FieldGroupNameSnapshot:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field group_name_snapshot", values[i])
+			} else if value.Valid {
+				_m.GroupNameSnapshot = new(string)
+				*_m.GroupNameSnapshot = value.String
+			}
+		case usagelog.FieldPlatformSnapshot:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field platform_snapshot", values[i])
+			} else if value.Valid {
+				_m.PlatformSnapshot = new(string)
+				*_m.PlatformSnapshot = value.String
 			}
 		case usagelog.FieldRequestID:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -450,6 +523,22 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 				_m.FirstTokenMs = new(int)
 				*_m.FirstTokenMs = int(value.Int64)
 			}
+		case usagelog.FieldSamplingDetails:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field sampling_details", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.SamplingDetails); err != nil {
+					return fmt.Errorf("unmarshal field sampling_details: %w", err)
+				}
+			}
+		case usagelog.FieldLatencyMetrics:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field latency_metrics", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.LatencyMetrics); err != nil {
+					return fmt.Errorf("unmarshal field latency_metrics: %w", err)
+				}
+			}
 		case usagelog.FieldUserAgent:
 			if value, ok := values[i].(*sql.NullString); !ok {
 				return fmt.Errorf("unexpected type %T for field user_agent", values[i])
@@ -538,6 +627,25 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.CreatedAt = value.Time
 			}
+		case usagelog.FieldAuthorizationMode:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field authorization_mode", values[i])
+			} else if value.Valid {
+				_m.AuthorizationMode = new(string)
+				*_m.AuthorizationMode = value.String
+			}
+		case usagelog.FieldCacheCreation30mTokens:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field cache_creation_30m_tokens", values[i])
+			} else if value.Valid {
+				_m.CacheCreation30mTokens = int(value.Int64)
+			}
+		case usagelog.FieldCacheCreation12hTokens:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field cache_creation_12h_tokens", values[i])
+			} else if value.Valid {
+				_m.CacheCreation12hTokens = int(value.Int64)
+			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
 		}
@@ -599,6 +707,9 @@ func (_m *UsageLog) String() string {
 	var builder strings.Builder
 	builder.WriteString("UsageLog(")
 	builder.WriteString(fmt.Sprintf("id=%v, ", _m.ID))
+	builder.WriteString("billing_status=")
+	builder.WriteString(_m.BillingStatus)
+	builder.WriteString(", ")
 	builder.WriteString("user_id=")
 	builder.WriteString(fmt.Sprintf("%v", _m.UserID))
 	builder.WriteString(", ")
@@ -607,6 +718,36 @@ func (_m *UsageLog) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("account_id=")
 	builder.WriteString(fmt.Sprintf("%v", _m.AccountID))
+	builder.WriteString(", ")
+	if v := _m.VendorIDSnapshot; v != nil {
+		builder.WriteString("vendor_id_snapshot=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.VendorRootIDSnapshot; v != nil {
+		builder.WriteString("vendor_root_id_snapshot=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.VendorParentIDSnapshot; v != nil {
+		builder.WriteString("vendor_parent_id_snapshot=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.AccountNameSnapshot; v != nil {
+		builder.WriteString("account_name_snapshot=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.GroupNameSnapshot; v != nil {
+		builder.WriteString("group_name_snapshot=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.PlatformSnapshot; v != nil {
+		builder.WriteString("platform_snapshot=")
+		builder.WriteString(*v)
+	}
 	builder.WriteString(", ")
 	builder.WriteString("request_id=")
 	builder.WriteString(_m.RequestID)
@@ -727,6 +868,12 @@ func (_m *UsageLog) String() string {
 		builder.WriteString(fmt.Sprintf("%v", *v))
 	}
 	builder.WriteString(", ")
+	builder.WriteString("sampling_details=")
+	builder.WriteString(fmt.Sprintf("%v", _m.SamplingDetails))
+	builder.WriteString(", ")
+	builder.WriteString("latency_metrics=")
+	builder.WriteString(fmt.Sprintf("%v", _m.LatencyMetrics))
+	builder.WriteString(", ")
 	if v := _m.UserAgent; v != nil {
 		builder.WriteString("user_agent=")
 		builder.WriteString(*v)
@@ -781,6 +928,17 @@ func (_m *UsageLog) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("created_at=")
 	builder.WriteString(_m.CreatedAt.Format(time.ANSIC))
+	builder.WriteString(", ")
+	if v := _m.AuthorizationMode; v != nil {
+		builder.WriteString("authorization_mode=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	builder.WriteString("cache_creation_30m_tokens=")
+	builder.WriteString(fmt.Sprintf("%v", _m.CacheCreation30mTokens))
+	builder.WriteString(", ")
+	builder.WriteString("cache_creation_12h_tokens=")
+	builder.WriteString(fmt.Sprintf("%v", _m.CacheCreation12hTokens))
 	builder.WriteByte(')')
 	return builder.String()
 }
