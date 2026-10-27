@@ -88,6 +88,7 @@ describe("admin settings auth source defaults helpers", () => {
       auth_source_default_email_platform_quotas: {
         anthropic: { daily: 10, weekly: 50, monthly: 200 },
         openai:    { daily: null, weekly: null, monthly: null },
+
       } as DefaultPlatformQuotasMap,
     });
 
@@ -101,7 +102,7 @@ describe("admin settings auth source defaults helpers", () => {
   });
 
   it("appends auth source defaults back onto update payload", () => {
-    const payload: UpdateSettingsRequest = {
+    const payload: UpdateSettingsRequest = { revision: "revision",
       site_name: "Sub2API",
     };
 
@@ -202,7 +203,7 @@ describe("admin settings auth source defaults helpers", () => {
   });
 
   it("appends sanitized nested platform_quotas with non-null values in update payload", () => {
-    const payload: UpdateSettingsRequest = {};
+    const payload: UpdateSettingsRequest = { revision: "revision" };
     appendAuthSourceDefaultsToUpdateRequest(payload, {
       email: {
         balance: 0,

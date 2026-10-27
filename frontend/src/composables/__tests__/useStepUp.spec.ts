@@ -1,6 +1,8 @@
+import { authSessionStamp } from '@/api/tokenRefresh'
 import { describe, it, expect, vi } from 'vitest'
 import {
   useStepUp,
+  globalAdminStepUp, requestAdminStepUp,
   isStepUpRequired,
   isStepUpBlocked,
   isStepUpCancelled,
@@ -57,6 +59,20 @@ describe('useStepUp.run', () => {
     expect(stepUp.visible.value).toBe(false)
   })
 
+  it('does not replay a verified action under a replacement login', async () => {
+    localStorage.setItem('auth_token', 'first-session')
+    const stepUp = useStepUp()
+    const action = vi.fn().mockRejectedValueOnce({ code: 'STEP_UP_REQUIRED' }).mockResolvedValueOnce('wrong-user-action')
+    const pending = stepUp.run(action)
+    const rejected = expect(pending).rejects.toBeInstanceOf(StepUpCancelledError)
+    await vi.waitFor(() => expect(stepUp.visible.value).toBe(true))
+    localStorage.setItem('auth_token', 'second-session')
+    stepUp.onVerified()
+    await rejected
+    expect(action).toHaveBeenCalledTimes(1)
+    localStorage.clear()
+  })
+
   it('re-throws non-step-up errors without prompting', async () => {
     const stepUp = useStepUp()
     const err = { status: 500, code: 'INTERNAL' }
@@ -104,5 +120,22 @@ describe('useStepUp.run', () => {
     expect(isStepUpRequired(cancelled)).toBe(false)
     expect(isStepUpBlocked(cancelled)).toBe(false)
     expect(isStepUpCancelled({ status: 403, code: 'STEP_UP_REQUIRED' })).toBe(false)
+  })
+})
+
+describe('shared administrative verification', () => {
+  it('shares a prompt and cancels all waiting actions together', async () => {
+    const first = requestAdminStepUp()
+    const second = requestAdminStepUp()
+    expect(first).toBe(second)
+    globalAdminStepUp.onCancel()
+    expect(await first).toBe(false)
+    expect(await second).toBe(false)
+  })
+  it('permits token refresh in the same family but separates a different login or credential generation', () => {
+    const token = (sid: string, generation: number, exp: number) => `e30.${btoa(JSON.stringify({user_id: 1, role: 'admin', sid, token_version: generation, exp}))}.signature`
+    expect(authSessionStamp(token('a', 1, 5))).toBe(authSessionStamp(token('a', 1, 9)))
+    expect(authSessionStamp(token('a', 1, 5))).not.toBe(authSessionStamp(token('b', 1, 5)))
+    expect(authSessionStamp(token('a', 1, 5))).not.toBe(authSessionStamp(token('a', 2, 5)))
   })
 })

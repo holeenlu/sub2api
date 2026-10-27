@@ -207,7 +207,7 @@ func codexDirectImagesUsage(body []byte) (OpenAIUsage, bool) {
 func (s *OpenAIGatewayService) handleCodexDirectImagesNonStreamingResponse(resp *http.Response, c *gin.Context, parsed *OpenAIImagesRequest) (OpenAIUsage, int, []string, error) {
 	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
-		if shouldClassifyOpenAIUpstreamStreamReadError(err) {
+		if shouldClassifyOpenAIUpstreamStreamReadError(err, c.Request.Context(), streamWriteContext(c)) {
 			err = newOpenAIUpstreamStreamReadError(err)
 		}
 		return OpenAIUsage{}, 0, nil, err

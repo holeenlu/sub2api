@@ -113,3 +113,11 @@ func BenchmarkOpenAILargeNativeRequest(b *testing.B) {
 		})
 	}
 }
+
+// Test-only adapters and reference algorithms; production uses the current entrypoints.
+// normalizeOpenAIResponsesLegacyIngress accepts the Chat Completions-shaped
+// payloads that a few Responses clients still emit. Native Responses input is
+// always authoritative because this path has no separate full-replay attempt.
+func normalizeOpenAIResponsesLegacyIngress(body []byte) ([]byte, bool, error) {
+	return normalizeOpenAIResponsesLegacyIngressWithConfig(nil, body)
+}

@@ -56,6 +56,9 @@
             </span>
           </span>
         </p>
+        <p class="mt-1 text-xs text-gray-500" :title="t('usage.cacheHitRateHint')">
+          {{ t('usage.cacheHitRate') }}: <span data-testid="summary-cache-share" class="tabular-nums">{{ formatCacheHitRate(getCacheHitRate(stats?.total_input_tokens, stats?.total_cache_read_tokens, stats?.total_cache_creation_tokens)) }}</span>
+        </p>
       </div>
     </div>
     <div class="card p-4 flex items-center gap-3">
@@ -83,7 +86,7 @@
       <div class="rounded-lg bg-purple-100 p-2 dark:bg-purple-900/30 text-purple-600">
         <Icon name="clock" size="md" />
       </div>
-      <div><p class="text-xs font-medium text-gray-500">{{ t('usage.avgDuration') }}</p><p class="text-xl font-bold">{{ formatDuration(stats?.average_duration_ms || 0) }}</p></div>
+      <div :title="t('usage.aggregateDurationHint')"><p class="text-xs font-medium text-gray-500">{{ t('usage.avgDuration') }}</p><p class="text-xl font-bold">{{ formatDuration(stats?.average_duration_ms || 0) }}</p></div>
     </div>
   </div>
 </template>
@@ -94,6 +97,7 @@ import { useI18n } from 'vue-i18n'
 import type { AdminUsageStatsResponse } from '@/api/admin/usage'
 import type { UsageStatsResponse } from '@/types'
 import Icon from '@/components/icons/Icon.vue'
+import { formatCacheHitRate, getCacheHitRate } from '@/utils/usageMetrics'
 
 const props = withDefaults(defineProps<{
   stats: (AdminUsageStatsResponse | UsageStatsResponse) | null

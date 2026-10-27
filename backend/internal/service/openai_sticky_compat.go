@@ -17,6 +17,14 @@ type openAILegacySessionHashContextKey struct{}
 
 var openAILegacySessionHashKey = openAILegacySessionHashContextKey{}
 
+type openAIStickySessionDeferredContextKey struct{}
+
+// WithDeferredOpenAIStickySession keeps WS selection from renewing affinity
+// before the handler finishes turn admission, including its billing checks.
+func WithDeferredOpenAIStickySession(ctx context.Context) context.Context {
+	return context.WithValue(ctx, openAIStickySessionDeferredContextKey{}, true)
+}
+
 var (
 	openAIStickyLegacyReadFallbackTotal atomic.Int64
 	openAIStickyLegacyReadFallbackHit   atomic.Int64
@@ -155,6 +163,9 @@ func (s *OpenAIGatewayService) setStickySessionAccountID(ctx context.Context, gr
 	if s == nil || s.cache == nil || accountID <= 0 {
 		return nil
 	}
+	if deferred, _ := ctx.Value(openAIStickySessionDeferredContextKey{}).(bool); deferred {
+		return nil
+	}
 	primaryKey := s.openAISessionCacheKey(sessionHash)
 	if primaryKey == "" {
 		return nil
@@ -178,8 +189,11 @@ func (s *OpenAIGatewayService) setStickySessionAccountID(ctx context.Context, gr
 	return nil
 }
 
-func (s *OpenAIGatewayService) refreshStickySessionTTL(ctx context.Context, groupID *int64, sessionHash string, ttl time.Duration) error {
-	if s == nil || s.cache == nil {
+func (s *OpenAIGatewayService) refreshStickySessionTTL(ctx context.Context, groupID *int64, sessionHash string, accountID int64, ttl time.Duration) error {
+	if s == nil || s.cache == nil || accountID <= 0 {
+		return nil
+	}
+	if deferred, _ := ctx.Value(openAIStickySessionDeferredContextKey{}).(bool); deferred {
 		return nil
 	}
 	primaryKey := s.openAISessionCacheKey(sessionHash)
@@ -187,16 +201,32 @@ func (s *OpenAIGatewayService) refreshStickySessionTTL(ctx context.Context, grou
 		return nil
 	}
 
-	err := s.cache.RefreshSessionTTL(ctx, derefGroupID(groupID), primaryKey, ttl)
+	// A legacy hit or an expiry during admission needs a primary binding, but
+	// a concurrent request may already have bound a different account. Perform
+	// the comparison and refresh/create in one cache operation.
+	written, err := s.cache.CompareAndRefreshSessionAccountID(ctx, derefGroupID(groupID), primaryKey, accountID, ttl, true)
+	if err != nil || !written {
+		return err
+	}
 	if !s.openAISessionHashReadOldFallbackEnabled() && !s.openAISessionHashDualWriteOldEnabled() {
 		return err
 	}
 
 	legacyKey := s.openAILegacySessionCacheKey(ctx, sessionHash)
 	if legacyKey != "" {
-		_ = s.cache.RefreshSessionTTL(ctx, derefGroupID(groupID), legacyKey, s.openAIStickyLegacyTTL(ttl))
+		_, err = s.cache.CompareAndRefreshSessionAccountID(ctx, derefGroupID(groupID), legacyKey, accountID, s.openAIStickyLegacyTTL(ttl), s.openAISessionHashDualWriteOldEnabled())
 	}
 	return err
+}
+
+// RefreshStickySessionAfterAdmission renews an admitted WS turn without taking
+// ownership from another request or a deliberately preserved sticky home.
+func (s *OpenAIGatewayService) RefreshStickySessionAfterAdmission(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
+	if preserveOpenAIGuardianParentBinding(ctx, sessionHash) || preserveBorrowedStickyHome(ctx, sessionHash, accountID) {
+		return nil
+	}
+	ctx = context.WithValue(ctx, openAIStickySessionDeferredContextKey{}, false)
+	return s.refreshStickySessionTTL(ctx, groupID, sessionHash, accountID, s.openAIWSSessionStickyTTL())
 }
 
 func (s *OpenAIGatewayService) deleteStickySessionAccountID(ctx context.Context, groupID *int64, sessionHash string) error {

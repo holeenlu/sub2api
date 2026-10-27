@@ -13,7 +13,8 @@ import (
 )
 
 type opsRepository struct {
-	db *sql.DB
+	db          *sql.DB
+	queryBudget opsQueryBudget
 }
 
 const insertOpsErrorLogSQL = `
@@ -225,7 +226,7 @@ func (r *opsRepository) ListErrorLogs(ctx context.Context, filter *service.OpsEr
 	countSQL := "SELECT COUNT(*) FROM ops_error_logs e " + where
 
 	var total int
-	if err := r.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
+	if err := r.queryOpsRow(ctx, countSQL, args...).Scan(&total); err != nil {
 		return nil, err
 	}
 
@@ -235,9 +236,9 @@ func (r *opsRepository) ListErrorLogs(ctx context.Context, filter *service.OpsEr
 SELECT
   e.id,
   e.created_at,
-  e.error_phase,
-  e.error_type,
-  COALESCE(e.error_owner, ''),
+  ` + service.OpsSLAEffectiveColumnSQL("e", "error_phase") + `,
+  ` + service.OpsSLAEffectiveColumnSQL("e", "error_type") + `,
+  ` + service.OpsSLAEffectiveColumnSQL("e", "error_owner") + `,
   COALESCE(e.error_source, ''),
   e.severity,
   COALESCE(e.upstream_status_code, e.status_code, 0),
@@ -267,7 +268,8 @@ SELECT
   COALESCE(e.user_agent, ''),
   e.request_type,
   COALESCE(ak.name, ''),
-  ak.deleted_at
+  ak.deleted_at,
+  e.status_code
 FROM ops_error_logs e
 LEFT JOIN accounts a ON e.account_id = a.id
 LEFT JOIN groups g ON e.group_id = g.id
@@ -278,7 +280,7 @@ LEFT JOIN api_keys ak ON ak.id = e.api_key_id
 ORDER BY ` + opsErrorLogsOrderBy(filter) + `
 LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 
-	rows, err := r.db.QueryContext(ctx, selectSQL, argsWithLimit...)
+	rows, err := r.queryOpsRows(ctx, selectSQL, argsWithLimit...)
 	if err != nil {
 		return nil, err
 	}
@@ -288,6 +290,7 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 	for rows.Next() {
 		var item service.OpsErrorLog
 		var statusCode sql.NullInt64
+		var requestStatusCode sql.NullInt64
 		var clientIP sql.NullString
 		var userID sql.NullInt64
 		var apiKeyID sql.NullInt64
@@ -338,6 +341,7 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 			&requestType,
 			&apiKeyName,
 			&apiKeyDeletedAt,
+			&requestStatusCode,
 		); err != nil {
 			return nil, err
 		}
@@ -351,6 +355,10 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 		}
 		item.ResolvedByUserName = resolvedByName
 		item.StatusCode = int(statusCode.Int64)
+		if requestStatusCode.Valid {
+			v := int(requestStatusCode.Int64)
+			item.RequestStatusCode = &v
+		}
 		if clientIP.Valid {
 			s := clientIP.String
 			item.ClientIP = &s
@@ -406,9 +414,9 @@ func (r *opsRepository) GetErrorLogByID(ctx context.Context, id int64) (*service
 SELECT
   e.id,
   e.created_at,
-  e.error_phase,
-  e.error_type,
-  COALESCE(e.error_owner, ''),
+  ` + service.OpsSLAEffectiveColumnSQL("e", "error_phase") + `,
+  ` + service.OpsSLAEffectiveColumnSQL("e", "error_type") + `,
+  ` + service.OpsSLAEffectiveColumnSQL("e", "error_owner") + `,
   COALESCE(e.error_source, ''),
   e.severity,
   COALESCE(e.upstream_status_code, e.status_code, 0),
@@ -425,7 +433,7 @@ SELECT
   COALESCE(e.upstream_error_message, ''),
   COALESCE(e.upstream_error_detail, ''),
   COALESCE(e.upstream_errors::text, ''),
-  e.is_business_limited,
+  ` + service.OpsSLABusinessLimitedSQL("e") + `,
   e.user_id,
   COALESCE(u.email, ''),
   e.api_key_id,
@@ -449,7 +457,8 @@ SELECT
   e.time_to_first_token_ms,
   COALESCE(e.api_key_prefix, ''),
   COALESCE(ak.name, ''),
-  ak.deleted_at
+  ak.deleted_at,
+  e.status_code
 FROM ops_error_logs e
 LEFT JOIN users u ON e.user_id = u.id
 LEFT JOIN accounts a ON e.account_id = a.id
@@ -460,6 +469,7 @@ LIMIT 1`
 
 	var out service.OpsErrorLogDetail
 	var statusCode sql.NullInt64
+	var requestStatusCode sql.NullInt64
 	var upstreamStatusCode sql.NullInt64
 	var resolvedAt sql.NullTime
 	var resolvedBy sql.NullInt64
@@ -477,7 +487,7 @@ LIMIT 1`
 	var detailAPIKeyName string
 	var detailAPIKeyDeletedAt sql.NullTime
 
-	err := r.db.QueryRowContext(ctx, q, id).Scan(
+	err := r.queryOpsRow(ctx, q, id).Scan(
 		&out.ID,
 		&out.CreatedAt,
 		&out.Phase,
@@ -524,12 +534,17 @@ LIMIT 1`
 		&out.APIKeyPrefix,
 		&detailAPIKeyName,
 		&detailAPIKeyDeletedAt,
+		&requestStatusCode,
 	)
 	if err != nil {
 		return nil, err
 	}
 
 	out.StatusCode = int(statusCode.Int64)
+	if requestStatusCode.Valid {
+		v := int(requestStatusCode.Int64)
+		out.RequestStatusCode = &v
+	}
 	if resolvedAt.Valid {
 		t := resolvedAt.Time
 		out.ResolvedAt = &t
@@ -749,7 +764,7 @@ func (r *opsRepository) ListSystemLogs(ctx context.Context, filter *service.OpsS
 	where, args, _ := buildOpsSystemLogsWhere(filter)
 	countSQL := "SELECT COUNT(*) FROM ops_system_logs l " + where
 	var total int
-	if err := r.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
+	if err := r.queryOpsRow(ctx, countSQL, args...).Scan(&total); err != nil {
 		return nil, err
 	}
 
@@ -776,7 +791,7 @@ FROM ops_system_logs l
 ORDER BY l.created_at DESC, l.id DESC
 LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 
-	rows, err := r.db.QueryContext(ctx, query, argsWithLimit...)
+	rows, err := r.queryOpsRows(ctx, query, argsWithLimit...)
 	if err != nil {
 		return nil, err
 	}
@@ -854,7 +869,7 @@ func (r *opsRepository) DeleteSystemLogs(ctx context.Context, filter *service.Op
 	}
 
 	query := "DELETE FROM ops_system_logs l " + where
-	res, err := r.db.ExecContext(ctx, query, args...)
+	res, err := r.execOpsQuery(ctx, query, args...)
 	if err != nil {
 		return 0, err
 	}
@@ -941,12 +956,12 @@ func buildOpsErrorLogsWhere(filter *service.OpsErrorLogFilter) (string, []any) {
 	}
 	if phase := phaseFilter; phase != "" {
 		args = append(args, phase)
-		clauses = append(clauses, "e.error_phase = $"+itoa(len(args)))
+		clauses = append(clauses, service.OpsSLAEffectiveColumnSQL("e", "error_phase")+" = $"+itoa(len(args)))
 	}
 	if filter != nil {
 		if owner := strings.TrimSpace(strings.ToLower(filter.Owner)); owner != "" {
 			args = append(args, owner)
-			clauses = append(clauses, "LOWER(COALESCE(e.error_owner,'')) = $"+itoa(len(args)))
+			clauses = append(clauses, "LOWER("+service.OpsSLAEffectiveColumnSQL("e", "error_owner")+") = $"+itoa(len(args)))
 		}
 		if source := strings.TrimSpace(strings.ToLower(filter.Source)); source != "" {
 			args = append(args, source)
@@ -967,14 +982,14 @@ func buildOpsErrorLogsWhere(filter *service.OpsErrorLogFilter) (string, []any) {
 	}
 	switch view {
 	case "", "errors":
-		clauses = append(clauses, "COALESCE(e.is_business_limited,false) = false")
+		clauses = append(clauses, "NOT "+service.OpsSLABusinessLimitedSQL("e"))
 	case "excluded":
-		clauses = append(clauses, "COALESCE(e.is_business_limited,false) = true")
+		clauses = append(clauses, service.OpsSLABusinessLimitedSQL("e"))
 	case "all":
 		// no-op
 	default:
 		// treat unknown as default 'errors'
-		clauses = append(clauses, "COALESCE(e.is_business_limited,false) = false")
+		clauses = append(clauses, "NOT "+service.OpsSLABusinessLimitedSQL("e"))
 	}
 	if len(filter.StatusCodes) > 0 {
 		args = append(args, pq.Array(filter.StatusCodes))
@@ -1032,11 +1047,11 @@ func buildOpsErrorLogsWhere(filter *service.OpsErrorLogFilter) (string, []any) {
 	}
 	if len(filter.ErrorPhasesAny) > 0 {
 		args = append(args, pq.Array(filter.ErrorPhasesAny))
-		clauses = append(clauses, "e.error_phase = ANY($"+itoa(len(args))+")")
+		clauses = append(clauses, service.OpsSLAEffectiveColumnSQL("e", "error_phase")+" = ANY($"+itoa(len(args))+")")
 	}
 	if len(filter.ErrorTypesAny) > 0 {
 		args = append(args, pq.Array(filter.ErrorTypesAny))
-		clauses = append(clauses, "e.error_type = ANY($"+itoa(len(args))+")")
+		clauses = append(clauses, service.OpsSLAEffectiveColumnSQL("e", "error_type")+" = ANY($"+itoa(len(args))+")")
 	}
 
 	return "WHERE " + strings.Join(clauses, " AND "), args

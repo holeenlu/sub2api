@@ -23,6 +23,7 @@ func (a *LegacyModerationAdapter) Check(ctx context.Context, req Request) (*Lega
 		APIKeyID: req.APIKeyID, APIKeyName: req.APIKeyName, GroupID: cloneInt64Ptr(req.GroupID),
 		GroupName: req.GroupName, Endpoint: req.Endpoint, Provider: req.Provider,
 		Model: req.Model, Protocol: req.Protocol, Body: req.Body,
+		DeviceID: req.DeviceID,
 	})
 	if err != nil || decision == nil {
 		return nil, err
@@ -30,6 +31,6 @@ func (a *LegacyModerationAdapter) Check(ctx context.Context, req Request) (*Lega
 	return &LegacyDecision{
 		Allowed: decision.Allowed, Blocked: decision.Blocked, Flagged: decision.Flagged,
 		Message: decision.Message, StatusCode: decision.StatusCode,
-		ErrorCode: "content_policy_violation", Action: decision.Action,
+		ErrorCode: decision.ErrorCode(), Action: decision.Action,
 	}, nil
 }

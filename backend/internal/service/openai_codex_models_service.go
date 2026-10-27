@@ -23,7 +23,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"golang.org/x/net/http2"
-	"golang.org/x/sync/singleflight"
 )
 
 // chatgptCodexModelsURL is the ChatGPT Codex models manifest endpoint.
@@ -44,7 +43,10 @@ const (
 	openAIModelsCacheTTL              = 60 * time.Second
 	openAIModelsCacheStaleTTL         = 5 * time.Minute
 	codexModelsManifestRequestTimeout = 15 * time.Second
-	codexAutoModelPrefix              = "codex-auto-"
+	// 刷新只用于目录读取，按现有缓存条目预算的 1/16 限制在途键；相同键共用一次刷新。
+	openAIModelsMaxConcurrentRefreshes = openAIModelsCacheMaxEntries / 16
+	openAIModelsRefreshFailureBackoff  = 5 * time.Second
+	codexAutoModelPrefix               = "codex-auto-"
 )
 
 // FilterCodexModelIDsForGroup removes dedicated media-generation models,
@@ -159,6 +161,14 @@ func (s *OpenAIGatewayService) BuildGroupConfiguredCodexModelsManifest(
 	if err != nil {
 		return nil, false, fmt.Errorf("build group configured Codex models: %w", err)
 	}
+	// The configured catalog is returned without MergeGroupConfiguredCodexModels,
+	// so it needs the same BPS route restrictions (multi-agent and context window).
+	if s.excelBPSGloballyEnabled(ctx) {
+		body, _, err = restrictExcelBPSCodexModelsManifest(body, catalog, group)
+		if err != nil {
+			return nil, false, err
+		}
+	}
 	manifest := &OpenAIModelsResponse{
 		Body: body,
 		ETag: codexModelsManifestBodyETag(body),
@@ -174,6 +184,8 @@ func (s *OpenAIGatewayService) BuildGroupConfiguredCodexModelsManifest(
 // to the authenticated OpenAI group without discarding metadata from upstream
 // Codex model entries. A group's custom models list also filters the picker,
 // matching the standard /v1/models display policy.
+// Composite groups keep their supplied directory and receive only Cloud
+// capability restrictions and the corresponding final ETag.
 func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 	ctx context.Context,
 	group *Group,
@@ -183,7 +195,7 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 	if s == nil || s.accountRepo == nil || group == nil || manifest == nil || manifest.NotModified {
 		return nil
 	}
-	if group.Platform != PlatformOpenAI || len(manifest.Body) == 0 {
+	if (group.Platform != PlatformOpenAI && group.Platform != PlatformComposite) || len(manifest.Body) == 0 {
 		return nil
 	}
 
@@ -191,32 +203,47 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 	if err != nil {
 		return fmt.Errorf("load group configured Codex models: %w", err)
 	}
-	var configuredModels []string
-	if !group.CodexModelsManifestConfig.Enabled {
-		configuredModels = openAIConfiguredCodexModelIDsForGroup(visible, group)
-	}
-	body, changed, err := mergeConfiguredCodexModelsManifest(
-		manifest.Body,
-		configuredModels,
-		group.ModelAllowlist.Models,
-		group.ModelAllowlistEnabled(),
-	)
-	if err != nil {
-		return fmt.Errorf("merge group configured Codex models: %w", err)
-	}
-	if group.CodexModelsManifestConfig.Enabled && group.ModelAllowlistEnabled() {
-		body, err = orderPinnedCodexModelsBySelection(body, group.ModelAllowlist)
-		if err != nil {
-			return fmt.Errorf("order pinned Codex models: %w", err)
+	body, changed := manifest.Body, false
+	if group.Platform == PlatformOpenAI {
+		var configuredModels []string
+		if !group.CodexModelsManifestConfig.Enabled {
+			configuredModels = openAIConfiguredCodexModelIDsForGroup(visible, group)
 		}
-		changed = true
+		body, changed, err = mergeConfiguredCodexModelsManifest(
+			body,
+			configuredModels,
+			group.ModelAllowlist.Models,
+			group.ModelAllowlistEnabled(),
+		)
+		if err != nil {
+			return fmt.Errorf("merge group configured Codex models: %w", err)
+		}
+		if s.excelBPSGloballyEnabled(ctx) {
+			restricted, restrictedChanged, restrictErr := restrictExcelBPSCodexModelsManifest(body, accounts, group)
+			if restrictErr != nil {
+				return restrictErr
+			}
+			body, changed = restricted, changed || restrictedChanged
+		}
 	}
-	filtered, retired, err := filterRetiredOpenAIPublicModelsBody(body, accounts, true)
+	experimental, experimentalChanged, err := restrictCodexExperimentalToolsManifest(body, accounts, group)
 	if err != nil {
-		return fmt.Errorf("filter retired Codex models: %w", err)
+		return fmt.Errorf("restrict experimental Codex tools: %w", err)
 	}
-	body = filtered
-	if changed || retired {
+	body, changed = experimental, changed || experimentalChanged
+	restricted, cloudChanged, err := restrictCloudCodexModelsManifest(body, accounts, group)
+	if err != nil {
+		return fmt.Errorf("restrict Cloud Codex models: %w", err)
+	}
+	body, changed = restricted, changed || cloudChanged
+	if group.Platform == PlatformOpenAI {
+		filtered, retired, err := filterRetiredOpenAIPublicModelsBody(body, accounts, true)
+		if err != nil {
+			return fmt.Errorf("filter retired Codex models: %w", err)
+		}
+		body, changed = filtered, changed || retired
+	}
+	if changed {
 		manifest.Body = body
 		manifest.ETag = codexModelsManifestBodyETag(body)
 	}
@@ -225,6 +252,66 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 		manifest.NotModified = true
 	}
 	return nil
+}
+
+// Discovery may use a native or pinned account while inference selects Cloud.
+// Apply the same capability ceiling as local generation to the final group
+// directory, including unmapped groups. Transient limits must not widen it.
+func restrictCloudCodexModelsManifest(body []byte, accounts []Account, group *Group) ([]byte, bool, error) {
+	cloudAccounts := make([]*Account, 0)
+	for i := range accounts {
+		if accounts[i].IsOpenAI() && accounts[i].IsOpenAICloudConfigured() {
+			cloudAccounts = append(cloudAccounts, &accounts[i])
+		}
+	}
+	if len(cloudAccounts) == 0 {
+		return body, false, nil
+	}
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, false, err
+	}
+	var models []json.RawMessage
+	if err := json.Unmarshal(envelope["models"], &models); err != nil {
+		return nil, false, err
+	}
+	changed := false
+	for index, raw := range models {
+		var model map[string]json.RawMessage
+		if json.Unmarshal(raw, &model) != nil {
+			continue
+		}
+		var slug string
+		if json.Unmarshal(model["slug"], &slug) != nil || strings.TrimSpace(slug) == "" {
+			continue
+		}
+		slug = strings.TrimSpace(slug)
+		routed := codexModelRoutingAccountIDs(group, slug)
+		for _, account := range cloudAccounts {
+			if len(routed) > 0 && !containsInt64(routed, account.ID) || !account.IsModelSupported(slug) {
+				continue
+			}
+			if applyCodexToolCapabilities(model, cloudCodexToolCapabilities, true) {
+				var err error
+				models[index], err = json.Marshal(model)
+				if err != nil {
+					return nil, false, err
+				}
+				changed = true
+			}
+			break
+		}
+	}
+	if !changed {
+		return body, false, nil
+	}
+	var err error
+	envelope["models"], err = json.Marshal(models)
+	if err != nil {
+		return nil, false, err
+	}
+	result, err := json.Marshal(envelope)
+	return result, err == nil, err
 }
 
 // loadCodexGroupCatalogAccounts separates picker membership from capability
@@ -366,10 +453,9 @@ type configuredCodexModelMessages struct {
 	GuardianV2            any    `json:"guardian_v2"`
 }
 
-// configuredCodexModelDescriptor is the minimum complete ModelInfo contract
-// understood by current Codex clients. Several nullable fields are intentionally
-// emitted: unlike ordinary OpenAI /v1/models entries, the Codex manifest parser
-// requires them to be present.
+// configuredCodexModelDescriptor supplies complete metadata for generated catalogs.
+// Partial native manifests reuse only its decoding-required fields; optional
+// native fields do not inherit this descriptor's capability defaults.
 type configuredCodexModelDescriptor struct {
 	officialMetadata                  json.RawMessage
 	Slug                              string                          `json:"slug"`
@@ -1451,20 +1537,28 @@ func mergeConfiguredCodexModelsManifest(
 		seen[modelID] = struct{}{}
 		changed = true
 	}
-	if !changed {
-		return body, false, nil
+	if changed {
+		rawModels, err := json.Marshal(merged)
+		if err != nil {
+			return nil, false, err
+		}
+		envelope["models"] = rawModels
+		body, err = json.Marshal(envelope)
+		if err != nil {
+			return nil, false, err
+		}
 	}
-
-	rawModels, err := json.Marshal(merged)
-	if err != nil {
-		return nil, false, err
+	// Apply the group's order after upstream entries and configured aliases are
+	// merged, for pinned discovery, scheduler discovery and local catalogs alike.
+	if filterBySelection {
+		ordered, err := orderCodexModelsBySelection(body, allowlist)
+		if err != nil {
+			return nil, false, err
+		}
+		changed = changed || !bytes.Equal(body, ordered)
+		body = ordered
 	}
-	envelope["models"] = rawModels
-	mergedBody, err := json.Marshal(envelope)
-	if err != nil {
-		return nil, false, err
-	}
-	return mergedBody, true, nil
+	return body, changed, nil
 }
 
 func codexModelWithVisibility(rawModel json.RawMessage, visibility string) (json.RawMessage, bool, error) {
@@ -1614,6 +1708,15 @@ type openAIModelsCacheEntry struct {
 	order      uint64
 	expiresAt  time.Time
 	staleUntil time.Time
+	retryAt    time.Time
+	lastErr    error
+}
+
+// 每个键只持有一个完成信号，等待者取消不会取消共享刷新或留下独立的等待队列。
+type openAIModelsRefresh struct {
+	done     chan struct{}
+	manifest *OpenAIModelsResponse
+	err      error
 }
 
 type openAIModelsCacheState uint8
@@ -1628,7 +1731,7 @@ type openAIModelsCache struct {
 	mu        sync.Mutex
 	entries   map[string]openAIModelsCacheEntry
 	nextOrder uint64
-	refresh   singleflight.Group
+	refresh   map[string]*openAIModelsRefresh
 }
 
 func (c *openAIModelsCache) get(key string, now time.Time) (*OpenAIModelsResponse, openAIModelsCacheState) {
@@ -1639,7 +1742,9 @@ func (c *openAIModelsCache) get(key string, now time.Time) (*OpenAIModelsRespons
 		return nil, openAIModelsCacheMiss
 	}
 	if !now.Before(entry.staleUntil) {
-		delete(c.entries, key)
+		if !now.Before(entry.retryAt) {
+			delete(c.entries, key)
+		}
 		return nil, openAIModelsCacheMiss
 	}
 	if now.Before(entry.expiresAt) {
@@ -1658,6 +1763,13 @@ func (c *openAIModelsCache) set(key string, manifest *OpenAIModelsResponse, now 
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.setEntryLocked(key, openAIModelsCacheEntry{
+		manifest: manifest, expiresAt: now.Add(openAIModelsCacheTTL),
+		staleUntil: now.Add(openAIModelsCacheStaleTTL),
+	}, now)
+}
+
+func (c *openAIModelsCache) setEntryLocked(key string, entry openAIModelsCacheEntry, now time.Time) {
 	if c.entries == nil {
 		c.entries = make(map[string]openAIModelsCacheEntry)
 	}
@@ -1665,7 +1777,7 @@ func (c *openAIModelsCache) set(key string, manifest *OpenAIModelsResponse, now 
 		oldestKey := ""
 		var oldestOrder uint64
 		for candidateKey, entry := range c.entries {
-			if !now.Before(entry.staleUntil) {
+			if !now.Before(entry.staleUntil) && !now.Before(entry.retryAt) {
 				delete(c.entries, candidateKey)
 				continue
 			}
@@ -1679,12 +1791,24 @@ func (c *openAIModelsCache) set(key string, manifest *OpenAIModelsResponse, now 
 		}
 	}
 	c.nextOrder++
-	c.entries[key] = openAIModelsCacheEntry{
-		manifest:   manifest,
-		order:      c.nextOrder,
-		expiresAt:  now.Add(openAIModelsCacheTTL),
-		staleUntil: now.Add(openAIModelsCacheStaleTTL),
+	entry.order = c.nextOrder
+	c.entries[key] = entry
+}
+
+func (c *openAIModelsCache) recordFailure(key string, err error, now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry := c.entries[key]
+	var upstreamErr *codexModelsManifestUpstreamError
+	authorizationRejected := errors.As(err, &upstreamErr) &&
+		(upstreamErr.statusCode == http.StatusUnauthorized || upstreamErr.statusCode == http.StatusForbidden)
+	if authorizationRejected || !now.Before(entry.staleUntil) {
+		// 已知授权拒绝不能通过 stale 回退继续展示该凭据的旧目录。
+		entry.manifest = nil
+		entry.expiresAt, entry.staleUntil = time.Time{}, time.Time{}
 	}
+	entry.lastErr, entry.retryAt = err, now.Add(openAIModelsRefreshFailureBackoff)
+	c.setEntryLocked(key, entry, now)
 }
 
 // FetchCodexModelsManifest fetches the live Codex models manifest from either
@@ -1694,6 +1818,12 @@ func (c *openAIModelsCache) set(key string, manifest *OpenAIModelsResponse, now 
 // passed through verbatim. Custom API key manifests receive only the narrowly
 // scoped compatibility adjustments required by custom-provider Codex clients.
 func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, account *Account, clientVersion, ifNoneMatch string) (*OpenAIModelsResponse, error) {
+	if account != nil && account.IsExcelBPSEnabled() && s.excelBPSGloballyEnabled(ctx) {
+		return s.fetchExcelBPSCodexManifest(ctx, account, clientVersion, ifNoneMatch)
+	}
+	return s.fetchNativeCodexModelsManifest(ctx, account, clientVersion, ifNoneMatch)
+}
+func (s *OpenAIGatewayService) fetchNativeCodexModelsManifest(ctx context.Context, account *Account, clientVersion, ifNoneMatch string) (*OpenAIModelsResponse, error) {
 	if account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_ACCOUNT_REQUIRED", "account is required")
 	}
@@ -1869,47 +1999,81 @@ func (s *OpenAIGatewayService) fetchCachedOpenAIModels(ctx context.Context, requ
 	if state == openAIModelsCacheFresh {
 		return openAIModelsResponseForClient(manifest, ifNoneMatch), nil
 	}
-	resultCh := s.refreshCachedOpenAIModels(cacheKey, request, fetch)
+	refresh, err := s.openAIModelsCache.startRefresh(cacheKey, fetch)
 	if state == openAIModelsCacheStale {
-		return openAIModelsResponseForClient(manifest, ifNoneMatch), nil
+		// 刷新可能已确认凭据被拒绝，再查一次以免返回刚失效的旧值。
+		if current, currentState := s.openAIModelsCache.get(cacheKey, time.Now()); currentState != openAIModelsCacheMiss {
+			return openAIModelsResponseForClient(current, ifNoneMatch), nil
+		}
+	}
+	if err != nil {
+		return nil, err
 	}
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case result := <-resultCh:
-		if result.Err != nil {
-			return nil, result.Err
+	case <-refresh.done:
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
-		manifest, ok := result.Val.(*OpenAIModelsResponse)
-		if !ok || manifest == nil {
-			return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_REQUEST_FAILED", "invalid shared Codex models manifest result")
+		if refresh.err != nil {
+			return nil, refresh.err
 		}
-		return openAIModelsResponseForClient(manifest, ifNoneMatch), nil
+		return openAIModelsResponseForClient(refresh.manifest, ifNoneMatch), nil
 	}
 }
 
-func (s *OpenAIGatewayService) refreshCachedOpenAIModels(cacheKey string, request openAIModelsRequest, fetch func(ctx context.Context, ifNoneMatch string) (*OpenAIModelsResponse, error)) <-chan singleflight.Result {
-	return s.openAIModelsCache.refresh.DoChan(cacheKey, func() (any, error) {
+func (cache *openAIModelsCache) startRefresh(cacheKey string, fetch func(ctx context.Context, ifNoneMatch string) (*OpenAIModelsResponse, error)) (*openAIModelsRefresh, error) {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	if refresh := cache.refresh[cacheKey]; refresh != nil {
+		return refresh, nil
+	}
+	entry := cache.entries[cacheKey]
+	now := time.Now()
+	if entry.lastErr != nil && now.Before(entry.retryAt) {
+		return nil, entry.lastErr
+	}
+	if entry.manifest != nil && now.Before(entry.expiresAt) {
+		refresh := &openAIModelsRefresh{done: make(chan struct{}), manifest: entry.manifest}
+		close(refresh.done)
+		return refresh, nil
+	}
+	if len(cache.refresh) >= openAIModelsMaxConcurrentRefreshes {
+		return nil, infraerrors.New(http.StatusServiceUnavailable, "OPENAI_MODELS_REFRESH_BUSY", "Model catalog refresh capacity is busy")
+	}
+	refresh := &openAIModelsRefresh{done: make(chan struct{})}
+	if cache.refresh == nil {
+		cache.refresh = make(map[string]*openAIModelsRefresh)
+	}
+	cache.refresh[cacheKey] = refresh
+	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), codexModelsManifestRequestTimeout)
 		defer cancel()
-		cached, _ := s.openAIModelsCache.get(cacheKey, time.Now())
+		cached, _ := cache.get(cacheKey, time.Now())
 		ifNoneMatch := ""
 		if cached != nil {
 			ifNoneMatch = cached.upstreamETag
 		}
 		manifest, err := fetch(ctx, ifNoneMatch)
+		if err == nil && manifest == nil {
+			err = infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_REQUEST_FAILED", "invalid shared Codex models manifest result")
+		}
 		if err != nil {
-			return nil, err
+			cache.recordFailure(cacheKey, err, time.Now())
+		} else if manifest.NotModified && cached != nil {
+			manifest = cached
+			cache.set(cacheKey, manifest, time.Now())
+		} else if !manifest.NotModified {
+			cache.set(cacheKey, manifest, time.Now())
 		}
-		if manifest.NotModified && cached != nil {
-			s.openAIModelsCache.set(cacheKey, cached, time.Now())
-			return cached, nil
-		}
-		if !manifest.NotModified {
-			s.openAIModelsCache.set(cacheKey, manifest, time.Now())
-		}
-		return manifest, nil
-	})
+		cache.mu.Lock()
+		defer cache.mu.Unlock()
+		refresh.manifest, refresh.err = manifest, err
+		delete(cache.refresh, cacheKey)
+		close(refresh.done)
+	}()
+	return refresh, nil
 }
 
 func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstreamForRequest(request openAIModelsRequest) func(ctx context.Context, ifNoneMatch string) (*OpenAIModelsResponse, error) {
@@ -2024,11 +2188,11 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 			retryable: true,
 		}
 	}
-	if request.useAPIKeyUpstream {
+	if convertedFromOpenAIModelList {
 		body, err = completeAPIKeyCodexModelsManifestMetadata(
 			body,
-			false,
 			request.credentialAccount,
+			convertedFromOpenAIModelList,
 		)
 		if err != nil {
 			return nil, &codexModelsManifestUpstreamError{
@@ -2041,6 +2205,8 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 				retryable: true,
 			}
 		}
+	}
+	if request.useAPIKeyUpstream {
 		body, err = adjustAPIKeyCodexModelsManifest(body, request.credentialAccount)
 		if err != nil {
 			return nil, &codexModelsManifestUpstreamError{
@@ -2149,16 +2315,6 @@ func adjustAPIKeyCodexModelsManifest(body []byte, account *Account) ([]byte, err
 	return adjusted, nil
 }
 
-// convertOpenAIModelListToCodexManifest rewrites a standard OpenAI
-// GET /v1/models response ({"object":"list","data":[{"id":...},...]}) into the
-// same complete Codex manifest used by locally generated custom-provider
-// catalogs. Bodies that already carry a top-level models field, are not the
-// standard list shape, or yield no usable model IDs are returned unchanged so
-// envelope validation reports the original payload.
-func convertOpenAIModelListToCodexManifest(body []byte) []byte {
-	return convertOpenAIModelListToCodexManifestForAccount(body, nil)
-}
-
 func convertOpenAIModelListToCodexManifestForAccount(body []byte, account *Account) []byte {
 	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal(body, &envelope); err != nil || envelope == nil {
@@ -2221,12 +2377,8 @@ func convertOpenAIModelListToCodexManifestForAccount(body []byte, account *Accou
 	return converted
 }
 
-// completeAPIKeyCodexModelsManifestMetadata fills fields omitted by standard
-// OpenAI-compatible /models endpoints. Existing provider metadata always wins;
-// only absent or null values are synthesized.
-// CompleteAPIKeyCodexModelsManifestForClient fills the complete ModelInfo
-// contract immediately before a group-specific API key manifest is returned.
-// The shared upstream cache remains independent from local group policy.
+// CompleteAPIKeyCodexModelsManifestForClient 为普通 ID 列表生成的目录应用当前账号能力。
+// 原生 models 只补解码必需的缺省字段，可选字段、null 和未知字段保持上游语义。
 func (s *OpenAIGatewayService) CompleteAPIKeyCodexModelsManifestForClient(manifest *OpenAIModelsResponse, account *Account) error {
 	if manifest == nil || account == nil || !account.IsOpenAIApiKey() || manifest.NotModified || len(manifest.Body) == 0 {
 		return nil
@@ -2239,15 +2391,13 @@ func (s *OpenAIGatewayService) CompleteAPIKeyCodexModelsManifestForClient(manife
 		}
 	}
 	var err error
-	body, err = applySyncedAPIKeyCodexModelMetadata(body, account, manifest.convertedFromOpenAIModelList)
-	if err != nil {
-		return err
+	if manifest.convertedFromOpenAIModelList {
+		body, err = applySyncedAPIKeyCodexModelMetadata(body, account)
+		if err != nil {
+			return err
+		}
 	}
-	body, err = completeAPIKeyCodexModelsManifestMetadata(
-		body,
-		true,
-		account,
-	)
+	body, err = completeAPIKeyCodexModelsManifestMetadata(body, account, manifest.convertedFromOpenAIModelList)
 	if err != nil {
 		return err
 	}
@@ -2260,7 +2410,7 @@ func (s *OpenAIGatewayService) CompleteAPIKeyCodexModelsManifestForClient(manife
 	return nil
 }
 
-func applySyncedAPIKeyCodexModelMetadata(body []byte, account *Account, overwriteLocalDefaults bool) ([]byte, error) {
+func applySyncedAPIKeyCodexModelMetadata(body []byte, account *Account) ([]byte, error) {
 	snapshot := account.GetUpstreamModelMetadataSnapshot()
 	if snapshot == nil || len(snapshot.Models) == 0 {
 		return body, nil
@@ -2334,11 +2484,7 @@ func applySyncedAPIKeyCodexModelMetadata(body []byte, account *Account, overwrit
 			if !exists {
 				continue
 			}
-			current, currentExists := model[field]
-			current = bytes.TrimSpace(current)
-			if !overwriteLocalDefaults && currentExists && len(current) > 0 && !bytes.Equal(current, []byte("null")) {
-				continue
-			}
+			current := bytes.TrimSpace(model[field])
 			if bytes.Equal(current, bytes.TrimSpace(value)) {
 				continue
 			}
@@ -2371,7 +2517,8 @@ func applySyncedAPIKeyCodexModelMetadata(body []byte, account *Account, overwrit
 	return updated, nil
 }
 
-func completeAPIKeyCodexModelsManifestMetadata(body []byte, completeAll bool, account *Account) ([]byte, error) {
+// 普通 ID 列表生成完整画像；原生对象只补 ModelInfo 解码必需且缺失的字段。
+func completeAPIKeyCodexModelsManifestMetadata(body []byte, account *Account, generated bool) ([]byte, error) {
 	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal(body, &envelope); err != nil {
 		return nil, fmt.Errorf("decode JSON object: %w", err)
@@ -2381,7 +2528,7 @@ func completeAPIKeyCodexModelsManifestMetadata(body []byte, completeAll bool, ac
 		return nil, fmt.Errorf("decode top-level models array: %w", err)
 	}
 
-	officialOpenAI := account != nil && isOfficialOpenAIModelsBaseURL(account.GetOpenAIBaseURL())
+	officialOpenAI := generated && account != nil && isOfficialOpenAIModelsBaseURL(account.GetOpenAIBaseURL())
 	changed := false
 	if officialOpenAI {
 		filtered := make([]json.RawMessage, 0, len(models))
@@ -2415,11 +2562,7 @@ func completeAPIKeyCodexModelsManifestMetadata(body []byte, completeAll bool, ac
 			continue
 		}
 
-		completeDescriptor := completeAll || isDeepSeekCodexModel(slug)
 		forceOfficialImage := officialOpenAI && isOpenAICodexImageInputModel(slug)
-		if !completeDescriptor && !forceOfficialImage {
-			continue
-		}
 
 		descriptor := newConfiguredCodexModelDescriptor(slug)
 		descriptor.SupportsSearchTool = shouldForwardOpenAIResponsesViaRawChatCompletions(account)
@@ -2439,19 +2582,53 @@ func completeAPIKeyCodexModelsManifestMetadata(body []byte, completeAll bool, ac
 			return nil, fmt.Errorf("decode default model %q: %w", slug, err)
 		}
 
-		capabilityModel := slug
-		if account != nil {
-			capabilityModel = account.GetMappedModel(slug)
-		}
-		capabilities := accountCodexToolCapabilities(account, capabilityModel)
-		modelChanged := applyCodexToolCapabilities(model, capabilities, false)
-		if completeDescriptor {
-			merged, err := mergeMissingCodexModelFields(model, defaults)
-			if err != nil {
-				return nil, fmt.Errorf("complete model %q: %w", slug, err)
+		modelChanged := false
+		if generated {
+			capabilityModel := slug
+			if account != nil {
+				capabilityModel = account.GetMappedModel(slug)
 			}
-			modelChanged = merged || modelChanged
+			capabilities := accountCodexToolCapabilities(account, capabilityModel)
+			modelChanged = applyCodexToolCapabilities(model, capabilities, false)
+		} else {
+			// Codex ModelInfo 的非 Option、无 serde(default) 字段；不要把完整
+			// descriptor 的可选能力或 model_messages 子项补入原生对象。
+			required := make(map[string]json.RawMessage, 10)
+			for _, field := range []string{
+				"display_name", "supported_reasoning_levels", "shell_type", "visibility",
+				"supported_in_api", "priority", "support_verbosity", "truncation_policy",
+				"experimental_supported_tools",
+			} {
+				required[field] = defaults[field]
+			}
+			// ModelsResponse 还要求两种指令来源至少有一个字符串（空字符串合法）。
+			// 只使用缺省字段承接兼容，显式 null/错误类型不被改写。
+			isString := func(raw json.RawMessage) bool {
+				raw = bytes.TrimSpace(raw)
+				return len(raw) > 0 && raw[0] == '"'
+			}
+			base, baseExists := model["base_instructions"]
+			messagesRaw, messagesExist := model["model_messages"]
+			var messages map[string]json.RawMessage
+			_ = json.Unmarshal(messagesRaw, &messages)
+			template, templateExists := messages["instructions_template"]
+			if !isString(base) && !isString(template) {
+				instruction, _ := json.Marshal(descriptor.ModelMessages.InstructionsTemplate)
+				switch {
+				case !messagesExist || (messages != nil && !templateExists):
+					required["model_messages"] = json.RawMessage(`{"instructions_template":` + string(instruction) + `}`)
+				case !baseExists && (bytes.Equal(bytes.TrimSpace(messagesRaw), []byte("null")) ||
+					(messages != nil && bytes.Equal(bytes.TrimSpace(template), []byte("null")))):
+					required["base_instructions"] = instruction
+				}
+			}
+			defaults = required
 		}
+		merged, err := mergeMissingCodexModelFields(model, defaults)
+		if err != nil {
+			return nil, fmt.Errorf("complete model %q: %w", slug, err)
+		}
+		modelChanged = merged || modelChanged
 		if forceOfficialImage {
 			modalities, err := json.Marshal([]string{"text", "image"})
 			if err != nil {
@@ -2500,8 +2677,7 @@ func mergeMissingCodexModelFields(current, defaults map[string]json.RawMessage) 
 		if exists && stringSliceContains(codexToolCapabilityFields, key) {
 			continue
 		}
-		if !exists || (bytes.Equal(bytes.TrimSpace(currentValue), []byte("null")) &&
-			!bytes.Equal(bytes.TrimSpace(defaultValue), []byte("null"))) {
+		if !exists {
 			current[key] = defaultValue
 			changed = true
 			continue
