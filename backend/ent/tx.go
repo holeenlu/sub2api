@@ -20,6 +20,8 @@ type Tx struct {
 	Account *AccountClient
 	// AccountGroup is the client for interacting with the AccountGroup builders.
 	AccountGroup *AccountGroupClient
+	// AccountSupplyIdentityClaim is the client for interacting with the AccountSupplyIdentityClaim builders.
+	AccountSupplyIdentityClaim *AccountSupplyIdentityClaimClient
 	// Announcement is the client for interacting with the Announcement builders.
 	Announcement *AnnouncementClient
 	// AnnouncementRead is the client for interacting with the AnnouncementRead builders.
@@ -60,10 +62,6 @@ type Tx struct {
 	PaymentProviderInstance *PaymentProviderInstanceClient
 	// PendingAuthSession is the client for interacting with the PendingAuthSession builders.
 	PendingAuthSession *PendingAuthSessionClient
-	// PromoCode is the client for interacting with the PromoCode builders.
-	PromoCode *PromoCodeClient
-	// PromoCodeUsage is the client for interacting with the PromoCodeUsage builders.
-	PromoCodeUsage *PromoCodeUsageClient
 	// Proxy is the client for interacting with the Proxy builders.
 	Proxy *ProxyClient
 	// RedeemCode is the client for interacting with the RedeemCode builders.
@@ -92,6 +90,18 @@ type Tx struct {
 	UserPlatformQuota *UserPlatformQuotaClient
 	// UserSubscription is the client for interacting with the UserSubscription builders.
 	UserSubscription *UserSubscriptionClient
+	// Vendor is the client for interacting with the Vendor builders.
+	Vendor *VendorClient
+	// VendorGroup is the client for interacting with the VendorGroup builders.
+	VendorGroup *VendorGroupClient
+	// VendorSettlement is the client for interacting with the VendorSettlement builders.
+	VendorSettlement *VendorSettlementClient
+	// VendorSettlementAllocation is the client for interacting with the VendorSettlementAllocation builders.
+	VendorSettlementAllocation *VendorSettlementAllocationClient
+	// VendorSettlementLine is the client for interacting with the VendorSettlementLine builders.
+	VendorSettlementLine *VendorSettlementLineClient
+	// VendorSettlementPayment is the client for interacting with the VendorSettlementPayment builders.
+	VendorSettlementPayment *VendorSettlementPaymentClient
 
 	// lazily loaded.
 	client     *Client
@@ -226,6 +236,7 @@ func (tx *Tx) init() {
 	tx.APIKey = NewAPIKeyClient(tx.config)
 	tx.Account = NewAccountClient(tx.config)
 	tx.AccountGroup = NewAccountGroupClient(tx.config)
+	tx.AccountSupplyIdentityClaim = NewAccountSupplyIdentityClaimClient(tx.config)
 	tx.Announcement = NewAnnouncementClient(tx.config)
 	tx.AnnouncementRead = NewAnnouncementReadClient(tx.config)
 	tx.AuthIdentity = NewAuthIdentityClient(tx.config)
@@ -246,8 +257,6 @@ func (tx *Tx) init() {
 	tx.PaymentOrder = NewPaymentOrderClient(tx.config)
 	tx.PaymentProviderInstance = NewPaymentProviderInstanceClient(tx.config)
 	tx.PendingAuthSession = NewPendingAuthSessionClient(tx.config)
-	tx.PromoCode = NewPromoCodeClient(tx.config)
-	tx.PromoCodeUsage = NewPromoCodeUsageClient(tx.config)
 	tx.Proxy = NewProxyClient(tx.config)
 	tx.RedeemCode = NewRedeemCodeClient(tx.config)
 	tx.SecuritySecret = NewSecuritySecretClient(tx.config)
@@ -262,6 +271,12 @@ func (tx *Tx) init() {
 	tx.UserAttributeValue = NewUserAttributeValueClient(tx.config)
 	tx.UserPlatformQuota = NewUserPlatformQuotaClient(tx.config)
 	tx.UserSubscription = NewUserSubscriptionClient(tx.config)
+	tx.Vendor = NewVendorClient(tx.config)
+	tx.VendorGroup = NewVendorGroupClient(tx.config)
+	tx.VendorSettlement = NewVendorSettlementClient(tx.config)
+	tx.VendorSettlementAllocation = NewVendorSettlementAllocationClient(tx.config)
+	tx.VendorSettlementLine = NewVendorSettlementLineClient(tx.config)
+	tx.VendorSettlementPayment = NewVendorSettlementPaymentClient(tx.config)
 }
 
 // txDriver wraps the given dialect.Tx with a nop dialect.Driver implementation.

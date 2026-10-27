@@ -368,7 +368,7 @@ func openAIMissingRootObjectUnionTypeEdit(raw []byte, absoluteStart int) (openAI
 		!bytes.Contains(raw, openAIResponsesJSONEscapeNeedle) {
 		return openAIResponsesToolSchemaEdit{}, false
 	}
-	var schema map[string]json.RawMessage
+	var schema map[string]any
 	if len(raw) < 2 || raw[0] != '{' || json.Unmarshal(raw, &schema) != nil {
 		return openAIResponsesToolSchemaEdit{}, false
 	}
@@ -382,7 +382,7 @@ func openAIMissingRootObjectUnionTypeEdit(raw []byte, absoluteStart int) (openAI
 	}, true
 }
 
-func openAIResponsesSchemaHasObjectOnlyUnion(schema map[string]json.RawMessage, depth int) bool {
+func openAIResponsesSchemaHasObjectOnlyUnion(schema map[string]any, depth int) bool {
 	if depth > openAIResponsesObjectUnionMaxDepth {
 		return false
 	}
@@ -393,8 +393,8 @@ func openAIResponsesSchemaHasObjectOnlyUnion(schema map[string]json.RawMessage, 
 			continue
 		}
 		found = true
-		var branches []json.RawMessage
-		if json.Unmarshal(raw, &branches) != nil || len(branches) == 0 {
+		branches, valid := raw.([]any)
+		if !valid || len(branches) == 0 {
 			return false
 		}
 		for _, branch := range branches {
@@ -406,17 +406,16 @@ func openAIResponsesSchemaHasObjectOnlyUnion(schema map[string]json.RawMessage, 
 	return found
 }
 
-func openAIResponsesSchemaIsObjectOnly(raw json.RawMessage, depth int) bool {
+func openAIResponsesSchemaIsObjectOnly(raw any, depth int) bool {
 	if depth > openAIResponsesObjectUnionMaxDepth {
 		return false
 	}
-	var schema map[string]json.RawMessage
-	if json.Unmarshal(raw, &schema) != nil {
+	schema, ok := raw.(map[string]any)
+	if !ok {
 		return false
 	}
 	if rawType, ok := schema["type"]; ok {
-		var schemaType string
-		return json.Unmarshal(rawType, &schemaType) == nil && schemaType == "object"
+		return rawType == "object"
 	}
 	return openAIResponsesSchemaHasObjectOnlyUnion(schema, depth+1)
 }
@@ -717,4 +716,54 @@ func applyOpenAIResponsesToolSchemaEdits(
 		return nil, false, fmt.Errorf("sanitize OpenAI Responses tool schemas: patch produced invalid JSON")
 	}
 	return sanitized, true, nil
+}
+
+// normalizeOpenAIResponsesToolSchemaMap is the decoded-map adapter of the
+// native tool-schema repair. It shares scope traversal, union inference and
+// pattern predicates with the byte adapter; instance-valued keywords are opaque.
+func normalizeOpenAIResponsesToolSchemaMap(schema map[string]any) bool {
+	changed := false
+	if typ, exists := schema["type"]; exists && typ == nil {
+		schema["type"] = "object"
+		changed = true
+	} else if !exists && openAIResponsesSchemaHasObjectOnlyUnion(schema, 0) {
+		schema["type"] = "object"
+		changed = true
+	}
+	var walk func(any, openAIResponsesToolSchemaContext)
+	walk = func(raw any, scope openAIResponsesToolSchemaContext) {
+		if scope == openAIResponsesToolSchemaSkip {
+			return
+		}
+		switch value := raw.(type) {
+		case map[string]any:
+			if scope == openAIResponsesToolSchemaOrArray {
+				scope = openAIResponsesToolSchema
+			}
+			for key, child := range value {
+				if scope == openAIResponsesToolSchema {
+					if key == "required" && child == nil {
+						delete(value, key)
+						changed = true
+						continue
+					}
+					if pattern, ok := child.(string); key == "pattern" && ok && hasRegexLookaround(pattern) {
+						delete(value, key)
+						changed = true
+						continue
+					}
+				}
+				next, _ := openAIResponsesToolSchemaChildContext(scope, []byte(strconv.Quote(key)))
+				walk(child, next)
+			}
+		case []any:
+			if scope == openAIResponsesToolSchemaArray || scope == openAIResponsesToolSchemaOrArray {
+				for _, child := range value {
+					walk(child, openAIResponsesToolSchema)
+				}
+			}
+		}
+	}
+	walk(schema, openAIResponsesToolSchema)
+	return changed
 }

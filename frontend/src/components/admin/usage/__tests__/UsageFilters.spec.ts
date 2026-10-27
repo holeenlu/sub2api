@@ -213,6 +213,24 @@ describe('UsageFilters — user search dropdown', () => {
     expect(wrapper.text()).not.toContain('a@test.com')
   })
 
+  it('setApiKeyKeyword backfills the key name and cancels a pending key search', async () => {
+    mockSearchApiKeys.mockReset().mockResolvedValue([{ id: 1, name: 'stale-key' }])
+
+    const wrapper = mountFilters()
+    const apiKeyInput = wrapper.find('input[placeholder="Search API key..."]')
+    await apiKeyInput.trigger('focus')
+    await apiKeyInput.setValue('sta')
+
+    // 下钻回填发生在 300ms 防抖到期之前
+    ;(wrapper.vm as unknown as { setApiKeyKeyword: (name: string) => void }).setApiKeyKeyword('prod-key')
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+
+    expect(mockSearchApiKeys).not.toHaveBeenCalled()
+    expect((apiKeyInput.element as HTMLInputElement).value).toBe('prod-key')
+    expect(wrapper.text()).not.toContain('stale-key')
+  })
+
   it('does not restore stale user results after the search is cleared', async () => {
     const pendingSearch = deferred<Array<{ id: number; email: string; deleted: boolean }>>()
     mockSearchUsers.mockImplementationOnce(() => pendingSearch.promise)
@@ -304,4 +322,15 @@ describe('UsageFilters — native compaction filter', () => {
     expect(filters.native_compaction_v2).toBe(true)
     expect(wrapper.emitted('change')).toBeTruthy()
   })
+})
+
+// Existing behavior under the migrated full administrator role.
+const roleState = vi.hoisted(() => ({ isSuperAdmin: true }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ get isSuperAdmin() { return roleState.isSuperAdmin }, isAdmin: true, isSimpleMode: false, can: () => true }) }))
+
+it.each([false, true])('gates upstream account search for super-admin=%s', (isSuperAdmin) => {
+  roleState.isSuperAdmin = isSuperAdmin
+  const wrapper = mount(UsageFilters, { props: { modelValue: {} }, global: { stubs: { Select: true } } })
+  try { expect(wrapper.find('input[placeholder="Search account..."]').exists()).toBe(isSuperAdmin) }
+  finally { wrapper.unmount(); roleState.isSuperAdmin = true }
 })

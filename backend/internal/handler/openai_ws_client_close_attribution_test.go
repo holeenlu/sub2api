@@ -4,7 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
+	"io"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	coderws "github.com/coder/websocket"
@@ -144,6 +148,42 @@ func TestOpenAIWSIngressEndedByClient_MatchesCloseCodeReportedInLog(t *testing.T
 				require.True(t, openAIWSIngressEndedByClient(err),
 					"日志按 1000 归类为正常关闭，归因侧不得同时判为账号故障")
 			}
+		})
+	}
+}
+
+func TestOpenAIWSFirstMessageDiagnostics(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		err, cause error
+		want       string
+	}{
+		{name: "timeout", err: context.DeadlineExceeded, want: "first_message_timeout"},
+		{name: "parent_deadline", err: context.DeadlineExceeded, cause: context.DeadlineExceeded, want: "request_deadline_exceeded"},
+		{name: "disconnect", err: io.EOF, want: "client_disconnected"},
+		{name: "compression", err: errors.New("flate: corrupt input private-token"), want: "compressed_frame_invalid"},
+		{name: "limit", err: coderws.ErrMessageTooBig, want: "client_message_too_large"},
+		{name: "lease", err: context.Canceled, cause: service.ErrOpenAIWSIngressLeaseLost, want: "ingress_lease_lost"},
+		{name: "close_reason", err: coderws.CloseError{Code: coderws.StatusGoingAway, Reason: "private-token"}, want: "client_disconnected"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			if tc.cause == context.DeadlineExceeded {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithDeadline(ctx, time.Now().Add(-time.Second))
+				defer cancel()
+			} else if tc.cause != nil {
+				var cancel context.CancelCauseFunc
+				ctx, cancel = context.WithCancelCause(ctx)
+				cancel(tc.cause)
+			}
+			core, logs := observer.New(zap.WarnLevel)
+			logOpenAIWSFirstMessageFailure(zap.New(core), ctx, tc.err, time.Second, 120*time.Second, true)
+			require.Equal(t, 1, logs.Len())
+			fields := logs.All()[0].ContextMap()
+			require.Equal(t, tc.want, fields["failure_kind"])
+			require.EqualValues(t, time.Second, fields["read_elapsed"])
+			require.NotContains(t, fmt.Sprint(fields), "private-token")
 		})
 	}
 }

@@ -6,12 +6,14 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/anthropicfp"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
@@ -19,17 +21,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
-
-type anthropicCacheControlPayload struct {
-	Type string `json:"type"`
-	TTL  string `json:"ttl,omitempty"`
-}
-
-type anthropicSystemTextBlockPayload struct {
-	Type         string                        `json:"type"`
-	Text         string                        `json:"text"`
-	CacheControl *anthropicCacheControlPayload `json:"cache_control,omitempty"`
-}
 
 type anthropicMetadataPayload struct {
 	UserID string `json:"user_id"`
@@ -44,6 +35,7 @@ func (s *GatewayService) replaceModelInBody(body []byte, newModel string) []byte
 type claudeOAuthNormalizeOptions struct {
 	injectMetadata bool
 	metadataUserID string
+	preserveSystem bool
 }
 
 // sanitizeSystemText rewrites only the fixed OpenCode identity sentence (if present).
@@ -62,20 +54,6 @@ func sanitizeSystemText(text string) string {
 		strings.TrimSpace(claudeCodeSystemPrompt),
 	)
 	return text
-}
-
-func marshalAnthropicSystemTextBlock(text string, includeCacheControl bool) ([]byte, error) {
-	block := anthropicSystemTextBlockPayload{
-		Type: "text",
-		Text: text,
-	}
-	if includeCacheControl {
-		block.CacheControl = &anthropicCacheControlPayload{
-			Type: "ephemeral",
-			TTL:  claude.DefaultCacheControlTTL,
-		}
-	}
-	return json.Marshal(block)
 }
 
 func marshalAnthropicSystemTextBlockWithCacheControl(text string, cacheControl any) ([]byte, error) {
@@ -228,9 +206,11 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 	out := body
 	modified := false
 
-	if next, changed := normalizeClaudeOAuthSystemBody(out); changed {
-		out = next
-		modified = true
+	if !opts.preserveSystem {
+		if next, changed := normalizeClaudeOAuthSystemBody(out); changed {
+			out = next
+			modified = true
+		}
 	}
 
 	rawModel := gjson.GetBytes(out, "model")
@@ -323,7 +303,9 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 	return out, modelID
 }
 
-func (s *GatewayService) buildOAuthMetadataUserID(parsed *ParsedRequest, account *Account, fp *Fingerprint) string {
+// buildOAuthMetadataUserID owns default session synthesis for every Anthropic
+// ingress. Explicit metadata remains owned by the existing identity rewrite.
+func (s *GatewayService) buildOAuthMetadataUserID(c *gin.Context, parsed *ParsedRequest, account *Account, fp *Fingerprint) string {
 	if parsed == nil || account == nil {
 		return ""
 	}
@@ -346,9 +328,16 @@ func (s *GatewayService) buildOAuthMetadataUserID(parsed *ParsedRequest, account
 	// 不复用 GenerateSessionHash —— 后者是粘性路由键、按设计逐轮变化（见其测试）。
 	var firstUserText string
 	if parsed.Body != nil {
-		firstUserText = extractFirstUserText(parsed.Body.Bytes())
+		firstUserText = billingSourceText(parsed.Body.Bytes(), c)
 	}
-	seed := buildStableSessionSeed(account.ID, sessionContextDiscriminator(parsed.SessionContext), firstUserText)
+	sessionContext := parsed.SessionContext
+	if sessionContext == nil && c != nil && c.Request != nil {
+		sessionContext = &SessionContext{
+			ClientIP: ip.GetClientIP(c), UserAgent: c.GetHeader("User-Agent"),
+			APIKeyID: getAPIKeyIDFromContext(c),
+		}
+	}
+	seed := buildStableSessionSeed(account.ID, sessionContextDiscriminator(sessionContext), firstUserText)
 	sessionID := generateSessionUUID(seed)
 
 	// 根据指纹 UA 版本选择输出格式
@@ -356,29 +345,14 @@ func (s *GatewayService) buildOAuthMetadataUserID(parsed *ParsedRequest, account
 	if fp != nil {
 		uaVersion = ExtractCLIVersion(fp.UserAgent)
 	}
-	accountUUID := strings.TrimSpace(account.GetExtraString("account_uuid"))
+	accountUUID := strings.TrimSpace(telemetryCredential(account, "account_uuid"))
 	return FormatMetadataUserID(userID, accountUUID, sessionID, uaVersion)
 }
 
-// applyClaudeCodeOAuthMimicryToBody 将"非 Claude Code 客户端 + Claude OAuth 账号"
-// 路径上原本只在 /v1/messages 里做的完整伪装应用到任意 body 上。
-//
-// 这是 /v1/messages 主路径上 rewriteSystemForNonClaudeCode +
-// normalizeClaudeOAuthRequestBody 流程的通用版，供 OpenAI 协议兼容层
-// (ForwardAsChatCompletions / ForwardAsResponses) 复用。
-//
-// 未抽离之前，OpenAI 协议兼容层仅做 injectClaudeCodePrompt（前置追加），
-// 而仓内 /v1/messages 路径自己的注释明确说过"仅前置追加无法通过 Anthropic
-// 第三方检测"；那条注释就是本函数存在的根因。
-//
-// 参数：
-//   - ctx / c：用于读取指纹和 gateway settings；c 可为 nil（如 count_tokens）。
-//   - account：必须是 OAuth 账号，且调用方已判断不是 Claude Code 客户端。
-//   - body：已经 marshal 成 Anthropic /v1/messages 格式的请求体。
-//   - systemRaw：body 中原始 system 字段（用于判断是否需要 rewrite）。
-//   - model：最终会发给上游的模型 ID（用于模型规范化 + metadata 版本选择）。
-//
-// 返回：改写后的 body。即使中间任何一步失败，也会退化成原 body（不会 panic）。
+// applyClaudeCodeOAuthMimicryToBody prepares non-Claude-Code OAuth requests for
+// count_tokens and the Chat/Responses compatibility endpoints. Capture the
+// original user text before moving system instructions into messages; metadata
+// synthesis shares the Messages account/client namespace and honors explicit IDs.
 func (s *GatewayService) applyClaudeCodeOAuthMimicryToBody(
 	ctx context.Context,
 	c *gin.Context,
@@ -391,22 +365,29 @@ func (s *GatewayService) applyClaudeCodeOAuthMimicryToBody(
 		return body
 	}
 
+	captureClaudeBillingSource(c, body)
+
 	systemPromptInjectionEnabled, systemPrompt, systemPromptBlocks := s.claudeOAuthSystemPromptInjectionSettings(ctx)
 	if systemPromptInjectionEnabled {
 		systemPromptBlocks = claudeOAuthSystemPromptBlocksForModel(model, systemPromptBlocks)
-		body = rewriteSystemForNonClaudeCodeWithPromptBlocks(body, normalizeSystemParam(systemRaw), systemPrompt, systemPromptBlocks)
+		body = rewriteSystemForNonClaudeCodeWithPromptBlocks(body, normalizeSystemParam(systemRaw), systemPrompt, systemPromptBlocks, s.claudePromptAccountVariables(ctx, c, account, body))
 	}
 
-	normalizeOpts := claudeOAuthNormalizeOptions{}
+	normalizeOpts := claudeOAuthNormalizeOptions{
+		preserveSystem: claudeOAuthSystemPromptPreservesCallerSystem(systemPromptInjectionEnabled, model, systemPromptBlocks),
+	}
 
 	if s.identityService != nil && c != nil && c.Request != nil {
-		if fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, c.Request.Header); err == nil && fp != nil {
+		if fp, err := s.identityService.GetAccountFingerprint(ctx, account, c.Request.Header); err == nil && fp != nil {
 			mimicMPT := false
 			if s.settingService != nil {
 				_, mimicMPT, _ = s.settingService.GetGatewayForwardingSettings(ctx)
 			}
 			if !mimicMPT {
-				if uid := s.buildOAuthMetadataUserIDFromBody(ctx, account, fp, body); uid != "" {
+				parsed := &ParsedRequest{
+					Body: NewRequestBodyRef(body), MetadataUserID: gjson.GetBytes(body, "metadata.user_id").String(),
+				}
+				if uid := s.buildOAuthMetadataUserID(c, parsed, account, fp); uid != "" {
 					normalizeOpts.injectMetadata = true
 					normalizeOpts.metadataUserID = uid
 				}
@@ -420,7 +401,7 @@ func (s *GatewayService) applyClaudeCodeOAuthMimicryToBody(
 	// 对齐 Parrot transform_request 里剩余的字段级改写。顺序有语义约束：
 	//   1) messages cache：仅在配置开启时清除客户端断点并注入代理断点
 	//   2) tool rewrite：最后改 tools[*].name / tool_choice.name 并在 tools[-1]
-	//      上打断点；mapping 存入 gin.Context 供响应侧 bytes.Replace 还原。
+	//      上打断点；mapping 存入 gin.Context，响应侧仅还原对应工具名称字段。
 	body = s.rewriteMessageCacheControlIfEnabled(ctx, body)
 
 	if rw := buildToolNameRewriteFromBody(body); rw != nil {
@@ -433,52 +414,6 @@ func (s *GatewayService) applyClaudeCodeOAuthMimicryToBody(
 	}
 
 	return body
-}
-
-// buildOAuthMetadataUserIDFromBody 是 buildOAuthMetadataUserID 的变体，
-// 适用于调用方手上没有 ParsedRequest 的场景（如 OpenAI 协议兼容层）。
-//
-// 与 buildOAuthMetadataUserID 的唯一区别：
-//   - session hash 从 body 本体按同样规则重算，而不是读取 ParsedRequest 缓存值。
-//   - 如果 body 里已经存在 metadata.user_id，则返回空（由 ensureClaudeOAuthMetadataUserID
-//     自行决定是否覆盖）。
-func (s *GatewayService) buildOAuthMetadataUserIDFromBody(
-	ctx context.Context,
-	account *Account,
-	fp *Fingerprint,
-	body []byte,
-) string {
-	_ = ctx
-	if account == nil {
-		return ""
-	}
-	if existing := gjson.GetBytes(body, "metadata.user_id").String(); existing != "" {
-		return ""
-	}
-
-	userID := strings.TrimSpace(account.GetClaudeUserID())
-	if userID == "" && fp != nil {
-		userID = fp.ClientID
-	}
-	if userID == "" {
-		userID = generateClientID()
-	}
-
-	// 与 buildOAuthMetadataUserID 一致：用会话级稳定种子，避免整 body 哈希导致
-	// 每轮（甚至每个 token 变化）都重算出不同的 session_id。
-	var clientDiscriminator string
-	if fp != nil {
-		clientDiscriminator = fp.ClientID
-	}
-	seed := buildStableSessionSeed(account.ID, clientDiscriminator, extractFirstUserText(body))
-	sessionID := generateSessionUUID(seed)
-
-	var uaVersion string
-	if fp != nil {
-		uaVersion = ExtractCLIVersion(fp.UserAgent)
-	}
-	accountUUID := strings.TrimSpace(account.GetExtraString("account_uuid"))
-	return FormatMetadataUserID(userID, accountUUID, sessionID, uaVersion)
 }
 
 // buildStableSessionSeed 为伪装路径合成的 metadata.user_id session_id 生成"会话级稳定"种子。
@@ -543,161 +478,18 @@ func normalizeSystemParam(system any) any {
 	return parsed
 }
 
-// systemIncludesClaudeCodePrompt 检查 system 中是否已包含 Claude Code 提示词
-// 使用前缀匹配支持多种变体（标准版、Agent SDK 版等）
-func systemIncludesClaudeCodePrompt(system any) bool {
-	system = normalizeSystemParam(system)
-	switch v := system.(type) {
-	case string:
-		return hasClaudeCodePrefix(v)
-	case []any:
-		for _, item := range v {
-			if m, ok := item.(map[string]any); ok {
-				if text, ok := m["text"].(string); ok && hasClaudeCodePrefix(text) {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
-// hasClaudeCodePrefix 检查文本是否以 Claude Code 提示词的特征前缀开头
-func hasClaudeCodePrefix(text string) bool {
-	for _, prefix := range claudeCodePromptPrefixes {
-		if strings.HasPrefix(text, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
-// injectClaudeCodePrompt 在 system 开头注入 Claude Code 提示词
-// 处理 null、字符串、数组三种格式
-func injectClaudeCodePrompt(body []byte, system any) []byte {
-	system = normalizeSystemParam(system)
-	claudeCodeBlock, err := marshalAnthropicSystemTextBlock(claudeCodeSystemPrompt, true)
-	if err != nil {
-		logger.LegacyPrintf("service.gateway", "Warning: failed to build Claude Code prompt block: %v", err)
-		return body
-	}
-	// Opencode plugin applies an extra safeguard: it not only prepends the Claude Code
-	// banner, it also prefixes the next system instruction with the same banner plus
-	// a blank line. This helps when upstream concatenates system instructions.
-	claudeCodePrefix := strings.TrimSpace(claudeCodeSystemPrompt)
-
-	var items [][]byte
-
-	switch v := system.(type) {
-	case nil:
-		items = [][]byte{claudeCodeBlock}
-	case string:
-		// Be tolerant of older/newer clients that may differ only by trailing whitespace/newlines.
-		if strings.TrimSpace(v) == "" || strings.TrimSpace(v) == strings.TrimSpace(claudeCodeSystemPrompt) {
-			items = [][]byte{claudeCodeBlock}
-		} else {
-			// Mirror opencode behavior: keep the banner as a separate system entry,
-			// but also prefix the next system text with the banner.
-			merged := v
-			if !strings.HasPrefix(v, claudeCodePrefix) {
-				merged = claudeCodePrefix + "\n\n" + v
-			}
-			nextBlock, buildErr := marshalAnthropicSystemTextBlock(merged, false)
-			if buildErr != nil {
-				logger.LegacyPrintf("service.gateway", "Warning: failed to build prefixed Claude Code system block: %v", buildErr)
-				return body
-			}
-			items = [][]byte{claudeCodeBlock, nextBlock}
-		}
-	case []any:
-		items = make([][]byte, 0, len(v)+1)
-		items = append(items, claudeCodeBlock)
-		prefixedNext := false
-		systemResult := gjson.GetBytes(body, "system")
-		if systemResult.IsArray() {
-			systemResult.ForEach(func(_, item gjson.Result) bool {
-				textResult := item.Get("text")
-				if textResult.Exists() && textResult.Type == gjson.String &&
-					strings.TrimSpace(textResult.String()) == strings.TrimSpace(claudeCodeSystemPrompt) {
-					return true
-				}
-
-				raw := []byte(item.Raw)
-				// Prefix the first subsequent text system block once.
-				if !prefixedNext && item.Get("type").String() == "text" && textResult.Exists() && textResult.Type == gjson.String {
-					text := textResult.String()
-					if strings.TrimSpace(text) != "" && !strings.HasPrefix(text, claudeCodePrefix) {
-						next, setErr := sjson.SetBytes(raw, "text", claudeCodePrefix+"\n\n"+text)
-						if setErr == nil {
-							raw = next
-							prefixedNext = true
-						}
-					}
-				}
-				items = append(items, raw)
-				return true
-			})
-		} else {
-			for _, item := range v {
-				m, ok := item.(map[string]any)
-				if !ok {
-					raw, marshalErr := json.Marshal(item)
-					if marshalErr == nil {
-						items = append(items, raw)
-					}
-					continue
-				}
-				if text, ok := m["text"].(string); ok && strings.TrimSpace(text) == strings.TrimSpace(claudeCodeSystemPrompt) {
-					continue
-				}
-				if !prefixedNext {
-					if blockType, _ := m["type"].(string); blockType == "text" {
-						if text, ok := m["text"].(string); ok && strings.TrimSpace(text) != "" && !strings.HasPrefix(text, claudeCodePrefix) {
-							m["text"] = claudeCodePrefix + "\n\n" + text
-							prefixedNext = true
-						}
-					}
-				}
-				raw, marshalErr := json.Marshal(m)
-				if marshalErr == nil {
-					items = append(items, raw)
-				}
-			}
-		}
-	default:
-		items = [][]byte{claudeCodeBlock}
-	}
-
-	result, ok := setJSONRawBytes(body, "system", buildJSONArrayRaw(items))
-	if !ok {
-		logger.LegacyPrintf("service.gateway", "Warning: failed to inject Claude Code prompt")
-		return body
-	}
-	return result
-}
-
-// rewriteSystemForNonClaudeCode 将非 Claude Code 客户端的 system prompt 迁移至 messages，
-// system 字段仅保留 Claude Code 标识提示词。
-// Anthropic 基于 system 参数内容检测第三方应用，仅前置追加 Claude Code 提示词
-// 无法通过检测，因为后续内容仍为非 Claude Code 格式。
-// 策略：将原始 system prompt 提取并注入为 user/assistant 消息对，system 仅保留 Claude Code 标识。
-func rewriteSystemForNonClaudeCode(body []byte, system any) []byte {
-	return rewriteSystemForNonClaudeCodeWithPromptBlocks(body, system, "", "")
-}
-
-func rewriteSystemForNonClaudeCodeWithPrompt(body []byte, system any, expansionPrompt string) []byte {
-	return rewriteSystemForNonClaudeCodeWithPromptBlocks(body, system, expansionPrompt, "")
-}
-
 type claudeOAuthSystemPromptBlockConfig struct {
+	Match     string `json:"match,omitempty"`
+	ID        string `json:"id,omitempty"`
+	Note      string `json:"note,omitempty"`
+	Hide      bool   `json:"hide,omitempty"`
+	Placement string `json:"placement,omitempty"`
+
 	Enabled      *bool           `json:"enabled,omitempty"`
 	Type         string          `json:"type,omitempty"`
 	Text         string          `json:"text,omitempty"`
 	CacheControl json.RawMessage `json:"cache_control,omitempty"`
-}
-
-type claudeOAuthSystemPromptBlocksEnvelope struct {
-	Blocks []claudeOAuthSystemPromptBlockConfig `json:"blocks"`
+	DropIfEmpty  *bool           `json:"drop_if_empty,omitempty"`
 }
 
 // claudeFableOAuthSystemPromptBlocks keeps the Claude Code identity required by
@@ -718,6 +510,28 @@ func claudeOAuthSystemPromptBlocksForModel(model, configured string) string {
 	return configured
 }
 
+// Empty configured arrays mean zero injection. Caller-system slots preserve the
+// original system blocks, so subsequent normalization must not change identity
+// sentences inside them. Fable retains its existing OAuth identity contract.
+func claudeOAuthSystemPromptPreservesCallerSystem(enabled bool, model, configured string) bool {
+	if !enabled {
+		return true
+	}
+	blocks, err := parseClaudeOAuthSystemPromptBlocksConfig(claudeOAuthSystemPromptBlocksForModel(model, configured))
+	if err != nil || blocks == nil {
+		return false
+	}
+	if len(blocks) == 0 {
+		return true
+	}
+	for _, block := range blocks {
+		if (block.Enabled == nil || *block.Enabled) && strings.TrimSpace(block.Text) == "{caller_system}" {
+			return true
+		}
+	}
+	return false
+}
+
 func defaultClaudeOAuthExpansionPrompt(expansionPrompt string) string {
 	expansionPrompt = strings.TrimSpace(expansionPrompt)
 	if expansionPrompt == "" {
@@ -731,18 +545,57 @@ func parseClaudeOAuthSystemPromptBlocksConfig(raw string) ([]claudeOAuthSystemPr
 	if raw == "" {
 		return nil, nil
 	}
-	if strings.HasPrefix(raw, "[") {
-		var blocks []claudeOAuthSystemPromptBlockConfig
-		if err := json.Unmarshal([]byte(raw), &blocks); err != nil {
+	if !json.Valid([]byte(raw)) {
+		lines := strings.Split(raw, "\n")
+		items := []string{}
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			if !strings.HasPrefix(line, "{") || !json.Valid([]byte(line)) {
+				return nil, fmt.Errorf("system blocks must be JSON or JSONL objects")
+			}
+			items = append(items, line)
+		}
+		raw = "[" + strings.Join(items, ",") + "]"
+	}
+	if strings.HasPrefix(raw, "{") && gjson.Get(raw, "text").Exists() && !gjson.Get(raw, "blocks").Exists() {
+		raw = "[" + raw + "]"
+	}
+	decode := func(data []byte, target any) error {
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		decoder.DisallowUnknownFields()
+		return decoder.Decode(target)
+	}
+	data := []byte(raw)
+	if !strings.HasPrefix(raw, "[") {
+		var envelope struct {
+			Blocks json.RawMessage `json:"blocks"`
+		}
+		if err := decode(data, &envelope); err != nil {
 			return nil, err
 		}
-		return blocks, nil
+		data = envelope.Blocks
 	}
-	var envelope claudeOAuthSystemPromptBlocksEnvelope
-	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
+	var items []json.RawMessage
+	if err := json.Unmarshal(data, &items); err != nil {
 		return nil, err
 	}
-	return envelope.Blocks, nil
+	if items == nil {
+		return nil, fmt.Errorf("system blocks must be an array or an object containing a blocks array")
+	}
+	blocks := make([]claudeOAuthSystemPromptBlockConfig, len(items))
+	for i, item := range items {
+		if !bytes.HasPrefix(bytes.TrimSpace(item), []byte("{")) {
+			return nil, fmt.Errorf("system block %d must be an object", i)
+		}
+		if err := decode(item, &blocks[i]); err != nil {
+			return nil, err
+		}
+		blocks[i].Text = claudePromptVariablePattern.ReplaceAllString(blocks[i].Text, "{$1}")
+	}
+	return blocks, nil
 }
 
 func decodeClaudeOAuthSystemPromptCacheControl(raw json.RawMessage) (any, error) {
@@ -760,70 +613,84 @@ func decodeClaudeOAuthSystemPromptCacheControl(raw json.RawMessage) (any, error)
 	if err := json.Unmarshal(trimmed, &value); err != nil {
 		return nil, err
 	}
-	if _, ok := value.(map[string]any); !ok {
+	object, ok := value.(map[string]any)
+	if !ok {
 		return nil, fmt.Errorf("cache_control must be boolean, null, or object")
+	}
+	if object["type"] != "ephemeral" {
+		return nil, fmt.Errorf("cache_control type must be ephemeral")
+	}
+	if ttl, exists := object["ttl"]; exists && ttl != "5m" && ttl != "1h" {
+		return nil, fmt.Errorf("cache_control ttl must be 5m or 1h")
 	}
 	return value, nil
 }
 
-func expandClaudeOAuthSystemPromptTextTemplate(body []byte, text string, expansionPrompt string) (string, error) {
+func expandClaudeOAuthSystemPromptTextTemplate(body []byte, text string, expansionPrompt string, variables ...map[string]string) (string, error) {
 	if text == "" {
 		return "", nil
 	}
+	for _, variable := range claudePromptVariablePattern.FindAllStringSubmatch(text, -1) {
+		if !claude.IsPromptTemplateVariable(variable[1]) {
+			return "", fmt.Errorf("unknown template variable: %s", variable[1])
+		}
+	}
 	expansionPrompt = defaultClaudeOAuthExpansionPrompt(expansionPrompt)
-	// 同一次展开内只取一次版本号，billing attribution / 指纹 / 占位符三处共用，
-	// 避免运行期版本翻转瞬间取到不同值。
-	cliVersion := claude.EffectiveCLIVersion()
+	// 生成的模板与 mimic 头/CCH 共用已验证版本，不跟随运行期版本发现。
+	cliVersion := claude.CLICurrentVersion
 	billingText, err := buildBillingAttributionText(body, cliVersion)
 	if err != nil {
 		return "", err
 	}
 	fp := computeClaudeCodeFingerprint(body, cliVersion)
-	replacer := strings.NewReplacer(
-		"{billing_header}", billingText,
-		"{cc_version}", cliVersion,
-		"{fp}", fp,
-		"{claude_code_system_prompt}", claudeCodeSystemPrompt,
-		"{claude_code_expansion_prompt}", expansionPrompt,
-	)
-	return replacer.Replace(text), nil
+	values := claude.PromptTemplateVariables()
+	for name, value := range map[string]string{
+		"billing_header": billingText, "billing": billingText, "billing_semi": strings.TrimRight(billingText, ";") + ";",
+		"cc_version": cliVersion, "cli_version": cliVersion, "fp": fp,
+		"claude_code_system_prompt": claudeCodeSystemPrompt, "identity": claudeCodeSystemPrompt,
+		"claude_code_expansion_prompt": expansionPrompt, "agent_expansion": expansionPrompt,
+		"model": gjson.GetBytes(body, "model").String(), "timezone": "UTC", "locale": "en-US", "cwd": "", "session_id": "",
+		"env": "", "env_official": "", "env_timezone_only": "Timezone: UTC", "caller_agent": "",
+		"agent_standing": "", "standing": "Respect tool permissions and protect private credentials.", "rules": "", "overlay_body": "",
+	} {
+		values[name] = value
+	}
+	for _, extra := range variables {
+		for key, value := range extra {
+			values[key] = value
+		}
+	}
+	return claudePromptVariablePattern.ReplaceAllStringFunc(text, func(match string) string {
+		parts := claudePromptVariablePattern.FindStringSubmatch(match)
+		if value, ok := values[parts[1]]; ok {
+			return value
+		}
+		return match
+	}), nil
 }
 
 func defaultClaudeOAuthSystemPromptBlockConfig() []claudeOAuthSystemPromptBlockConfig {
-	enabled := true
-	return []claudeOAuthSystemPromptBlockConfig{
-		{
-			Enabled: &enabled,
-			Type:    "text",
-			Text:    "{billing_header}",
-		},
-		{
-			Enabled: &enabled,
-			Type:    "text",
-			Text:    "{claude_code_system_prompt}",
-		},
-		{
-			Enabled: &enabled,
-			Type:    "text",
-			Text:    "{claude_code_expansion_prompt}",
-			CacheControl: json.RawMessage(
-				fmt.Sprintf(`{"type":"ephemeral","ttl":%q}`, claude.DefaultCacheControlTTL),
-			),
-		},
+	var blocks []claudeOAuthSystemPromptBlockConfig
+	if err := json.Unmarshal(claude.PromptTemplatePreset("default"), &blocks); err != nil {
+		panic(err)
 	}
+	return blocks
 }
 
-func buildClaudeOAuthSystemPromptBlocksJSON(body []byte, expansionPrompt string, blocksConfig string) ([][]byte, error) {
+func buildClaudeOAuthSystemPromptBlocksJSON(body []byte, expansionPrompt string, blocksConfig string, variables ...map[string]string) ([][]byte, error) {
 	blocks, err := parseClaudeOAuthSystemPromptBlocksConfig(blocksConfig)
 	if err != nil {
 		return nil, err
 	}
-	if len(blocks) == 0 {
+	if blocks == nil {
 		blocks = defaultClaudeOAuthSystemPromptBlockConfig()
 	}
 
 	items := make([][]byte, 0, len(blocks))
 	for i, block := range blocks {
+		if block.Placement != "" && block.Placement != "system" {
+			continue
+		}
 		if block.Enabled != nil && !*block.Enabled {
 			continue
 		}
@@ -834,12 +701,41 @@ func buildClaudeOAuthSystemPromptBlocksJSON(body []byte, expansionPrompt string,
 		if blockType != "text" {
 			return nil, fmt.Errorf("system block %d type %q is not supported", i, block.Type)
 		}
-		text, err := expandClaudeOAuthSystemPromptTextTemplate(body, block.Text, expansionPrompt)
+		// This slot inserts raw caller blocks once, preserving text, order,
+		// cache markers and any supported client block attributes. It is not a
+		// string replacement: caller instructions containing braces are literal.
+		if strings.TrimSpace(block.Text) == "{caller_system}" {
+			system := gjson.GetBytes(body, "system")
+			if system.Type == gjson.String && strings.TrimSpace(system.String()) != "" {
+				raw, err := marshalAnthropicSystemTextBlockWithCacheControl(system.String(), nil)
+				if err != nil {
+					return nil, err
+				}
+				items = append(items, raw)
+			} else if system.IsArray() && len(system.Array()) > 0 {
+				for _, item := range system.Array() {
+					items = append(items, []byte(item.Raw))
+				}
+			} else if block.DropIfEmpty != nil && !*block.DropIfEmpty {
+				raw, _ := marshalAnthropicSystemTextBlockWithCacheControl("\u200b", nil)
+				items = append(items, raw)
+			}
+			continue
+		}
+		text, err := expandClaudeOAuthSystemPromptTextTemplate(body, block.Text, expansionPrompt, variables...)
 		if err != nil {
 			return nil, err
 		}
-		if strings.TrimSpace(text) == "" {
+		if strings.TrimSpace(text) == "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__" {
 			continue
+		}
+		if strings.TrimSpace(text) == "" {
+			if block.DropIfEmpty != nil && !*block.DropIfEmpty {
+				text = "\u200b"
+			}
+			if text == "" || strings.TrimSpace(text) == "" {
+				continue
+			}
 		}
 		cacheControl, err := decodeClaudeOAuthSystemPromptCacheControl(block.CacheControl)
 		if err != nil {
@@ -862,7 +758,46 @@ func ValidateClaudeOAuthSystemPromptBlocksConfig(raw string) error {
 	if err != nil {
 		return infraerrors.BadRequest("INVALID_CLAUDE_OAUTH_SYSTEM_PROMPT_BLOCKS", "claude oauth system prompt blocks must be valid JSON")
 	}
+	callerSlots, cacheMarkers, wrappers := 0, 0, 0
+	if len(raw) > 200000 || len(blocks) > 24 {
+		return infraerrors.BadRequest("INVALID_CLAUDE_OAUTH_SYSTEM_PROMPT_BLOCKS", "templates allow at most 24 blocks and 200000 bytes")
+	}
 	for i, block := range blocks {
+		for _, variable := range claudePromptVariablePattern.FindAllStringSubmatch(block.Text, -1) {
+			if !claude.IsPromptTemplateVariable(variable[1]) {
+				return infraerrors.BadRequest("INVALID_CLAUDE_OAUTH_SYSTEM_PROMPT_BLOCKS", "unknown template variable: "+variable[1])
+			}
+		}
+		if strings.Contains(block.Text, "{dynamic_boundary}") && (strings.TrimSpace(block.Text) != "{dynamic_boundary}" || block.Placement != "" && block.Placement != "system" || len(block.CacheControl) > 0 && string(block.CacheControl) != "null" && string(block.CacheControl) != "false") {
+			return infraerrors.BadRequest("INVALID_CLAUDE_OAUTH_SYSTEM_PROMPT_BLOCKS", "dynamic_boundary must occupy its own system block without cache control")
+		}
+		if block.Match != "" {
+			if block.Placement != "overlay_body" || len(block.Match) > 512 {
+				return infraerrors.BadRequest("INVALID_CLAUDE_OAUTH_SYSTEM_PROMPT_BLOCKS", "match is a bounded overlay-body RE2 expression")
+			}
+			if _, err := regexp.Compile(block.Match); err != nil {
+				return infraerrors.BadRequest("INVALID_CLAUDE_OAUTH_SYSTEM_PROMPT_BLOCKS", "invalid overlay match expression")
+			}
+		}
+		if len(block.Text) > 40000 || len(block.ID) > 64 || len(block.Note) > 2048 {
+			return infraerrors.BadRequest("INVALID_CLAUDE_OAUTH_SYSTEM_PROMPT_BLOCKS", "template block too large")
+		}
+		switch block.Placement {
+		case "", "system", "overlay_body":
+		case "overlay_wrapper":
+			if block.Enabled == nil || *block.Enabled {
+				wrappers++
+			}
+			if !strings.Contains(block.Text, "{overlay_body}") {
+				return infraerrors.BadRequest("INVALID_CLAUDE_OAUTH_SYSTEM_PROMPT_BLOCKS", "overlay wrapper requires overlay_body")
+			}
+		default:
+			return infraerrors.BadRequest("INVALID_CLAUDE_OAUTH_SYSTEM_PROMPT_BLOCKS", "invalid block placement")
+		}
+		if block.Placement != "" && block.Placement != "system" && ((len(block.CacheControl) > 0 && string(block.CacheControl) != "false" && string(block.CacheControl) != "null") || strings.Contains(block.Text, "{caller_system}")) {
+			return infraerrors.BadRequest("INVALID_CLAUDE_OAUTH_SYSTEM_PROMPT_BLOCKS", "overlay blocks cannot override cache or caller system")
+		}
+
 		blockType := strings.TrimSpace(block.Type)
 		if blockType == "" {
 			blockType = "text"
@@ -870,9 +805,27 @@ func ValidateClaudeOAuthSystemPromptBlocksConfig(raw string) error {
 		if blockType != "text" {
 			return infraerrors.BadRequest("INVALID_CLAUDE_OAUTH_SYSTEM_PROMPT_BLOCKS", fmt.Sprintf("system block %d type must be text", i))
 		}
-		if _, err := decodeClaudeOAuthSystemPromptCacheControl(block.CacheControl); err != nil {
+		cache, err := decodeClaudeOAuthSystemPromptCacheControl(block.CacheControl)
+		if err != nil {
 			return infraerrors.BadRequest("INVALID_CLAUDE_OAUTH_SYSTEM_PROMPT_BLOCKS", fmt.Sprintf("system block %d cache_control is invalid", i))
 		}
+		if strings.Contains(block.Text, "{caller_system}") {
+			if strings.TrimSpace(block.Text) != "{caller_system}" || cache != nil {
+				return infraerrors.BadRequest("INVALID_CLAUDE_OAUTH_SYSTEM_PROMPT_BLOCKS", "caller_system must occupy its own block without a cache override")
+			}
+			if block.Enabled == nil || *block.Enabled {
+				callerSlots++
+			}
+		}
+		if block.Enabled != nil && !*block.Enabled {
+			continue
+		}
+		if cache != nil && strings.TrimSpace(block.Text) != "" {
+			cacheMarkers++
+		}
+	}
+	if callerSlots > 1 || cacheMarkers > maxCacheControlBlocks || wrappers > 1 {
+		return infraerrors.BadRequest("INVALID_CLAUDE_OAUTH_SYSTEM_PROMPT_BLOCKS", "system templates allow one caller_system slot and at most four cache markers")
 	}
 	return nil
 }
@@ -907,29 +860,35 @@ func extractSystemTextAndCacheControl(system any) (string, any) {
 	}
 }
 
-func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expansionPrompt string, blocksConfig string) []byte {
+func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expansionPrompt string, blocksConfig string, variables ...map[string]string) (out []byte) {
+	defer func() {
+		if ValidateClaudeOAuthSystemPromptBlocksConfig(blocksConfig) == nil {
+			out = applyClaudePromptOverlay(out, expansionPrompt, blocksConfig, variables...)
+		}
+	}()
+	blocksConfig = claudeOAuthSystemPromptBlocksForModel(gjson.GetBytes(body, "model").String(), blocksConfig)
+	if blocks, err := parseClaudeOAuthSystemPromptBlocksConfig(blocksConfig); err == nil && blocks != nil && len(blocks) == 0 {
+		return body
+	}
 	system = normalizeSystemParam(system)
 	expansionPrompt = defaultClaudeOAuthExpansionPrompt(expansionPrompt)
 
 	// 1. 提取原始 system prompt 文本及其缓存断点
 	originalSystemText, originalSystemCacheControl := extractSystemTextAndCacheControl(system)
 
-	// 2. 构造 system 数组，对齐真实 Claude Code CLI 的 3-block 形态：
-	//    [0] billing attribution block（cc_version={cliVer}.{fp}; cc_entrypoint=cli;）
-	//    [1] "You are Claude Code..." 身份前缀 block（默认不带 cache_control）
-	//    [2] 工具无关的通用提示词扩充 block（带 cache_control 作为稳定缓存断点）
-	//
-	//    真实 CC 的 system 在身份前缀之后还有大段提示词，仅有 2 块会在块数/体量上明显
-	//    区别于真实 CLI。这里注入 claudeCodeSystemPromptExpansion（中性段落）把形态做到
-	//    接近真实，同时不注入会污染被代理用户行为的工具专属指令。
-	//
-	//    缺失 billing block 的系统 payload 是 Anthropic 判定第三方的关键信号之一
-	//    （真实 CLI 每个请求都带）。新版 CLI 已取消 cch=... 签名字段，故 block 不再注入
-	//    cch（见 buildBillingAttributionText）。
-	systemBlocks, blockErr := buildClaudeOAuthSystemPromptBlocksJSON(body, expansionPrompt, blocksConfig)
+	// Existing empty settings keep billing + identity + the local expansion.
+	// Explicit templates can insert caller blocks in system via caller_system;
+	// legacy templates without that slot retain system-to-messages migration.
+	blockErr := ValidateClaudeOAuthSystemPromptBlocksConfig(blocksConfig)
+	var systemBlocks [][]byte
+	if blockErr == nil {
+		systemBlocks, blockErr = buildClaudeOAuthSystemPromptBlocksJSON(body, expansionPrompt, blocksConfig, variables...)
+	}
+	preservesCaller := claudeOAuthSystemPromptPreservesCallerSystem(true, gjson.GetBytes(body, "model").String(), blocksConfig)
 	if blockErr != nil {
 		logger.LegacyPrintf("service.gateway", "Warning: failed to build configured Claude OAuth system blocks: %v", blockErr)
-		systemBlocks, blockErr = buildClaudeOAuthSystemPromptBlocksJSON(body, expansionPrompt, "")
+		systemBlocks, blockErr = buildClaudeOAuthSystemPromptBlocksJSON(body, expansionPrompt, "", variables...)
+		preservesCaller = false
 	}
 	if blockErr != nil {
 		logger.LegacyPrintf("service.gateway", "Warning: failed to build default Claude OAuth system blocks: %v", blockErr)
@@ -944,7 +903,7 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expa
 	// 3. 将原始 system prompt 作为 user/assistant 消息对注入到 messages 开头
 	//    模型仍通过 messages 接收完整指令，保留客户端功能
 	ccPromptTrimmed := strings.TrimSpace(claudeCodeSystemPrompt)
-	if originalSystemText != "" && originalSystemText != ccPromptTrimmed && !hasClaudeCodePrefix(originalSystemText) {
+	if !preservesCaller && originalSystemText != "" && originalSystemText != ccPromptTrimmed {
 		instructionBlock := map[string]any{
 			"type": "text",
 			"text": "[System Instructions]\n" + originalSystemText,
@@ -1088,6 +1047,11 @@ func enforceCacheControlBlockLimit(body []byte) []byte {
 	}
 
 	count := len(messagePaths) + len(toolPaths) + len(systemPaths)
+	// Automatic caching consumes one of the same four upstream breakpoints.
+	// https://platform.claude.com/docs/en/build-with-claude/prompt-caching
+	if gjson.GetBytes(body, "cache_control").Exists() {
+		count++
+	}
 	if count <= maxCacheControlBlocks {
 		if modified {
 			return out
