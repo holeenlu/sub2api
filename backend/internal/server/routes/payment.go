@@ -35,6 +35,7 @@ func RegisterPaymentRoutes(
 	settingService *service.SettingService,
 	panelRateLimiter *middleware.PanelRateLimiter,
 	redisClient *redis.Client,
+	stepUp middleware.StepUpAuthMiddleware,
 ) {
 	// --- User-facing payment endpoints (authenticated) ---
 	authenticated := v1.Group("/payment")
@@ -93,6 +94,7 @@ func RegisterPaymentRoutes(
 	adminGroup.Use(gin.HandlerFunc(adminAuth))
 	adminGroup.Use(panelRateLimiter.Global())
 	adminGroup.Use(gin.HandlerFunc(auditLog))
+	adminGroup.Use(middleware.AdminPermissionStepUp(stepUp))
 	adminGroup.Use(middleware.AdminComplianceGuard(settingService))
 	{
 		// Dashboard
@@ -100,7 +102,6 @@ func RegisterPaymentRoutes(
 
 		// Config
 		adminGroup.GET("/config", adminPaymentHandler.GetConfig)
-		adminGroup.PUT("/config", adminPaymentHandler.UpdateConfig)
 
 		// Orders
 		adminOrders := adminGroup.Group("/orders")
@@ -111,6 +112,7 @@ func RegisterPaymentRoutes(
 			adminOrders.POST("/:id/retry", adminPaymentHandler.RetryFulfillment)
 			adminOrders.POST("/:id/refund", adminPaymentHandler.ProcessRefund)
 			adminOrders.POST("/:id/refund/query", adminPaymentHandler.QueryAndFinalizeRefund)
+			adminOrders.POST("/:id/refund/resolve", adminPaymentHandler.ResolvePendingRefund)
 		}
 
 		// Subscription Plans

@@ -244,6 +244,32 @@ func requireCompleteConfiguredCodexModel(t *testing.T, model map[string]any, slu
 	}
 }
 
+// 校验官方 ModelInfo 与 ModelsResponse 的解码合同，不要求可选能力被填充。
+func requireCodexModelRequiredFields(t *testing.T, model map[string]any, slug string) {
+	t.Helper()
+	require.Equal(t, slug, model["slug"])
+	for _, field := range []string{"display_name", "shell_type", "visibility"} {
+		require.IsType(t, "", model[field], field)
+	}
+	for _, field := range []string{"supported_reasoning_levels", "experimental_supported_tools"} {
+		require.IsType(t, []any{}, model[field], field)
+	}
+	for _, field := range []string{"supported_in_api", "support_verbosity"} {
+		require.IsType(t, false, model[field], field)
+	}
+	require.IsType(t, float64(0), model["priority"])
+	policy, ok := model["truncation_policy"].(map[string]any)
+	require.True(t, ok)
+	require.IsType(t, "", policy["mode"])
+	require.IsType(t, float64(0), policy["limit"])
+	if _, ok := model["base_instructions"].(string); ok {
+		return
+	}
+	messages, ok := model["model_messages"].(map[string]any)
+	require.True(t, ok)
+	require.IsType(t, "", messages["instructions_template"])
+}
+
 func effortsFromManifestModel(t *testing.T, model map[string]any) []string {
 	t.Helper()
 
@@ -1510,6 +1536,62 @@ func TestMergeGroupConfiguredCodexModelsKeepsExplicitAutoReviewSelection(t *test
 	require.Equal(t, []string{"codex-auto-review"}, codexManifestModelSlugs(t, manifest.Body))
 }
 
+func TestCodexCatalogsFollowGroupSelectionOrder(t *testing.T) {
+	for _, mode := range []string{"local", "scheduler", "pinned"} {
+		t.Run(mode, func(t *testing.T) {
+			svc := &OpenAIGatewayService{accountRepo: codexModelsVisibilityAccountRepo{
+				byGroup: map[int64][]Account{74: {{Platform: PlatformOpenAI, Credentials: map[string]any{
+					"model_mapping": map[string]any{"model-a": "model-a", "model-b": "model-b", "model-z": "model-z"},
+				}}}},
+			}}
+			group := &Group{ID: 74, Platform: PlatformOpenAI,
+				ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"model-z", "model-b", "model-a"}},
+			}
+			group.CodexModelsManifestConfig.Enabled = mode == "pinned"
+			source := []byte(`{"version":"upstream","models":[{"slug":"model-a"},{"slug":"model-z","input_modalities":["text","image"],"unknown_capability":{"keep":true}},{"slug":"model-b"}]}`)
+			build := func(etag string) *OpenAIModelsResponse {
+				if mode == "local" {
+					manifest, configured, err := svc.BuildGroupConfiguredCodexModelsManifest(context.Background(), group, etag)
+					require.NoError(t, err)
+					require.True(t, configured)
+					return manifest
+				}
+				manifest := &OpenAIModelsResponse{Body: bytes.Clone(source), ETag: codexModelsManifestBodyETag(source)}
+				require.NoError(t, svc.MergeGroupConfiguredCodexModels(context.Background(), group, manifest, etag))
+				return manifest
+			}
+			first := build("")
+			require.Equal(t, group.ModelAllowlist.Models, codexManifestModelSlugs(t, first.Body))
+			if mode != "local" {
+				model, err := json.Marshal(decodeCodexManifestModels(t, first.Body)[0])
+				require.NoError(t, err)
+				require.JSONEq(t, `{"slug":"model-z","input_modalities":["text","image"],"unknown_capability":{"keep":true}}`, string(model))
+				require.Contains(t, string(first.Body), `"version":"upstream"`)
+			}
+			require.True(t, build(first.ETag).NotModified)
+			group.ModelAllowlist.Models = []string{"model-b", "model-a", "model-z"}
+			reordered := build(first.ETag)
+			require.False(t, reordered.NotModified)
+			require.NotEqual(t, first.ETag, reordered.ETag)
+			require.Equal(t, group.ModelAllowlist.Models, codexManifestModelSlugs(t, reordered.Body))
+		})
+	}
+
+	// A wildcard expands available concrete models in source order, once, at its position.
+	source := []byte(`{"models":[{"slug":"model-b"},{"slug":"model-z"},{"slug":"model-a"},{"slug":"hidden"}]}`)
+	body, changed, err := mergeConfiguredCodexModelsManifest(source, nil, []string{"model-z", "model-*", "model-a"}, true)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, []string{"model-z", "model-b", "model-a"}, codexManifestModelSlugs(t, body))
+	body, _, err = mergeConfiguredCodexModelsManifest(source, nil, []string{"MODEL-Z", "model-b"}, true)
+	require.NoError(t, err)
+	require.Equal(t, []string{"model-z", "model-b"}, codexManifestModelSlugs(t, body))
+	unchanged, changed, err := mergeConfiguredCodexModelsManifest(source, nil, nil, false)
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Equal(t, source, unchanged)
+}
+
 func TestMergeGroupConfiguredCodexModelsHonorsCustomListAndFinalETag(t *testing.T) {
 	t.Parallel()
 
@@ -2036,11 +2118,12 @@ func TestFetchCodexModelsManifestAPIKeyCustomUpstream(t *testing.T) {
 	if gotProxyURL != "" || gotAccountID != 2 || gotConcurrency != 3 {
 		t.Errorf("upstream routing metadata: proxy=%q account_id=%d concurrency=%d", gotProxyURL, gotAccountID, gotConcurrency)
 	}
+	require.NoError(t, s.CompleteAPIKeyCodexModelsManifestForClient(manifest, newCodexModelsAPIKeyTestAccount("https://upstream.example/v1")))
 	models := decodeCodexManifestModels(t, manifest.Body)
 	require.Len(t, models, 1)
-	requireCompleteConfiguredCodexModel(t, models[0], "deepseek-v4-pro")
+	requireCodexModelRequiredFields(t, models[0], "deepseek-v4-pro")
 	require.Equal(t, "DeepSeek V4 Pro", models[0]["display_name"])
-	require.EqualValues(t, 1_000_000, models[0]["context_window"])
+	require.NotContains(t, models[0], "context_window", "optional native capabilities are not inferred")
 	require.Equal(t, codexModelsManifestBodyETag(manifest.Body), manifest.ETag)
 	require.Equal(t, `W/"api-key-manifest"`, manifest.upstreamETag)
 }
@@ -2125,69 +2208,110 @@ func TestConvertOpenAIModelListToCodexManifestUsesCompleteDescriptors(t *testing
 	require.Len(t, models[0]["supported_reasoning_levels"], 4)
 }
 
-func TestCompleteAPIKeyCodexModelsManifestForClientPreservesProviderMetadata(t *testing.T) {
+func TestCompleteAPIKeyCodexModelsManifestForClientCompletesPartialNativeMetadata(t *testing.T) {
 	t.Parallel()
-
-	svc := &OpenAIGatewayService{}
-	manifest := &OpenAIModelsResponse{
-		Body: []byte(`{"models":[{"slug":"grok-4.6","description":"Provider supplied","service_tiers":[{"id":"provider-priority","name":"Provider Fast","description":"Provider supplied tier."}],"model_messages":{"auto_review":{"enabled":true}},"truncation_policy":{"mode":"tokens"},"unknown":{"kept":true}}],"metadata":{"source":"upstream"}}`),
-	}
+	body := []byte(`{"models":[{"slug":"grok-4.6","description":"Provider supplied","service_tiers":[{"id":"provider-priority","name":"Provider Fast","description":"Provider supplied tier."}],"model_messages":{"auto_review":{"enabled":true}},"truncation_policy":{"mode":"tokens"},"unknown":{"kept":true}}],"metadata":{"source":"upstream"}}`)
+	manifest := &OpenAIModelsResponse{Body: body}
 	account := newCodexModelsAPIKeyTestAccount("https://upstream.example/v1")
-
-	require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(manifest, account))
-	models := decodeCodexManifestModels(t, manifest.Body)
-	require.Len(t, models, 1)
-	requireCompleteConfiguredCodexModel(t, models[0], "grok-4.6")
-	require.Equal(t, "Provider supplied", models[0]["description"])
-	require.Equal(t, map[string]any{"kept": true}, models[0]["unknown"])
-	require.Equal(t, []any{
-		map[string]any{
-			"id":          "provider-priority",
-			"name":        "Provider Fast",
-			"description": "Provider supplied tier.",
-		},
-	}, models[0]["service_tiers"])
-	require.Equal(t, []any{"text"}, models[0]["input_modalities"])
-	require.Equal(t, []string{"low", "medium", "high", "xhigh"}, effortsFromManifestModel(t, models[0]))
-	modelMessages, ok := models[0]["model_messages"].(map[string]any)
-	require.True(t, ok)
-	require.NotEmpty(t, modelMessages["instructions_template"])
-	require.Equal(t, map[string]any{"enabled": true}, modelMessages["auto_review"])
-	require.Equal(t, map[string]any{"mode": "tokens", "limit": float64(10_000)}, models[0]["truncation_policy"])
+	require.NoError(t, (&OpenAIGatewayService{}).CompleteAPIKeyCodexModelsManifestForClient(manifest, account))
+	model := decodeCodexManifestModels(t, manifest.Body)[0]
+	requireCodexModelRequiredFields(t, model, "grok-4.6")
+	require.Equal(t, "Provider supplied", model["description"])
+	require.Equal(t, map[string]any{"kept": true}, model["unknown"])
+	require.Equal(t, []any{map[string]any{"id": "provider-priority", "name": "Provider Fast", "description": "Provider supplied tier."}}, model["service_tiers"])
+	require.Equal(t, []string{"low", "medium", "high", "xhigh"}, effortsFromManifestModel(t, model))
+	messages := model["model_messages"].(map[string]any)
+	require.NotEmpty(t, messages["instructions_template"])
+	require.Equal(t, map[string]any{"enabled": true}, messages["auto_review"])
+	require.NotContains(t, messages, "approvals")
+	require.Equal(t, map[string]any{"mode": "tokens", "limit": float64(10_000)}, model["truncation_policy"])
+	for _, field := range []string{"context_window", "input_modalities", "default_reasoning_level"} {
+		require.NotContains(t, model, field)
+	}
 	require.Equal(t, codexModelsManifestBodyETag(manifest.Body), manifest.ETag)
-
-	var envelope map[string]any
-	require.NoError(t, json.Unmarshal(manifest.Body, &envelope))
-	require.Equal(t, map[string]any{"source": "upstream"}, envelope["metadata"])
 }
 
-func TestCompleteAPIKeyCodexModelsManifestForClientUsesKnownGPTImageFallback(t *testing.T) {
+func TestCompleteAPIKeyCodexModelsManifestForClientPreservesCompleteNativeMetadata(t *testing.T) {
 	t.Parallel()
+	body := []byte(`{"models":[{"slug":"grok-4.6","display_name":"Native model","description":null,"supported_reasoning_levels":[],"shell_type":"unified_exec","visibility":"list","supported_in_api":true,"priority":0,"support_verbosity":false,"truncation_policy":{"mode":"tokens","limit":10000},"experimental_supported_tools":[],"base_instructions":"Native instructions","context_window":null,"default_reasoning_level":null,"model_messages":null,"service_tiers":[],"unknown":{"kept":true,"number":9007199254740993}}],"metadata":{"source":"upstream"}}`)
+	manifest := &OpenAIModelsResponse{Body: append([]byte(nil), body...)}
+	account := newCodexModelsAPIKeyTestAccount("https://upstream.example/v1")
+	require.NoError(t, (&OpenAIGatewayService{}).CompleteAPIKeyCodexModelsManifestForClient(manifest, account))
+	require.Equal(t, body, manifest.Body, "a complete native object retains optional omissions, legal nulls, order and unknown values")
+	requireCodexModelRequiredFields(t, decodeCodexManifestModels(t, manifest.Body)[0], "grok-4.6")
+	require.Equal(t, codexModelsManifestBodyETag(body), manifest.ETag)
+}
 
+func TestCompleteAPIKeyCodexModelsManifestForClientNativeInstructionSources(t *testing.T) {
+	for _, tc := range []struct {
+		name, fields           string
+		wantMessages, wantBase bool
+	}{
+		{"missing sources", ``, true, false},
+		{"legacy source including empty string", `,"base_instructions":""`, false, true},
+		{"canonical source", `,"model_messages":{"instructions_template":"native"}`, true, false},
+		{"partial canonical object", `,"model_messages":{"unknown":true}`, true, false},
+		{"nullable canonical object", `,"model_messages":null`, true, true},
+		{"nullable canonical template", `,"model_messages":{"instructions_template":null}`, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(`{"models":[{"slug":"custom"` + tc.fields + `}]}`)
+			manifest := &OpenAIModelsResponse{Body: body}
+			require.NoError(t, (&OpenAIGatewayService{}).CompleteAPIKeyCodexModelsManifestForClient(manifest, newCodexModelsAPIKeyTestAccount("https://upstream.example/v1")))
+			model := decodeCodexManifestModels(t, manifest.Body)[0]
+			requireCodexModelRequiredFields(t, model, "custom")
+			_, hasMessages := model["model_messages"]
+			_, hasBase := model["base_instructions"]
+			require.Equal(t, tc.wantMessages, hasMessages)
+			require.Equal(t, tc.wantBase, hasBase)
+			var original map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal([]byte(`{"slug":"custom"`+tc.fields+`}`), &original))
+			for key, value := range original {
+				if key == "model_messages" && tc.name == "partial canonical object" {
+					continue
+				}
+				actual, err := json.Marshal(model[key])
+				require.NoError(t, err)
+				require.JSONEq(t, string(value), string(actual), "explicit instruction-source values remain unchanged")
+			}
+		})
+	}
+}
+
+func TestCompleteAPIKeyCodexModelsManifestForClientPreservesInvalidNativeValues(t *testing.T) {
+	t.Parallel()
+	// 非 nullable 字段的 null 和错误类型不是合法缺省，不能用补全伪装成有效清单。
+	modelBody := `{"slug":"custom","display_name":null,"supported_reasoning_levels":null,"service_tiers":null,"truncation_policy":{"mode":null,"limit":"invalid"},"model_messages":42,"base_instructions":false,"context_window":null}`
+	manifest := &OpenAIModelsResponse{Body: []byte(`{"models":[` + modelBody + `]}`)}
+	require.NoError(t, (&OpenAIGatewayService{}).CompleteAPIKeyCodexModelsManifestForClient(manifest, newCodexModelsAPIKeyTestAccount("https://upstream.example/v1")))
+	model := decodeCodexManifestModels(t, manifest.Body)[0]
+	var original map[string]any
+	require.NoError(t, json.Unmarshal([]byte(modelBody), &original))
+	for key, value := range original {
+		require.Equal(t, value, model[key], key)
+	}
+}
+
+func TestCompleteAPIKeyCodexModelsManifestForClientUsesKnownGPTImageFallbackForConvertedList(t *testing.T) {
+	t.Parallel()
 	svc := &OpenAIGatewayService{}
-	manifest := &OpenAIModelsResponse{Body: []byte(`{"models":[
-		{"slug":"gpt-5.6-sol"},
-		{"slug":"company-coding-model"},
-		{"slug":"gpt-4o","input_modalities":["text"]}
-	]}`)}
+	source := []byte(`{"data":[{"id":"gpt-5.6-sol"},{"id":"company-coding-model"},{"id":"gpt-4o"}]}`)
 	account := newCodexModelsAPIKeyTestAccount("https://openai-compatible.example.test/v1")
-
+	manifest := &OpenAIModelsResponse{Body: convertOpenAIModelListToCodexManifestForAccount(source, account), upstreamSourceBody: source, convertedFromOpenAIModelList: true}
 	require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(manifest, account))
 	models := decodeCodexManifestModels(t, manifest.Body)
 	require.Len(t, models, 3)
-
-	bySlug := make(map[string]map[string]any, len(models))
 	for _, model := range models {
-		slug, ok := model["slug"].(string)
-		require.True(t, ok)
-		bySlug[slug] = model
+		slug := model["slug"].(string)
+		requireCompleteConfiguredCodexModel(t, model, slug)
+		want := []any{"text", "image"}
+		if slug == "company-coding-model" {
+			want = []any{"text"}
+		}
+		require.Equal(t, want, model["input_modalities"])
 	}
-	require.Equal(t, []any{"text", "image"}, bySlug["gpt-5.6-sol"]["input_modalities"])
-	require.Equal(t, []any{"text"}, bySlug["company-coding-model"]["input_modalities"])
-	require.Equal(t, []any{"text"}, bySlug["gpt-4o"]["input_modalities"])
 }
 
-// Scenario: 标准 /models 型号列表优先使用已同步账号能力，再使用本地 descriptor 兜底。
 func TestCompleteAPIKeyCodexModelsManifestForClientUsesSyncedMetadataForConvertedModelList(t *testing.T) {
 	t.Parallel()
 
@@ -2224,9 +2348,18 @@ func TestCompleteAPIKeyCodexModelsManifestForClientUsesSyncedMetadataForConverte
 	require.Equal(t, []any{"text", "image"}, models[0]["input_modalities"])
 	require.EqualValues(t, 999_000, models[0]["context_window"])
 	require.EqualValues(t, 999_000, models[0]["max_context_window"])
+	account.SetUpstreamModelMetadataSnapshot(UpstreamModelMetadataSnapshot{Models: map[string]UpstreamModelMetadata{
+		"future-reasoner": {ID: "future-reasoner", DisplayName: "Updated Reasoner", ContextWindow: 512_000},
+	}})
+	cached, err := svc.FetchCodexModelsManifest(context.Background(), account, "0.150.0", "")
+	require.NoError(t, err)
+	require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(cached, account))
+	current := decodeCodexManifestModels(t, cached.Body)[0]
+	require.Equal(t, "Updated Reasoner", current["display_name"])
+	require.EqualValues(t, 512_000, current["context_window"], "generated catalogs use the current account snapshot after a cache hit")
 }
 
-func TestCompleteAPIKeyCodexModelsManifestForClientFillsMissingProviderFieldsWithoutOverwritingExplicitMetadata(t *testing.T) {
+func TestCompleteAPIKeyCodexModelsManifestForClientPreservesNativeFieldsAgainstSyncedMetadata(t *testing.T) {
 	t.Parallel()
 
 	reasoning := true
@@ -2243,25 +2376,30 @@ func TestCompleteAPIKeyCodexModelsManifestForClientFillsMissingProviderFieldsWit
 	manifest := &OpenAIModelsResponse{Body: []byte(`{"models":[{
 		"slug":"provider-model",
 		"description":"Provider supplied",
-		"context_window":64000,
-		"max_context_window":64000
+		"context_window":null,
+		"max_context_window":64000,
+		"model_messages":null
 	}]}`)}
 	svc := &OpenAIGatewayService{}
 
 	require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(manifest, account))
 	models := decodeCodexManifestModels(t, manifest.Body)
 	require.Len(t, models, 1)
-	require.Equal(t, "Synced Display", models[0]["display_name"])
+	requireCodexModelRequiredFields(t, models[0], "provider-model")
+	require.Equal(t, "provider-model", models[0]["display_name"])
 	require.Equal(t, "Provider supplied", models[0]["description"])
-	require.Equal(t, "ultra", models[0]["default_reasoning_level"])
-	require.Equal(t, []string{"high", "ultra"}, effortsFromManifestModel(t, models[0]))
-	require.Equal(t, []any{"text", "image"}, models[0]["input_modalities"])
-	require.EqualValues(t, 64_000, models[0]["context_window"])
+	require.NotContains(t, models[0], "default_reasoning_level")
+	require.NotEqual(t, []string{"high", "ultra"}, effortsFromManifestModel(t, models[0]))
+	require.NotContains(t, models[0], "input_modalities")
+	require.Contains(t, models[0], "context_window")
+	require.Nil(t, models[0]["context_window"])
+	require.Contains(t, models[0], "model_messages")
+	require.Nil(t, models[0]["model_messages"])
 	require.EqualValues(t, 64_000, models[0]["max_context_window"])
 }
 
-// Scenario: 原生 manifest 的缺失字段在命中缓存后仍使用账号当前同步快照，而不是缓存中的本地默认值。
-func TestCompleteAPIKeyCodexModelsManifestForClientUsesCurrentSnapshotForCachedNativeManifest(t *testing.T) {
+// 原生 manifest 不因缓存命中或账号同步快照变化获得本地推断字段。
+func TestCompleteAPIKeyCodexModelsManifestForClientPreservesCachedNativeManifest(t *testing.T) {
 	t.Parallel()
 
 	reasoning := true
@@ -2297,21 +2435,24 @@ func TestCompleteAPIKeyCodexModelsManifestForClientUsesCurrentSnapshotForCachedN
 	require.NoError(t, err)
 	require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(first, account))
 	firstModel := decodeCodexManifestModels(t, first.Body)[0]
-	require.Equal(t, "Synced DeepSeek", firstModel["display_name"])
+	requireCodexModelRequiredFields(t, firstModel, "deepseek-v4-pro")
+	require.Equal(t, "DeepSeek V4 Pro", firstModel["display_name"])
 	require.Equal(t, "Provider supplied", firstModel["description"])
-	require.Equal(t, "ultra", firstModel["default_reasoning_level"])
-	require.Equal(t, []string{"high", "ultra"}, effortsFromManifestModel(t, firstModel))
-	require.Equal(t, []any{"text", "image"}, firstModel["input_modalities"])
-	require.EqualValues(t, 256_000, firstModel["context_window"])
+	require.NotContains(t, firstModel, "default_reasoning_level")
+	require.Equal(t, []string{"low", "high", "max"}, effortsFromManifestModel(t, firstModel))
+	require.NotContains(t, firstModel, "input_modalities")
+	require.NotContains(t, firstModel, "context_window")
 
 	setSnapshot("Refreshed DeepSeek", 512_000)
 	second, err := svc.FetchCodexModelsManifest(context.Background(), account, "0.150.0", "")
 	require.NoError(t, err)
 	require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(second, account))
 	secondModel := decodeCodexManifestModels(t, second.Body)[0]
-	require.Equal(t, "Refreshed DeepSeek", secondModel["display_name"])
+	requireCodexModelRequiredFields(t, secondModel, "deepseek-v4-pro")
+	require.Equal(t, "DeepSeek V4 Pro", secondModel["display_name"])
 	require.Equal(t, "Provider supplied", secondModel["description"])
-	require.EqualValues(t, 512_000, secondModel["context_window"])
+	require.NotContains(t, secondModel, "context_window")
+	require.Equal(t, first.Body, second.Body)
 	require.Equal(t, int32(1), calls.Load(), "second response should use the cached upstream source body")
 }
 
@@ -2319,8 +2460,9 @@ func TestCompleteAPIKeyCodexModelsManifestForClientMarksOnlyOfficialVisionGPTIma
 	t.Parallel()
 
 	svc := &OpenAIGatewayService{}
-	manifest := &OpenAIModelsResponse{Body: []byte(`{"models":[{"slug":"gpt-6-astra"},{"slug":"gpt-5.6-sol"},{"slug":"gpt-4o"},{"slug":"gpt-3.5-turbo"},{"slug":"gpt-4"}]}`)}
+	source := []byte(`{"data":[{"id":"gpt-6-astra"},{"id":"gpt-5.6-sol"},{"id":"gpt-4o"},{"id":"gpt-3.5-turbo"},{"id":"gpt-4"}]}`)
 	account := newCodexModelsAPIKeyTestAccount("")
+	manifest := &OpenAIModelsResponse{Body: convertOpenAIModelListToCodexManifestForAccount(source, account), upstreamSourceBody: source, convertedFromOpenAIModelList: true}
 
 	require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(manifest, account))
 	models := decodeCodexManifestModels(t, manifest.Body)
@@ -2347,8 +2489,9 @@ func TestCompleteAPIKeyCodexModelsManifestForClientFiltersOfficialNonAgentModels
 	t.Parallel()
 
 	svc := &OpenAIGatewayService{}
-	manifest := &OpenAIModelsResponse{Body: []byte(`{"models":[{"slug":"gpt-5.6-sol"},{"slug":"gpt-4o-realtime-preview"},{"slug":"gpt-4o-mini-tts"},{"slug":"text-embedding-3-large"},{"slug":"omni-moderation-latest"},{"slug":"o4-mini"},{"slug":"codex-mini-latest"}]}`)}
+	source := []byte(`{"data":[{"id":"gpt-5.6-sol"},{"id":"gpt-4o-realtime-preview"},{"id":"gpt-4o-mini-tts"},{"id":"text-embedding-3-large"},{"id":"omni-moderation-latest"},{"id":"o4-mini"},{"id":"codex-mini-latest"}]}`)
 	account := newCodexModelsAPIKeyTestAccount("")
+	manifest := &OpenAIModelsResponse{Body: convertOpenAIModelListToCodexManifestForAccount(source, account), upstreamSourceBody: source, convertedFromOpenAIModelList: true}
 
 	require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(manifest, account))
 	require.Equal(t, []string{"gpt-5.6-sol", "o4-mini", "codex-mini-latest"}, codexManifestModelSlugs(t, manifest.Body))
@@ -2582,7 +2725,7 @@ func TestValidateCodexModelsManifestEnvelopeRequiresExactModelsKey(t *testing.T)
 	require.Error(t, validateCodexModelsManifestEnvelope([]byte(`{"Models":[]}`)))
 }
 
-func TestFetchCodexModelsManifestAPIKeyDoesNotCacheInvalidEnvelope(t *testing.T) {
+func TestFetchCodexModelsManifestAPIKeyBacksOffInvalidEnvelope(t *testing.T) {
 	var calls atomic.Int32
 	upstream := &codexModelsHTTPUpstreamStub{do: func(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 		body := `{"object":"list","data":[]}`
@@ -2601,6 +2744,16 @@ func TestFetchCodexModelsManifestAPIKeyDoesNotCacheInvalidEnvelope(t *testing.T)
 	if _, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", ""); err == nil {
 		t.Fatal("expected invalid manifest error on first fetch")
 	}
+	_, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", "")
+	require.Error(t, err)
+	require.EqualValues(t, 1, calls.Load(), "invalid responses enter the same short failure backoff")
+	s.openAIModelsCache.mu.Lock()
+	for key, entry := range s.openAIModelsCache.entries {
+		entry.retryAt = time.Now().Add(-time.Second)
+		s.openAIModelsCache.entries[key] = entry
+	}
+	s.openAIModelsCache.mu.Unlock()
+
 	manifest, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", "")
 	if err != nil {
 		t.Fatalf("second fetch returned error: %v", err)
@@ -2745,6 +2898,184 @@ func TestFetchCodexModelsManifestAPIKeyConcurrentRequestsShareRefresh(t *testing
 		if err := <-errs; err != nil {
 			t.Errorf("caller %d returned error: %v", i, err)
 		}
+	}
+}
+
+func TestOpenAIModelsRefreshCapacityPreservesSingleflightAndStaleReads(t *testing.T) {
+	t.Parallel()
+	s := &OpenAIGatewayService{}
+	started := make(chan struct{}, openAIModelsMaxConcurrentRefreshes+1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	var calls atomic.Int32
+	fetch := func(ctx context.Context, _ string) (*OpenAIModelsResponse, error) {
+		calls.Add(1)
+		started <- struct{}{}
+		select {
+		case <-release:
+			return &OpenAIModelsResponse{Body: []byte(`{"models":[]}`)}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	results := make(chan error, openAIModelsMaxConcurrentRefreshes+1)
+	for i := 0; i < openAIModelsMaxConcurrentRefreshes; i++ {
+		request := openAIModelsRequest{url: fmt.Sprintf("https://models.example/%d", i)}
+		go func() {
+			_, err := s.fetchCachedOpenAIModels(context.Background(), request, fetch, "")
+			results <- err
+		}()
+	}
+	for i := 0; i < openAIModelsMaxConcurrentRefreshes; i++ {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("admitted catalog refresh did not start")
+		}
+	}
+	busyRequest := openAIModelsRequest{url: "https://models.example/overflow"}
+	_, err := s.fetchCachedOpenAIModels(context.Background(), busyRequest, fetch, "")
+	require.Equal(t, "OPENAI_MODELS_REFRESH_BUSY", infraerrors.Reason(err))
+	require.EqualValues(t, openAIModelsMaxConcurrentRefreshes, calls.Load())
+
+	staleRequest := openAIModelsRequest{url: "https://models.example/stale"}
+	s.openAIModelsCache.set(buildOpenAIModelsCacheKey(staleRequest), &OpenAIModelsResponse{Body: []byte(`{"models":[{"slug":"old"}]}`)}, time.Now().Add(-2*time.Minute))
+	stale, err := s.fetchCachedOpenAIModels(context.Background(), staleRequest, fetch, "")
+	require.NoError(t, err)
+	require.Contains(t, string(stale.Body), `"old"`)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	joined := make(chan error, 1)
+	go func() {
+		_, err := s.fetchCachedOpenAIModels(ctx, openAIModelsRequest{url: "https://models.example/0"}, fetch, "")
+		joined <- err
+	}()
+	cancel()
+	require.ErrorIs(t, <-joined, context.Canceled)
+	// 已在途的键不受新键容量拒绝影响，取消的等待者也不终止共享刷新。
+	go func() {
+		_, err := s.fetchCachedOpenAIModels(context.Background(), openAIModelsRequest{url: "https://models.example/0"}, fetch, "")
+		results <- err
+	}()
+	releaseOnce.Do(func() { close(release) })
+	for i := 0; i <= openAIModelsMaxConcurrentRefreshes; i++ {
+		select {
+		case err := <-results:
+			require.NoError(t, err)
+		case <-time.After(time.Second):
+			t.Fatal("shared refresh did not release its waiters")
+		}
+	}
+	require.EqualValues(t, openAIModelsMaxConcurrentRefreshes, calls.Load())
+	_, err = s.fetchCachedOpenAIModels(context.Background(), busyRequest, fetch, "")
+	require.NoError(t, err)
+	require.EqualValues(t, openAIModelsMaxConcurrentRefreshes+1, calls.Load(), "completed refreshes release capacity")
+}
+
+func TestOpenAIModelsRefreshFailureBackoffStartsAtCompletion(t *testing.T) {
+	t.Parallel()
+	s := &OpenAIGatewayService{}
+	started, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	wantErr := errors.New("catalog unavailable")
+	var calls atomic.Int32
+	request := openAIModelsRequest{url: "https://models.example/slow"}
+	fetch := func(context.Context, string) (*OpenAIModelsResponse, error) {
+		if calls.Add(1) == 1 {
+			close(started)
+			<-release
+			return nil, wantErr
+		}
+		return &OpenAIModelsResponse{Body: []byte(`{"models":[]}`)}, nil
+	}
+	finished := make(chan error, 1)
+	go func() {
+		_, err := s.fetchCachedOpenAIModels(context.Background(), request, fetch, "")
+		finished <- err
+	}()
+	<-started
+	time.Sleep(10 * time.Millisecond)
+	completedAfter := time.Now()
+	releaseOnce.Do(func() { close(release) })
+	require.ErrorIs(t, <-finished, wantErr)
+	key := buildOpenAIModelsCacheKey(request)
+	s.openAIModelsCache.mu.Lock()
+	retryAt := s.openAIModelsCache.entries[key].retryAt
+	s.openAIModelsCache.mu.Unlock()
+	require.False(t, retryAt.Before(completedAfter.Add(openAIModelsRefreshFailureBackoff)), "time spent waiting for upstream cannot consume the failure backoff")
+	for range 3 {
+		_, err := s.fetchCachedOpenAIModels(context.Background(), request, fetch, "")
+		require.ErrorIs(t, err, wantErr)
+	}
+	require.EqualValues(t, 1, calls.Load())
+	s.openAIModelsCache.mu.Lock()
+	entry := s.openAIModelsCache.entries[key]
+	entry.retryAt = time.Now().Add(-time.Second)
+	s.openAIModelsCache.entries[key] = entry
+	s.openAIModelsCache.mu.Unlock()
+	_, err := s.fetchCachedOpenAIModels(context.Background(), request, fetch, "")
+	require.NoError(t, err)
+	require.EqualValues(t, 2, calls.Load())
+
+	// 失败条目与成功条目共用已有缓存容量，随机键失败不能无限保留错误。
+	for i := 0; i <= openAIModelsCacheMaxEntries; i++ {
+		s.openAIModelsCache.recordFailure(fmt.Sprint(i), wantErr, time.Now())
+	}
+	require.Len(t, s.openAIModelsCache.entries, openAIModelsCacheMaxEntries)
+}
+
+func TestOpenAIModelsStaleRefreshAuthorizationAndCredentialIsolation(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusServiceUnavailable} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var calls atomic.Int32
+			started, release := make(chan struct{}), make(chan struct{})
+			var releaseOnce sync.Once
+			t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+			s := newCodexModelsAPIKeyTestService(&codexModelsHTTPUpstreamStub{do: func(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+				call := calls.Add(1)
+				if call == 2 {
+					close(started)
+					<-release
+					return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"error":"rejected"}`))}, nil
+				}
+				body := `{"models":[{"slug":"old"}]}`
+				if req.Header.Get("Authorization") == "Bearer changed-token" {
+					body = `{"models":[{"slug":"new"}]}`
+				}
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+			}})
+			account := newCodexModelsAPIKeyTestAccount("https://models.example")
+			_, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", "")
+			require.NoError(t, err)
+			expireCodexModelsManifestCache(s, 2*time.Minute)
+			stale, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", "")
+			require.NoError(t, err)
+			require.Contains(t, string(stale.Body), `"old"`)
+			<-started
+			releaseOnce.Do(func() { close(release) })
+			require.Eventually(t, func() bool {
+				s.openAIModelsCache.mu.Lock()
+				defer s.openAIModelsCache.mu.Unlock()
+				return len(s.openAIModelsCache.refresh) == 0
+			}, time.Second, time.Millisecond)
+			again, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", "")
+			if status == http.StatusServiceUnavailable {
+				require.NoError(t, err)
+				require.Contains(t, string(again.Body), `"old"`)
+			} else {
+				require.Error(t, err)
+				require.Nil(t, again, "a known authorization rejection cannot use stale discovery")
+			}
+			require.EqualValues(t, 2, calls.Load())
+			rotated := newCodexModelsAPIKeyTestAccount("https://models.example")
+			rotated.Credentials["api_key"] = "changed-token"
+			fresh, err := s.FetchCodexModelsManifest(context.Background(), rotated, "0.144.0", "")
+			require.NoError(t, err)
+			require.Contains(t, string(fresh.Body), `"new"`)
+			require.EqualValues(t, 3, calls.Load())
+		})
 	}
 }
 
@@ -3850,7 +4181,7 @@ func TestAstraUltrafastCatalogUsesAccountCapabilities(t *testing.T) {
 
 func TestGPT61SolAPIKeyCatalogUsesFullResponses(t *testing.T) {
 	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"base_url": "https://api.openai.com"}}
-	body, err := completeAPIKeyCodexModelsManifestMetadata([]byte(`{"models":[{"slug":"gpt-6.1-sol"}]}`), true, account)
+	body, err := completeAPIKeyCodexModelsManifestMetadata([]byte(`{"models":[{"slug":"gpt-6.1-sol"}]}`), account, true)
 	require.NoError(t, err)
 	var catalog struct {
 		Models []map[string]any `json:"models"`
@@ -3860,24 +4191,35 @@ func TestGPT61SolAPIKeyCatalogUsesFullResponses(t *testing.T) {
 	require.Equal(t, "low", catalog.Models[0]["default_reasoning_level"])
 }
 
-func TestGPT61SolAPIKeyCatalogContextWindow(t *testing.T) {
+func TestGPT61SolGeneratedAPIKeyCatalogContextWindow(t *testing.T) {
 	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"base_url": "https://api.openai.com"}}
 	for _, tc := range []struct {
 		name string
 		body string
-		want int64
+		want any
 	}{
 		{"missing uses updated default", `{"models":[{"slug":"gpt-6.1-sol"}]}`, 500_000},
-		{"null uses updated default", `{"models":[{"slug":"gpt-6.1-sol","context_window":null}]}`, 500_000},
+		{"explicit null is preserved", `{"models":[{"slug":"gpt-6.1-sol","context_window":null}]}`, nil},
 		{"lower upstream window is preserved", `{"models":[{"slug":"gpt-6.1-sol","context_window":272000}]}`, 272_000},
 		{"higher upstream window is preserved", `{"models":[{"slug":"gpt-6.1-sol","context_window":1000000,"max_context_window":1000000}]}`, 1_000_000},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			body, err := completeAPIKeyCodexModelsManifestMetadata([]byte(tc.body), true, account)
+			body, err := completeAPIKeyCodexModelsManifestMetadata([]byte(tc.body), account, true)
 			require.NoError(t, err)
 			models := decodeCodexManifestModels(t, body)
 			require.Len(t, models, 1)
 			require.EqualValues(t, tc.want, models[0]["context_window"])
 		})
 	}
+}
+
+// Test-only adapters and reference algorithms; production uses the current entrypoints.
+// convertOpenAIModelListToCodexManifest rewrites a standard OpenAI
+// GET /v1/models response ({"object":"list","data":[{"id":...},...]}) into the
+// same complete Codex manifest used by locally generated custom-provider
+// catalogs. Bodies that already carry a top-level models field, are not the
+// standard list shape, or yield no usable model IDs are returned unchanged so
+// envelope validation reports the original payload.
+func convertOpenAIModelListToCodexManifest(body []byte) []byte {
+	return convertOpenAIModelListToCodexManifestForAccount(body, nil)
 }

@@ -1,9 +1,15 @@
+import type { AccountTelemetryState } from '@/utils/accountTelemetry'
 /**
  * Admin Accounts API endpoints
  * Handles AI platform account management for administrators
  */
 
 import { apiClient } from '../client'
+
+export async function creationDefaults(): Promise<{ concurrency: number; priority: number }> {
+  const { data } = await apiClient.get('/admin/accounts/defaults')
+  return data
+}
 import type { OpenAIReferralRefreshResult, OpenAIReferralSendResult } from '@/types/openaiReferrals'
 import type {
   Account,
@@ -532,7 +538,8 @@ export async function batchUpdateCredentials(request: {
  */
 export async function bulkUpdate(
   accountIdsOrPayload: number[] | Record<string, unknown>,
-  updates?: Record<string, unknown>
+  updates?: Record<string, unknown>,
+  params?: Record<string, unknown>
 ): Promise<{
   success: number
   failed: number
@@ -554,7 +561,7 @@ export async function bulkUpdate(
     failed_ids?: number[]
     long_context_inherited_count?: number
     results: Array<{ account_id: number; success: boolean; error?: string }>
-  }>('/admin/accounts/bulk-update', payload)
+  }>('/admin/accounts/bulk-update', payload, params ? { params } : undefined)
   return data
 }
 
@@ -604,58 +611,6 @@ export async function setSchedulable(id: number, schedulable: boolean): Promise<
  */
 export async function getAvailableModels(id: number): Promise<ClaudeModel[]> {
   const { data } = await apiClient.get<ClaudeModel[]>(`/admin/accounts/${id}/models`)
-  return data
-}
-
-export interface SyncUpstreamModelsResult {
-  models: string[]
-  metadata?: Record<string, UpstreamModelMetadata>
-  warnings?: UpstreamModelSyncWarning[]
-}
-
-export interface UpstreamModelSyncWarning {
-  code: string
-  message: string
-}
-
-export interface UpstreamModelMetadata {
-  id: string
-  display_name?: string
-  description?: string
-  reasoning?: boolean
-  default_reasoning_level?: string
-  supported_reasoning_levels?: string[]
-  input_modalities?: string[]
-  context_window?: number
-  max_context_window?: number
-  max_output_tokens?: number
-}
-
-/**
- * Sync live supported models from the account's upstream model-list endpoint
- * @param id - Account ID
- * @returns List of model IDs returned by the upstream
- */
-export async function syncUpstreamModels(id: number): Promise<SyncUpstreamModelsResult> {
-  const { data } = await apiClient.post<SyncUpstreamModelsResult>(`/admin/accounts/${id}/models/sync-upstream`)
-  return data
-}
-
-export interface SyncUpstreamPreviewParams {
-  platform: string
-  type: string
-  base_url?: string
-  api_key: string
-  model_mapping?: Record<string, string>
-}
-
-/**
- * Preview upstream models without a saved account (create-flow)
- * @param params - Connection credentials
- * @returns List of model IDs returned by the upstream
- */
-export async function syncUpstreamModelsPreview(params: SyncUpstreamPreviewParams): Promise<SyncUpstreamModelsResult> {
-  const { data } = await apiClient.post<SyncUpstreamModelsResult>('/admin/accounts/models/sync-upstream-preview', params)
   return data
 }
 
@@ -1132,6 +1087,7 @@ export async function refreshOpenCodeGoUsage(id: number): Promise<OpenCodeGoUsag
 }
 
 export const accountsAPI = {
+  creationDefaults,
   list,
   listWithEtag,
   getUpstreamBillingRatesWithEtag,
@@ -1160,8 +1116,6 @@ export const accountsAPI = {
   resetTempUnschedulable,
   setSchedulable,
   getAvailableModels,
-  syncUpstreamModels,
-  syncUpstreamModelsPreview,
   generateAuthUrl,
   exchangeCode,
   refreshOpenAIToken,
@@ -1203,3 +1157,8 @@ export const accountsAPI = {
 }
 
 export default accountsAPI
+
+export async function importAccountTelemetry(id: number, bundle: unknown): Promise<AccountTelemetryState> {
+  const { data } = await apiClient.post<AccountTelemetryState>('/admin/accounts/' + id + '/telemetry/import', bundle)
+  return data
+}

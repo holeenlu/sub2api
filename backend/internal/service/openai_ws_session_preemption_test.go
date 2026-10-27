@@ -327,7 +327,13 @@ func TestOpenAIWSHTTPBridgeSessionPreemptionEligibility(t *testing.T) {
 		defaultMode   string
 		accountMode   string
 		wantArmed     bool
+		bps           bool
+		bpsDisabled   bool
 	}{
+		{name: "BPS independent bridge with native ctx pool", bps: true, routerEnabled: true, defaultMode: OpenAIWSIngressModeCtxPool},
+		{name: "BPS independent bridge with native WS off", bps: true, routerEnabled: true, defaultMode: OpenAIWSIngressModeOff},
+		{name: "BPS independent bridge with router disabled", bps: true},
+		{name: "BPS disabled preserves native preemption", bps: true, bpsDisabled: true, wantArmed: true},
 		{name: "explicit HTTP bridge", routerEnabled: true, defaultMode: OpenAIWSIngressModeCtxPool, accountMode: OpenAIWSIngressModeHTTPBridge},
 		{name: "default HTTP bridge", routerEnabled: true, defaultMode: OpenAIWSIngressModeHTTPBridge},
 		{name: "ctx pool overrides bridge default", routerEnabled: true, defaultMode: OpenAIWSIngressModeHTTPBridge, accountMode: OpenAIWSIngressModeCtxPool, wantArmed: true},
@@ -350,8 +356,15 @@ func TestOpenAIWSHTTPBridgeSessionPreemptionEligibility(t *testing.T) {
 			}
 			account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
 				Extra: map[string]any{"openai_oauth_responses_websockets_v2_mode": tt.accountMode}}
-			firstMessage := []byte(`{"type":"response.create","prompt_cache_key":"cache-a","input":"first request"}`)
-			secondMessage := []byte(`{"type":"response.create","prompt_cache_key":"cache-b","input":"second request"}`)
+			if tt.bps {
+				account.Extra["openai_excel_bps"] = true
+				account.Credentials = excelAccount().Credentials
+				if !tt.bpsDisabled {
+					svc.settingService = excelBPSSettingsTestService()
+				}
+			}
+			firstMessage := []byte(`{"type":"response.create","model":"gpt-6-astra","prompt_cache_key":"cache-a","input":"first request"}`)
+			secondMessage := []byte(`{"type":"response.create","model":"gpt-6-astra","prompt_cache_key":"cache-b","input":"second request"}`)
 			first, cleanupFirst, firstArmed := svc.BeginOpenAIWSIngressSessionPreemption(context.Background(), newContext(), account, firstMessage)
 			defer cleanupFirst()
 			second, cleanupSecond, secondArmed := svc.BeginOpenAIWSIngressSessionPreemption(context.Background(), newContext(), account, secondMessage)

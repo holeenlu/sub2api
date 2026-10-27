@@ -47,9 +47,10 @@ type UpstreamModelMetadata struct {
 }
 
 type UpstreamModelMetadataSnapshot struct {
-	Source   string                           `json:"source"`
-	SyncedAt string                           `json:"synced_at"`
-	Models   map[string]UpstreamModelMetadata `json:"models"`
+	CapabilityScope string                           `json:"capability_scope,omitempty"`
+	Source          string                           `json:"source"`
+	SyncedAt        string                           `json:"synced_at"`
+	Models          map[string]UpstreamModelMetadata `json:"models"`
 }
 
 type UpstreamModelCatalog struct {
@@ -71,6 +72,12 @@ type modelsDevProvider struct {
 }
 
 type modelsDevModel struct {
+	Cost struct {
+		Input      *float64 `json:"input"`
+		Output     *float64 `json:"output"`
+		CacheRead  *float64 `json:"cache_read"`
+		CacheWrite *float64 `json:"cache_write"`
+	} `json:"cost"`
 	ID               string                     `json:"id"`
 	Name             string                     `json:"name"`
 	Description      string                     `json:"description"`
@@ -102,6 +109,7 @@ func (a *Account) SetUpstreamModelMetadataSnapshot(snapshot UpstreamModelMetadat
 	if a.Extra == nil {
 		a.Extra = make(map[string]any)
 	}
+	snapshot.CapabilityScope = codexCapabilityScope(a)
 	a.Extra[UpstreamModelMetadataExtraKey] = snapshot
 }
 
@@ -267,6 +275,9 @@ func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, accou
 	}
 
 	completeMetadata := completeUpstreamModelMetadataSubset(capabilityIDs, catalog.Metadata)
+	if liveListAvailable {
+		retainLiveCodexExperimentalMetadata(completeMetadata, catalog.Metadata, capabilityIDs, account)
+	}
 	persistedCapabilities := false
 	if len(completeMetadata) > 0 && account != nil && account.ID > 0 && s.accountRepo != nil {
 		// Retain known metadata only for models still listed or explicitly mapped.
@@ -280,6 +291,9 @@ func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, accou
 			}
 			for _, modelID := range retainedModels {
 				old, exists := previous.Models[modelID]
+				if previous.CapabilityScope != codexCapabilityScope(account) {
+					old.CodexToolCapabilities = cloneCodexCapabilitiesWithoutExperimental(old.CodexToolCapabilities)
+				}
 				if !exists {
 					continue
 				}
@@ -287,17 +301,26 @@ func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, accou
 					if entry.CodexToolCapabilities == nil {
 						entry.CodexToolCapabilities = make(map[string]json.RawMessage)
 					}
+					if liveListAvailable && len(old.CodexToolCapabilities["experimental_supported_tools"]) > 0 {
+						if _, present := entry.CodexToolCapabilities["experimental_supported_tools"]; !present {
+							entry.CodexToolCapabilities["experimental_supported_tools"] = json.RawMessage("[]")
+						}
+					}
 					applyCodexToolCapabilities(entry.CodexToolCapabilities, old.CodexToolCapabilities, false)
 					completeMetadata[modelID] = entry
 				} else {
+					if liveListAvailable {
+						old.CodexToolCapabilities = cloneCodexCapabilitiesWithoutExperimental(old.CodexToolCapabilities)
+					}
 					completeMetadata[modelID] = old
 				}
 			}
 		}
 		snapshot := UpstreamModelMetadataSnapshot{
-			Source:   source,
-			SyncedAt: time.Now().UTC().Format(time.RFC3339),
-			Models:   completeMetadata,
+			CapabilityScope: codexCapabilityScope(account),
+			Source:          source,
+			SyncedAt:        time.Now().UTC().Format(time.RFC3339),
+			Models:          completeMetadata,
 		}
 		if err := s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{UpstreamModelMetadataExtraKey: snapshot}); err != nil {
 			return nil, newUpstreamModelSyncInternalError("Failed to save upstream model metadata", err)
@@ -1347,15 +1370,11 @@ func buildVertexPublisherModelsURL(location, pageToken string) (string, error) {
 	if !vertexLocationPattern.MatchString(location) {
 		return "", fmt.Errorf("invalid vertex location: %s", location)
 	}
-	host := location + "-aiplatform.googleapis.com"
-	if location == "global" {
-		host = vertexGlobalHost
-	}
 	query := url.Values{"pageSize": []string{strconv.Itoa(vertexPublisherModelsPageSize)}}
 	if pageToken != "" {
 		query.Set("pageToken", pageToken)
 	}
-	return fmt.Sprintf("https://%s/v1beta1/publishers/google/models?%s", host, query.Encode()), nil
+	return fmt.Sprintf("https://%s/v1beta1/publishers/google/models?%s", vertexAPIHost(location), query.Encode()), nil
 }
 
 func buildGeminiModelsURL(base string) string {
@@ -1747,4 +1766,51 @@ func dedupeAndSortModelIDs(models []string) []string {
 	}
 	sort.Strings(result)
 	return result
+}
+
+func cloneCodexCapabilitiesWithoutExperimental(old map[string]json.RawMessage) map[string]json.RawMessage {
+	if old == nil {
+		return nil
+	}
+	result := make(map[string]json.RawMessage, len(old))
+	for key, value := range old {
+		if key == "experimental_supported_tools" {
+			value = json.RawMessage("[]")
+		}
+		result[key] = value
+	}
+	return result
+}
+
+// Tool discovery is useful even when an upstream omits context/window metadata.
+// A fresh list may withdraw tools; absence is not permission to revive the old list.
+func retainLiveCodexExperimentalMetadata(dst, live map[string]UpstreamModelMetadata, ids []string, account *Account) {
+	var previous *UpstreamModelMetadataSnapshot
+	if account != nil {
+		previous = account.GetUpstreamModelMetadataSnapshot()
+	}
+	for _, id := range ids {
+		current := live[id]
+		value, declared := current.CodexToolCapabilities["experimental_supported_tools"]
+		var old UpstreamModelMetadata
+		if previous != nil {
+			old = previous.Models[id]
+		}
+		if !declared && len(old.CodexToolCapabilities["experimental_supported_tools"]) == 0 {
+			continue
+		}
+		entry, complete := dst[id]
+		if !complete {
+			entry, _ = mergeUpstreamModelMetadata(current, old)
+			entry.ID = id
+		}
+		capabilities := make(map[string]json.RawMessage, len(entry.CodexToolCapabilities)+1)
+		applyCodexToolCapabilities(capabilities, entry.CodexToolCapabilities, true)
+		if !declared {
+			value = json.RawMessage("[]")
+		}
+		capabilities["experimental_supported_tools"] = value
+		entry.CodexToolCapabilities = capabilities
+		dst[id] = entry
+	}
 }

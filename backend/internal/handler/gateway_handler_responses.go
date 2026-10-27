@@ -21,6 +21,7 @@ import (
 // This converts Responses API requests to Anthropic format, forwards to Anthropic
 // upstream, and converts responses back to Responses format.
 func (h *GatewayHandler) Responses(c *gin.Context) {
+	service.BeginOpenAIRequestTiming(c)
 	streamStarted := false
 
 	requestStart := time.Now()
@@ -47,11 +48,9 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 	// Read request body
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
-		if maxErr, ok := extractMaxBytesError(err); ok {
-			h.responsesErrorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
-			return
-		}
-		h.responsesErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		writeRequestBodyReadError(c, err, func(status int, errType, message string) {
+			h.responsesErrorResponse(c, status, errType, message)
+		})
 		return
 	}
 
@@ -84,6 +83,12 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 	}
 	if rejectSystemOneOnlyPlatform(c, apiKey, h.responsesErrorResponse) {
 		return
+	}
+	if cappedBody, changed, err := applyOpenAIReasoningEffortPolicyForRequest(c, apiKey, body); err != nil {
+		respondOpenAIReasoningEffortPolicyError(c, err, h.responsesErrorResponse)
+		return
+	} else if changed {
+		body = cappedBody
 	}
 	reqStream, ok := parseOpenAICompatibleStream(body)
 	if !ok {
@@ -126,6 +131,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		h.responsesSecurityAuditError(c, decision)
 		return
 	}
+	requestCtx = c.Request.Context()
 
 	// Error passthrough binding
 	if h.errorPassthroughService != nil {
@@ -243,8 +249,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 				selection.WaitPlan.MaxConcurrency,
 				selection.WaitPlan.Timeout,
 				reqStream,
-				&streamStarted,
-			)
+				&streamStarted, selection.WaitPlan.RefreshLimit)
 			if err != nil {
 				reqLog.Warn("gateway.responses.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				h.handleConcurrencyError(c, err, "account", streamStarted)
@@ -271,7 +276,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		account = latest
 		selection.Account = latest
 		if selection.ProfitGateActive() {
-			if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, apiKey.GroupID, sessionHash, account.ID); err != nil {
+			if err := h.gatewayService.BindSelectionStickySessionAfterProfitAdmission(admissionCtx, selection, apiKey.GroupID, sessionHash, account.ID); err != nil {
 				reqLog.Warn("gateway.responses.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}
 		}
@@ -315,6 +320,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 			sessionID := service.ExtractClientSessionID(c)
 			stampForwardRequestedReasoningEffort(result, service.RequestedReasoningEffortFromContext(c.Request.Context()))
+			usageFields := clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel)
 			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 					Result:             result,
@@ -331,7 +337,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 					RequestPayloadHash: requestPayloadHash,
 					APIKeyService:      h.apiKeyService,
 					SessionID:          sessionID,
-					ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
+					ChannelUsageFields: usageFields,
 				}); err != nil {
 					reqLog.Error("gateway.responses.record_usage_failed",
 						zap.Int64("account_id", account.ID),
@@ -372,7 +378,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 				zap.Bool("upstream_error_response_already_written", upstreamErrorAlreadyCommunicated),
 				zap.Error(err),
 			)
-			if result != nil {
+			if result != nil && result.Usage.HasObservedTokens() {
 				submitForwardUsage(result)
 			}
 			return
@@ -397,7 +403,7 @@ func (h *GatewayHandler) responsesErrorResponse(c *gin.Context, status int, code
 // handleResponsesFailoverExhausted writes a failover-exhausted error in Responses format.
 func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastErr *service.UpstreamFailoverError, streamStarted bool) {
 	if lastErr != nil {
-		copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
+		copyFailoverRetryAfter(c, lastErr.ResponseHeaders, lastErr.Reason)
 	}
 	statusCode := http.StatusBadGateway
 	if lastErr != nil && lastErr.StatusCode > 0 {
