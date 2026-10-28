@@ -1,5 +1,34 @@
 export default {
     accounts: {
+      creatorUnknown: 'Unknown (historical)',
+      creatorSystem: 'System',
+      telemetry: {
+        "title": "Account telemetry",
+        "hint": "Import a device bundle to bind its installation and environment to this account. Enable Ops Monitoring Settings → Advanced Settings → Scheduled account telemetry to generate and send complete events.",
+        "createHint": "After creating a Claude OAuth / Setup Token account, import a local device bundle from its account page. The account waits for an import; the server does not initialize Claude Code. Scheduled sending is off by default.",
+        "waiting_import": "Waiting for device import",
+        "ready": "Device bundle imported",
+        "import": "Import device bundle",
+        "reimport": "Replace device bundle",
+        "importing": "Importing…",
+        "importHint": "Use a JSON bundle from the local Windows, Linux or macOS tool (max 1 MiB). It contains the device’s installation IDs, CLI version and environment, without account credentials or sessions. The gateway supplies the account identity and session; tokens are used only for upstream authentication.",
+        "importTooLarge": "The device bundle must not exceed 1 MiB.",
+        "importInvalid": "Invalid bundle. Use a version 2 bundle from the local tool, without account, token or session fields.",
+        "importFailed": "Could not import the device bundle.",
+        "importAccountChanged": "The account or device bundle changed. Refresh and try again.",
+        "deviceId": "Device installation ID",
+        "machineId": "Machine ID",
+        "cliVersion": "Claude Code version",
+        "platform": "Platform",
+        "arch": "Architecture",
+        "locale": "Device locale",
+        "exportedAt": "Exported at",
+        "importedAt": "Imported at",
+        "sessionId": "Gateway session ID",
+        "deviceBundle": "Imported device bundle (read-only)",
+        "copy": "Copy device bundle JSON",
+        "copied": "Copied"
+      },
       title: 'Account Management',
       description: 'Manage AI platform accounts and credentials',
       createAccount: 'Create Account',
@@ -22,14 +51,14 @@ export default {
       toolActions: 'Tools',
       viewColumns: 'Columns',
       selectedCount: '{count} selected',
-      dataExportConfirmMessage: 'The exported data contains sensitive account and proxy information. Store it securely.',
+      dataExportConfirmMessage: 'The backup includes Codex and independent Excel/BPS authorizations, plus credentials for included proxies. Store it securely.',
       dataExportConfirm: 'Confirm Export',
       dataExported: 'Data exported successfully',
       dataExportedSkippedShadows: 'Data exported. Skipped {count} spark shadow account(s): their scheduling config is not included in the backup; recreate and re-tune them after restore.',
       dataExportFailed: 'Failed to export data',
       dataImportTitle: 'Import Data',
       dataImportHint: 'Upload the exported JSON file to import accounts and proxies.',
-      dataImportWarning: 'Import will create new accounts/proxies; groups must be bound manually. Ensure existing data does not conflict.',
+      dataImportWarning: 'Import creates accounts, restores authorizations and settings, and creates or reuses proxies. Groups match by platform and name; configure matching groups on the destination first. Accounts with missing groups cannot be imported.',
       dataImportFile: 'Data file',
       dataImportButton: 'Start Import',
       dataImporting: 'Importing...',
@@ -232,7 +261,18 @@ export default {
       accountSchedulingThresholdOverrideValue: 'Account threshold percent',
       accountSchedulingThresholdOverrideDisabledHint:
         'Use 1-100. The account becomes temporarily unschedulable after reaching this usage percent; 100 disables it for this account.',
+      anthropicFableSchedulingThresholdOverride: '7d Fable Threshold Override',
+      anthropicFableSchedulingThresholdOverrideHint:
+        'Override the global 7d Fable threshold for this account only. Disable to use the system setting.',
+      anthropicFableSchedulingThresholdOverrideValue: '7d Fable threshold percent',
+      anthropicFableSchedulingThresholdOverrideDisabledHint:
+        'Use 1-100. Only the Fable-specific 7d F window is checked. Once it reaches this percent, the account stops serving Fable models (other models are unaffected) until the window resets; shared 7d usage remains controlled by the regular Anthropic threshold.',
       status: {
+        anthropicErrors: {
+          "authentication": "Upstream authentication failed. Check or renew account authorization.",
+          "revoked": "Upstream authorization has been revoked. Authorize the account again.",
+          "disabled": "The upstream account or organization has been disabled."
+        },
         active: 'Active',
         inactive: 'Inactive',
         expired: 'Expired',
@@ -256,6 +296,8 @@ export default {
         tempUnschedulableUntil: 'Resumes {time}'
       },
       columns: {
+    createdBy: 'Created by',
+    createdByRole: 'Creator role',
         name: 'Name',
         id: 'Account ID',
         platformType: 'Platform/Type',
@@ -267,7 +309,7 @@ export default {
         billingRateMultiplier: 'Billing Rate',
         upstreamBillingRate: 'Upstream Declared Rate',
         weight: 'Weight',
-        schedulerScore: 'Scheduler Score',
+        schedulerScore: 'Scheduling Estimate',
         status: 'Status',
         schedulable: 'Schedulable',
         todayStats: 'Today Stats',
@@ -280,12 +322,10 @@ export default {
         actions: 'Actions'
       },
       schedulerScore: {
-        baseShort: 'Base',
-        stickyShort: 'Sticky',
         ungrouped: 'Ungrouped',
-        hint: 'Displayed as "group / base score / sticky bonus". The base score is computed within the current filtered candidate set and includes priority, load, queue depth, error rate, first-token latency, reset window, quota headroom, billing rate, and related factors. The sticky bonus applies only when sticky weighting is enabled for previous_response_id or session_hash. Higher scores are preferred.'
+        hint: 'Displays group / static estimate from the filtered pool, using load, queue, quota and enabled business preferences. Request health and affinity are not included. Priority, available capacity and protocol ownership are separate constraints, so this estimate is not the actual selection order. See request scheduling traces for actual decisions.'
       },
-      usageWindowsHint: '"5h / 7d" are the upstream account\'s official rolling usage windows (e.g. OpenAI ChatGPT, Claude). They are imposed by the upstream provider on the account itself — not configured by sub2api, and unrelated to the models you map. Usage resets automatically once each window rolls over, and the limit cannot be lifted from within sub2api.',
+      usageWindowsHint: '"5h / 7d" are the upstream account\'s official rolling usage windows (e.g. OpenAI ChatGPT, Claude). They are imposed by the upstream provider on the account itself — not configured by @:common.siteName itself, and unrelated to the models you map. Usage resets automatically once each window rolls over, and the limit cannot be lifted from within @:common.siteName itself.',
       ollamaCloud: {
         title: 'Ollama Cloud usage',
         sessionSecurityHint: 'The browser session is encrypted at rest and sent only to the fixed official settings URL.',
@@ -336,7 +376,7 @@ export default {
         }
       },
       upstreamBilling: {
-        trustWarning: 'This rate is declared by the upstream site for the current API key. Sub2API cannot verify that it matches actual charges. The upstream site or an intermediary may return forged, stale, or modified data. Verify it against bills, balance changes, and actual usage.',
+        trustWarning: 'This rate is declared by the upstream site for the current API key. @:common.siteName cannot verify that it matches actual charges. The upstream site or an intermediary may return forged, stale, or modified data. Verify it against bills, balance changes, and actual usage.',
         autoProbe: 'Automatically probe upstream declared rate',
         autoProbeHint: 'Refresh the upstream declared rate on the global interval. This switch alone does not change the account rate.',
         syncRate: 'Sync upstream declared rate',
@@ -373,6 +413,7 @@ export default {
         batchPartial: 'Probe partially completed: {success} succeeded, {failed} failed'
       },
       allPrivacyModes: 'All Privacy States',
+      privacyStatus: 'Privacy',
       privacyUnset: 'Unset',
       privacyTrainingOff: 'Training data sharing disabled',
       privacyCfBlocked: 'Blocked by Cloudflare, training may still be on',
@@ -522,6 +563,7 @@ export default {
         selectAllFailed: 'Failed to load all accounts. The previous selection was kept.',
         clear: 'Clear selection',
         edit: 'Bulk Edit',
+        editFiltered: 'Edit all filtered results ({count})',
         delete: 'Bulk Delete',
         confirmDelete: 'Delete the selected {count} account(s)? This action cannot be undone.',
         deleteSuccess: 'Deleted {count} account(s)',
@@ -535,6 +577,9 @@ export default {
         partialSuccess: 'Partially completed: {success} succeeded, {failed} failed'
       },
       bulkEdit: {
+    fullEditor: 'Edit all parameters',
+    fullEditorHelp: 'Use the single-account editor with the first selected account as a reference. Only changed settings are applied; authorization credentials are never copied. Select one platform and account type.',
+    noChanges: 'No settings changed',
         title: 'Bulk Edit Accounts',
         selectionInfo:
           '{count} account(s) selected. Only checked or filled fields will be updated; others stay unchanged.',
@@ -622,8 +667,7 @@ export default {
       vertexSaJsonInvalid: 'Service Account JSON format is invalid',
       vertexSaJsonRequired: 'Please upload a Service Account JSON',
       oauthSetupToken: 'OAuth / Setup Token',
-      addMethod: 'Add Method',
-      setupTokenLongLived: 'Setup Token (Long-lived)',
+      addMethod: 'Authorization Method',
       baseUrl: 'Base URL',
       baseUrlHint: 'Leave default for official Anthropic API',
       apiKeyRequired: 'API Key *',
@@ -639,9 +683,89 @@ export default {
       },
       // OpenAI specific hints
       openai: {
+        cloud: {
+          ineligibleAccounts: 'Cloud cannot be enabled for these accounts. Remove them from the selection to enable; disabling is still available: {accounts}',
+          "nativeHint": "Use this account’s native Codex authorization without signing in again. Cloud takes priority while enabled and preserves BPS settings. Turning it off restores existing BPS model routing, with other models using native. Save the account to apply.",
+          "testMode": "Cloud compatibility",
+          "downloadResult": "Download result.json",
+          "downloadAnswer": "Download answer.txt",
+          "incompleteTest": "The test stream ended before a final result was received.",
+          "enable": "Enable Cloud gateway",
+        },
+
         baseUrlHint: 'Leave default for official OpenAI API',
         apiKeyHint: 'Your OpenAI API Key',
         oauthPassthrough: 'Auto passthrough (auth only)',
+        excelBPS: 'Excel / BPS protocol',
+        excelBPSOmitUnsupportedTools: 'Keep BPS and omit unsupported hosted tools',
+        excelBPSOmitUnsupportedToolsDesc: "Off by default. Requests for unsupported hosted tools fail before sending. Enable to omit optional hosted tools and tell the model they are unavailable. Forced tool choices remain errors. Default cached search is omitted. Client function, custom and namespace tools keep their declared behavior.",
+        excelBPSCacheCreationAsInput: 'Bill cache creation as regular input',
+        excelBPSAutoDisableOn403: 'Automatically disable BPS on a 403 error',
+        excelBPSAutoRecoverOn403: 'Automatically probe BPS recovery after a 403 error',
+        excelBPSAutoRecoverOn403Desc: 'Off by default and requires automatic disable on 403. After the configured interval, send a small text probe with this account and re-enable BPS only after a complete matching response. Group changes are not reverted; probes consume a small amount of upstream quota.',
+        excelBPS403RecoveryInterval: 'Recovery probe interval (minutes)',
+        excelBPS403RecoveryIntervalHint: 'Default 60 minutes. Enter an integer from 1 to 10080. The interval applies after shutdown and after each failed probe.',
+        excelBPS403RecoveryIntervalInvalid: 'Recovery probe interval must be an integer from 1 to 10080 minutes',
+        excelBPSAutoMoveOn403: 'Automatically change groups on a BPS 403 error',
+        excelBPSAutoMoveOn403Desc: 'Disabled by default. Uses the same trigger as disabling BPS; both options work independently or together. Move to the selected group and leave all other groups, or leave every group. The account stays enabled and the request is not retried. Invalid destinations or changed settings leave memberships unchanged. Group changes remain in account history and do not imply a current ban.',
+        excelBPS403TargetGroup: 'Group action after a 403',
+        excelBPS403SelectTarget: 'Select a destination group or leave all groups',
+        excelBPS403LeaveAllGroups: 'Leave all groups',
+        excelBPSAutoDisableOn403Desc: 'Disabled by default. Turn off this account’s Excel / BPS protocol when the BPS upstream returns HTTP 403 mapped to basispoints_upstream_error. The account stays enabled and the current request is not retried. Model access errors do not trigger this option, and a 403 does not confirm a ban. After an automatic shutdown, the account list shows a “BPS 403: Excel possibly banned” badge under the account name until the protocol is turned back on.',
+        excelBPS403SavedState: "Saved BPS 403 state (save the form to apply edits)",
+        excelBPS403StopRecovery: "Stop automatic recovery and disable BPS (applies on save)",
+        excelBPS403State_history: "BPS 403 history",
+        excelBPS403State_paused: "BPS 403 recovery paused",
+        excelBPS403State_pending: "BPS 403 awaiting probe",
+        excelBPS403State_failed: "BPS 403 probe failed",
+        excelBPS403State_probing: "BPS 403 probe claimed",
+        excelBPS403State_unknown: "BPS 403 outcome not recorded",
+        excelBPS403Pause_global_disabled: "Global BPS is disabled; recovery probes are paused.",
+        excelBPS403Pause_cloud_enabled: "Cloud is selected; BPS recovery is paused.",
+        excelBPS403Pause_manual_disabled: "Account BPS or automatic shutdown is disabled; no recovery probes.",
+        excelBPS403Pause_recovery_disabled: "Automatic recovery is disabled for this account.",
+        excelBPS403Pause_account_ineligible: "This account is not eligible for BPS probes.",
+        excelBPS403Pause_account_inactive: "The account is inactive; recovery is paused.",
+        excelBPS403Pause_scheduling_paused: "Account scheduling is paused.",
+        excelBPS403Pause_account_expired: "The account has expired; recovery is paused.",
+        excelBPS403Pause_no_text_model: "No BPS text model is selected for recovery probes (empty scope or image-only). Select and save a text model; other models are not probed implicitly.",
+        excelBPS403Pause_invalid_timestamp: "Invalid recovery timestamp; re-enable and save account BPS settings.",
+        excelBPS403EffectiveInterval: "Effective account interval: {minutes} minutes.",
+        excelBPS403LastAttempt: "Last probe claim: {time} (does not confirm dispatch or success).",
+        excelBPS403NextAttempt: "Next eligible probe: {time}; the worker scans every minute.",
+        excelBPS403CurrentCycleResult: "Probe result for the current recovery cycle",
+        excelBPS403HistoricalResult: "Historical probe result (not a probe in the current cycle)",
+        excelBPS403UpstreamIdentifiers: "Upstream code: {code}; type: {type}; request ID: {requestId}",
+        excelBPS403ProbeResult: "{time}: {reason}; stage {stage}, HTTP {status}, duration {duration} ms.",
+        excelBPS403Result_global_disabled: 'Global BPS was disabled; routing was not restored',
+        excelBPS403Result_success: "Probe succeeded and routing restored",
+        excelBPS403Result_probe_unavailable: "Empty model scope or probe service unavailable",
+        excelBPS403Result_identity_unavailable: "Account identity unavailable",
+        excelBPS403Result_authorization_failed: "Excel authorization failed",
+        excelBPS403Result_transport_failed: "Network request failed",
+        excelBPS403Result_empty_response: "Empty upstream response",
+        excelBPS403Result_http_rejected: "Upstream rejected the request",
+        excelBPS403Result_read_failed: "Response read failed",
+        excelBPS403Result_response_too_large: "Probe response exceeded size limit",
+        excelBPS403Result_invalid_response: "Incomplete response or no valid completion event",
+        excelBPS403Result_response_mismatch: "Response did not exactly match the probe",
+        excelBPS403Result_timeout: "Probe timed out",
+        excelBPS403Result_canceled: "Probe canceled",
+        excelBPS403Result_prepare_failed: "Probe preparation failed",
+        excelBPS403Result_state_write_failed: "Recovery state could not be saved",
+        excelBPS403BadgeNote: 'Excel / BPS returned HTTP 403 (not a confirmed ban). Automatic actions taken:',
+        excelBPS403BadgeDisabled: '{time}: Excel / BPS was automatically disabled after HTTP 403',
+        excelBPS403BadgeMoved: '{time} moved to group “{group}”; clears when the account’s groups change',
+        excelBPS403BadgeLeftGroups: '{time} left all groups; clears when the account’s groups change',
+        excelBPSIgnoreEncryptedContent: 'Ignore encrypted content in history',
+        excelBPSIgnoreEncryptedContentDesc: 'Disabled by default. Old Codex conversations that used multi-agent collaboration carry sub-agent messages as ciphertext that only the native Codex channel can read. BPS cannot forward it, so the whole conversation fails on every turn with an encrypted_content error. When enabled, encrypted parts of messages and tool results are replaced with a fixed omission notice before forwarding, keeping the remaining text, message order and tool call pairing so the conversation can continue. The model cannot see omitted content; plaintext messages, such as a sub-agent’s final answer, and reasoning items are not affected.',
+        excelBPSCacheCreationAsInputDesc: 'Disabled by default. Bill BPS cache creation tokens as regular input and report zero cache creation usage downstream. Total input and cache reads stay unchanged. This does not disable upstream caching.',
+        excelBPSDesc: "Use a separately authorized Excel grant for the same ChatGPT user and workspace. Enable the global BPS gateway first, then select account models. Native Codex credentials are preserved.",
+        excelBPSAccountSettingsHint: "First-time setup starts with built-in models and recommended options. Existing accounts retain saved values. Edit the options below and save the account; toggling BPS does not reapply a template.",
+        excelBPSModels: 'Select models for Excel / BPS',
+        excelBPSAstraOnly: 'Astra only',
+        excelBPSModelsHint: 'Matches model names after account mapping. Selected models use Excel / BPS; other models retain their Codex, WS and passthrough settings. An empty selection disables BPS routing. Explicitly selecting gpt-image-2 also enables BPS for non-streaming PNG generation and single-image edits without masks. Unsupported options stay on Codex; only explicit request-format rejections allow fallback. Authentication, network and server failures are not replayed. Other image models and legacy all-model routing do not enable BPS images.',
+        excelBPSNotice: "HTTP/SSE and client WebSocket are supported. BPS-selected models use BPS HTTP/SSE bridging independently of native WS mode. Switching between native WS and BPS requires reconnecting with full context; an existing HTTP bridge can continue with complete history. Enable inline images in system settings. Reasoning effort follows model capabilities.",
         oauthPassthroughDesc:
           'When enabled, this OpenAI account uses automatic passthrough: the gateway forwards request/response as-is and only swaps auth, while keeping billing/concurrency/audit and necessary safety filtering.',
         flattenNamespaces: 'Flatten Codex namespace tools (compatibility)',
@@ -655,7 +779,7 @@ export default {
           'Disabled by default. Enable to allow responses_websockets_v2 capability (still gated by global and account-type switches).',
         wsMode: 'WS mode',
         wsModeDesc:
-          'Applies only to the current OpenAI account type. Select Off to disable WS. Other modes use the selected connection method only when gateway.openai_ws.mode_router_v2_enabled=true; otherwise, they use the context pool.',
+          "Controls the WS path for non-BPS models on the current OpenAI account type; off disables WS ingress for those models. BPS-selected models still use HTTP/SSE bridging even when off. Selected modes require gateway.openai_ws.mode_router_v2_enabled=true; otherwise native WS capability gates and context-pool rules apply.",
         wsModeOff: 'Off (off)',
         wsModeCtxPool: 'Context Pool (ctx_pool)',
         wsModePassthrough: 'Passthrough (passthrough)',
@@ -663,11 +787,11 @@ export default {
         wsModeShared: 'Shared (shared)',
         wsModeDedicated: 'Dedicated (dedicated)',
         wsModeCtxPoolHint:
-          'The gateway gets and reuses upstream WS connections from a pool, with the pool limit determined by gateway configuration.',
+          "Non-BPS models reuse native upstream WS connections. Global, account-type, v2 and Force HTTP settings must allow native WS; unavailable native WS does not silently become an HTTP bridge. BPS-selected models use BPS HTTP/SSE bridging.",
         wsModePassthroughHint:
-          'The gateway opens a separate upstream WS connection for each client session, without using a connection pool.',
+          "Non-BPS models use a dedicated native upstream WS connection per client session without pooling, subject to native WS gates and Force HTTP settings. BPS-selected models use BPS HTTP/SSE bridging.",
         wsModeHttpBridgeHint:
-          'The gateway converts client WS requests to upstream HTTP requests, then converts SSE streaming responses back into WS messages.',
+          "Explicit HTTP bridging: non-BPS models use native HTTP/SSE and BPS-selected models use BPS HTTP/SSE. Events are streamed back as client WS messages; native upstream WS need not be enabled.",
         oauthResponsesWebsocketsV2: 'OAuth WebSocket Mode',
         oauthResponsesWebsocketsV2Desc:
           'Only applies to OpenAI OAuth. This account can use OpenAI WebSocket Mode only when enabled.',
@@ -749,8 +873,10 @@ export default {
         testMode: 'Test mode',
         testModeDefault: 'Default request',
         testModeCompact: 'Compact probe',
+        testModeBPSTools: 'BPS tool roundtrip (up to 3 upstream requests)',
         modelRestrictionDisabledByPassthrough: 'Automatic passthrough is enabled: model whitelist/mapping will not take effect.',
-      },
+
+},
       grok: {
         baseUrlHint: 'Grok OAuth accounts forward to the official xAI API base URL.',
         apiKeyHint: 'Grok subscription support uses OAuth refresh tokens; API keys are out of scope for this account type.',
@@ -776,8 +902,8 @@ export default {
         searchTestHint:
           'Standalone web_search probe (same as gateway /v1/web_search). Not a free-form chat with tools.',
         ttsTextLabel: 'TTS text',
-        ttsTextPlaceholder: 'Example: Hello from Sub2API connectivity test.',
-        ttsTextDefault: 'Hello from Sub2API account connectivity test.',
+        ttsTextPlaceholder: 'Example: Hello from TapModels connectivity test.',
+        ttsTextDefault: 'Hello from TapModels account connectivity test.',
         ttsTestHint: 'Standalone /v1/tts with language=en; success reports audio byte size.',
         sttTestHint: 'Standalone /v1/stt with a synthetic silent WAV; success means the endpoint is reachable.',
         realtimeTestHint:
@@ -836,29 +962,11 @@ export default {
       targetNoWildcard: 'Target model cannot contain wildcard *',
       searchModels: 'Search models...',
       noMatchingModels: 'No matching models',
-      fillRelatedModels: 'Sync latest supported models',
-      syncUpstreamModels: 'Sync upstream supported models',
-      syncUpstreamModelsLoading: 'Syncing upstream...',
-      syncUpstreamModelsSuccess: 'Synced {count} new model(s) from upstream ({total} upstream total)',
-      syncUpstreamModelsNoChanges: 'All {count} upstream model(s) are already in the whitelist',
-      syncUpstreamModelsEmpty: 'Upstream returned no models to sync',
-      syncUpstreamModelsFailed: 'Failed to sync upstream models',
-      syncUpstreamModelsError: 'Failed to sync upstream models: {message}',
-      syncUpstreamModelsMetadataIncomplete:
-        'Model IDs were synced, but no capability metadata could be updated.',
-      syncUpstreamModelsMetadataPartial:
-        'Some model capabilities were updated; remaining models are still incomplete.',
-      clearAllModels: 'Clear all models',
-      customModelName: 'Custom model name',
-      enterCustomModelName: 'Enter custom model name',
-      addModel: 'Add',
-      modelExists: 'Model already exists',
-      modelMappingConflict: 'A mapping already exists for {from} → {to}. Modify or remove it under Model Mapping before adding this whitelist model',
       modelCount: '{count} models',
       poolMode: 'Pool Mode',
       poolModeHint: 'Enable when upstream is an account pool; errors won\'t mark local account status',
       poolModeInfo:
-        'When enabled, upstream 429/403/401 errors will auto-retry without marking the account as rate-limited or errored. Suitable for upstream pointing to another sub2api instance.',
+        'When enabled, upstream 429/403/401 errors will auto-retry without marking the account as rate-limited or errored. Suitable for upstream pointing to another @:common.siteName instance.',
       poolModeRetryCount: 'Same-Account Retries',
       poolModeRetryCountHint:
         'Only applies in pool mode. Use 0 to disable in-place retry. Default {default}, maximum {max}.',
@@ -963,6 +1071,7 @@ export default {
 	    countTooltipRefresh: 'Refresh remaining Claude resets (read-only, never consumes one)',
 	    fetched: 'Checked at {time}',
 	    error: 'Could not check reset credits',
+	    cachePersistFailed: 'Live reset count is shown, but saving failed. Reloading may show older data.',
 	    ineligible: 'This account cannot use resets right now',
 	    cooldown: 'Cooldown until {time}',
 	    expiresAt: 'Expires {time}',
@@ -1158,6 +1267,14 @@ export default {
       oauth: {
         title: 'Claude Account Authorization',
         authMethod: 'Authorization Method',
+        auth: 'Auth',
+        oauthToken: 'OAuth token',
+        setupTokenLongLived: 'Setup Token (Long-lived)',
+        setupTokenInstruction: 'Run `claude setup-token`, then paste the token returned by the CLI below.',
+        setupTokenExpiry: 'This Setup Token is valid for one year. Use it by setting the environment variable shown above.',
+        setupTokenInput: 'Setup Token',
+        setupTokenPlaceholder: 'Paste the token returned by claude setup-token...',
+        setupTokenInvalid: 'Setup Token must start with sk-ant-oat.',
         manualAuth: 'Manual Authorization',
         cookieAutoAuth: 'Cookie Auto-Auth',
         cookieAutoAuthDesc:
@@ -1677,10 +1794,9 @@ export default {
         grokLastStatus: 'Status {status}',
         grokLastProbe: 'Probe {time}',
         grokLastHeadersSeen: 'Headers {time}',
-        passiveSampled: 'Passive',
         activeQuery: 'Query',
         estimatedTotalCost: 'Est. total ${cost}',
-        estimatedTotalCostTooltip: 'Estimated total cost at 100% utilization, based on current window cost and utilization'
+        estimatedTotalCostTooltip: 'Estimates the total cost at 100% usage from the current window cost and usage rate.'
       },
       openaiReferral: {
         available: 'Invites left',
@@ -1765,7 +1881,7 @@ export default {
       needsReauth: 'Re-auth Required',
       rateLimited: 'Rate Limited',
       usageError: 'Fetch Error'
-    },
-
-    // Scheduled Tests
+    ,
+      policyCapacityUnavailable: 'Suspected degradation',
+    }
 }

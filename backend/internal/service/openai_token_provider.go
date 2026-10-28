@@ -25,7 +25,6 @@ type OpenAITokenRuntimeMetrics struct {
 	RefreshRequests    int64
 	RefreshSuccess     int64
 	RefreshFailure     int64
-	LockAcquireFailure int64
 	LockContention     int64
 	LockWaitSamples    int64
 	LockWaitTotalMs    int64
@@ -38,7 +37,6 @@ type openAITokenRuntimeMetricsStore struct {
 	refreshRequests    atomic.Int64
 	refreshSuccess     atomic.Int64
 	refreshFailure     atomic.Int64
-	lockAcquireFailure atomic.Int64
 	lockContention     atomic.Int64
 	lockWaitSamples    atomic.Int64
 	lockWaitTotalMs    atomic.Int64
@@ -55,7 +53,6 @@ func (m *openAITokenRuntimeMetricsStore) snapshot() OpenAITokenRuntimeMetrics {
 		RefreshRequests:    m.refreshRequests.Load(),
 		RefreshSuccess:     m.refreshSuccess.Load(),
 		RefreshFailure:     m.refreshFailure.Load(),
-		LockAcquireFailure: m.lockAcquireFailure.Load(),
 		LockContention:     m.lockContention.Load(),
 		LockWaitSamples:    m.lockWaitSamples.Load(),
 		LockWaitTotalMs:    m.lockWaitTotalMs.Load(),
@@ -141,9 +138,11 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 	}
 
 	cacheKey := OpenAITokenCacheKey(account)
+	expiresAt := account.GetCredentialAsTime("expires_at")
 
-	// 1) Try cache first.
-	if p.tokenCache != nil {
+	// A known-expired snapshot must pass through durable refresh checks, even
+	// if an older process cached that AT beyond its actual lifetime.
+	if p.tokenCache != nil && (expiresAt == nil || time.Now().Before(*expiresAt)) {
 		if token, err := p.tokenCache.GetAccessToken(ctx, cacheKey); err == nil && strings.TrimSpace(token) != "" {
 			slog.Debug("openai_token_cache_hit", "account_id", account.ID)
 			return token, nil
@@ -155,7 +154,6 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 	slog.Debug("openai_token_cache_miss", "account_id", account.ID)
 
 	// 2) Refresh if needed (pre-expiry skew).
-	expiresAt := account.GetCredentialAsTime("expires_at")
 	needsRefresh := !account.IsOpenAIPersonalAccessToken() && (expiresAt == nil || time.Until(*expiresAt) <= openAITokenRefreshSkew)
 	if needsRefresh && strings.TrimSpace(account.GetOpenAIRefreshToken()) == "" {
 		if expiresAt != nil && !time.Now().Before(*expiresAt) {
@@ -168,6 +166,7 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 		needsRefresh = false
 	}
 	refreshFailed := false
+	var refreshFailure error
 
 	if needsRefresh && p.refreshAPI != nil && p.executor != nil {
 		p.metrics.refreshRequests.Add(1)
@@ -175,12 +174,13 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 
 		result, err := p.refreshAPI.RefreshIfNeeded(ctx, account, p.executor, openAITokenRefreshSkew)
 		if err != nil {
-			if p.refreshPolicy.OnRefreshError == ProviderRefreshErrorReturn {
+			if p.refreshPolicy.OnRefreshError == ProviderRefreshErrorReturn || isProviderScopedTerminalRefreshError(err) || openAIRefreshCredentialCode(err) != "" || ctx.Err() != nil {
 				return "", err
 			}
 			slog.Warn("openai_token_refresh_failed", "account_id", account.ID, "error", err)
 			p.metrics.refreshFailure.Add(1)
 			refreshFailed = true
+			refreshFailure = err
 		} else if result.LockHeld {
 			if p.refreshPolicy.OnLockHeld == ProviderLockHeldWaitForCache {
 				p.metrics.lockContention.Add(1)
@@ -189,42 +189,29 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 				if waitErr != nil {
 					return "", waitErr
 				}
-				if strings.TrimSpace(token) != "" {
+				if strings.TrimSpace(token) != "" && (expiresAt == nil || time.Now().Before(*expiresAt)) {
 					slog.Debug("openai_token_cache_hit_after_wait", "account_id", account.ID)
 					return token, nil
 				}
+				// With an expired snapshot, verify the durable token generation
+				// below rather than trust a legacy overlong cache entry.
 			}
 		} else if result.Refreshed {
+			if !openAITokenRefreshAccountUsable(result.Account, account) {
+				return "", errOAuthRefreshAccountStateChanged
+			}
 			p.metrics.refreshSuccess.Add(1)
 			account = result.Account
 			expiresAt = account.GetCredentialAsTime("expires_at")
 		} else {
+			if !openAITokenRefreshAccountUsable(result.Account, account) {
+				return "", errOAuthRefreshAccountStateChanged
+			}
 			account = result.Account
 			expiresAt = account.GetCredentialAsTime("expires_at")
 		}
-	} else if needsRefresh && p.tokenCache != nil {
-		// Backward-compatible test path when refreshAPI is not injected.
-		p.metrics.refreshRequests.Add(1)
-		p.metrics.touchNow()
-		locked, lockErr := p.tokenCache.AcquireRefreshLock(ctx, cacheKey, 30*time.Second)
-		if lockErr == nil && locked {
-			defer func() { _ = p.tokenCache.ReleaseRefreshLock(ctx, cacheKey) }()
-		} else if lockErr != nil {
-			p.metrics.lockAcquireFailure.Add(1)
-			p.metrics.touchNow()
-			slog.Warn("openai_token_lock_failed", "account_id", account.ID, "error", lockErr)
-		} else {
-			p.metrics.lockContention.Add(1)
-			p.metrics.touchNow()
-			token, waitErr := p.waitForTokenAfterLockRace(ctx, cacheKey)
-			if waitErr != nil {
-				return "", waitErr
-			}
-			if strings.TrimSpace(token) != "" {
-				slog.Debug("openai_token_cache_hit_after_wait", "account_id", account.ID)
-				return token, nil
-			}
-		}
+	} else if needsRefresh {
+		return "", &providerConfigurationRefreshError{err: errors.New("OpenAI OAuth refresh API is not configured")}
 	}
 
 	accessToken := account.GetCredential("access_token")
@@ -232,42 +219,62 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 		return "", errors.New("access_token not found in credentials")
 	}
 
-	// 3) Populate cache with TTL.
-	if p.tokenCache != nil {
-		latestAccount, isStale := CheckTokenVersion(ctx, account, p.accountRepo)
-		if isStale && latestAccount != nil {
-			slog.Debug("openai_token_version_stale_use_latest", "account_id", account.ID)
-			accessToken = latestAccount.GetOpenAIAccessToken()
-			if strings.TrimSpace(accessToken) == "" {
-				return "", errors.New("access_token not found after version check")
+	latestAccount, isStale := CheckTokenVersion(ctx, account, p.accountRepo)
+	if isStale && latestAccount != nil {
+		if !openAITokenRefreshAccountUsable(latestAccount, account) {
+			return "", errOAuthRefreshAccountStateChanged
+		}
+		slog.Debug("openai_token_version_stale_use_latest", "account_id", account.ID)
+		accessToken = latestAccount.GetOpenAIAccessToken()
+		expiresAt = latestAccount.GetCredentialAsTime("expires_at")
+		if strings.TrimSpace(accessToken) == "" {
+			return "", errors.New("access_token not found after version check")
+		}
+	}
+	if expiresAt != nil && !time.Now().Before(*expiresAt) {
+		if refreshFailure != nil {
+			return "", refreshFailure
+		}
+		return "", errors.New("openai access_token expired before refresh completed")
+	}
+	// 3) Populate only an unexpired token. A transient pre-refresh failure may
+	// use the still-valid AT, but its cache TTL must never outlive that AT.
+	if p.tokenCache != nil && !isStale {
+		ttl := 30 * time.Minute
+		if refreshFailed {
+			if p.refreshPolicy.FailureTTL > 0 {
+				ttl = p.refreshPolicy.FailureTTL
+			} else {
+				ttl = time.Minute
 			}
-		} else {
-			ttl := 30 * time.Minute
-			if refreshFailed {
-				if p.refreshPolicy.FailureTTL > 0 {
-					ttl = p.refreshPolicy.FailureTTL
-				} else {
-					ttl = time.Minute
-				}
-				slog.Debug("openai_token_cache_short_ttl", "account_id", account.ID, "reason", "refresh_failed")
-			} else if expiresAt != nil {
-				until := time.Until(*expiresAt)
-				switch {
-				case until > openAITokenCacheSkew:
-					ttl = until - openAITokenCacheSkew
-				case until > 0:
-					ttl = until
-				default:
-					ttl = time.Minute
-				}
+			slog.Debug("openai_token_cache_short_ttl", "account_id", account.ID, "reason", "refresh_failed")
+		} else if expiresAt != nil {
+			until := time.Until(*expiresAt)
+			switch {
+			case until > openAITokenCacheSkew:
+				ttl = until - openAITokenCacheSkew
+			case until > 0:
+				ttl = until
 			}
-			if err := p.tokenCache.SetAccessToken(ctx, cacheKey, accessToken, ttl); err != nil {
-				slog.Warn("openai_token_cache_set_failed", "account_id", account.ID, "error", err)
+		}
+		if expiresAt != nil {
+			ttl = min(ttl, time.Until(*expiresAt))
+			if ttl <= 0 {
+				return "", errors.New("openai access_token expired before caching")
 			}
+		}
+		if err := p.tokenCache.SetAccessToken(ctx, cacheKey, accessToken, ttl); err != nil {
+			slog.Warn("openai_token_cache_set_failed", "account_id", account.ID, "error", err)
 		}
 	}
 
 	return accessToken, nil
+}
+
+func openAITokenRefreshAccountUsable(account, expected *Account) bool {
+	return account != nil && expected != nil && account.ID == expected.ID && account.Platform == PlatformOpenAI &&
+		account.Type == AccountTypeOAuth && account.IsActive() && !account.IsVendorArchived() && !account.IsOpenAIAgentIdentity() &&
+		(!isNativeOpenAIOAuthRefresh(expected) || isNativeOpenAIOAuthRefresh(account))
 }
 
 // disableAccountMissingRefreshToken 在请求路径上发现 OpenAI OAuth 账号
@@ -280,16 +287,31 @@ func (p *OpenAITokenProvider) disableAccountMissingRefreshToken(account *Account
 	if p == nil || p.accountRepo == nil || account == nil {
 		return
 	}
-	if p.runtimeBlocker != nil {
-		p.runtimeBlocker.BlockAccountScheduling(account, time.Time{}, "missing_refresh_token")
+	bgCtx, cancel := context.WithTimeout(context.Background(), defaultRefreshPostPersistCleanupTimeout)
+	defer cancel()
+	var err error
+	if isNativeOpenAIOAuthRefresh(account) {
+		conditional, capabilityErr := nativeOpenAIRefreshRepository(p.accountRepo)
+		if capabilityErr != nil {
+			return
+		}
+		var applied bool
+		applied, err = conditional.SetOpenAIOAuthRefreshErrorIfUnchanged(bgCtx, account, reason)
+		if err == nil && !applied {
+			return
+		}
+	} else {
+		err = p.accountRepo.SetError(bgCtx, account.ID, reason)
 	}
-	bgCtx := context.Background()
-	if err := p.accountRepo.SetError(bgCtx, account.ID, reason); err != nil {
+	if err != nil {
 		slog.Warn("openai_token_provider.set_error_failed",
 			"account_id", account.ID,
 			"error", err,
 		)
 		return
+	}
+	if p.runtimeBlocker != nil {
+		p.runtimeBlocker.BlockAccountScheduling(account, time.Time{}, "missing_refresh_token")
 	}
 	if p.tokenCache != nil {
 		cacheKey := OpenAITokenCacheKey(account)

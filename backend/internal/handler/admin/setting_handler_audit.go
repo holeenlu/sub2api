@@ -44,12 +44,7 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.RegistrationEmailDomainQuotaEnabled != after.RegistrationEmailDomainQuotaEnabled {
 		changed = append(changed, "registration_email_domain_quota_enabled")
 	}
-	if before.PromoCodeEnabled != after.PromoCodeEnabled {
-		changed = append(changed, "promo_code_enabled")
-	}
-	if before.InvitationCodeEnabled != after.InvitationCodeEnabled {
-		changed = append(changed, "invitation_code_enabled")
-	}
+
 	if before.PasswordResetEnabled != after.PasswordResetEnabled {
 		changed = append(changed, "password_reset_enabled")
 	}
@@ -341,30 +336,13 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.CompactHomeEnabled != after.CompactHomeEnabled {
 		changed = append(changed, "compact_home_enabled")
 	}
-	if before.HideCcsImportButton != after.HideCcsImportButton {
-		changed = append(changed, "hide_ccs_import_button")
-	}
 	if before.DefaultConcurrency != after.DefaultConcurrency {
 		changed = append(changed, "default_concurrency")
 	}
 	if before.DefaultBalance != after.DefaultBalance {
 		changed = append(changed, "default_balance")
 	}
-	if before.AffiliateRebateRate != after.AffiliateRebateRate {
-		changed = append(changed, "affiliate_rebate_rate")
-	}
-	if before.AffiliateRebateFreezeHours != after.AffiliateRebateFreezeHours {
-		changed = append(changed, "affiliate_rebate_freeze_hours")
-	}
-	if before.AffiliateRebateDurationDays != after.AffiliateRebateDurationDays {
-		changed = append(changed, "affiliate_rebate_duration_days")
-	}
-	if before.AffiliateRebatePerInviteeCap != after.AffiliateRebatePerInviteeCap {
-		changed = append(changed, "affiliate_rebate_per_invitee_cap")
-	}
-	if before.AdminRechargeRebateEnabled != after.AdminRechargeRebateEnabled {
-		changed = append(changed, "affiliate_admin_recharge_enabled")
-	}
+
 	if !equalDefaultSubscriptions(before.DefaultSubscriptions, after.DefaultSubscriptions) {
 		changed = append(changed, "default_subscriptions")
 	}
@@ -515,47 +493,8 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if !equalNullableFloat(before.OpenAIOAuthSchedulingRateMultiplier, after.OpenAIOAuthSchedulingRateMultiplier) {
 		changed = append(changed, "openai_oauth_scheduling_rate_multiplier")
 	}
-	if before.OpenAIAdvancedSchedulerEnabled != after.OpenAIAdvancedSchedulerEnabled {
-		changed = append(changed, "openai_advanced_scheduler_enabled")
-	}
-	if before.OpenAIAdvancedSchedulerStickyWeightedEnabled != after.OpenAIAdvancedSchedulerStickyWeightedEnabled {
-		changed = append(changed, "openai_advanced_scheduler_sticky_weighted_enabled")
-	}
 	if before.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled != after.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled {
 		changed = append(changed, "openai_advanced_scheduler_subscription_priority_enabled")
-	}
-	if before.OpenAIAdvancedSchedulerLBTopK != after.OpenAIAdvancedSchedulerLBTopK {
-		changed = append(changed, "openai_advanced_scheduler_lb_top_k")
-	}
-	if before.OpenAIAdvancedSchedulerWeightPriority != after.OpenAIAdvancedSchedulerWeightPriority {
-		changed = append(changed, "openai_advanced_scheduler_weight_priority")
-	}
-	if before.OpenAIAdvancedSchedulerWeightLoad != after.OpenAIAdvancedSchedulerWeightLoad {
-		changed = append(changed, "openai_advanced_scheduler_weight_load")
-	}
-	if before.OpenAIAdvancedSchedulerWeightQueue != after.OpenAIAdvancedSchedulerWeightQueue {
-		changed = append(changed, "openai_advanced_scheduler_weight_queue")
-	}
-	if before.OpenAIAdvancedSchedulerWeightErrorRate != after.OpenAIAdvancedSchedulerWeightErrorRate {
-		changed = append(changed, "openai_advanced_scheduler_weight_error_rate")
-	}
-	if before.OpenAIAdvancedSchedulerWeightTTFT != after.OpenAIAdvancedSchedulerWeightTTFT {
-		changed = append(changed, "openai_advanced_scheduler_weight_ttft")
-	}
-	if before.OpenAIAdvancedSchedulerWeightReset != after.OpenAIAdvancedSchedulerWeightReset {
-		changed = append(changed, "openai_advanced_scheduler_weight_reset")
-	}
-	if before.OpenAIAdvancedSchedulerWeightQuotaHeadroom != after.OpenAIAdvancedSchedulerWeightQuotaHeadroom {
-		changed = append(changed, "openai_advanced_scheduler_weight_quota_headroom")
-	}
-	if before.OpenAIAdvancedSchedulerWeightUpstreamCost != after.OpenAIAdvancedSchedulerWeightUpstreamCost {
-		changed = append(changed, "openai_advanced_scheduler_weight_upstream_cost")
-	}
-	if before.OpenAIAdvancedSchedulerWeightPreviousResponse != after.OpenAIAdvancedSchedulerWeightPreviousResponse {
-		changed = append(changed, "openai_advanced_scheduler_weight_previous_response")
-	}
-	if before.OpenAIAdvancedSchedulerWeightSessionSticky != after.OpenAIAdvancedSchedulerWeightSessionSticky {
-		changed = append(changed, "openai_advanced_scheduler_weight_session_sticky")
 	}
 	// 余额、订阅到期与账号限额通知
 	if before.BalanceLowNotifyEnabled != after.BalanceLowNotifyEnabled {
@@ -597,9 +536,7 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.ModelPlazaDescription != after.ModelPlazaDescription {
 		changed = append(changed, "model_plaza_description")
 	}
-	if before.AffiliateEnabled != after.AffiliateEnabled {
-		changed = append(changed, "affiliate_enabled")
-	}
+
 	if before.RiskControlEnabled != after.RiskControlEnabled {
 		changed = append(changed, "risk_control_enabled")
 	}
@@ -868,11 +805,4 @@ func equalPlatformQuotaSettings(before, after map[string]*service.DefaultPlatfor
 		}
 	}
 	return true
-}
-
-func stringSetting(value *string, fallback string) string {
-	if value == nil {
-		return fallback
-	}
-	return *value
 }

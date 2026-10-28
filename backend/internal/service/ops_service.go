@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"math"
 	"math/rand/v2"
 	"strings"
 	"sync"
@@ -43,6 +44,7 @@ type OpsRuntimeSettingsRefreshHealth struct {
 
 // OpsService provides ingestion and query APIs for the Ops monitoring module.
 type OpsService struct {
+	nodeMetrics opsNodeMetricsReader
 	opsRepo     OpsRepository
 	settingRepo SettingRepository
 	cfg         *config.Config
@@ -67,10 +69,10 @@ type OpsService struct {
 	// 解耦避免 OpsService -> OpsCleanupService 的硬依赖（cleanup 也读 settings，会循环）。
 	cleanupReloader CleanupReloader
 
-	// quotaAutoPauseSink 由 wire 注入（通常是 SettingService.SetOpenAIQuotaAutoPauseSettings）。
+	// quotaAutoPauseSink 由 wire 注入（通常是 SettingService.SetQuotaSchedulingSettings）。
 	// UpdateOpsAdvancedSettings 写入新配置后调用，把最新的 quota auto-pause 全局默认阈值
 	// 立即同步到调度热路径读取的内存缓存，避免下次请求才能感知新值。
-	quotaAutoPauseSink func(OpsOpenAIAccountQuotaAutoPauseSettings)
+	quotaAutoPauseSink func(OpsOpenAIAccountQuotaAutoPauseSettings, SchedulingQuotaProtection)
 
 	// Published snapshots are immutable. Gateway reads are lock-free; the mutex
 	// only serializes startup and administrative updates.
@@ -100,10 +102,10 @@ func (s *OpsService) SetCleanupReloader(r CleanupReloader) {
 	s.cleanupReloader = r
 }
 
-// SetOpenAIQuotaAutoPauseSettingsSink 由 wire 注入，把最新的 quota auto-pause 全局默认
+// SetQuotaSchedulingSettingsSink 由 wire 注入，把最新的 quota auto-pause 全局默认
 // 阈值 push 到调度热路径读取的内存缓存。同 SetCleanupReloader 的解耦目的：避免 OpsService
 // 持有 *SettingService 引入循环依赖。
-func (s *OpsService) SetOpenAIQuotaAutoPauseSettingsSink(sink func(OpsOpenAIAccountQuotaAutoPauseSettings)) {
+func (s *OpsService) SetQuotaSchedulingSettingsSink(sink func(OpsOpenAIAccountQuotaAutoPauseSettings, SchedulingQuotaProtection)) {
 	if s == nil {
 		return
 	}
@@ -488,11 +490,7 @@ func (s *OpsService) prepareErrorLogInput(ctx context.Context, entry *OpsInsertE
 	// HTTP attempt. Enforce that ownership at the persistence boundary so an
 	// earlier inference attempt cannot leak its status or text into top-level
 	// auth fields even if a caller supplied stale single-value context.
-	for i := len(entry.UpstreamErrors) - 1; i >= 0; i-- {
-		last := entry.UpstreamErrors[i]
-		if last == nil {
-			continue
-		}
+	if last := LastOpsUpstreamAttempt(entry.UpstreamErrors); last != nil {
 		if last.Stage == string(GatewayFailureStageAccountAuth) {
 			entry.ErrorPhase = string(GatewayFailureStageAccountAuth)
 			entry.ErrorOwner = "provider"
@@ -508,7 +506,6 @@ func (s *OpsService) prepareErrorLogInput(ctx context.Context, entry *OpsInsertE
 				entry.UpstreamErrorDetail = &detail
 			}
 		}
-		break
 	}
 
 	// Sanitize + truncate error_body to avoid storing sensitive data.
@@ -549,6 +546,8 @@ func (s *OpsService) prepareErrorLogInput(ctx context.Context, entry *OpsInsertE
 		return nil, false, err
 	}
 
+	// Apply SLA responsibility after final per-turn evidence and auth attribution.
+	normalizeOpsSLA(entry)
 	return entry, true, nil
 }
 
@@ -577,9 +576,12 @@ func sanitizeOpsUpstreamErrors(entry *OpsInsertErrorLogInput) error {
 			events = append(events, ev)
 		}
 	}
-	firstEventWithBody := len(events) - opsUpstreamErrorsBodyWindow
-	if firstEventWithBody < 0 {
-		firstEventWithBody = 0
+	firstEventWithBody := len(events)
+	for i, remaining := len(events)-1, opsUpstreamErrorsBodyWindow; i >= 0 && remaining > 0; i-- {
+		if events[i].Kind != opsSchedulingTrace && events[i].Kind != cloudAdaptationKind && events[i].Kind != cloudFailureKind {
+			firstEventWithBody = i
+			remaining--
+		}
 	}
 
 	sanitized := make([]*OpsUpstreamErrorEvent, 0, len(events))
@@ -588,7 +590,7 @@ func sanitizeOpsUpstreamErrors(entry *OpsInsertErrorLogInput) error {
 		normalizeOpsUpstreamProxyAttribution(&out)
 		// Only boundOpsUpstreamErrors may stamp this; never trust caller input.
 		out.DroppedEarlierAttempts = 0
-		keepBody := i >= firstEventWithBody
+		keepBody := i >= firstEventWithBody || (out.Kind == opsSchedulingTrace || out.Kind == cloudAdaptationKind || out.Kind == cloudFailureKind)
 		urlMaxLen, messageMaxLen := 2048, 2048
 		if !keepBody {
 			urlMaxLen, messageMaxLen = opsUpstreamErrorsOlderURLMaxLen, opsUpstreamErrorsOlderMessageMaxLen
@@ -627,12 +629,17 @@ func sanitizeOpsUpstreamErrors(entry *OpsInsertErrorLogInput) error {
 		// Drop fully-empty events (can happen if only status code was known).
 		// Judged on the original detail so an older attempt whose detail is
 		// cleared by the body window below is still retained.
-		if out.UpstreamStatusCode == 0 && out.Message == "" && detail == "" {
+		if out.UpstreamStatusCode == 0 && out.Message == "" && detail == "" &&
+			!(out.Kind == OpsUpstreamRetryStopped && out.Reason != "") {
 			continue
 		}
 		if keepBody && detail != "" {
 			// Keep upstream detail small while the event waits in the queue.
-			sanitizedDetail, _ := sanitizeErrorBodyForStorage(detail, OpsErrorLogQueueBodyMaxBytes)
+			limit := OpsErrorLogQueueBodyMaxBytes
+			if out.Kind == opsSchedulingTrace {
+				limit = maxSchedulingTraceBytes
+			}
+			sanitizedDetail, _ := sanitizeErrorBodyForStorage(detail, limit)
 			out.Detail = sanitizedDetail
 		} else {
 			out.Detail = ""
@@ -757,6 +764,7 @@ func (s *OpsService) GetErrorLogByID(ctx context.Context, id int64) (*OpsErrorLo
 		}
 		return nil, infraerrors.InternalServer("OPS_ERROR_LOAD_FAILED", "Failed to load ops error log").WithCause(err)
 	}
+	detail = sanitizeOpsDetailCredentials(detail)
 	if detail != nil && strings.TrimSpace(detail.UpstreamErrors) != "" {
 		if normalized, normalizeErr := normalizeOpsUpstreamErrorsJSON(detail.UpstreamErrors); normalizeErr == nil {
 			detail.UpstreamErrors = normalized
@@ -889,6 +897,13 @@ func redactSensitiveJSON(v any) any {
 		out := make(map[string]any, len(t))
 		for k, vv := range t {
 			if isSensitiveKey(k) {
+				// This gateway-owned field counts WS events, not credential tokens.
+				// Keep the exception value-typed so strings/objects cannot bypass redaction.
+				if count, ok := vv.(float64); strings.EqualFold(strings.TrimSpace(k), "downstream_token_events") &&
+					ok && count >= 0 && count == math.Trunc(count) {
+					out[k] = count
+					continue
+				}
 				out[k] = "[REDACTED]"
 				continue
 			}

@@ -1,7 +1,7 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
-      <UsageStatsCards :stats="usageStats" />
+      <UsageStatsCards :show-account-cost="rolePermissions.can('billing.cost.read')" :stats="usageStats" />
       <!-- Charts Section -->
       <div class="space-y-4">
         <div class="card p-4">
@@ -83,9 +83,9 @@
           </button>
         </div>
 
-        <UsageFilters v-model="filters" ref="usageFiltersRef" flat :mode="activeTab" class="border-b border-gray-100 dark:border-dark-700/50" :start-date="startDate" :end-date="endDate" :exporting="exporting" :model-options="modelNameOptions" @change="applyFilters" @refresh="refreshData" @reset="resetFilters" @cleanup="openCleanupDialog" @export="exportToExcel">
+        <UsageFilters v-model="filters" ref="usageFiltersRef" flat :mode="filtersMode" class="border-b border-gray-100 dark:border-dark-700/50" :start-date="startDate" :end-date="endDate" :exporting="exporting" :model-options="modelNameOptions" @change="applyFilters" @refresh="refreshData" @reset="resetFilters" @cleanup="openCleanupDialog" @export="exportToExcel">
           <template #after-reset>
-            <div v-if="activeTab !== 'ranking'" class="relative" ref="columnDropdownRef">
+            <div v-if="hasColumnSettings" class="relative" ref="columnDropdownRef">
               <button
                 data-testid="usage-column-settings"
                 @click="showColumnDropdown = !showColumnDropdown"
@@ -123,7 +123,7 @@
         </UsageFilters>
 
         <div v-show="activeTab === 'usage'" class="overflow-hidden rounded-b-2xl">
-          <UsageTable
+          <UsageTable :show-account-billing="rolePermissions.can('billing.cost.read')"
             flat
             :data="usageLogs"
             :loading="loading"
@@ -135,7 +135,7 @@
             @userClick="handleUserClick"
             @ipGeoBatchFailed="handleIpGeoBatchFailed"
           />
-          <Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
+          <Pagination :total-exact="usageTotalExact" :show-jump="false" v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
         </div>
         <div v-show="activeTab === 'errors'" class="overflow-hidden rounded-b-2xl">
           <OpsErrorLogTable
@@ -151,15 +151,30 @@
             @update:pageSize="onErrPageSize"
             @ipGeoBatchFailed="handleIpGeoBatchFailed" />
         </div>
-        <!-- 懒挂载：首次切到该 tab 才请求排行数据，之后随筛选自动刷新 -->
+        <!-- 懒挂载：首次切到该 tab 才请求排行数据，之后随筛选自动刷新；
+             active 让隐藏中的排行不发请求，切回时补一次 -->
         <div v-if="rankingMounted" v-show="activeTab === 'ranking'" class="overflow-hidden rounded-b-2xl">
           <UserTokenRanking
             ref="rankingRef"
+            :active="activeTab === 'ranking'"
             :start-date="startDate"
             :end-date="endDate"
             :filters="breakdownFilters"
             :model="filters.model"
             @select-user="handleRankingSelectUser"
+          />
+        </div>
+        <!-- 同上，API Key 维度 -->
+        <div v-if="keyRankingMounted" v-show="activeTab === 'keyRanking'" class="overflow-hidden rounded-b-2xl">
+          <APIKeyTokenRanking
+            ref="keyRankingRef"
+            :active="activeTab === 'keyRanking'"
+            :visible-column-keys="keyRankingVisibleColumnKeys"
+            :start-date="startDate"
+            :end-date="endDate"
+            :filters="breakdownFilters"
+            :model="filters.model"
+            @select-api-key="handleRankingSelectApiKey"
           />
         </div>
       </div>
@@ -184,19 +199,29 @@
 </template>
 
 <script setup lang="ts">
+import { createUsageCursorPager } from '@/composables/usageCursor'
+const usageCursor = createUsageCursorPager()
+const usageTotalExact = ref(false)
+
+import { consumeUsageExport } from "@/api/usageExport"
+import { useAuthStore } from "@/stores/auth"
+const rolePermissions = useAuthStore()
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { saveAs } from 'file-saver'
 import { useRoute } from 'vue-router'
-import { useAppStore } from '@/stores/app'; import { adminAPI } from '@/api/admin'; import { adminUsageAPI } from '@/api/admin/usage'
+import { useAppStore } from '@/stores/app'; import { adminAPI } from '@/api/admin'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatReasoningEffort } from '@/utils/format'
 import { resolveUsageRequestType, requestTypeToLegacyStream } from '@/utils/usageRequestType'
 import AppLayout from '@/components/layout/AppLayout.vue'; import Pagination from '@/components/common/Pagination.vue'; import Select from '@/components/common/Select.vue'; import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
 import UsageTable from '@/components/admin/usage/UsageTable.vue'; import UsageExportProgress from '@/components/admin/usage/UsageExportProgress.vue'
+import { getUsageCacheHitRate, usageLatencyExportKeys, usageLatencyExportValues } from '@/utils/usageMetrics'
 import UserTokenRanking from '@/components/admin/usage/UserTokenRanking.vue'
+import APIKeyTokenRanking from '@/components/admin/usage/APIKeyTokenRanking.vue'
 import UsageCleanupDialog from '@/components/admin/usage/UsageCleanupDialog.vue'
+import { useHiddenColumns } from '@/composables/useHiddenColumns'
 import UserBalanceHistoryModal from '@/components/admin/user/UserBalanceHistoryModal.vue'
 import OpsErrorLogTable from '@/views/admin/ops/components/OpsErrorLogTable.vue'
 import OpsErrorDetailModal from '@/views/admin/ops/components/OpsErrorDetailModal.vue'
@@ -230,9 +255,10 @@ const upstreamEndpointStats = ref<EndpointStat[]>([])
 const endpointPathStats = ref<EndpointStat[]>([])
 const endpointStatsLoading = ref(false)
 let abortController: AbortController | null = null; let exportAbortController: AbortController | null = null
-let chartReqSeq = 0
-let statsReqSeq = 0
-let modelStatsReqSeq = 0
+let chartLoadTimer: ReturnType<typeof setTimeout> | undefined
+let chartController: AbortController | null = null
+let statsController: AbortController | null = null
+let modelStatsController: AbortController | null = null
 const exportProgress = reactive({ show: false, progress: 0, current: 0, total: 0, estimatedTime: '' })
 const cleanupDialogVisible = ref(false)
 // Balance history modal state
@@ -243,7 +269,7 @@ const breakdownFilters = computed(() => {
   const f: Record<string, any> = {}
   if (filters.value.user_id) f.user_id = filters.value.user_id
   if (filters.value.api_key_id) f.api_key_id = filters.value.api_key_id
-  if (filters.value.account_id) f.account_id = filters.value.account_id
+  if (rolePermissions.isSuperAdmin && filters.value.account_id) f.account_id = filters.value.account_id
   if (filters.value.group_id) f.group_id = filters.value.group_id
   if (filters.value.request_type != null) f.request_type = filters.value.request_type
   if (filters.value.native_compaction_v2 != null) f.native_compaction_v2 = filters.value.native_compaction_v2
@@ -270,6 +296,14 @@ const handleUserClick = async (userId: number) => {
 const handleRankingSelectUser = (userId: number, email: string) => {
   filters.value = { ...filters.value, user_id: userId }
   usageFiltersRef.value?.setUserKeyword?.(email || '')
+  activeTab.value = 'usage'
+  applyFilters()
+}
+
+// 同上，API Key 维度：把整个用量页收敛到这把 Key 并跳到用量明细。
+const handleRankingSelectApiKey = (apiKeyId: number, keyName: string) => {
+  filters.value = { ...filters.value, api_key_id: apiKeyId }
+  usageFiltersRef.value?.setApiKeyKeyword?.(keyName || '')
   activeTab.value = 'usage'
   applyFilters()
 }
@@ -382,6 +416,7 @@ const buildUsageListParams = (
     page_size: pageSize,
     exact_total: exactTotal,
     ...filters.value,
+    account_id: rolePermissions.isSuperAdmin ? filters.value.account_id : undefined,
     stream: legacyStream === null ? undefined : legacyStream,
     sort_by: sortState.sort_by,
     sort_order: sortState.sort_order
@@ -392,14 +427,16 @@ const loadLogs = async () => {
   abortController?.abort(); const c = new AbortController(); abortController = c; loading.value = true
   try {
     const res = await adminAPI.usage.list(
-      buildUsageListParams(pagination.page, pagination.page_size, false),
+      usageCursor.prepare(buildUsageListParams(pagination.page, pagination.page_size, false)),
       { signal: c.signal }
     )
-    if(!c.signal.aborted) { usageLogs.value = res.items; pagination.total = res.total }
+    if(!c.signal.aborted) { usageTotalExact.value = res.total_exact ?? false; usageCursor.accept(pagination.page, res); usageLogs.value = res.items; pagination.total = res.total }
   } catch (error: any) { if(error?.name !== 'AbortError') console.error('Failed to load usage logs:', error) } finally { if(abortController === c) loading.value = false }
 }
 const loadStats = async (force = false) => {
-  const seq = ++statsReqSeq
+  statsController?.abort()
+  const controller = new AbortController()
+  statsController = controller
   endpointStatsLoading.value = true
   try {
     const requestType = filters.value.request_type
@@ -408,20 +445,20 @@ const loadStats = async (force = false) => {
       ...filters.value,
       stream: legacyStream === null ? undefined : legacyStream,
       ...(force ? { nocache: 1 } : {}),
-    })
-    if (seq !== statsReqSeq) return
+    }, { signal: controller.signal })
+    if (controller.signal.aborted) return
     usageStats.value = s
     inboundEndpointStats.value = s.endpoints || []
     upstreamEndpointStats.value = s.upstream_endpoints || []
     endpointPathStats.value = s.endpoint_paths || []
   } catch (error) {
-    if (seq !== statsReqSeq) return
+    if (controller.signal.aborted) return
     console.error('Failed to load usage stats:', error)
     inboundEndpointStats.value = []
     upstreamEndpointStats.value = []
     endpointPathStats.value = []
   } finally {
-    if (seq === statsReqSeq) endpointStatsLoading.value = false
+    if (statsController === controller && !controller.signal.aborted) endpointStatsLoading.value = false
   }
 }
 
@@ -437,7 +474,9 @@ const loadModelStats = async (source: ModelDistributionSource, force = false) =>
     return
   }
 
-  const seq = ++modelStatsReqSeq
+  modelStatsController?.abort()
+  const controller = new AbortController()
+  modelStatsController = controller
   modelStatsLoading.value = true
   try {
     const requestType = filters.value.request_type
@@ -448,7 +487,7 @@ const loadModelStats = async (source: ModelDistributionSource, force = false) =>
       user_id: filters.value.user_id,
       model: filters.value.model,
       api_key_id: filters.value.api_key_id,
-      account_id: filters.value.account_id,
+      account_id: rolePermissions.isSuperAdmin ? filters.value.account_id : undefined,
       group_id: filters.value.group_id,
       request_type: requestType,
       stream: legacyStream === null ? undefined : legacyStream,
@@ -457,9 +496,9 @@ const loadModelStats = async (source: ModelDistributionSource, force = false) =>
 	  upstream_model_mismatch: filters.value.upstream_model_mismatch,
     }
 
-    const response = await adminAPI.dashboard.getModelStats({ ...baseParams, model_source: source })
+    const response = await adminAPI.dashboard.getModelStats({ ...baseParams, model_source: source }, { signal: controller.signal })
 
-    if (seq !== modelStatsReqSeq) return
+    if (controller.signal.aborted) return
 
     const models = response.models || []
     if (source === 'requested') {
@@ -471,7 +510,7 @@ const loadModelStats = async (source: ModelDistributionSource, force = false) =>
     }
     loadedModelSources[source] = true
   } catch (error) {
-    if (seq !== modelStatsReqSeq) return
+    if (controller.signal.aborted) return
     console.error('Failed to load model stats:', error)
     if (source === 'requested') {
       requestedModelStats.value = []
@@ -482,12 +521,15 @@ const loadModelStats = async (source: ModelDistributionSource, force = false) =>
     }
     loadedModelSources[source] = false
   } finally {
-    if (seq === modelStatsReqSeq) modelStatsLoading.value = false
+    if (modelStatsController === controller && !controller.signal.aborted) modelStatsLoading.value = false
   }
 }
 
 const loadChartData = async () => {
-  const seq = ++chartReqSeq
+  clearTimeout(chartLoadTimer)
+  chartController?.abort()
+  const controller = new AbortController()
+  chartController = controller
   chartsLoading.value = true
   try {
     const requestType = filters.value.request_type
@@ -499,7 +541,7 @@ const loadChartData = async () => {
       user_id: filters.value.user_id,
       model: filters.value.model,
       api_key_id: filters.value.api_key_id,
-      account_id: filters.value.account_id,
+      account_id: rolePermissions.isSuperAdmin ? filters.value.account_id : undefined,
       group_id: filters.value.group_id,
       request_type: requestType,
       stream: legacyStream === null ? undefined : legacyStream,
@@ -511,11 +553,11 @@ const loadChartData = async () => {
       include_model_stats: false,
       include_group_stats: true,
       include_users_trend: false
-    })
-    if (seq !== chartReqSeq) return
+    }, { signal: controller.signal })
+    if (controller.signal.aborted) return
     trendData.value = snapshot.trend || []
     groupStats.value = snapshot.groups || []
-  } catch (error) { console.error('Failed to load chart data:', error) } finally { if (seq === chartReqSeq) chartsLoading.value = false }
+  } catch (error) { if (!controller.signal.aborted) console.error('Failed to load chart data:', error) } finally { if (chartController === controller && !controller.signal.aborted) chartsLoading.value = false }
 }
 const applyFilters = () => {
   pagination.page = 1
@@ -538,7 +580,9 @@ const refreshData = () => {
   loadModelStats(modelDistributionSource.value, true)
   loadChartData()
   if (activeTab.value === 'errors') loadAdminErrors()
+  // 两个排行都已挂载时各自 reload；隐藏中的那个由 active 守门，只记过期不发请求
   if (rankingMounted.value) rankingRef.value?.reload()
+  if (keyRankingMounted.value) keyRankingRef.value?.reload()
 }
 const resetFilters = () => {
   const range = getLast24HoursRangeDates()
@@ -573,42 +617,37 @@ const getRequestTypeLabel = (log: AdminUsageLog): string => {
 }
 
 const exportToExcel = async () => {
-  if (exporting.value) return; exporting.value = true; exportProgress.show = true
+  if (exporting.value || !rolePermissions.can('usage.export')) return; exporting.value = true; exportProgress.show = true
   const c = new AbortController(); exportAbortController = c
   try {
-    let p = 1; let total = pagination.total; let exportedCount = 0
+    const total = pagination.total; let exportedCount = 0
     const XLSX = await import('xlsx')
     const headers = [
       t('usage.time'), t('admin.usage.user'), t('usage.apiKeyFilter'),
-      t('admin.usage.account'), t('usage.requestedModel'), t('usage.sentUpstreamModel'), t('usage.upstreamResponseModel'), t('usage.upstreamModelMismatch'), t('usage.requestedReasoningEffort'), t('usage.reasoningEffort'), t('admin.usage.group'),
+      ...(rolePermissions.isSuperAdmin ? [t('admin.usage.account')] : []), t('usage.requestedModel'), t('usage.sentUpstreamModel'), t('usage.upstreamResponseModel'), t('usage.upstreamModelMismatch'), t('usage.requestedReasoningEffort'), t('usage.reasoningEffort'), t('admin.usage.group'),
       t('usage.inboundEndpoint'), t('usage.upstreamEndpoint'),
       t('usage.type'),
       t('admin.usage.inputTokens'), t('admin.usage.outputTokens'),
-      t('admin.usage.cacheReadTokens'), t('admin.usage.cacheCreationTokens'),
+      t('admin.usage.cacheReadTokens'), t('admin.usage.cacheCreationTokens'), `${t('usage.cacheHitRate')} (%)`,
       t('admin.usage.inputCost'), t('admin.usage.outputCost'),
       t('admin.usage.cacheReadCost'), t('admin.usage.cacheCreationCost'),
-      t('usage.rate'), t('usage.accountMultiplier'), t('usage.original'), t('usage.userBilled'), t('usage.accountBilled'),
-      t('usage.firstToken'), t('usage.duration'),
-      t('admin.usage.requestId'), t('admin.usage.upstreamRequestId'), t('usage.userAgent'), t('admin.usage.ipAddress')
+      t('usage.rate'), ...(rolePermissions.can('billing.cost.read') ? [t('usage.accountMultiplier')] : []), t('usage.original'), t('usage.userBilled'), ...(rolePermissions.can('billing.cost.read') ? [t('usage.accountBilled')] : []),
+      ...usageLatencyExportKeys.map(key => t(key)),
+      t('admin.usage.requestId'), t('admin.usage.upstreamRequestId'), t('usage.userAgent'), t('admin.usage.ipAddress'), t('usage.billingStatusLabel'), t('usage.samplingSteps'), t('usage.samplingExport')
     ]
     const ws = XLSX.utils.aoa_to_sheet([headers])
-    while (true) {
-      const res = await adminUsageAPI.list(
-        buildUsageListParams(p, 100, true),
-        { signal: c.signal }
-      )
-      if (c.signal.aborted) break; if (p === 1) { total = res.total; exportProgress.total = total }
-      const rows = (res.items || []).map((log: AdminUsageLog) => [
-        log.created_at, log.user?.email || '', log.api_key?.name || '', log.account?.name || '', log.model,
+    await consumeUsageExport<AdminUsageLog>('/admin/usage/export', buildUsageListParams(1, 100, true), (items) => {
+      const rows = items.map((log: AdminUsageLog) => [
+        log.created_at, log.user?.email || '', log.api_key?.name || '', ...(rolePermissions.isSuperAdmin ? [log.account?.name || ''] : []), log.model,
         log.upstream_model || log.model, log.upstream_response_model || '', log.upstream_model_mismatch == null ? '' : t(log.upstream_model_mismatch ? 'common.yes' : 'common.no'), formatReasoningEffort(log.reasoning_effort), formatReasoningEffort(log.upstream_reasoning_effort || log.reasoning_effort), log.group?.name || '',
         log.inbound_endpoint || '', log.upstream_endpoint || '', getRequestTypeLabel(log),
-        log.input_tokens, log.output_tokens, log.cache_read_tokens, log.cache_creation_tokens,
+        log.input_tokens, log.output_tokens, log.cache_read_tokens, log.cache_creation_tokens, getUsageCacheHitRate(log)?.toFixed(2) ?? '',
         log.input_cost?.toFixed(6) || '0.000000', log.output_cost?.toFixed(6) || '0.000000',
         log.cache_read_cost?.toFixed(6) || '0.000000', log.cache_creation_cost?.toFixed(6) || '0.000000',
-        log.rate_multiplier?.toPrecision(4) || '1.00', (log.account_rate_multiplier ?? 1).toPrecision(4),
+        log.rate_multiplier?.toPrecision(4) || '1.00', ...(rolePermissions.can('billing.cost.read') ? [(log.account_rate_multiplier ?? 1).toPrecision(4)] : []),
         log.total_cost?.toFixed(6) || '0.000000', log.actual_cost?.toFixed(6) || '0.000000',
-        ((log.account_stats_cost ?? log.total_cost) * (log.account_rate_multiplier ?? 1)).toFixed(6), log.first_token_ms ?? '', log.duration_ms,
-        log.request_id || '', log.upstream_request_id || '', log.user_agent || '', log.ip_address || ''
+        ...(rolePermissions.can('billing.cost.read') ? [((log.account_stats_cost ?? log.total_cost) * (log.account_rate_multiplier ?? 1)).toFixed(6)] : []), ...usageLatencyExportValues(log),
+        log.request_id || '', log.upstream_request_id || '', log.user_agent || '', log.ip_address || '', log.billing_status || 'unknown', log.sampling_details?.samples.length ?? '', log.sampling_details ? JSON.stringify(log.sampling_details) : ''
       ])
       if (rows.length) {
         XLSX.utils.sheet_add_aoa(ws, rows, { origin: -1 })
@@ -616,15 +655,14 @@ const exportToExcel = async () => {
       exportedCount += rows.length
       exportProgress.current = exportedCount
       exportProgress.progress = total > 0 ? Math.min(100, Math.round(exportedCount / total * 100)) : 0
-      if (exportedCount >= total || res.items.length < 100) break; p++
-    }
+    }, c.signal)
     if(!c.signal.aborted) {
       const wb = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(wb, ws, 'Usage')
       saveAs(new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `usage_${filters.value.start_date}_to_${filters.value.end_date}.xlsx`)
       appStore.showSuccess(t('usage.exportSuccess'))
     }
-  } catch (error) { console.error('Failed to export:', error); appStore.showError('Export Failed') }
+  } catch (error) { if (!c.signal.aborted) { console.error('Failed to export:', error); appStore.showError(t('usage.exportFailed')) } }
   finally { if(exportAbortController === c) { exportAbortController = null; exporting.value = false; exportProgress.show = false } }
 }
 
@@ -640,7 +678,7 @@ const HIDDEN_COLUMNS_CURRENT_VERSION = 'upstream-request-id-hidden-by-default'
 const allColumns = computed(() => [
   { key: 'user', label: t('admin.usage.user'), sortable: false },
   { key: 'api_key', label: t('usage.apiKeyFilter'), sortable: false },
-  { key: 'account', label: t('admin.usage.account'), sortable: false },
+  ...(rolePermissions.isSuperAdmin ? [{ key: 'account', label: t('admin.usage.account'), sortable: false }] : []),
   { key: 'model', label: t('usage.model'), sortable: true },
   { key: 'reasoning_effort', label: t('usage.reasoningEffort'), sortable: false },
   { key: 'endpoint', label: t('usage.endpoint'), sortable: false },
@@ -694,7 +732,7 @@ const ERR_HIDDEN_COLUMNS_KEY = 'usage-error-hidden-columns'
 const errAllColumns = computed(() => [
   { key: 'user', label: t('admin.ops.errorLog.user') },
   { key: 'api_key', label: t('admin.ops.errorLog.apiKey') },
-  { key: 'account', label: t('admin.ops.errorLog.account') },
+  ...(rolePermissions.isSuperAdmin ? [{ key: 'account', label: t('admin.ops.errorLog.account') }] : []),
   { key: 'platform', label: t('admin.ops.errorLog.platform') },
   { key: 'model', label: t('admin.ops.errorLog.model') },
   { key: 'endpoint', label: t('admin.ops.errorLog.endpoint') },
@@ -709,49 +747,58 @@ const errAllColumns = computed(() => [
   { key: 'actions', label: t('admin.ops.errorLog.action') },
 ])
 
-const errHiddenColumns = reactive<Set<string>>(new Set())
+const errorColumns = useHiddenColumns(ERR_HIDDEN_COLUMNS_KEY, {
+  alwaysVisible: ERR_ALWAYS_VISIBLE,
+  defaultHidden: ERR_DEFAULT_HIDDEN_COLUMNS,
+})
 
 const errToggleableColumns = computed(() =>
   errAllColumns.value.filter(col => !ERR_ALWAYS_VISIBLE.includes(col.key))
 )
 
-const errVisibleColumnKeys = computed(() =>
-  errAllColumns.value
-    .filter(col => ERR_ALWAYS_VISIBLE.includes(col.key) || !errHiddenColumns.has(col.key))
-    .map(col => col.key)
+const errVisibleColumnKeys = computed(() => errorColumns.visibleKeys(errAllColumns.value))
+
+// ---- API 密钥排行 tab 列设置(与上面两个同机制,独立存储) ----
+// 密钥列是行的身份，隐藏后整行无意义，因此不可切换。
+const KEY_RANKING_ALWAYS_VISIBLE = ['key']
+
+// key 集合须与 APIKeyTokenRanking / BreakdownRanking 内部的列定义一致
+const keyRankingAllColumns = computed(() => [
+  { key: 'key', label: t('admin.usage.keyRanking.columns.key') },
+  { key: 'user', label: t('admin.usage.keyRanking.columns.user') },
+  { key: 'requests', label: t('admin.usage.tokenRanking.columns.requests') },
+  { key: 'input_tokens', label: t('admin.usage.tokenRanking.columns.inputTokens') },
+  { key: 'output_tokens', label: t('admin.usage.tokenRanking.columns.outputTokens') },
+  { key: 'cache_tokens', label: t('admin.usage.tokenRanking.columns.cacheTokens') },
+  { key: 'total_tokens', label: t('admin.usage.tokenRanking.columns.totalTokens') },
+  { key: 'actual_cost', label: t('admin.usage.tokenRanking.columns.cost') },
+])
+
+const keyRankingColumns = useHiddenColumns('usage-key-ranking-hidden-columns', {
+  alwaysVisible: KEY_RANKING_ALWAYS_VISIBLE,
+})
+const keyRankingToggleableColumns = computed(() =>
+  keyRankingAllColumns.value.filter(col => !KEY_RANKING_ALWAYS_VISIBLE.includes(col.key))
 )
+const keyRankingVisibleColumnKeys = computed(() => keyRankingColumns.visibleKeys(keyRankingAllColumns.value))
 
-const toggleErrColumn = (key: string) => {
-  if (errHiddenColumns.has(key)) {
-    errHiddenColumns.delete(key)
-  } else {
-    errHiddenColumns.add(key)
-  }
-  try {
-    localStorage.setItem(ERR_HIDDEN_COLUMNS_KEY, JSON.stringify([...errHiddenColumns]))
-  } catch (e) {
-    console.error('Failed to save error columns:', e)
-  }
+// 列设置下拉按当前 tab 分发。用户排行没有可切换的列，按钮对它隐藏。
+const hasColumnSettings = computed(() => activeTab.value !== 'ranking')
+const currentToggleableColumns = computed(() => {
+  if (activeTab.value === 'errors') return errToggleableColumns.value
+  if (activeTab.value === 'keyRanking') return keyRankingToggleableColumns.value
+  return toggleableColumns.value
+})
+const isCurrentColumnVisible = (key: string) => {
+  if (activeTab.value === 'errors') return errorColumns.isVisible(key)
+  if (activeTab.value === 'keyRanking') return keyRankingColumns.isVisible(key)
+  return isColumnVisible(key)
 }
-
-const loadSavedErrColumns = () => {
-  try {
-    const saved = localStorage.getItem(ERR_HIDDEN_COLUMNS_KEY)
-    const keys = saved ? (JSON.parse(saved) as string[]) : ERR_DEFAULT_HIDDEN_COLUMNS
-    keys.forEach((key) => errHiddenColumns.add(key))
-  } catch {
-    ERR_DEFAULT_HIDDEN_COLUMNS.forEach((key) => errHiddenColumns.add(key))
-  }
+const toggleCurrentColumn = (key: string) => {
+  if (activeTab.value === 'errors') return errorColumns.toggle(key)
+  if (activeTab.value === 'keyRanking') return keyRankingColumns.toggle(key)
+  return toggleColumn(key)
 }
-
-// 列设置下拉按当前 tab 分发
-const currentToggleableColumns = computed(() =>
-  activeTab.value === 'errors' ? errToggleableColumns.value : toggleableColumns.value
-)
-const isCurrentColumnVisible = (key: string) =>
-  activeTab.value === 'errors' ? !errHiddenColumns.has(key) : isColumnVisible(key)
-const toggleCurrentColumn = (key: string) =>
-  activeTab.value === 'errors' ? toggleErrColumn(key) : toggleColumn(key)
 
 const loadSavedColumns = () => {
   try {
@@ -783,21 +830,27 @@ const loadSavedColumns = () => {
 }
 
 // Detail tabs
-type DetailTab = 'usage' | 'errors' | 'ranking'
+type DetailTab = 'usage' | 'errors' | 'ranking' | 'keyRanking'
 const activeTab = ref<DetailTab>('usage')
 const detailTabs = computed(() => [
   { key: 'usage' as const, label: t('usage.tabs.usage'), icon: 'document' as const },
   { key: 'errors' as const, label: t('usage.tabs.errors'), icon: 'exclamationTriangle' as const },
   { key: 'ranking' as const, label: t('usage.tabs.ranking'), icon: 'chart' as const },
+  { key: 'keyRanking' as const, label: t('usage.tabs.keyRanking'), icon: 'key' as const },
 ])
+// 两个排行 tab 对筛选栏的要求一致，都走 ranking 模式
+const filtersMode = computed(() => (activeTab.value === 'keyRanking' ? 'ranking' : activeTab.value))
 const usageFiltersRef = ref<InstanceType<typeof UsageFilters> | null>(null)
 const rankingMounted = ref(false)
 const rankingRef = ref<InstanceType<typeof UserTokenRanking> | null>(null)
+const keyRankingMounted = ref(false)
+const keyRankingRef = ref<InstanceType<typeof APIKeyTokenRanking> | null>(null)
 
 const switchTab = (tab: DetailTab) => {
   activeTab.value = tab
   if (tab === 'errors' && errRows.value.length === 0) loadAdminErrors()
   if (tab === 'ranking') rankingMounted.value = true
+  if (tab === 'keyRanking') keyRankingMounted.value = true
 }
 
 // Error tab state
@@ -826,7 +879,7 @@ const loadAdminErrors = async () => {
       end_time: toRFC3339(filters.value.end_date, true),
       user_id: filters.value.user_id ?? undefined,
       api_key_id: filters.value.api_key_id ?? undefined,
-      account_id: filters.value.account_id ?? undefined,
+      account_id: rolePermissions.isSuperAdmin ? filters.value.account_id ?? undefined : undefined,
       group_id: filters.value.group_id ?? undefined,
       model: filters.value.model || undefined,
       phase: filters.value.error_phase || undefined,
@@ -870,14 +923,15 @@ onMounted(() => {
   loadLogs()
   loadStats()
   loadModelStats(modelDistributionSource.value, true)
-  window.setTimeout(() => {
+  chartLoadTimer = setTimeout(() => {
     void loadChartData()
   }, 120)
   loadSavedColumns()
-  loadSavedErrColumns()
+  errorColumns.load()
+  keyRankingColumns.load()
   document.addEventListener('click', handleColumnClickOutside)
 })
-onUnmounted(() => { abortController?.abort(); exportAbortController?.abort(); document.removeEventListener('click', handleColumnClickOutside) })
+onUnmounted(() => { clearTimeout(chartLoadTimer); statsController?.abort(); modelStatsController?.abort(); chartController?.abort(); abortController?.abort(); exportAbortController?.abort(); document.removeEventListener('click', handleColumnClickOutside) })
 
 watch(modelDistributionSource, (source) => {
   void loadModelStats(source)

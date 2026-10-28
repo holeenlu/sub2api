@@ -81,7 +81,7 @@ FROM combined`
 	var tokenConsumed int64
 	var peakRequestsPerMin int64
 	var peakTokensPerMin int64
-	if err := r.db.QueryRowContext(ctx, q, args...).Scan(
+	if err := r.queryOpsRow(ctx, q, args...).Scan(
 		&successCount,
 		&errorTotal,
 		&tokenConsumed,
