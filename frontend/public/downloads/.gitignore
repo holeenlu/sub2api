@@ -1,0 +1,5 @@
+# These packaged scripts are source, not the root's ignored tooling directories.
+!sub2api-image-skills/gpt-image-flare/scripts/
+!sub2api-image-skills/gpt-image-flare/scripts/generate.py
+!sub2api-image-skills/gpt-image-sunburst/scripts/
+!sub2api-image-skills/gpt-image-sunburst/scripts/generate.py

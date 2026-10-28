@@ -1,0 +1,604 @@
+package service
+
+import (
+	"bufio"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+)
+
+type antigravityCompatStreamAdapter interface {
+	Emit(*apicompat.AnthropicStreamEvent, *antigravityClientWriter)
+	Finalize(*antigravityClientWriter)
+	WriteError(*antigravityClientWriter, string)
+	Err() error
+}
+
+type antigravityChatStreamAdapter struct {
+	anthropicState *apicompat.AnthropicEventToResponsesState
+	chatState      *apicompat.ResponsesEventToChatState
+}
+
+func newAntigravityChatStreamAdapter(model string, includeUsage bool) *antigravityChatStreamAdapter {
+	anthropicState := apicompat.NewAnthropicEventToResponsesState()
+	anthropicState.Model = model
+	chatState := apicompat.NewResponsesEventToChatState()
+	chatState.Model = model
+	chatState.IncludeUsage = includeUsage
+	return &antigravityChatStreamAdapter{
+		anthropicState: anthropicState,
+		chatState:      chatState,
+	}
+}
+
+func (a *antigravityChatStreamAdapter) Emit(event *apicompat.AnthropicStreamEvent, writer *antigravityClientWriter) {
+	for _, responseEvent := range apicompat.AnthropicEventToResponsesEvents(event, a.anthropicState) {
+		a.emitResponseEvent(&responseEvent, writer)
+	}
+}
+
+func (a *antigravityChatStreamAdapter) Err() error { return a.chatState.Err() }
+
+func (a *antigravityChatStreamAdapter) Finalize(writer *antigravityClientWriter) {
+	if a.Err() != nil {
+		return
+	}
+	for _, responseEvent := range apicompat.FinalizeAnthropicResponsesStream(a.anthropicState) {
+		a.emitResponseEvent(&responseEvent, writer)
+	}
+	chunks := apicompat.FinalizeResponsesChatStream(a.chatState)
+	if a.Err() != nil {
+		return
+	}
+	for _, chunk := range chunks {
+		if data, err := apicompat.ChatChunkToSSE(chunk); err == nil {
+			writer.Write([]byte(data))
+		}
+	}
+	writer.Write([]byte("data: [DONE]\n\n"))
+}
+
+func (a *antigravityChatStreamAdapter) WriteError(writer *antigravityClientWriter, reason string) {
+	writer.Fprintf("data: {\"error\":{\"message\":%q,\"type\":\"upstream_error\"}}\n\n", reason)
+}
+
+func (a *antigravityChatStreamAdapter) emitResponseEvent(event *apicompat.ResponsesStreamEvent, writer *antigravityClientWriter) {
+	chunks := apicompat.ResponsesEventToChatChunks(event, a.chatState)
+	if a.Err() != nil {
+		return
+	}
+	for _, chunk := range chunks {
+		if data, err := apicompat.ChatChunkToSSE(chunk); err == nil {
+			writer.Write([]byte(data))
+		}
+	}
+}
+
+type antigravityResponsesStreamAdapter struct {
+	anthropicState *apicompat.AnthropicEventToResponsesState
+}
+
+func newAntigravityResponsesStreamAdapter(model string) *antigravityResponsesStreamAdapter {
+	state := apicompat.NewAnthropicEventToResponsesState()
+	state.Model = model
+	return &antigravityResponsesStreamAdapter{anthropicState: state}
+}
+
+func (a *antigravityResponsesStreamAdapter) Err() error { return nil }
+
+func (a *antigravityResponsesStreamAdapter) Emit(event *apicompat.AnthropicStreamEvent, writer *antigravityClientWriter) {
+	for _, responseEvent := range apicompat.AnthropicEventToResponsesEvents(event, a.anthropicState) {
+		a.emitResponseEvent(responseEvent, writer)
+	}
+}
+
+func (a *antigravityResponsesStreamAdapter) Finalize(writer *antigravityClientWriter) {
+	for _, responseEvent := range apicompat.FinalizeAnthropicResponsesStream(a.anthropicState) {
+		a.emitResponseEvent(responseEvent, writer)
+	}
+}
+
+func (a *antigravityResponsesStreamAdapter) WriteError(writer *antigravityClientWriter, reason string) {
+	state := a.anthropicState
+	if state.CompletedSent {
+		return
+	}
+	if state.ResponseID == "" {
+		state.ResponseID = "resp_" + uuid.NewString()
+	}
+	output := state.Outputs
+	if output == nil {
+		output = []apicompat.ResponsesOutput{}
+	}
+	a.emitResponseEvent(apicompat.ResponsesStreamEvent{
+		Type: "response.failed", SequenceNumber: state.SequenceNumber,
+		Response: &apicompat.ResponsesResponse{
+			ID: state.ResponseID, Object: "response", CreatedAt: state.Created,
+			Model: state.Model, Status: "failed", Output: output,
+			Error: &apicompat.ResponsesError{Code: "upstream_error", Message: reason},
+		},
+	}, writer)
+	state.SequenceNumber++
+	state.CompletedSent = true
+}
+
+func (a *antigravityResponsesStreamAdapter) emitResponseEvent(event apicompat.ResponsesStreamEvent, writer *antigravityClientWriter) {
+	if data, err := apicompat.ResponsesEventToSSE(event); err == nil {
+		writer.Write([]byte(data))
+	}
+}
+
+type antigravityCompatScanEvent struct {
+	line string
+	err  error
+}
+
+type antigravityCompatStreamSession struct {
+	processor                   *antigravity.StreamingProcessor
+	adapter                     antigravityCompatStreamAdapter
+	writer                      *antigravityClientWriter
+	usage                       *ClaudeUsage
+	pendingEvents               []apicompat.AnthropicStreamEvent
+	firstTokenMs                *int
+	startTime                   time.Time
+	meaningfulData              bool
+	preContentKeepaliveSent     bool
+	preContentKeepaliveInterval time.Duration
+}
+
+const (
+	antigravityCompatPreContentKeepaliveInterval = 15 * time.Second
+	// Allow slow first tokens, but do not let comment-only streams reset the idle timer forever.
+	antigravityCompatPreContentMaxWait = 2 * time.Minute
+)
+
+func newAntigravityCompatStreamSession(
+	model string,
+	startTime time.Time,
+	adapter antigravityCompatStreamAdapter,
+	writer *antigravityClientWriter,
+) *antigravityCompatStreamSession {
+	return &antigravityCompatStreamSession{
+		processor:                   antigravity.NewStreamingProcessor(model),
+		adapter:                     adapter,
+		writer:                      writer,
+		usage:                       &ClaudeUsage{},
+		startTime:                   startTime,
+		preContentKeepaliveInterval: antigravityCompatPreContentKeepaliveInterval,
+	}
+}
+
+func (s *antigravityCompatStreamSession) consume(line string) {
+	claudeEvents := s.processor.ProcessLine(strings.TrimRight(line, "\r\n"))
+	if len(claudeEvents) == 0 {
+		return
+	}
+	s.consumeClaudeEvents(claudeEvents)
+}
+
+func (s *antigravityCompatStreamSession) hasMeaningfulData() bool {
+	return s.meaningfulData || s.processor.HasContent()
+}
+
+func (s *antigravityCompatStreamSession) writePreContentKeepalive(now time.Time) {
+	// Intentional tradeoff: this commits HTTP 200 after 15s, so later upstream
+	// failures cannot fail over; report them as SSE errors to the client instead.
+	if s.hasMeaningfulData() || s.writer.Disconnected() || now.Sub(s.startTime) < s.preContentKeepaliveInterval {
+		return
+	}
+	if s.writer.Write([]byte(": ping\n\n")) {
+		s.preContentKeepaliveSent = true
+	}
+}
+
+func (s *antigravityCompatStreamSession) finish() (*antigravityStreamResult, error) {
+	finalEvents, usage := s.processor.Finish()
+	mergeAntigravityCompatUsage(s.usage, usage)
+	s.consumeClaudeEvents(finalEvents)
+	if !s.hasMeaningfulData() && !s.writer.Disconnected() {
+		if s.preContentKeepaliveSent {
+			s.adapter.WriteError(s.writer, "empty_stream")
+			return s.result(false), errors.New("empty Antigravity compatibility stream after keepalive")
+		}
+		return nil, antigravityCompatEmptyStreamError()
+	}
+	s.adapter.Finalize(s.writer)
+	if err := s.adapter.Err(); err != nil {
+		return s.result(s.writer.Disconnected()), fmt.Errorf("upstream protocol conversion failed: %w", err)
+	}
+	return s.result(s.writer.Disconnected()), nil
+}
+
+func (s *antigravityCompatStreamSession) collectResult(clientDisconnect bool) *antigravityStreamResult {
+	_, usage := s.processor.Finish()
+	mergeAntigravityCompatUsage(s.usage, usage)
+	return s.result(clientDisconnect)
+}
+
+func (s *antigravityCompatStreamSession) result(clientDisconnect bool) *antigravityStreamResult {
+	return &antigravityStreamResult{
+		usage:            s.usage,
+		firstTokenMs:     s.firstTokenMs,
+		clientDisconnect: clientDisconnect,
+	}
+}
+
+func (s *antigravityCompatStreamSession) consumeClaudeEvents(data []byte) {
+	var eventType string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "event:"):
+			eventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		case strings.HasPrefix(line, "data:"):
+			s.consumeClaudeData(eventType, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+		}
+	}
+}
+
+func (s *antigravityCompatStreamSession) consumeClaudeData(eventType, payload string) {
+	var event apicompat.AnthropicStreamEvent
+	if json.Unmarshal([]byte(payload), &event) != nil {
+		return
+	}
+	if event.Type == "" {
+		event.Type = eventType
+	}
+	if event.Usage != nil {
+		mergeAnthropicUsage(s.usage, *event.Usage)
+	}
+	if event.Message != nil {
+		mergeAnthropicUsage(s.usage, event.Message.Usage)
+	}
+	s.emitOrBuffer(event)
+}
+
+func (s *antigravityCompatStreamSession) emitOrBuffer(event apicompat.AnthropicStreamEvent) {
+	if s.meaningfulData {
+		s.adapter.Emit(&event, s.writer)
+		return
+	}
+
+	s.pendingEvents = append(s.pendingEvents, event)
+	if !isMeaningfulAntigravityCompatEvent(&event) {
+		return
+	}
+
+	s.meaningfulData = true
+	ms := int(time.Since(s.startTime).Milliseconds())
+	s.firstTokenMs = &ms
+	for i := range s.pendingEvents {
+		s.adapter.Emit(&s.pendingEvents[i], s.writer)
+	}
+	s.pendingEvents = nil
+}
+
+func isMeaningfulAntigravityCompatEvent(event *apicompat.AnthropicStreamEvent) bool {
+	if event == nil {
+		return false
+	}
+	if event.ContentBlock != nil {
+		block := event.ContentBlock
+		return block.Type == "tool_use" ||
+			block.Text != "" ||
+			block.Thinking != "" ||
+			block.Source != nil
+	}
+	if event.Delta != nil {
+		delta := event.Delta
+		return delta.StopReason != "" || delta.Text != "" ||
+			delta.PartialJSON != "" ||
+			delta.Thinking != ""
+	}
+	return false
+}
+
+func mergeAntigravityCompatUsage(dst *ClaudeUsage, src *antigravity.ClaudeUsage) {
+	if dst == nil || src == nil {
+		return
+	}
+	dst.InputTokens = src.InputTokens
+	dst.OutputTokens = src.OutputTokens
+	dst.CacheCreationInputTokens = src.CacheCreationInputTokens
+	dst.CacheReadInputTokens = src.CacheReadInputTokens
+	dst.ImageOutputTokens = src.ImageOutputTokens
+}
+
+func (s *AntigravityGatewayService) handleAntigravityCompatStream(
+	c *gin.Context,
+	resp *http.Response,
+	startTime time.Time,
+	originalModel string,
+	adapter antigravityCompatStreamAdapter,
+	prefix string,
+) (*antigravityStreamResult, error) {
+	return s.handleAntigravityCompatStreamWithKeepaliveInterval(c, resp, startTime, originalModel, adapter, prefix, antigravityCompatPreContentKeepaliveInterval, antigravityCompatPreContentMaxWait)
+}
+
+func (s *AntigravityGatewayService) handleAntigravityCompatStreamWithKeepaliveInterval(
+	c *gin.Context, resp *http.Response, startTime time.Time, originalModel string,
+	adapter antigravityCompatStreamAdapter, prefix string, interval, maxPreContentWait time.Duration,
+) (*antigravityStreamResult, error) {
+	defer GuardSSEWrites(c)()
+	drain := newOpenAIHTTPUsageDrain(streamWriteContext(c), resp.Body.Close)
+	defer drain.stop()
+	writer := newAntigravityClientWriter(c.Writer, prefix)
+	writer.beforeFirstWrite = func() {
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("Connection", "keep-alive")
+		c.Header("X-Accel-Buffering", "no")
+		c.Status(http.StatusOK)
+	}
+	session := newAntigravityCompatStreamSession(originalModel, startTime, adapter, writer)
+	session.preContentKeepaliveInterval = interval
+	events, stopScanner, maxLineSize := s.startAntigravityCompatScanner(resp.Body, c)
+	defer stopScanner()
+
+	timeout := s.antigravityCompatStreamTimeout()
+	timeoutTimer, timeoutCh := newAntigravityCompatTimer(timeout)
+	if timeoutTimer != nil {
+		defer timeoutTimer.Stop()
+	}
+	keepaliveTicker, keepaliveCh := s.newAntigravityCompatKeepaliveTicker()
+	if keepaliveTicker != nil {
+		defer keepaliveTicker.Stop()
+	}
+	preContentDelay := time.Until(startTime.Add(interval))
+	if preContentDelay < 0 {
+		preContentDelay = 0
+	}
+	preContentTimer := time.NewTimer(preContentDelay)
+	defer preContentTimer.Stop()
+	preContentDeadline := startTime.Add(maxPreContentWait)
+	deadlineDelay := time.Until(preContentDeadline)
+	if deadlineDelay < 0 {
+		deadlineDelay = 0
+	}
+	deadlineTimer := time.NewTimer(deadlineDelay)
+	defer deadlineTimer.Stop()
+	preContentTimeout := func() (*antigravityStreamResult, error) {
+		if session.preContentKeepaliveSent {
+			writeAntigravityCompatStreamError(c, adapter, writer, "stream_timeout")
+			return session.collectResult(false), fmt.Errorf("pre-content stream timeout")
+		}
+		return nil, antigravityCompatEmptyStreamError()
+	}
+
+	for {
+		if drain.disconnected() {
+			writer.disconnected = true
+		}
+		select {
+		case event, open := <-events:
+			if drain.disconnected() {
+				writer.disconnected = true
+			}
+			if !session.hasMeaningfulData() && !writer.Disconnected() && !time.Now().Before(preContentDeadline) {
+				return preContentTimeout()
+			}
+			if !open {
+				if !session.hasMeaningfulData() && !writer.Disconnected() {
+					return handleAntigravityCompatEmptyStream(c, session)
+				}
+				result, err := session.finish()
+				if adapter.Err() != nil {
+					if !writer.Disconnected() {
+						err = writeAPICompatConversionError(c, adapter.Err(), false)
+					}
+				}
+				return result, err
+			}
+			if event.err != nil {
+				return s.handleAntigravityCompatReadError(c, session, event.err, maxLineSize, prefix)
+			}
+			resetAntigravityCompatTimer(timeoutTimer, timeout)
+			s.observeAntigravityGeminiSSELine(c, event.line)
+			session.consume(event.line)
+
+		case <-timeoutCh:
+			if writer.Disconnected() {
+				return session.collectResult(true), nil
+			}
+			if !session.hasMeaningfulData() {
+				return preContentTimeout()
+			}
+			logger.LegacyPrintf("service.antigravity_gateway", "Stream data interval timeout (%s)", prefix)
+			writeAntigravityCompatStreamError(c, adapter, writer, "stream_timeout")
+			return session.collectResult(false), fmt.Errorf("stream data interval timeout")
+
+		case <-keepaliveCh:
+			if session.hasMeaningfulData() && !writer.Disconnected() {
+				writer.Write([]byte(": ping\n\n"))
+			}
+		case now := <-preContentTimer.C:
+			if !session.hasMeaningfulData() && !writer.Disconnected() && !now.Before(preContentDeadline) {
+				return preContentTimeout()
+			}
+			session.writePreContentKeepalive(now)
+			if !session.hasMeaningfulData() && !writer.Disconnected() {
+				preContentTimer.Reset(interval)
+			}
+		case <-deadlineTimer.C:
+			if !session.hasMeaningfulData() && !writer.Disconnected() {
+				return preContentTimeout()
+			}
+		}
+	}
+}
+
+func handleAntigravityCompatEmptyStream(c *gin.Context, session *antigravityCompatStreamSession) (*antigravityStreamResult, error) {
+	if session.preContentKeepaliveSent {
+		writeAntigravityCompatStreamError(c, session.adapter, session.writer, "empty_stream")
+		return session.collectResult(false), errors.New("empty Antigravity compatibility stream after keepalive")
+	}
+	return nil, antigravityCompatEmptyStreamError()
+}
+
+func (s *AntigravityGatewayService) startAntigravityCompatScanner(
+	body io.Reader, contexts ...*gin.Context,
+) (<-chan antigravityCompatScanEvent, func(), int) {
+	maxLineSize := defaultMaxLineSize
+	if s.settingService != nil && s.settingService.cfg != nil && s.settingService.cfg.Gateway.MaxLineSize > 0 {
+		maxLineSize = s.settingService.cfg.Gateway.MaxLineSize
+	}
+	scanner := bufio.NewScanner(newGeminiTerminalReader(body, maxLineSize, contexts...))
+	scanBuf := getSSEScannerBuf64K()
+	scanner.Buffer(scanBuf[:0], maxLineSize)
+
+	events := make(chan antigravityCompatScanEvent, 16)
+	done := make(chan struct{})
+	go func() {
+		defer putSSEScannerBuf64K(scanBuf)
+		defer close(events)
+		send := func(event antigravityCompatScanEvent) bool {
+			select {
+			case events <- event:
+				return true
+			case <-done:
+				return false
+			}
+		}
+		for scanner.Scan() {
+			if !send(antigravityCompatScanEvent{line: scanner.Text()}) {
+				return
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			send(antigravityCompatScanEvent{err: err})
+		}
+	}()
+	return events, func() { close(done) }, maxLineSize
+}
+
+func (s *AntigravityGatewayService) antigravityCompatStreamTimeout() time.Duration {
+	if s.settingService == nil || s.settingService.cfg == nil {
+		return 0
+	}
+	return time.Duration(s.settingService.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
+}
+
+func (s *AntigravityGatewayService) newAntigravityCompatKeepaliveTicker() (*time.Ticker, <-chan time.Time) {
+	if s.settingService == nil || s.settingService.cfg == nil {
+		return nil, nil
+	}
+	interval := time.Duration(s.settingService.cfg.Gateway.StreamKeepaliveInterval) * time.Second
+	if interval <= 0 {
+		return nil, nil
+	}
+	ticker := time.NewTicker(interval)
+	return ticker, ticker.C
+}
+
+func newAntigravityCompatTimer(timeout time.Duration) (*time.Timer, <-chan time.Time) {
+	if timeout <= 0 {
+		return nil, nil
+	}
+	timer := time.NewTimer(timeout)
+	return timer, timer.C
+}
+
+func resetAntigravityCompatTimer(timer *time.Timer, timeout time.Duration) {
+	if timer == nil {
+		return
+	}
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+	timer.Reset(timeout)
+}
+
+func (s *AntigravityGatewayService) handleAntigravityCompatReadError(
+	c *gin.Context,
+	session *antigravityCompatStreamSession,
+	err error,
+	maxLineSize int,
+	prefix string,
+) (*antigravityStreamResult, error) {
+	if session.writer.Disconnected() || (c.Request != nil && c.Request.Context().Err() != nil) {
+		MarkOpsClientCancellation(c, true)
+		MarkResponseCommitted(c)
+		return session.collectResult(true), err
+	}
+
+	if !session.hasMeaningfulData() && !session.writer.Disconnected() {
+		if session.preContentKeepaliveSent {
+			writeAntigravityCompatStreamError(c, session.adapter, session.writer, "stream_read_error")
+			return session.collectResult(false), fmt.Errorf("stream read error: %w", err)
+		}
+		return nil, antigravityCompatEmptyStreamError()
+	}
+	if errors.Is(err, bufio.ErrTooLong) {
+		logger.LegacyPrintf("service.antigravity_gateway", "SSE line too long (%s): max_size=%d error=%v", prefix, maxLineSize, err)
+		writeAntigravityCompatStreamError(c, session.adapter, session.writer, "response_too_large")
+		return session.collectResult(false), err
+	}
+	writeAntigravityCompatStreamError(c, session.adapter, session.writer, "stream_read_error")
+	return session.collectResult(false), fmt.Errorf("stream read error: %w", err)
+}
+
+func writeAntigravityCompatStreamError(
+	c *gin.Context,
+	adapter antigravityCompatStreamAdapter,
+	writer *antigravityClientWriter,
+	reason string,
+) {
+	adapter.WriteError(writer, reason)
+	MarkOpsStreamError(c, "upstream_error", reason, http.StatusBadGateway)
+	MarkResponseCommitted(c)
+}
+
+func antigravityCompatEmptyStreamError() error {
+	logger.LegacyPrintf("service.antigravity_gateway", "Empty Antigravity compatibility stream, triggering failover")
+	return &UpstreamFailoverError{
+		StatusCode:             http.StatusBadGateway,
+		ResponseBody:           []byte(`{"error":"empty stream response from upstream"}`),
+		RetryableOnSameAccount: true,
+	}
+}
+
+func (s *AntigravityGatewayService) handleChatCompletionsStreamingFromAntigravity(
+	c *gin.Context,
+	resp *http.Response,
+	startTime time.Time,
+	originalModel string,
+	includeUsage bool,
+) (*antigravityStreamResult, error) {
+	return s.handleAntigravityCompatStream(
+		c,
+		resp,
+		startTime,
+		originalModel,
+		newAntigravityChatStreamAdapter(originalModel, includeUsage),
+		"antigravity chat completions stream",
+	)
+}
+
+func (s *AntigravityGatewayService) handleResponsesStreamingFromAntigravity(
+	c *gin.Context,
+	resp *http.Response,
+	startTime time.Time,
+	originalModel string,
+) (*antigravityStreamResult, error) {
+	return s.handleAntigravityCompatStream(
+		c,
+		resp,
+		startTime,
+		originalModel,
+		newAntigravityResponsesStreamAdapter(originalModel),
+		"antigravity responses stream",
+	)
+}

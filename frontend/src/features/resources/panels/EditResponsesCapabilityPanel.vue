@@ -1,0 +1,102 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+import type { OpenAIResponsesMode, OpenAIEndpointCapability } from '@/features/resources/api/accountCredentialTypes';
+import Select from '@/shared/ui/Select.vue'
+import { type UnwrapRef, type Ref, type ComputedRef } from 'vue'
+import { usePanelField } from '../model/usePanelField'
+import type { Props } from '../model/editEditorTypes'
+
+
+const props = defineProps<{
+  account: NonNullable<Props['account']>
+  openAIResponsesMode: UnwrapRef<Ref<OpenAIResponsesMode, OpenAIResponsesMode>>
+  openAIResponsesModeOptions: UnwrapRef<ComputedRef<{ value: string; label: string }[]>>
+  openAITextGenerationCapabilityEnabled: UnwrapRef<ComputedRef<boolean>>
+  openAIResponsesStatusKey: UnwrapRef<ComputedRef<"admin.accounts.openai.responsesStatusForcedResponses" | "admin.accounts.openai.responsesStatusForcedChatCompletions" | "admin.accounts.openai.responsesStatusAutoSupported" | "admin.accounts.openai.responsesStatusAutoUnsupported" | "admin.accounts.openai.responsesStatusAutoUnknown">>
+  openAIEndpointCapabilityOptions: UnwrapRef<ComputedRef<{ value: OpenAIEndpointCapability; label: string }[]>>
+  openAIEndpointCapabilities: UnwrapRef<Ref<OpenAIEndpointCapability[], OpenAIEndpointCapability[]>>
+  toggleOpenAIEndpointCapability: UnwrapRef<(capability: OpenAIEndpointCapability, event?: Event) => void>
+}>()
+
+const emit = defineEmits<{
+  'update:openAIResponsesMode': [value: UnwrapRef<Ref<OpenAIResponsesMode, OpenAIResponsesMode>>]
+}>()
+
+const { t } = useI18n()
+
+const account = computed(() => props.account)
+
+const openAIResponsesMode = usePanelField(() => props.openAIResponsesMode, value => emit('update:openAIResponsesMode', value))
+
+const openAIResponsesModeOptions = computed(() => props.openAIResponsesModeOptions)
+
+const openAITextGenerationCapabilityEnabled = computed(() => props.openAITextGenerationCapabilityEnabled)
+
+const openAIResponsesStatusKey = computed(() => props.openAIResponsesStatusKey)
+
+const openAIEndpointCapabilityOptions = computed(() => props.openAIEndpointCapabilityOptions)
+
+const openAIEndpointCapabilities = computed(() => props.openAIEndpointCapabilities)
+
+const toggleOpenAIEndpointCapability = computed(() => props.toggleOpenAIEndpointCapability)
+</script>
+
+<template>
+<template v-if="account">
+<div
+        v-if="account?.platform === 'openai' && account?.type === 'apikey'"
+        class="space-y-4 border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <label class="input-label mb-0">{{ t('admin.accounts.openai.responsesMode') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.responsesModeDesc') }}
+            </p>
+          </div>
+          <div class="w-56">
+            <Select
+              v-model="openAIResponsesMode"
+              :options="openAIResponsesModeOptions"
+              :disabled="!openAITextGenerationCapabilityEnabled"
+              data-testid="openai-responses-mode-select"
+            />
+          </div>
+        </div>
+        <div
+          v-if="openAITextGenerationCapabilityEnabled"
+          class="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300"
+        >
+          <span class="font-medium">{{ t(openAIResponsesStatusKey) }}</span>
+        </div>
+        <div
+          v-else
+          class="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
+          data-testid="openai-responses-mode-not-applicable"
+        >
+          {{ t('admin.accounts.openai.responsesModeTextDisabledHint') }}
+        </div>
+        <div>
+          <label class="input-label mb-2 block">{{ t('admin.accounts.openai.endpointCapabilities') }}</label>
+          <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <label
+              v-for="option in openAIEndpointCapabilityOptions"
+              :key="option.value"
+              class="flex cursor-pointer items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-dark-600"
+            >
+              <input
+                type="checkbox"
+                class="rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500"
+                :data-testid="`openai-endpoint-capability-${option.value}`"
+                :checked="openAIEndpointCapabilities.includes(option.value)"
+                @change="toggleOpenAIEndpointCapability(option.value, $event)"
+              />
+              <span class="text-gray-700 dark:text-gray-200">{{ option.label }}</span>
+            </label>
+          </div>
+          <p class="input-hint">{{ t('admin.accounts.openai.endpointCapabilitiesDesc') }}</p>
+        </div>
+      </div>
+</template>
+</template>

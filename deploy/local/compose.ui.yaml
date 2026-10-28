@@ -1,0 +1,18 @@
+# Local integration only. Apply after API, web and vendor Compose files.
+# !override avoids retaining the generic published ports when files are merged.
+services:
+  web:
+    image: ${WEB_IMAGE:-sub2api-web:rebuild-ui}
+    ports: !override
+      - "127.0.0.1:${WEB_PORT:-32181}:8080"
+    environment:
+      WEB_PUBLIC_ORIGIN: http://127.0.0.1:${WEB_PORT:-32181}
+      BACKEND_ORIGIN: http://api:8080
+  vendor-portal:
+    image: ${VENDOR_PORTAL_IMAGE:-sub2api-vendor:rebuild-ui}
+    pull_policy: never
+    ports: !override
+      - "127.0.0.1:${PORTAL_PORT:-32182}:8080"
+    environment:
+      PORTAL_PUBLIC_ORIGIN: http://127.0.0.1:${PORTAL_PORT:-32182}
+      BACKEND_ORIGIN: http://api:8080

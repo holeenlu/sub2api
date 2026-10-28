@@ -1,0 +1,30 @@
+# Keep the API build independent of frontend, other worktrees and local secrets.
+# Allow only API sources, runtime entrypoint and license in the build context.
+**
+!backend/
+!backend/**
+!deploy/
+deploy/**
+!deploy/api/
+deploy/api/**
+!deploy/api/docker-entrypoint.sh
+!LICENSE
+backend/bin/
+backend/dist/
+backend/main
+backend/server
+backend/vendor/
+backend/internal/web/dist/
+backend/data/
+backend/logs/
+backend/tmp/
+backend/temp/
+backend/**/node_modules/
+backend/**/.git
+backend/**/.env
+backend/**/.env.*
+backend/**/*.env
+backend/**/config.yaml
+backend/**/config.local.yaml
+backend/**/*.log
+backend/**/credentials.txt

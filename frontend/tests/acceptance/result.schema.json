@@ -1,0 +1,491 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Sub2API frontend acceptance execution result",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "case_id",
+    "case_catalog_sha256",
+    "status",
+    "started_at",
+    "finished_at",
+    "executor",
+    "evidence_level",
+    "environment",
+    "runner",
+    "steps",
+    "evidence",
+    "observed_requests",
+    "blocked_reason",
+    "not_applicable_reason",
+    "reviewer",
+    "defects",
+    "cleanup",
+    "contains_credentials",
+    "variant_id",
+    "requested_path",
+    "resolved_path",
+    "parameter_fixture_refs"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "run_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "case_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "case_catalog_sha256": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "enum": [
+        "not_run",
+        "running",
+        "passed",
+        "failed",
+        "blocked",
+        "not_applicable"
+      ]
+    },
+    "started_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "finished_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "executor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "evidence_level": {
+      "enum": [
+        null,
+        "static_check",
+        "unit_or_component_mocked",
+        "local_real_api",
+        "external_sandbox",
+        "external_real_upstream",
+        "manual_confirmed"
+      ]
+    },
+    "environment": {
+      "type": "object"
+    },
+    "runner": {
+      "type": "object"
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "number",
+          "action",
+          "expected",
+          "actual",
+          "status",
+          "evidence_refs"
+        ],
+        "properties": {
+          "number": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "action": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expected": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "actual": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "not_run",
+              "running",
+              "passed",
+              "failed",
+              "blocked",
+              "not_applicable"
+            ]
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "array"
+    },
+    "observed_requests": {
+      "type": "array"
+    },
+    "blocked_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "not_applicable_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reviewer": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "defects": {
+      "type": "array"
+    },
+    "cleanup": {
+      "type": "object"
+    },
+    "contains_credentials": {
+      "const": false
+    },
+    "variant_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "requested_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "resolved_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "parameter_fixture_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "passed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "case_id": {
+            "type": "string",
+            "pattern": "^FE-[A-Z0-9-]+$"
+          },
+          "case_catalog_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "executor": {
+            "type": "string",
+            "minLength": 1
+          },
+          "started_at": {
+            "type": "string",
+            "minLength": 1
+          },
+          "finished_at": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence_level": {
+            "type": "string"
+          },
+          "evidence": {
+            "minItems": 1
+          },
+          "steps": {
+            "minItems": 1,
+            "items": {
+              "properties": {
+                "action": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "expected": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "actual": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "status": {
+                  "const": "passed"
+                },
+                "evidence_refs": {
+                  "minItems": 1
+                }
+              }
+            }
+          },
+          "environment": {
+            "required": [
+              "source_snapshot_sha256"
+            ],
+            "properties": {
+              "source_snapshot_sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            }
+          },
+          "variant_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "blocked"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "blocked_reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "not_applicable"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "not_applicable_reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reviewer": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "failed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "defects": {
+            "minItems": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "passed"
+          },
+          "evidence_level": {
+            "enum": [
+              "local_real_api",
+              "external_sandbox",
+              "external_real_upstream",
+              "manual_confirmed"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "environment": {
+            "required": [
+              "api_image_id",
+              "browser_name",
+              "browser_version",
+              "origin",
+              "role_fixture_ref"
+            ],
+            "properties": {
+              "api_image_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "browser_name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "browser_version": {
+                "type": "string",
+                "minLength": 1
+              },
+              "origin": {
+                "type": "string",
+                "minLength": 1
+              },
+              "role_fixture_ref": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "web_image_id"
+                ],
+                "properties": {
+                  "web_image_id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": [
+                  "vendor_image_id"
+                ],
+                "properties": {
+                  "vendor_image_id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "passed"
+          },
+          "case_id": {
+            "pattern": "^FE-(PAGE|SETTING|ALIAS|REDIRECT)-"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "requested_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resolved_path": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": [
+              "running",
+              "passed",
+              "failed",
+              "blocked",
+              "not_applicable"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "case_id": {
+            "type": "string",
+            "pattern": "^FE-[A-Z0-9-]+$"
+          },
+          "variant_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "case_catalog_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "executor": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  ]
+}

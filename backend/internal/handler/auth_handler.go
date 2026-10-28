@@ -1,0 +1,655 @@
+package handler
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"strings"
+	"sync"
+
+	"github.com/Wei-Shaw/sub2api/internal/authz"
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
+	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/service"
+
+	"github.com/gin-gonic/gin"
+)
+
+// AuthHandler handles authentication-related requests
+type AuthHandler struct {
+	cfg                  *config.Config
+	authService          *service.AuthService
+	userService          *service.UserService
+	settingSvc           *service.SettingService
+	totpService          *service.TotpService
+	userAttributeService *service.UserAttributeService
+
+	dingTalkClientInstance *DingTalkClient
+	dingTalkClientMu       sync.Mutex
+}
+
+// NewAuthHandler creates a new AuthHandler
+func NewAuthHandler(cfg *config.Config, authService *service.AuthService, userService *service.UserService, settingService *service.SettingService, totpService *service.TotpService, userAttributeService *service.UserAttributeService) *AuthHandler {
+	return &AuthHandler{
+		cfg:                  cfg,
+		authService:          authService,
+		userService:          userService,
+		settingSvc:           settingService,
+		totpService:          totpService,
+		userAttributeService: userAttributeService,
+	}
+}
+
+// RegisterRequest represents the registration request payload
+type RegisterRequest struct {
+	Email                 string `json:"email" binding:"required,email"`
+	Password              string `json:"password" binding:"required,min=6"`
+	VerifyCode            string `json:"verify_code"`
+	TurnstileToken        string `json:"turnstile_token"`
+	TencentCaptchaTicket  string `json:"tencent_captcha_ticket"`
+	TencentCaptchaRandstr string `json:"tencent_captcha_randstr"`
+}
+
+// SendVerifyCodeRequest 发送验证码请求
+type SendVerifyCodeRequest struct {
+	Email                 string `json:"email" binding:"required,email"`
+	TurnstileToken        string `json:"turnstile_token"`
+	TencentCaptchaTicket  string `json:"tencent_captcha_ticket"`
+	TencentCaptchaRandstr string `json:"tencent_captcha_randstr"`
+}
+
+// SendVerifyCodeResponse 发送验证码响应
+type SendVerifyCodeResponse struct {
+	Message   string `json:"message"`
+	Countdown int    `json:"countdown"` // 倒计时秒数
+}
+
+// LoginRequest represents the login request payload
+type LoginRequest struct {
+	Email                 string `json:"email" binding:"required,email"`
+	Password              string `json:"password" binding:"required"`
+	TurnstileToken        string `json:"turnstile_token"`
+	TencentCaptchaTicket  string `json:"tencent_captcha_ticket"`
+	TencentCaptchaRandstr string `json:"tencent_captcha_randstr"`
+}
+
+func captchaProof(turnstileToken, tencentTicket, tencentRandstr string) service.CaptchaProof {
+	return service.CaptchaProof{
+		TurnstileToken: turnstileToken,
+		TencentTicket:  tencentTicket,
+		TencentRandstr: tencentRandstr,
+	}
+}
+
+// AuthResponse 认证响应格式（匹配前端期望）
+type AuthResponse struct {
+	AccessToken  string    `json:"access_token"`
+	RefreshToken string    `json:"refresh_token,omitempty"` // 新增：Refresh Token
+	ExpiresIn    int       `json:"expires_in,omitempty"`    // 新增：Access Token有效期（秒）
+	TokenType    string    `json:"token_type"`
+	User         *dto.User `json:"user"`
+}
+
+func ensureLoginUserActive(user *service.User) error {
+	if user == nil {
+		return infraerrors.Unauthorized("INVALID_USER", "user not found")
+	}
+	if !user.IsActive() {
+		return service.ErrUserNotActive
+	}
+	return nil
+}
+
+// respondWithTokenPair 生成 Token 对并返回认证响应
+// 如果 Token 对生成失败，回退到只返回 Access Token（向后兼容）
+func (h *AuthHandler) respondWithTokenPair(c *gin.Context, user *service.User) {
+	respondWithTokenPair(c, h.authService, user)
+}
+
+func respondWithTokenPair(c *gin.Context, authService *service.AuthService, user *service.User) {
+	if err := ensureLoginUserActive(user); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	authorization, permissionErr := authService.GetUserAuthorization(c.Request.Context(), user)
+	if permissionErr != nil {
+		response.ErrorFrom(c, permissionErr)
+		return
+	}
+	userResponse := dto.UserFromService(user)
+	userResponse.Snapshot = &authorization
+
+	tokenPair, err := authService.GenerateTokenPair(c.Request.Context(), user, "")
+	if err != nil {
+		slog.Error("failed to generate token pair", "error", err, "user_id", user.ID)
+		// 回退到只返回Access Token
+		token, tokenErr := authService.GenerateToken(c.Request.Context(), user)
+		if tokenErr != nil {
+			response.InternalError(c, "Failed to generate token")
+			return
+		}
+		response.Success(c, AuthResponse{
+			AccessToken: token,
+			TokenType:   "Bearer",
+			User:        userResponse,
+		})
+		return
+	}
+	response.Success(c, AuthResponse{
+		AccessToken:  tokenPair.AccessToken,
+		RefreshToken: tokenPair.RefreshToken,
+		ExpiresIn:    tokenPair.ExpiresIn,
+		TokenType:    "Bearer",
+		User:         userResponse,
+	})
+}
+
+func (h *AuthHandler) ensureBackendModeAllowsUser(ctx context.Context, user *service.User) error {
+	if user == nil {
+		return infraerrors.Unauthorized("INVALID_USER", "user not found")
+	}
+	if h == nil || !h.isBackendModeEnabled(ctx) || user.IsStaff() || (user.IsVendor() && supplierLoginContext(ctx)) {
+		return nil
+	}
+	return infraerrors.Forbidden("BACKEND_MODE_ADMIN_ONLY", "Backend mode is active. Only admin login is allowed.")
+}
+
+func (h *AuthHandler) ensureBackendModeAllowsNewUserLogin(ctx context.Context) error {
+	if h == nil || !h.isBackendModeEnabled(ctx) {
+		return nil
+	}
+	return infraerrors.Forbidden("BACKEND_MODE_ADMIN_ONLY", "Backend mode is active. Only admin login is allowed.")
+}
+
+func (h *AuthHandler) isBackendModeEnabled(ctx context.Context) bool {
+	if h == nil || h.settingSvc == nil {
+		return false
+	}
+	settings, err := h.settingSvc.GetPublicSettings(ctx)
+	if err == nil && settings != nil {
+		return settings.BackendModeEnabled
+	}
+	return h.settingSvc.IsBackendModeEnabled(ctx)
+}
+
+// Register handles user registration
+// POST /api/v1/auth/register
+func (h *AuthHandler) Register(c *gin.Context) {
+	var req RegisterRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	// 验证当前启用的验证码（邮箱验证码注册场景避免重复校验一次性票据）
+	proof := captchaProof(req.TurnstileToken, req.TencentCaptchaTicket, req.TencentCaptchaRandstr)
+	if err := h.authService.VerifyCaptchaForRegister(c.Request.Context(), proof, ip.GetClientIP(c), req.VerifyCode); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	_, user, err := h.authService.RegisterWithVerification(
+		c.Request.Context(),
+		req.Email,
+		req.Password,
+		req.VerifyCode)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	h.respondWithTokenPair(c, user)
+}
+
+// SendVerifyCode 发送邮箱验证码
+// POST /api/v1/auth/send-verify-code
+func (h *AuthHandler) SendVerifyCode(c *gin.Context) {
+	var req SendVerifyCodeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	proof := captchaProof(req.TurnstileToken, req.TencentCaptchaTicket, req.TencentCaptchaRandstr)
+	if err := h.authService.VerifyCaptcha(c.Request.Context(), proof, ip.GetClientIP(c)); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	result, err := h.authService.SendVerifyCodeAsync(c.Request.Context(), req.Email, c.GetHeader("Accept-Language"))
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, SendVerifyCodeResponse{
+		Message:   "Verification code sent successfully",
+		Countdown: result.Countdown,
+	})
+}
+
+// Login handles user login
+// POST /api/v1/auth/login
+func (h *AuthHandler) Login(c *gin.Context) {
+	var req LoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	proof := captchaProof(req.TurnstileToken, req.TencentCaptchaTicket, req.TencentCaptchaRandstr)
+	if err := h.authService.VerifyCaptcha(c.Request.Context(), proof, ip.GetClientIP(c)); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	token, user, err := h.authService.Login(c.Request.Context(), req.Email, req.Password)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	_ = token // token 由 authService.Login 返回但此处由 respondWithTokenPair 重新生成
+
+	if err := h.ensureBackendModeAllowsUser(c.Request.Context(), user); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	// Check if TOTP 2FA is enabled for this user
+	if h.totpService != nil && h.settingSvc.IsTotpEnabled(c.Request.Context()) && user.TotpEnabled {
+		// Create a temporary login session for 2FA
+		tempToken, err := h.totpService.CreateLoginSession(c.Request.Context(), user.ID, user.Email, service.CredentialVersion(user))
+		if err != nil {
+			response.InternalError(c, "Failed to create 2FA session")
+			return
+		}
+
+		response.Success(c, TotpLoginResponse{
+			Requires2FA:     true,
+			TempToken:       tempToken,
+			UserEmailMasked: service.MaskEmail(user.Email),
+		})
+		return
+	}
+
+	h.authService.RecordSuccessfulLogin(c.Request.Context(), user.ID)
+
+	h.respondWithTokenPair(c, user)
+}
+
+// TotpLoginResponse represents the response when 2FA is required
+type TotpLoginResponse struct {
+	Requires2FA     bool   `json:"requires_2fa"`
+	TempToken       string `json:"temp_token,omitempty"`
+	UserEmailMasked string `json:"user_email_masked,omitempty"`
+}
+
+// Login2FARequest represents the 2FA login request
+type Login2FARequest struct {
+	TempToken string `json:"temp_token" binding:"required"`
+	TotpCode  string `json:"totp_code" binding:"required,len=6"`
+}
+
+// Login2FA completes the login with 2FA verification
+// POST /api/v1/auth/login/2fa
+func (h *AuthHandler) Login2FA(c *gin.Context) {
+	var req Login2FARequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	slog.Debug("login_2fa_request",
+		"temp_token_len", len(req.TempToken),
+		"totp_code_len", len(req.TotpCode))
+
+	// Get the login session
+	session, err := h.totpService.GetLoginSession(c.Request.Context(), req.TempToken)
+	if err != nil || session == nil {
+		tokenPrefix := ""
+		if len(req.TempToken) >= 8 {
+			tokenPrefix = req.TempToken[:8]
+		}
+		slog.Debug("login_2fa_session_invalid",
+			"temp_token_prefix", tokenPrefix,
+			"error", err)
+		response.BadRequest(c, "Invalid or expired 2FA session")
+		return
+	}
+
+	slog.Debug("login_2fa_session_found",
+		"user_id", session.UserID,
+		"email", session.Email)
+
+	// Verify the TOTP code
+	if err := h.totpService.VerifyCode(c.Request.Context(), session.UserID, req.TotpCode); err != nil {
+		slog.Debug("login_2fa_verify_failed",
+			"user_id", session.UserID,
+			"error", err)
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	// Get the user (before session deletion so we can check backend mode)
+	user, err := h.userService.GetByID(c.Request.Context(), session.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	// Reloads may refresh profile fields, but cannot upgrade the password proof.
+	if service.CredentialVersion(user) != session.CredentialVersion {
+		response.ErrorFrom(c, service.ErrTokenRevoked)
+		return
+	}
+	if err := ensureLoginUserActive(user); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	if err := h.ensureBackendModeAllowsUser(c.Request.Context(), user); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	if session.PendingOAuthBind != nil {
+		pendingSvc, err := h.pendingIdentityService()
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+
+		pendingSession, err := pendingSvc.GetBrowserSession(
+			c.Request.Context(),
+			session.PendingOAuthBind.PendingSessionToken,
+			session.PendingOAuthBind.BrowserSessionKey,
+		)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+
+		decision, err := h.ensurePendingOAuthAdoptionDecision(c, pendingSession.ID, oauthAdoptionDecisionRequest{})
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		pendingSession.LocalFlowState = clonePendingMap(pendingSession.LocalFlowState)
+		pendingSession.LocalFlowState["credential_version"] = fmt.Sprintf("%d", session.CredentialVersion)
+		if err := applyPendingOAuthBinding(
+			c.Request.Context(),
+			h.entClient(),
+			h.authService,
+			h.userService,
+			pendingSession,
+			decision,
+			&user.ID,
+			true,
+			true,
+		); err != nil {
+			response.ErrorFrom(c, infraerrors.InternalServer("PENDING_AUTH_BIND_APPLY_FAILED", "failed to bind pending oauth identity").WithCause(err))
+			return
+		}
+
+		secureCookie := isRequestHTTPS(c)
+		clearOAuthPendingSessionCookie(c, secureCookie)
+		clearOAuthPendingBrowserCookie(c, secureCookie)
+		h.authService.RecordSuccessfulLogin(c.Request.Context(), user.ID)
+
+		user, err = h.userService.GetByID(c.Request.Context(), session.UserID)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+	}
+
+	// Pending adoption reloads the user again. Require the same proof before
+	// issuing either a token pair or the legacy access-token fallback. A revocation
+	// after this snapshot still invalidates both tokens through their old version.
+	if service.CredentialVersion(user) != session.CredentialVersion {
+		response.ErrorFrom(c, service.ErrTokenRevoked)
+		return
+	}
+	issuanceUser := *user
+	issuanceUser.TokenVersion = session.CredentialVersion
+	issuanceUser.TokenVersionResolved = true
+
+	// Delete the login session (only after all checks pass)
+	_ = h.totpService.DeleteLoginSession(c.Request.Context(), req.TempToken)
+
+	if session.PendingOAuthBind == nil {
+		h.authService.RecordSuccessfulLogin(c.Request.Context(), user.ID)
+	}
+
+	h.respondWithTokenPair(c, &issuanceUser)
+}
+
+// GetCurrentUser handles getting current authenticated user
+// GET /api/v1/auth/me
+func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+
+	user, err := h.userService.GetByID(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	identities, err := h.userService.GetProfileIdentitySummaries(c.Request.Context(), subject.UserID, user)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	type UserResponse struct {
+		userProfileResponse
+		RunMode string `json:"run_mode"`
+		authz.Snapshot
+	}
+
+	runMode := config.RunModeStandard
+	if h.cfg != nil {
+		runMode = h.cfg.RunMode
+	}
+
+	permissions, err := h.settingSvc.ManagementSnapshot(c.Request.Context(), user)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, UserResponse{
+		Snapshot:            permissions,
+		userProfileResponse: userProfileResponseFromService(user, identities),
+		RunMode:             runMode,
+	})
+}
+
+// ForgotPasswordRequest 忘记密码请求
+type ForgotPasswordRequest struct {
+	Email                 string `json:"email" binding:"required,email"`
+	TurnstileToken        string `json:"turnstile_token"`
+	TencentCaptchaTicket  string `json:"tencent_captcha_ticket"`
+	TencentCaptchaRandstr string `json:"tencent_captcha_randstr"`
+}
+
+// ForgotPasswordResponse 忘记密码响应
+type ForgotPasswordResponse struct {
+	Message string `json:"message"`
+}
+
+// ForgotPassword 请求密码重置
+// POST /api/v1/auth/forgot-password
+func (h *AuthHandler) ForgotPassword(c *gin.Context) {
+	var req ForgotPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	proof := captchaProof(req.TurnstileToken, req.TencentCaptchaTicket, req.TencentCaptchaRandstr)
+	if err := h.authService.VerifyCaptcha(c.Request.Context(), proof, ip.GetClientIP(c)); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	frontendBaseURL := strings.TrimSpace(h.settingSvc.GetFrontendURL(c.Request.Context()))
+	if frontendBaseURL == "" {
+		slog.Error("frontend_url not configured in settings or config; cannot build password reset link")
+		response.InternalError(c, "Password reset is not configured")
+		return
+	}
+
+	// Request password reset (async)
+	// Note: This returns success even if email doesn't exist (to prevent enumeration)
+	if err := h.authService.RequestPasswordResetAsync(c.Request.Context(), req.Email, frontendBaseURL, c.GetHeader("Accept-Language")); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, ForgotPasswordResponse{
+		Message: "If your email is registered, you will receive a password reset link shortly.",
+	})
+}
+
+// ResetPasswordRequest 重置密码请求
+type ResetPasswordRequest struct {
+	Email       string `json:"email" binding:"required,email"`
+	Token       string `json:"token" binding:"required"`
+	NewPassword string `json:"new_password" binding:"required,min=6"`
+}
+
+// ResetPasswordResponse 重置密码响应
+type ResetPasswordResponse struct {
+	Message string `json:"message"`
+}
+
+// ResetPassword 重置密码
+// POST /api/v1/auth/reset-password
+func (h *AuthHandler) ResetPassword(c *gin.Context) {
+	var req ResetPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	// Reset password
+	if err := h.authService.ResetPassword(c.Request.Context(), req.Email, req.Token, req.NewPassword); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, ResetPasswordResponse{
+		Message: "Your password has been reset successfully. You can now log in with your new password.",
+	})
+}
+
+// ==================== Token Refresh Endpoints ====================
+
+// RefreshTokenRequest 刷新Token请求
+type RefreshTokenRequest struct {
+	RefreshToken string `json:"refresh_token" binding:"required"`
+}
+
+// RefreshTokenResponse 刷新Token响应
+type RefreshTokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	ExpiresIn    int    `json:"expires_in"` // Access Token有效期（秒）
+	TokenType    string `json:"token_type"`
+}
+
+// RefreshToken 刷新Token
+// POST /api/v1/auth/refresh
+func (h *AuthHandler) RefreshToken(c *gin.Context) {
+	var req RefreshTokenRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	result, err := h.authService.RefreshTokenPair(c.Request.Context(), req.RefreshToken)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	// Backend mode: block non-admin token refresh
+	if h.settingSvc.IsBackendModeEnabled(c.Request.Context()) && result.UserRole != service.RoleAdmin && result.UserRole != service.RoleSuperAdmin && !(supplierLoginContext(c.Request.Context()) && authz.IsVendorRole(result.UserRole)) {
+		response.Forbidden(c, "Backend mode is active. Only admin login is allowed.")
+		return
+	}
+
+	response.Success(c, RefreshTokenResponse{
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+		ExpiresIn:    result.ExpiresIn,
+		TokenType:    "Bearer",
+	})
+}
+
+// LogoutRequest 登出请求
+type LogoutRequest struct {
+	RefreshToken string `json:"refresh_token,omitempty"` // 可选：撤销指定的Refresh Token
+}
+
+// LogoutResponse 登出响应
+type LogoutResponse struct {
+	Message string `json:"message"`
+}
+
+// Logout 用户登出
+// POST /api/v1/auth/logout
+func (h *AuthHandler) Logout(c *gin.Context) {
+	var req LogoutRequest
+	// 允许空请求体（向后兼容）
+	_ = c.ShouldBindJSON(&req)
+
+	// 如果提供了Refresh Token，撤销它
+	if req.RefreshToken != "" {
+		if err := h.authService.RevokeRefreshToken(c.Request.Context(), req.RefreshToken); err != nil {
+			slog.Debug("failed to revoke refresh token", "error", err)
+			// 不影响登出流程
+		}
+	}
+	h.consumePendingOAuthSessionOnLogout(c)
+	clearOAuthLogoutCookies(c)
+
+	response.Success(c, LogoutResponse{
+		Message: "Logged out successfully",
+	})
+}
+
+// RevokeAllSessionsResponse 撤销所有会话响应
+type RevokeAllSessionsResponse struct {
+	Message string `json:"message"`
+}
+
+// RevokeAllSessions 撤销当前用户的所有会话
+// POST /api/v1/auth/revoke-all-sessions
+func (h *AuthHandler) RevokeAllSessions(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+
+	if err := h.authService.RevokeAllUserTokens(c.Request.Context(), subject.UserID); err != nil {
+		slog.Error("failed to revoke all sessions", "user_id", subject.UserID, "error", err)
+		response.InternalError(c, "Failed to revoke sessions")
+		return
+	}
+
+	response.Success(c, RevokeAllSessionsResponse{
+		Message: "All sessions have been revoked. Please log in again.",
+	})
+}
+
+func supplierLoginContext(ctx context.Context) bool { v, _ := authz.SupplierOrigin(ctx); return v }

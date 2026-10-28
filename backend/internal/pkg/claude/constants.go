@@ -1,0 +1,275 @@
+// Package claude provides constants and helpers for Claude API integration.
+package claude
+
+// Claude Code 客户端相关常量
+
+// Beta header 常量
+//
+// 这些 token 参与现有功能及兼容性策略，不等同于某一 CLI 版本的完整抓包。
+// mimic 固定集合及其与 2.1.301 样本的差异见 FullClaudeCodeMimicryBetas 和
+// docs/CLAUDE_REQUEST_FINGERPRINT.md；不能仅凭 beta 集合推断上游身份判定。
+const (
+	BetaOAuth                    = "oauth-2025-04-20"
+	BetaClaudeCode               = "claude-code-20250219"
+	BetaInterleavedThinking      = "interleaved-thinking-2025-05-14"
+	BetaFineGrainedToolStreaming = "fine-grained-tool-streaming-2025-05-14"
+	BetaTokenCounting            = "token-counting-2024-11-01"
+	BetaContext1M                = "context-1m-2025-08-07"
+	BetaFastMode                 = "fast-mode-2026-02-01"
+	// Legacy structured output compatibility; forwarded only when explicitly requested.
+	BetaStructuredOutputs = "structured-outputs-2025-11-13"
+	// Tool-change compatibility tokens; never enabled without an explicit client request.
+	BetaMidConversationToolChanges = "mid-conversation-tool-changes-2026-07-01"
+	BetaInlineTools                = "inline-tools-2026-09-15"
+
+	// 新增（对齐官方 CLI 2.1.9x 以来的流量）
+	BetaPromptCachingScope          = "prompt-caching-scope-2026-01-05"
+	BetaEffort                      = "effort-2025-11-24"
+	BetaRedactThinking              = "redact-thinking-2026-02-12"
+	BetaContextManagement           = "context-management-2025-06-27"
+	BetaThinkingBindingControls     = "thinking-binding-controls-2026-08-01"
+	BetaMidConversationOutputConfig = "mid-conversation-output-config-2026-07-01"
+	BetaExtendedCacheTTL            = "extended-cache-ttl-2025-04-11"
+
+	// server-side refusal fallback beta 字段族（beta Messages API 专有）。
+	// 客户端（Claude Code / SDK / OpenCode 等）会默认透传 body.fallbacks /
+	// body.fallback_credit_token，上游仅在 anthropic-beta 携带对应 token 时接受；
+	// 缺 token 时 Pydantic 拒收："fallbacks: Extra inputs are not permitted"。
+	// 仅用于 sanitize 的条件判断（strip-or-keep），禁止加入
+	// FullClaudeCodeMimicryBetas / DefaultBetaHeader / APIKeyBetaHeader /
+	// Bedrock 白名单：server-side fallback 会换模型、改计费，不能默认打开。
+	BetaServerSideFallback   = "server-side-fallback-2026-07-01"
+	BetaFallbackCredit       = "fallback-credit-2026-07-01"
+	BetaFallbackCreditLegacy = "fallback-credit-2026-06-01"
+)
+
+// DroppedBetas 是转发时需要从 anthropic-beta header 中移除的 beta token 列表。
+// 这些 token 是客户端特有的，不应透传给上游 API。
+var DroppedBetas = []string{}
+
+// DefaultBetaHeader Claude Code 客户端默认的 anthropic-beta header
+const DefaultBetaHeader = BetaClaudeCode + "," + BetaOAuth + "," + BetaInterleavedThinking + "," + BetaFineGrainedToolStreaming
+
+// MessageBetaHeaderNoTools /v1/messages 在无工具时的 beta header
+//
+// NOTE: Claude Code OAuth credentials are scoped to Claude Code. When we "mimic"
+// Claude Code for non-Claude-Code clients, we must include the claude-code beta
+// even if the request doesn't use tools, otherwise upstream may reject the
+// request as a non-Claude-Code API request.
+const MessageBetaHeaderNoTools = BetaClaudeCode + "," + BetaOAuth + "," + BetaInterleavedThinking
+
+// MessageBetaHeaderWithTools /v1/messages 在有工具时的 beta header
+const MessageBetaHeaderWithTools = BetaClaudeCode + "," + BetaOAuth + "," + BetaInterleavedThinking
+
+// CountTokensBetaHeader count_tokens 请求使用的 anthropic-beta header
+const CountTokensBetaHeader = BetaClaudeCode + "," + BetaOAuth + "," + BetaInterleavedThinking + "," + BetaTokenCounting
+
+// HaikuBetaHeader Haiku 模型在 OAuth 真实客户端透传路径上的默认 anthropic-beta header。
+// OAuth mimic 路径统一使用 FullClaudeCodeMimicryBetas。
+const HaikuBetaHeader = BetaOAuth + "," + BetaInterleavedThinking
+
+// APIKeyBetaHeader API-key 账号建议使用的 anthropic-beta header（不包含 oauth）
+const APIKeyBetaHeader = BetaClaudeCode + "," + BetaInterleavedThinking + "," + BetaFineGrainedToolStreaming
+
+// APIKeyHaikuBetaHeader Haiku 模型在 API-key 账号下使用的 anthropic-beta header（不包含 oauth / claude-code）
+const APIKeyHaikuBetaHeader = BetaInterleavedThinking
+
+// DefaultCacheControlTTL 是网关代理为自己生成的 cache_control 块默认使用的 ttl。
+// 真实 Claude Code CLI 当前使用 "1h"，但本仓策略是"客户端透传 ttl 优先；
+// 客户端缺省时统一使用 5m"，这样既不浪费 1h 缓存额度，也保留客户端自定义能力。
+const DefaultCacheControlTTL = "5m"
+
+// CLICurrentVersion 是已采样验证的 mimic 协议基线（三段 semver）。
+// 生成请求的 UA、billing 与 CCH 使用该固定版本；升级须一起验证 SDK/runtime。
+// 真实客户端身份跟踪的配置版本另由 EffectiveCLIVersion() 提供。
+const CLICurrentVersion = "2.1.301"
+
+// FullClaudeCodeMimicryBetas 返回 OAuth mimic 使用的 beta 列表。
+// 产品兼容性集合，并非 2.1.301 抓包的完整列表/顺序：保留 output-config
+// 兼容性，不默认开启 thinking-token-count/cache-diagnosis。详见指纹说明文档。
+//
+// 使用建议：
+//   - OAuth mimic：所有模型（包括 Haiku）都使用这整份列表。
+//   - OAuth 真实客户端透传：保留客户端 beta；未提供时使用模型对应默认值。
+//   - API-key 账号：不要使用本函数，参见 APIKeyBetaHeader。
+//   - 不默认加入 redact-thinking，避免上游抹除 thinking 内容；客户端显式传入时由合并逻辑保留。
+func FullClaudeCodeMimicryBetas() []string {
+	return []string{
+		BetaClaudeCode,
+		BetaOAuth,
+		BetaInterleavedThinking,
+		BetaPromptCachingScope,
+		BetaEffort,
+		BetaContextManagement,
+		BetaThinkingBindingControls,
+		BetaMidConversationOutputConfig,
+		BetaExtendedCacheTTL,
+	}
+}
+
+// DefaultHeaders 是 Claude Code 客户端默认请求头。
+// 每次调用现构造：User-Agent 走 DefaultUserAgent()（运行期可变版本号），
+// 不再在包 init 时固化；mimic 构建器另将 UA 固定为 CLICurrentVersion。
+func DefaultHeaders() map[string]string {
+	return map[string]string{
+		// Captured from the official 2.1.301 linux-arm64 binary on 2026-10-16.
+		// Keep the SDK, runtime and platform together as one client profile.
+		"User-Agent":                  DefaultUserAgent(),
+		"Accept":                      "application/json",
+		"Accept-Encoding":             "gzip, deflate, br, zstd",
+		"X-Stainless-Lang":            "js",
+		"X-Stainless-Package-Version": "0.128.0",
+		"X-Stainless-OS":              "Linux",
+		"X-Stainless-Arch":            "arm64",
+		"X-Stainless-Runtime":         "node",
+		"X-Stainless-Runtime-Version": "v26.3.0",
+		"X-Stainless-Retry-Count":     "0",
+		"X-Stainless-Timeout":         "600",
+		"X-App":                       "cli",
+		"Anthropic-Dangerous-Direct-Browser-Access": "true",
+	}
+}
+
+// Model 表示一个 Claude 模型
+type Model struct {
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	DisplayName string `json:"display_name"`
+	CreatedAt   string `json:"created_at"`
+}
+
+// DefaultModels Claude Code 客户端支持的默认模型列表
+var DefaultModels = []Model{
+	{
+		ID:          "claude-fable-5-1",
+		Type:        "model",
+		DisplayName: "Claude Fable 5.1",
+		CreatedAt:   "2026-09-01T00:00:00Z",
+	},
+	{
+		ID:          "claude-fable-5",
+		Type:        "model",
+		DisplayName: "Claude Fable 5",
+		CreatedAt:   "2026-06-09T00:00:00Z",
+	},
+	{
+		ID:          "claude-opus-4-5-20251101",
+		Type:        "model",
+		DisplayName: "Claude Opus 4.5",
+		CreatedAt:   "2025-11-01T00:00:00Z",
+	},
+	{
+		ID:          "claude-opus-4-6",
+		Type:        "model",
+		DisplayName: "Claude Opus 4.6",
+		CreatedAt:   "2026-02-06T00:00:00Z",
+	},
+	{
+		ID:          "claude-opus-4-7",
+		Type:        "model",
+		DisplayName: "Claude Opus 4.7",
+		CreatedAt:   "2026-04-17T00:00:00Z",
+	},
+	{
+		ID:          "claude-opus-4-8",
+		Type:        "model",
+		DisplayName: "Claude Opus 4.8",
+		CreatedAt:   "2026-05-29T00:00:00Z",
+	},
+	{
+		ID:          "claude-opus-5-5",
+		Type:        "model",
+		DisplayName: "Claude Opus 5.5",
+		CreatedAt:   "2026-09-22T00:00:00Z",
+	},
+	{
+		ID:          "claude-opus-5",
+		Type:        "model",
+		DisplayName: "Claude Opus 5",
+		CreatedAt:   "2026-07-25T00:00:00Z",
+	},
+	{
+		ID:          "claude-sonnet-5-5",
+		Type:        "model",
+		DisplayName: "Claude Sonnet 5.5",
+		CreatedAt:   "2026-09-28T00:00:00Z",
+	},
+	{
+		ID:          "claude-sonnet-5",
+		Type:        "model",
+		DisplayName: "Claude Sonnet 5",
+		CreatedAt:   "2026-07-01T00:00:00Z",
+	},
+	{
+		ID:          "claude-sonnet-4-6",
+		Type:        "model",
+		DisplayName: "Claude Sonnet 4.6",
+		CreatedAt:   "2026-02-18T00:00:00Z",
+	},
+	{
+		ID:          "claude-sonnet-4-5-20250929",
+		Type:        "model",
+		DisplayName: "Claude Sonnet 4.5",
+		CreatedAt:   "2025-09-29T00:00:00Z",
+	},
+	{
+		ID:          "claude-haiku-4-5-20251001",
+		Type:        "model",
+		DisplayName: "Claude Haiku 4.5",
+		CreatedAt:   "2025-10-01T00:00:00Z",
+	},
+	{
+		ID:          "claude-haiku-5-5",
+		Type:        "model",
+		DisplayName: "Claude Haiku 5.5",
+		CreatedAt:   "2026-10-07T00:00:00Z",
+	},
+}
+
+// DefaultModelIDs 返回默认模型的 ID 列表
+func DefaultModelIDs() []string {
+	ids := make([]string, len(DefaultModels))
+	for i, m := range DefaultModels {
+		ids[i] = m.ID
+	}
+	return ids
+}
+
+// DefaultTestModel 测试时使用的默认模型
+const DefaultTestModel = "claude-sonnet-4-5-20250929"
+
+// ModelIDOverrides Claude OAuth 请求需要的模型 ID 映射
+var ModelIDOverrides = map[string]string{
+	"claude-sonnet-4-5": "claude-sonnet-4-5-20250929",
+	"claude-opus-4-5":   "claude-opus-4-5-20251101",
+	"claude-haiku-4-5":  "claude-haiku-4-5-20251001",
+}
+
+// ModelIDReverseOverrides 用于将上游模型 ID 还原为短名
+var ModelIDReverseOverrides = map[string]string{
+	"claude-sonnet-4-5-20250929": "claude-sonnet-4-5",
+	"claude-opus-4-5-20251101":   "claude-opus-4-5",
+	"claude-haiku-4-5-20251001":  "claude-haiku-4-5",
+}
+
+// NormalizeModelID 根据 Claude OAuth 规则映射模型
+func NormalizeModelID(id string) string {
+	if id == "" {
+		return id
+	}
+	if mapped, ok := ModelIDOverrides[id]; ok {
+		return mapped
+	}
+	return id
+}
+
+// DenormalizeModelID 将上游模型 ID 转换为短名
+func DenormalizeModelID(id string) string {
+	if id == "" {
+		return id
+	}
+	if mapped, ok := ModelIDReverseOverrides[id]; ok {
+		return mapped
+	}
+	return id
+}

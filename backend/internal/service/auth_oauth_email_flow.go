@@ -1,0 +1,324 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/mail"
+	"strings"
+	"time"
+
+	dbent "github.com/Wei-Shaw/sub2api/ent"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+)
+
+func normalizeOAuthSignupSource(signupSource string) string {
+	signupSource = strings.TrimSpace(strings.ToLower(signupSource))
+	switch signupSource {
+	case "", "email":
+		return "email"
+	case "linuxdo", "wechat", "oidc", "github", "google", "dingtalk":
+		return signupSource
+	default:
+		return "email"
+	}
+}
+
+// SendPendingOAuthVerifyCode sends a local verification code for pending OAuth
+// account-creation flows without relying on the public registration gate.
+func (s *AuthService) SendPendingOAuthVerifyCode(ctx context.Context, email string, locale ...string) (*SendVerifyCodeResult, error) {
+	email = strings.TrimSpace(strings.ToLower(email))
+	if email == "" {
+		return nil, ErrEmailVerifyRequired
+	}
+	if _, err := mail.ParseAddress(email); err != nil {
+		return nil, ErrEmailVerifyRequired
+	}
+	if isReservedEmail(email) {
+		return nil, ErrEmailReserved
+	}
+	if s == nil || s.emailService == nil {
+		return nil, ErrServiceUnavailable
+	}
+	if err := s.validateRegistrationEmailQuota(ctx, email); err != nil {
+		return nil, err
+	}
+
+	siteName := DefaultSiteName
+	if s.settingService != nil {
+		siteName = s.settingService.GetSiteName(ctx)
+	}
+	if err := s.emailService.SendVerifyCode(ctx, email, siteName, firstEmailLocale(locale)); err != nil {
+		return nil, err
+	}
+	return &SendVerifyCodeResult{
+		Countdown: int(verifyCodeCooldown / time.Second),
+	}, nil
+}
+
+// VerifyOAuthEmailCode verifies the locally entered email verification code for
+// third-party signup and binding flows. This is intentionally independent from
+// the global registration email verification toggle.
+func (s *AuthService) VerifyOAuthEmailCode(ctx context.Context, email, verifyCode string) error {
+	email = strings.TrimSpace(strings.ToLower(email))
+	verifyCode = strings.TrimSpace(verifyCode)
+
+	if email == "" {
+		return ErrEmailVerifyRequired
+	}
+	if verifyCode == "" {
+		return ErrEmailVerifyRequired
+	}
+	if s == nil || s.emailService == nil {
+		return ErrServiceUnavailable
+	}
+	return s.emailService.VerifyCode(ctx, email, verifyCode)
+}
+
+// RegisterOAuthEmailAccount creates a local account from a third-party first
+// login after the user has verified a local email address.
+func (s *AuthService) RegisterOAuthEmailAccount(
+	ctx context.Context,
+	email string,
+	password string,
+	verifyCode string,
+	signupSource string) (*TokenPair, *User, error) {
+	if s == nil {
+		return nil, nil, ErrServiceUnavailable
+	}
+	if s.settingService == nil || (!s.settingService.IsRegistrationEnabled(ctx) && !s.canBypassRegistrationDisabledForOAuth(ctx, signupSource)) {
+		return nil, nil, ErrRegDisabled
+	}
+
+	email = strings.TrimSpace(strings.ToLower(email))
+	if isReservedEmail(email) {
+		return nil, nil, ErrEmailReserved
+	}
+	if err := s.VerifyOAuthEmailCode(ctx, email, verifyCode); err != nil {
+		slog.Error("oauth email register: verify code failed", "email", email, "error", err.Error())
+		return nil, nil, err
+	}
+
+	// 含 +别名 / Gmail 点号 / FQDN 根点变体归一化：该路径同样发放注册赠额，不能被单个收件箱刷号。
+	existsEmail, err := s.existsByEmailOrAlias(ctx, email)
+	if err != nil {
+		slog.Error("oauth email register: ExistsByEmail failed", "email", email, "error", err.Error())
+		return nil, nil, ErrServiceUnavailable
+	}
+	if existsEmail {
+		return nil, nil, ErrEmailExists
+	}
+	if err := s.validateRegistrationEmailQuota(ctx, email); err != nil {
+		slog.Error("oauth email register: policy rejected", "email", email, "error", err.Error())
+		return nil, nil, err
+	}
+
+	hashedPassword, err := s.HashPassword(password)
+	if err != nil {
+		return nil, nil, fmt.Errorf("hash password: %w", err)
+	}
+
+	signupSource = normalizeOAuthSignupSource(signupSource)
+	grantPlan := s.resolveSignupGrantPlan(ctx, signupSource)
+
+	user := &User{
+		Email:        email,
+		PasswordHash: hashedPassword,
+		Role:         RoleUser,
+		Balance:      grantPlan.Balance,
+		Concurrency:  grantPlan.Concurrency,
+		Status:       StatusActive,
+		SignupSource: signupSource,
+	}
+
+	if err := s.createUserWithRegistrationEmailGuard(ctx, user); err != nil {
+		switch {
+		case errors.Is(err, ErrEmailExists):
+			return nil, nil, ErrEmailExists
+		case errors.Is(err, ErrEmailDomainRegistrationLimit):
+			return nil, nil, ErrEmailDomainRegistrationLimit
+		default:
+			slog.Error("oauth email register: userRepo.Create failed", "email", email, "signup_source", signupSource, "error", err.Error())
+			return nil, nil, ErrServiceUnavailable
+		}
+	}
+
+	tokenPair, err := s.GenerateTokenPair(ctx, user, "")
+	if err != nil {
+		_ = s.RollbackOAuthEmailAccountCreation(ctx, user.ID)
+		return nil, nil, fmt.Errorf("generate token pair: %w", err)
+	}
+	return tokenPair, user, nil
+}
+
+// RegisterVerifiedOAuthEmailAccount creates a local account from an OAuth
+// provider that has already returned a verified email address.
+func (s *AuthService) RegisterVerifiedOAuthEmailAccount(
+	ctx context.Context,
+	email string,
+	password string,
+	signupSource string) (*TokenPair, *User, error) {
+	if s == nil {
+		return nil, nil, ErrServiceUnavailable
+	}
+	if s.settingService == nil || (!s.settingService.IsRegistrationEnabled(ctx) && !s.canBypassRegistrationDisabledForOAuth(ctx, signupSource)) {
+		return nil, nil, ErrRegDisabled
+	}
+
+	email = strings.TrimSpace(strings.ToLower(email))
+	if email == "" || len(email) > 255 {
+		return nil, nil, ErrEmailVerifyRequired
+	}
+	if _, err := mail.ParseAddress(email); err != nil {
+		return nil, nil, ErrEmailVerifyRequired
+	}
+	if isReservedEmail(email) {
+		return nil, nil, ErrEmailReserved
+	}
+	if strings.TrimSpace(password) == "" {
+		return nil, nil, infraerrors.BadRequest("PASSWORD_REQUIRED", "password is required")
+	}
+
+	// 与本地注册同口径：同一收件箱的别名变体不能各自建号（该路径也发放注册赠额）。
+	existsEmail, err := s.existsByEmailOrAlias(ctx, email)
+	if err != nil {
+		return nil, nil, ErrServiceUnavailable
+	}
+	if existsEmail {
+		return nil, nil, ErrEmailExists
+	}
+	if err := s.validateRegistrationEmailQuota(ctx, email); err != nil {
+		return nil, nil, err
+	}
+
+	hashedPassword, err := s.HashPassword(password)
+	if err != nil {
+		return nil, nil, fmt.Errorf("hash password: %w", err)
+	}
+
+	signupSource = normalizeOAuthSignupSource(signupSource)
+	grantPlan := s.resolveSignupGrantPlan(ctx, signupSource)
+	var defaultRPMLimit int
+	if s.settingService != nil {
+		defaultRPMLimit = s.settingService.GetDefaultUserRPMLimit(ctx)
+	}
+	user := &User{
+		Email:        email,
+		PasswordHash: hashedPassword,
+		Role:         RoleUser,
+		Balance:      grantPlan.Balance,
+		Concurrency:  grantPlan.Concurrency,
+		RPMLimit:     defaultRPMLimit,
+		Status:       StatusActive,
+		SignupSource: signupSource,
+	}
+
+	if err := s.createUserWithRegistrationEmailGuard(ctx, user); err != nil {
+		switch {
+		case errors.Is(err, ErrEmailExists):
+			return nil, nil, ErrEmailExists
+		case errors.Is(err, ErrEmailDomainRegistrationLimit):
+			return nil, nil, ErrEmailDomainRegistrationLimit
+		default:
+			return nil, nil, ErrServiceUnavailable
+		}
+	}
+
+	tokenPair, err := s.GenerateTokenPair(ctx, user, "")
+	if err != nil {
+		_ = s.RollbackOAuthEmailAccountCreation(ctx, user.ID)
+		return nil, nil, fmt.Errorf("generate token pair: %w", err)
+	}
+	return tokenPair, user, nil
+}
+
+// FinalizeOAuthEmailAccount applies normal signup bootstrap
+// only after the pending OAuth flow has fully reached its last reversible step.
+func (s *AuthService) FinalizeOAuthEmailAccount(
+	ctx context.Context,
+	user *User,
+	signupSource string) error {
+	if s == nil || user == nil || user.ID <= 0 {
+		return ErrServiceUnavailable
+	}
+
+	signupSource = normalizeOAuthSignupSource(signupSource)
+
+	s.updateOAuthSignupSource(ctx, user.ID, signupSource)
+	grantPlan := s.resolveSignupGrantPlan(ctx, signupSource)
+	s.assignSubscriptions(ctx, user.ID, grantPlan.Subscriptions, "auto assigned by signup defaults")
+	// snapshot user × platform quota（fail-open）
+	_ = s.snapshotPlatformQuotaDefaults(ctx, user.ID, &grantPlan)
+	return nil
+}
+
+// RollbackOAuthEmailAccountCreation removes a partially-created local account
+// when a later binding or token step fails.
+func (s *AuthService) RollbackOAuthEmailAccountCreation(ctx context.Context, userID int64) error {
+	if s == nil || s.userRepo == nil || userID <= 0 {
+		return ErrServiceUnavailable
+	}
+
+	if err := s.userRepo.Delete(ctx, userID); err != nil {
+		return fmt.Errorf("delete created oauth user: %w", err)
+	}
+	return nil
+}
+
+func (s *AuthService) oauthEmailFlowClient(ctx context.Context) *dbent.Client {
+	if s == nil || s.entClient == nil {
+		return nil
+	}
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		return tx.Client()
+	}
+	return s.entClient
+}
+
+func (s *AuthService) updateOAuthSignupSource(ctx context.Context, userID int64, signupSource string) {
+	client := s.oauthEmailFlowClient(ctx)
+	if client == nil || userID <= 0 || strings.TrimSpace(signupSource) == "" {
+		return
+	}
+	_ = client.User.UpdateOneID(userID).SetSignupSource(signupSource).Exec(ctx)
+}
+
+// ValidatePasswordCredentials checks the local password without completing the
+// login flow. This is used by pending third-party account adoption flows before
+// the external identity has been bound.
+func (s *AuthService) ValidatePasswordCredentials(ctx context.Context, email, password string) (*User, error) {
+	if s == nil {
+		return nil, ErrServiceUnavailable
+	}
+
+	user, err := s.userRepo.GetByEmail(ctx, strings.TrimSpace(strings.ToLower(email)))
+	if err != nil {
+		if errors.Is(err, ErrUserNotFound) {
+			return nil, ErrInvalidCredentials
+		}
+		return nil, ErrServiceUnavailable
+	}
+	if !user.IsActive() {
+		return nil, ErrUserNotActive
+	}
+	if !s.CheckPassword(password, user.PasswordHash) {
+		return nil, ErrInvalidCredentials
+	}
+	if err := s.ValidateLoginIdentity(ctx, user); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+// RecordSuccessfulLogin updates last-login activity after a non-standard login
+// flow finishes with a real session.
+func (s *AuthService) RecordSuccessfulLogin(ctx context.Context, userID int64) {
+	if s != nil && s.userRepo != nil && userID > 0 {
+		user, err := s.userRepo.GetByID(ctx, userID)
+		if err == nil && user != nil && !isReservedEmail(user.Email) {
+			s.backfillEmailIdentityOnSuccessfulLogin(ctx, user)
+		}
+	}
+	s.touchUserLogin(ctx, userID)
+}

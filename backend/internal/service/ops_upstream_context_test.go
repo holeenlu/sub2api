@@ -1,0 +1,434 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"net/http/httptest"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
+)
+
+func TestSafeUpstreamURL(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"strips query", "https://api.anthropic.com/v1/messages?beta=true", "https://api.anthropic.com/v1/messages"},
+		{"strips fragment", "https://api.openai.com/v1/responses#frag", "https://api.openai.com/v1/responses"},
+		{"strips both", "https://host/path?token=secret#x", "https://host/path"},
+		{"no query or fragment", "https://host/path", "https://host/path"},
+		{"empty string", "", ""},
+		{"whitespace only", "  ", ""},
+		{"query before fragment", "https://h/p?a=1#f", "https://h/p"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, safeUpstreamURL(tt.input))
+		})
+	}
+}
+
+func TestOpsUpstreamErrorEventKeepsExplicitProxySnapshotPerAttempt(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	oldProxyID := int64(10060)
+	oldProxy := &Proxy{
+		ID:       oldProxyID,
+		Name:     "wldsg82-ipv6-10060",
+		Protocol: "socks5",
+		Host:     "old-proxy.example",
+		Username: "proxy-user",
+		Password: "proxy-secret",
+	}
+	oldAccount := &Account{
+		ID:       11,
+		Name:     "old-account",
+		Platform: PlatformOpenAI,
+		ProxyID:  &oldProxyID,
+		Proxy:    oldProxy,
+	}
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		AccountID: oldAccount.ID,
+		ProxyID:   opsUpstreamProxyID(oldAccount),
+		ProxyName: opsUpstreamProxyName(oldAccount),
+		Kind:      "retry",
+	})
+
+	newProxyID := int64(8001)
+	newAccount := &Account{
+		ID:       12,
+		Name:     "new-account",
+		Platform: PlatformOpenAI,
+		ProxyID:  &newProxyID,
+		Proxy:    &Proxy{ID: newProxyID, Name: "oxylabs-uk-8001"},
+	}
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		AccountID: newAccount.ID,
+		ProxyID:   opsUpstreamProxyID(newAccount),
+		ProxyName: opsUpstreamProxyName(newAccount),
+		Kind:      "failover",
+	})
+
+	// Mutating the selected account after both attempts must not rewrite history.
+	oldProxy.Name = "mutated-current-proxy"
+	oldAccount.ProxyID = &newProxyID
+	oldAccount.Proxy = newAccount.Proxy
+
+	raw, ok := c.Get(OpsUpstreamErrorsKey)
+	require.True(t, ok)
+	events, ok := raw.([]*OpsUpstreamErrorEvent)
+	require.True(t, ok)
+	require.Len(t, events, 2)
+
+	require.Equal(t, int64(10060), *events[0].ProxyID)
+	require.Equal(t, "wldsg82-ipv6-10060", events[0].ProxyName)
+
+	require.Equal(t, int64(8001), *events[1].ProxyID)
+	require.Equal(t, "oxylabs-uk-8001", events[1].ProxyName)
+
+	encoded := marshalOpsUpstreamErrors(events)
+	require.NotNil(t, encoded)
+	require.NotContains(t, *encoded, "old-proxy.example")
+	require.NotContains(t, *encoded, "proxy-user")
+	require.NotContains(t, *encoded, "proxy-secret")
+}
+
+func TestOpsUpstreamProxyFieldAccessors(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	boundID := int64(7)
+	backupID := int64(8)
+	tests := []struct {
+		name     string
+		account  *Account
+		wantID   *int64
+		wantName string
+	}{
+		{
+			name:     "actual proxy object is authoritative",
+			account:  &Account{ProxyID: &boundID, Proxy: &Proxy{ID: backupID, Name: "backup-uk"}},
+			wantID:   &backupID,
+			wantName: "backup-uk",
+		},
+		{
+			name:     "proxy object without binding id is not a configured route",
+			account:  &Account{Proxy: &Proxy{ID: backupID, Name: "hydrated-proxy"}},
+			wantName: opsProxyNameDirect,
+		},
+		{
+			name:     "hydrated proxy without durable id is unknown, never id=null plus a real name",
+			account:  &Account{ProxyID: &boundID, Proxy: &Proxy{Name: "transient-proxy"}},
+			wantName: opsProxyNameUnknown,
+		},
+		{
+			name:     "blank proxy name gets the unnamed placeholder",
+			account:  &Account{ProxyID: &boundID, Proxy: &Proxy{ID: boundID, Name: "   "}},
+			wantID:   &boundID,
+			wantName: opsProxyNameUnnamed,
+		},
+		{
+			name:     "account has no proxy",
+			account:  &Account{},
+			wantName: opsProxyNameDirect,
+		},
+		{
+			name:     "configured proxy was not hydrated and transport is direct",
+			account:  &Account{ProxyID: &backupID},
+			wantName: opsProxyNameDirect,
+		},
+		{
+			name:     "missing attempt account",
+			account:  nil,
+			wantName: opsProxyNameUnknown,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+				ProxyID:   opsUpstreamProxyID(tt.account),
+				ProxyName: opsUpstreamProxyName(tt.account),
+				Kind:      "request_error",
+			})
+			raw, ok := c.Get(OpsUpstreamErrorsKey)
+			require.True(t, ok)
+			events, ok := raw.([]*OpsUpstreamErrorEvent)
+			require.True(t, ok)
+			require.Len(t, events, 1)
+			event := events[0]
+			if tt.wantID == nil {
+				require.Nil(t, event.ProxyID)
+			} else {
+				require.NotNil(t, event.ProxyID)
+				require.Equal(t, *tt.wantID, *event.ProxyID)
+			}
+			require.Equal(t, tt.wantName, event.ProxyName)
+		})
+	}
+}
+
+func TestOpsUpstreamErrorEventRetryKeepsExplicitAttemptProxy(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	proxyID := int64(10060)
+	account := &Account{ProxyID: &proxyID, Proxy: &Proxy{ID: proxyID, Name: "retry-proxy"}}
+
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		ProxyID:   opsUpstreamProxyID(account),
+		ProxyName: opsUpstreamProxyName(account),
+		Kind:      "retry",
+	})
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		ProxyID:   opsUpstreamProxyID(account),
+		ProxyName: opsUpstreamProxyName(account),
+		Kind:      "retry_exhausted",
+	})
+
+	raw, ok := c.Get(OpsUpstreamErrorsKey)
+	require.True(t, ok)
+	events, ok := raw.([]*OpsUpstreamErrorEvent)
+	require.True(t, ok)
+	require.Len(t, events, 2)
+	for _, event := range events {
+		require.NotNil(t, event.ProxyID)
+		require.Equal(t, proxyID, *event.ProxyID)
+		require.Equal(t, "retry-proxy", event.ProxyName)
+	}
+}
+
+func TestNormalizeOpsUpstreamProxyAttributionEnforcesSentinelInvariant(t *testing.T) {
+	positive := int64(7)
+	zero := int64(0)
+	tests := []struct {
+		name     string
+		in       OpsUpstreamErrorEvent
+		wantID   *int64
+		wantName string
+	}{
+		{name: "id with name kept", in: OpsUpstreamErrorEvent{ProxyID: &positive, ProxyName: "eu-1"}, wantID: &positive, wantName: "eu-1"},
+		{name: "id without name gets placeholder", in: OpsUpstreamErrorEvent{ProxyID: &positive}, wantID: &positive, wantName: opsProxyNameUnnamed},
+		{name: "null id with real name collapses to unknown", in: OpsUpstreamErrorEvent{ProxyName: "eu-1"}, wantName: opsProxyNameUnknown},
+		{name: "zero id with real name collapses to unknown", in: OpsUpstreamErrorEvent{ProxyID: &zero, ProxyName: "eu-1"}, wantName: opsProxyNameUnknown},
+		{name: "explicit direct preserved", in: OpsUpstreamErrorEvent{ProxyName: opsProxyNameDirect}, wantName: opsProxyNameDirect},
+		{name: "empty is unknown", in: OpsUpstreamErrorEvent{}, wantName: opsProxyNameUnknown},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ev := tt.in
+			normalizeOpsUpstreamProxyAttribution(&ev)
+			if tt.wantID == nil {
+				require.Nil(t, ev.ProxyID)
+			} else {
+				require.NotNil(t, ev.ProxyID)
+				require.Equal(t, *tt.wantID, *ev.ProxyID)
+			}
+			require.Equal(t, tt.wantName, ev.ProxyName)
+		})
+	}
+}
+
+func TestNormalizeOpsUpstreamErrorsJSONPreservesUnknownKeysAndOrder(t *testing.T) {
+	// A legacy row written by an older struct version: it carries a key the
+	// current struct no longer has, and mixes explicit/legacy attribution.
+	raw := `[` +
+		`{"at_unix_ms":1,"account_id":42,"upstream_request_body":"legacy-only-key","kind":"http_error"},` +
+		`{"at_unix_ms":2,"proxy_id":null,"proxy_name":"direct/no_proxy","kind":"request_error"},` +
+		`{"at_unix_ms":3,"proxy_id":9,"proxy_name":"eu-9","kind":"failover"},` +
+		`{"at_unix_ms":4,"proxy_id":0,"proxy_name":"stale-name","kind":"retry"},` +
+		`{"at_unix_ms":5,"proxy_id":11,"proxy_name":"","kind":"retry"}` +
+		`]`
+
+	out, err := normalizeOpsUpstreamErrorsJSON(raw)
+	require.NoError(t, err)
+
+	// Legacy-only key and original key order survive.
+	require.Contains(t, out, `"upstream_request_body":"legacy-only-key"`)
+	require.True(t, strings.Index(out, `"at_unix_ms":1`) < strings.Index(out, `"account_id":42`))
+
+	events, err := ParseOpsUpstreamErrors(out)
+	require.NoError(t, err)
+	require.Len(t, events, 5)
+	require.Nil(t, events[0].ProxyID)
+	require.Equal(t, opsProxyNameUnknown, events[0].ProxyName)
+	require.Nil(t, events[1].ProxyID)
+	require.Equal(t, opsProxyNameDirect, events[1].ProxyName)
+	require.NotNil(t, events[2].ProxyID)
+	require.Equal(t, int64(9), *events[2].ProxyID)
+	require.Equal(t, "eu-9", events[2].ProxyName)
+	require.Nil(t, events[3].ProxyID)
+	require.Equal(t, opsProxyNameUnknown, events[3].ProxyName)
+	require.NotNil(t, events[4].ProxyID)
+	require.Equal(t, opsProxyNameUnnamed, events[4].ProxyName)
+
+	// Already-normalized input is returned byte-for-byte.
+	again, err := normalizeOpsUpstreamErrorsJSON(out)
+	require.NoError(t, err)
+	require.Equal(t, out, again)
+
+	_, err = normalizeOpsUpstreamErrorsJSON(`{"not":"an array"}`)
+	require.Error(t, err)
+	_, err = normalizeOpsUpstreamErrorsJSON(`[not json`)
+	require.Error(t, err)
+}
+
+func TestParseOpsUpstreamErrorsMarksLegacyProxyAttributionUnknown(t *testing.T) {
+	events, err := ParseOpsUpstreamErrors(`[{"account_id":42,"account_name":"legacy","kind":"http_error"}]`)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	require.Nil(t, events[0].ProxyID)
+	require.Equal(t, opsProxyNameUnknown, events[0].ProxyName)
+}
+
+func TestParseOpsUpstreamErrorsPreservesExplicitDirectAttribution(t *testing.T) {
+	events, err := ParseOpsUpstreamErrors(`[{"proxy_id":null,"proxy_name":"direct/no_proxy","kind":"request_error"}]`)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	require.Nil(t, events[0].ProxyID)
+	require.Equal(t, opsProxyNameDirect, events[0].ProxyName)
+}
+
+func TestOpsServiceGetErrorLogByIDNormalizesLegacyProxyAttribution(t *testing.T) {
+	repo := &opsRepoMock{
+		GetErrorLogByIDFn: func(context.Context, int64) (*OpsErrorLogDetail, error) {
+			return &OpsErrorLogDetail{UpstreamErrors: `[{"account_id":42,"kind":"http_error"}]`}, nil
+		},
+	}
+	svc := NewOpsService(repo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	detail, err := svc.GetErrorLogByID(context.Background(), 1)
+	require.NoError(t, err)
+	require.NotNil(t, detail)
+	require.Contains(t, detail.UpstreamErrors, `"proxy_name":"unknown"`)
+	require.Contains(t, detail.UpstreamErrors, `"proxy_id":null`)
+	require.NotContains(t, detail.UpstreamErrors, `"proxy_mode"`)
+	require.NotContains(t, detail.UpstreamErrors, `"proxy_source"`)
+	require.NotContains(t, detail.UpstreamErrors, `"proxy_fallback"`)
+}
+
+func TestSchedulingTraceBoundsAndIsolation(t *testing.T) {
+	ctx := WithSchedulingTrace(context.Background(), nil)
+	counts := map[string]int{"excluded": 1}
+	RecordSchedulingDecision(ctx, SchedulingDecision{Stage: "filter", Action: "filtered", Excluded: counts})
+	counts["excluded"] = 99
+	before := WithOpsSchedulingTrace(ctx, nil)
+	require.Contains(t, before[0].Detail, `"excluded":1`)
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			RecordSchedulingDecision(ctx, SchedulingDecision{Stage: "retry", Action: "decided", Reason: strings.Repeat("x", 1000)})
+		}()
+	}
+	wg.Wait()
+	trace := WithOpsSchedulingTrace(ctx, nil)
+	require.Len(t, trace, 1)
+	require.Nil(t, LastOpsUpstreamAttempt(trace), "local decisions must never become upstream attempts")
+	require.LessOrEqual(t, len(trace[0].Detail), maxSchedulingTraceBytes)
+	var snapshot struct {
+		Dropped int                  `json:"dropped_events"`
+		Events  []SchedulingDecision `json:"events"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(trace[0].Detail), &snapshot))
+	require.Positive(t, snapshot.Dropped)
+	require.LessOrEqual(t, len(snapshot.Events), maxSchedulingTraceEvents)
+	require.Contains(t, before[0].Detail, `"excluded":1`, "queued snapshots are immutable")
+	require.Empty(t, WithOpsSchedulingTrace(context.Background(), nil), "collectors do not leak between requests")
+	entry := &OpsInsertErrorLogInput{UpstreamErrors: trace}
+	require.NoError(t, sanitizeOpsUpstreamErrors(entry))
+	require.NotNil(t, entry.UpstreamErrorsJSON)
+	var persisted []*OpsUpstreamErrorEvent
+	require.NoError(t, json.Unmarshal([]byte(*entry.UpstreamErrorsJSON), &persisted))
+	require.JSONEq(t, trace[0].Detail, persisted[0].Detail)
+
+	// Large reason aggregates must hit the byte bound before the event bound.
+	byteCtx := WithSchedulingTrace(context.Background(), nil)
+	large := make(map[string]int)
+	for i := 0; i < 32; i++ {
+		large[strconv.Itoa(i)+strings.Repeat("<", 60)] = 1
+	}
+	for i := 0; i < 4; i++ {
+		RecordSchedulingDecision(byteCtx, SchedulingDecision{Stage: "filter", Action: "filtered", Excluded: large})
+	}
+	bounded := WithOpsSchedulingTrace(byteCtx, nil)
+	require.LessOrEqual(t, len(bounded[0].Detail), maxSchedulingTraceBytes)
+	require.NoError(t, json.Unmarshal([]byte(bounded[0].Detail), &snapshot))
+	require.Positive(t, snapshot.Dropped)
+	require.Less(t, len(snapshot.Events), maxSchedulingTraceEvents)
+
+	// The local envelope must not displace one of the 16 retained provider bodies.
+	var attempts []*OpsUpstreamErrorEvent
+	for i := 0; i < opsUpstreamErrorsBodyWindow; i++ {
+		attempts = append(attempts, &OpsUpstreamErrorEvent{Kind: "http_error", UpstreamStatusCode: 429, UpstreamResponseBody: "limited"})
+	}
+	entry = &OpsInsertErrorLogInput{UpstreamErrors: WithOpsSchedulingTrace(ctx, attempts)}
+	require.NoError(t, sanitizeOpsUpstreamErrors(entry))
+	require.NoError(t, json.Unmarshal([]byte(*entry.UpstreamErrorsJSON), &persisted))
+	require.Len(t, persisted, opsUpstreamErrorsBodyWindow+1)
+	for _, attempt := range persisted[:opsUpstreamErrorsBodyWindow] {
+		require.Equal(t, "limited", attempt.UpstreamResponseBody)
+	}
+}
+
+func TestSchedulingTraceWSTurnSnapshots(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx := WithSchedulingTrace(context.Background(), nil)
+	c.Request = httptest.NewRequest("GET", "/v1/responses", nil).WithContext(ctx)
+	SetOpenAIClientTransport(c, OpenAIClientTransportWS)
+	BeginOpsStreamTurn(c, 1)
+	RecordSchedulingDecision(ctx, SchedulingDecision{Stage: "selection", Action: "stopped", Reason: "first_turn"})
+	MarkOpsStreamError(c, "rate_limit_error", "wait exhausted", 429)
+	require.True(t, HasOpsCurrentStreamError(c))
+	first := GetOpsStreamErrors(c)
+	require.Len(t, first, 1)
+	require.Len(t, first[0].UpstreamErrors, 1)
+	c.Set(OpsUpstreamModelKey, "previous-upstream-model")
+	BeginOpsStreamTurn(c, 2)
+	require.Empty(t, c.GetString(OpsUpstreamModelKey), "a new WS turn must resolve its own outbound model")
+	require.False(t, HasOpsCurrentStreamError(c), "a previous failed turn must not label this one as failed")
+	// Forwarders retain derived contexts across turns; resetting must reach them.
+	RecordSchedulingDecision(ctx, SchedulingDecision{Stage: "selection", Action: "acquired", AccountID: 2})
+	second := WithOpsSchedulingTrace(ctx, nil)
+	require.NotContains(t, second[0].Detail, "first_turn")
+	require.Contains(t, first[0].UpstreamErrors[0].Detail, "first_turn")
+	require.Nil(t, LastOpsUpstreamAttempt(first[0].UpstreamErrors))
+}
+
+func TestSchedulingTraceAsyncSnapshotPreservesFailure(t *testing.T) {
+	core, logs := observer.New(zap.InfoLevel)
+	var jobs []func()
+	ctx := WithSchedulingTrace(logger.IntoContext(t.Context(), zap.New(core)), func(job func()) bool { jobs = append(jobs, job); return true })
+	RecordSchedulingDecision(ctx, SchedulingDecision{Stage: "filter", Action: "filtered", Excluded: map[string]int{"busy": 2}})
+	RecordSchedulingDecision(ctx, SchedulingDecision{Stage: "retry", Action: "stopped", Reason: "keep_failure"})
+	for range 100 {
+		RecordSchedulingDecision(ctx, SchedulingDecision{Stage: "slot", Action: "acquired"})
+	}
+	LogSchedulingTrace(ctx, false)
+	require.Len(t, jobs, 1)
+	require.Zero(t, logs.Len(), "serialization and logging must run on the existing worker")
+	var work sync.WaitGroup
+	work.Add(1)
+	go func() { defer work.Done(); jobs[0]() }()
+	// Mutate the live summary before resetting the next WS turn as the worker runs.
+	RecordSchedulingDecision(ctx, SchedulingDecision{Stage: "filter", Action: "filtered", Excluded: map[string]int{"next_turn": 99}})
+	resetSchedulingTrace(ctx)
+	work.Wait()
+	require.Equal(t, 1, logs.Len())
+	detail := logs.All()[0].ContextMap()["decisions"].(string)
+	require.Contains(t, detail, "keep_failure")
+	require.Contains(t, detail, `"busy":2`)
+	require.NotContains(t, detail, "next_turn")
+	require.Contains(t, detail, "dropped_events")
+	require.LessOrEqual(t, len(detail), maxSchedulingTraceBytes)
+}

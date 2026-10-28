@@ -1,0 +1,980 @@
+package service
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"strings"
+	"testing"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
+)
+
+func TestOpenAIResponsesRejectedFieldRetryStateRejectsDuplicateBodyAndCap(t *testing.T) {
+	initialBody := []byte(`{"model":"gpt-5.5"}`)
+	state := newOpenAIResponsesRejectedFieldRetryState(initialBody)
+
+	require.False(t, state.Allow(initialBody))
+	for attempt := 0; attempt < maxOpenAIResponsesRejectedFieldRetries; attempt++ {
+		nextBody := []byte(fmt.Sprintf(`{"model":"gpt-5.5","variant":%d}`, attempt))
+		require.True(t, state.Allow(nextBody))
+		require.False(t, state.Allow(nextBody))
+	}
+	require.False(t, state.Allow([]byte(`{"model":"gpt-5.5","variant":"overflow"}`)))
+}
+
+func TestOpenAIResponsesRejectedFieldRetryStateForRequestAllowsSameTransformAcrossAccounts(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	initialBody := []byte(`{"model":"gpt-5.5","truncation":"auto"}`)
+	retryBody := []byte(`{"model":"gpt-5.5"}`)
+
+	accountA := openAIResponsesRejectedFieldRetryStateForRequest(c, initialBody)
+	require.True(t, accountA.Allow(retryBody))
+	require.False(t, accountA.Allow(retryBody), "one account must not repeat the same transform")
+
+	accountB := openAIResponsesRejectedFieldRetryStateForRequest(c, initialBody)
+	require.NotSame(t, accountA, accountB)
+	require.Same(t, accountA.budget, accountB.budget)
+	require.True(t, accountB.Allow(retryBody), "a failover account must be allowed to apply the same transform")
+}
+
+func TestOpenAIResponsesRejectedFieldRetryStateForRequestSharesBoundedBudgetAcrossAccounts(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	for attempt := 0; attempt < maxOpenAIResponsesRejectedFieldRetries; attempt++ {
+		state := openAIResponsesRejectedFieldRetryStateForRequest(c, []byte(fmt.Sprintf(`{"account":%d}`, attempt)))
+		require.True(t, state.Allow([]byte(`{"same":"retry"}`)))
+	}
+	overflow := openAIResponsesRejectedFieldRetryStateForRequest(c, []byte(`{"account":"overflow"}`))
+	require.False(t, overflow.Allow([]byte(`{"new":"retry"}`)))
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRejectsAmbiguousErrors(t *testing.T) {
+	tests := []struct {
+		name         string
+		body         []byte
+		responseBody []byte
+	}{
+		{
+			name:         "namespace belongs to message",
+			body:         []byte(`{"input":[{"type":"message","namespace":"keep"}]}`),
+			responseBody: []byte(`{"error":{"code":"unknown_parameter","message":"Unknown parameter: 'input[0].namespace'.","param":"input[0].namespace"}}`),
+		},
+		{
+			name:         "max output tokens only mentioned",
+			body:         []byte(`{"max_output_tokens":4096}`),
+			responseBody: []byte(`{"error":{"code":"invalid_request_error","message":"max_output_tokens must be positive","param":"max_output_tokens"}}`),
+		},
+		{
+			name:         "structured param overrides namespace mention",
+			body:         []byte(`{"input":[{"type":"function_call","namespace":"keep","arguments":"{}"}]}`),
+			responseBody: []byte(`{"error":{"code":"unknown_parameter","message":"Unknown parameter: 'input[0].namespace'.","param":"tools"}}`),
+		},
+		{
+			name:         "nested max output tokens param is not top level",
+			body:         []byte(`{"max_output_tokens":4096,"input":[{"type":"message","content":{"max_output_tokens":"keep"}}]}`),
+			responseBody: []byte(`{"error":{"code":"unknown_parameter","message":"Unknown parameter: input[0].content.max_output_tokens","param":"input[0].content.max_output_tokens"}}`),
+		},
+		{
+			name:         "structured target conflicts with message target",
+			body:         []byte(`{"max_output_tokens":4096,"truncation":"auto"}`),
+			responseBody: []byte(`{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: truncation.","param":"max_output_tokens"}}`),
+		},
+		{
+			name:         "hosted search capability rejection must not remove search",
+			body:         []byte(`{"tools":[{"type":"web_search"}],"tool_choice":"auto","input":"search the web"}`),
+			responseBody: []byte(`{"error":{"message":"Hosted tool 'web_search' requires authorization and metering that are not supported by rustponsesapi.","type":"invalid_request_error","param":"tools","code":"unsupported_parameter"}}`),
+		},
+		{
+			name:         "hosted search rejection without param must not trigger item ID repair",
+			body:         []byte(`{"tools":[{"type":"web_search"}],"tool_choice":"auto","input":[{"type":"message","id":"msg_replay","role":"user","content":"search the web"}]}`),
+			responseBody: []byte(`{"error":{"code":"unsupported_parameter","message":"Hosted tool 'web_search' requires authorization and metering that are not supported by rustponsesapi.","type":"invalid_request_error"}}`),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, tt.body, tt.responseBody)
+			require.NoError(t, err)
+			require.False(t, changed)
+			require.Nil(t, retryBody)
+		})
+	}
+}
+
+func TestNormalizeOpenAIResponsesRejectedPersistedItemLookup(t *testing.T) {
+	const rejection = `{"error":{"code":"unsupported_parameter","type":"invalid_request_error","message":"Supplied input item IDs require persisted-item lookup that is not supported by rustponsesapi."}}`
+	const body = `{"type":"response.create","previous_response_id":"resp_keep","input":[
+		{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"hello","id":"nested_keep"}]},
+		{"type":"reasoning","id":"rs_1","encrypted_content":"cipher","summary":[]},
+		{"type":"function_call","id":"fc_1","call_id":"call_1","name":"lookup","arguments":"{}"},
+		{"type":"function_call_output","id":"fco_1","call_id":"call_1","output":"ok"},
+		{"type":"custom_tool_call","id":"ctc_1","call_id":"call_2","name":"patch","input":"patch"},
+		{"type":"custom_tool_call_output","id":"fc_2","call_id":"call_2","output":"ok"},
+		{"type":"tool_search_call","id":"tsc_1","execution":"client","call_id":"call_search","status":"completed","arguments":{"limit":9007199254740993,"query":"lookup"}},
+		{"type":"tool_search_output","id":"tso_1","execution":"client","call_id":"call_search","status":"completed","tools":[{"type":"function","name":"lookup","parameters":{"type":"object","properties":{"id":{"type":"string"}}}}]},
+		{"id":"msg_2","role":"user","content":"continue"}
+	]}`
+	for _, errorBody := range []string{rejection, `{"type":"error",` + rejection[1:], `{"type":"response.failed","response":{"error":` + gjson.Get(rejection, "error").Raw + `}}`} {
+		status := openAIWSRejectedFieldRetryHTTPStatus([]byte(errorBody))
+		require.Equal(t, http.StatusBadRequest, status)
+		retry, reason, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(status, []byte(body), []byte(errorBody))
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Equal(t, "persisted input item lookup rejection", reason)
+		// Removing only top-level item IDs must preserve every other byte's
+		// JSON value, including nested IDs, opaque content and tool pairing.
+		var original, actual map[string]any
+		require.NoError(t, decodeOpenAIJSONUseNumber([]byte(body), &original))
+		require.NoError(t, decodeOpenAIJSONUseNumber(retry, &actual))
+		for _, item := range original["input"].([]any) {
+			delete(item.(map[string]any), "id")
+		}
+		require.Equal(t, original, actual)
+		_, _, changed, err = normalizeOpenAIResponsesRejectedFieldRetryBody(status, retry, []byte(errorBody))
+		require.NoError(t, err)
+		require.False(t, changed, "must not retry unchanged bodies")
+	}
+	for _, input := range []string{
+		`[{"type":"item_reference","id":"msg_remote"}]`,
+		`[{"type":"message","id":"msg_remote"}]`,
+		`[{"type":"reasoning","id":"rs_remote","summary":[]}]`,
+		`[{"type":"future_item","id":"remote","content":"unknown"}]`,
+		`[{"type":"tool_search_call","id":"tsc_1","execution":"server","arguments":{}}]`,
+		`[{"type":"tool_search_output","id":"tso_1","execution":"server","tools":[]}]`,
+		`[{"type":"tool_search_call","id":"tsc_1","call_id":"call_search","arguments":{}}]`,
+		`[{"type":"tool_search_call","id":"tsc_1","execution":"client","call_id":"call_search","arguments":"{}"}]`,
+		`[{"type":"tool_search_call","id":"tsc_1","execution":"client","call_id":" ","arguments":{}}]`,
+		`[{"type":"tool_search_output","id":"tso_1","execution":"client","call_id":"call_search","tools":null}]`,
+		`[{"type":"function_call","id":"fc_1","name":"lookup","arguments":"{}"}]`,
+		`[{"type":"message","id":"msg_1","role":"user","content":"hi"},{"type":"item_reference","id":"remote"}]`,
+	} {
+		_, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, []byte(`{"input":`+input+`}`), []byte(rejection))
+		require.NoError(t, err)
+		require.False(t, changed, input)
+	}
+	// The identifying phrase is matched as a substring, so the repair must
+	// survive the wording drift the upstream has already shown once: a dropped
+	// trailing period, a renamed backend, or extra leading text.
+	for _, errorBody := range []string{
+		strings.Replace(rejection, "by rustponsesapi.", "by rustponsesapi", 1),
+		strings.Replace(rejection, "rustponsesapi", "some-other-backend", 1),
+		strings.Replace(rejection, "Supplied input item IDs", "Request rejected: supplied input item IDs", 1),
+	} {
+		_, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, []byte(body), []byte(errorBody))
+		require.NoError(t, err)
+		require.True(t, changed, errorBody)
+	}
+	for _, errorBody := range []string{
+		strings.Replace(rejection, "unsupported_parameter", "invalid_request_error", 1),
+		strings.Replace(rejection, `"type":"invalid_request_error"`, `"param":"tools","type":"invalid_request_error"`, 1),
+		// Dropping the identifying phrase must stop the repair even though the
+		// rest of the sentence, and the backend name, still match.
+		strings.Replace(rejection, "persisted-item lookup", "an unrelated lookup", 1),
+	} {
+		_, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, []byte(body), []byte(errorBody))
+		require.NoError(t, err)
+		require.False(t, changed, errorBody)
+	}
+	_, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusInternalServerError, []byte(body), []byte(rejection))
+	require.NoError(t, err)
+	require.False(t, changed)
+}
+
+// The decline reason is the only signal that separates "the repair was offered
+// and refused" from "the rejection never arrived"; pin its wording so the log
+// stays greppable and keeps naming the item that blocked the repair.
+func TestNormalizeOpenAIResponsesStatelessMissingItem(t *testing.T) {
+	const rejection = `{"type":"error","status":404,"error":{"code":"error","type":"invalid_request_error","message":"Item with id 'rs_MixedCase' not found. Items are not persisted when store is set to false."}}`
+	const body = `{"store":false,"input":[{"type":"reasoning","id":"rs_MixedCase","summary":[],"encrypted_content":"cipher"},{"type":"function_call","id":"fc_keep","call_id":"pair","name":"test","arguments":"{}"}]}`
+	for _, event := range []string{rejection, `{"type":"response.failed","response":{"error":` + gjson.Get(rejection, "error").Raw + `}}`} {
+		retry, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusNotFound, []byte(body), []byte(event))
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.False(t, gjson.GetBytes(retry, "input.0.id").Exists())
+		require.Equal(t, "cipher", gjson.GetBytes(retry, "input.0.encrypted_content").String())
+		require.Equal(t, "fc_keep", gjson.GetBytes(retry, "input.1.id").String(), "only the explicitly rejected item is repaired")
+		require.Equal(t, "pair", gjson.GetBytes(retry, "input.1.call_id").String())
+	}
+	for _, input := range []string{`{"type":"item_reference","id":"rs_MixedCase"}`, `{"type":"reasoning","id":"rs_MixedCase","summary":[]}`} {
+		_, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusNotFound, []byte(`{"input":[`+input+`]}`), []byte(rejection))
+		require.NoError(t, err)
+		require.False(t, changed, "missing content is not repaired by deleting history")
+	}
+	_, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusNotFound, []byte(body), []byte(`{"error":{"message":"Item with id 'rs_MixedCase' not found."}}`))
+	require.NoError(t, err)
+	require.False(t, changed, "a general 404 does not permit rewriting input")
+}
+
+func TestOpenAIResponsesAgentMessageLookupRepairPreservesCapturedHistory(t *testing.T) {
+	_, history := cloudCatalogHistoryFixture(t)
+	plain, err := json.Marshal(history["agent_message/plain"])
+	require.NoError(t, err)
+	body := []byte(`{"type":"response.create","previous_response_id":"resp_keep","input":[` + string(plain) + `]}`)
+	rejection := []byte(`{"error":{"code":"unsupported_parameter","message":"Supplied input item IDs require persisted-item lookup that is not supported."}}`)
+	for _, envelope := range [][]byte{rejection, []byte(`{"type":"response.failed","response":{"error":` + gjson.GetBytes(rejection, "error").Raw + `}}`)} {
+		retry, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, envelope)
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Equal(t, "resp_keep", gjson.GetBytes(retry, "previous_response_id").String())
+		require.False(t, gjson.GetBytes(retry, "input.0.id").Exists())
+		for _, field := range []string{"type", "author", "recipient", "content", "internal_chat_message_metadata_passthrough"} {
+			require.Equal(t, gjson.GetBytes(body, "input.0."+field).Raw, gjson.GetBytes(retry, "input.0."+field).Raw, field)
+		}
+	}
+	for _, item := range []string{
+		`{"type":"agent_message","id":"amsg_x","content":[{"type":"input_text","text":"ready"}]}`,
+		`{"type":"agent_message","id":"amsg_x","author":"worker","recipient":3,"content":[{"type":"input_text","text":"ready"}]}`,
+		`{"type":"agent_message","id":"amsg_x","author":"worker","recipient":"root","content":null}`,
+		`{"type":"agent_message","id":"amsg_x","author":"worker","recipient":"root","content":[]}`,
+		`{"type":"agent_message","id":"amsg_x","author":"worker","recipient":"root","content":[{"type":"input_text","text":4}]}`,
+		`{"type":"agent_message","id":"amsg_x","author":"worker","recipient":"root","content":[{"type":"input_text","text":"ready","file_id":"remote"}]}`,
+		`{"type":"agent_message","id":"amsg_x","author":"worker","recipient":"root","content":[{"type":"encrypted_content","encrypted_content":"task"}]}`,
+		`{"type":"agent_message","id":"amsg_x","author":"worker","recipient":"root","content":[{"type":"input_text","text":"ready"},{"type":"encrypted_content","encrypted_content":"task"}]}`,
+	} {
+		original := []byte(`{"input":[` + item + `]}`)
+		unchanged, changed, reason, err := removeOpenAIResponsesSelfContainedItemIDs(original)
+		require.NoError(t, err)
+		require.False(t, changed, item)
+		require.Contains(t, reason, "incomplete agent_message")
+		require.Equal(t, original, unchanged)
+	}
+}
+
+func TestRemoveOpenAIResponsesSelfContainedItemIDsExplainsDeclines(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		body  string
+		equal string
+	}{
+		{"item reference", `{"input":[{"type":"item_reference","id":"msg_remote"}]}`, "item_reference at input[0]"},
+		{"reference after a repairable item", `{"input":[{"type":"message","id":"msg_1","role":"user","content":"hi"},{"type":"item_reference","id":"remote"}]}`, "item_reference at input[1]"},
+		{"unsupported type", `{"input":[{"type":"web_search_call","id":"ws_1","status":"completed"}]}`, `unsupported item type "web_search_call" at input[0]`},
+		{"incomplete reasoning", `{"input":[{"type":"reasoning","id":"rs_1","summary":[]}]}`, "incomplete reasoning at input[0]"},
+		{"incomplete message", `{"input":[{"type":"message","id":"msg_1"}]}`, "incomplete message at input[0]"},
+		{"untyped incomplete message", `{"input":[{"id":"msg_1"}]}`, "incomplete message at input[0]"},
+		{"incomplete function call", `{"input":[{"type":"function_call","id":"fc_1","name":"lookup","arguments":"{}"}]}`, "incomplete function_call at input[0]"},
+		{"nothing to remove", `{"input":[{"type":"message","role":"user","content":"hi"}]}`, "no input item ids to remove"},
+		{"input is not an array", `{"input":"plain text"}`, "input is not an array"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, changed, declineReason, err := removeOpenAIResponsesSelfContainedItemIDs([]byte(tt.body))
+			require.NoError(t, err)
+			require.False(t, changed)
+			require.Equal(t, tt.equal, declineReason)
+		})
+	}
+
+	_, changed, declineReason, err := removeOpenAIResponsesSelfContainedItemIDs(
+		[]byte(`{"input":[{"type":"message","id":"msg_1","role":"user","content":"hi"}]}`),
+	)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Empty(t, declineReason, "a successful repair must not report a decline")
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRepairsAutomationMissingRootType(t *testing.T) {
+	body := []byte(`{"tools":[{"type":"function","name":"automation_update","parameters":{"oneOf":[{"type":"object"},{"type":"object","properties":{}}]}}]}`)
+	responseBody := []byte(`{"error":{"code":"invalid_function_parameters","message":"Invalid schema for function 'automation_update': got 'type: \"None\"'.","param":"tools[0].parameters"}}`)
+
+	retryBody, reason, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody)
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "tool parameter root type rejection", reason)
+	require.Equal(t, "object", gjson.GetBytes(retryBody, "tools.0.parameters.type").String())
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyDoesNotGuessAutomationRootType(t *testing.T) {
+	body := []byte(`{"tools":[{"type":"function","name":"automation_update","parameters":{"oneOf":[{"type":"object"}]}}]}`)
+	tests := []string{
+		`{"error":{"code":"invalid_function_parameters","message":"got type: \"None\"","param":"metadata.parameters"}}`,
+		`{"error":{"code":"invalid_request_error","message":"got type: \"None\"","param":"tools[0].parameters"}}`,
+		`{"error":{"code":"invalid_function_parameters","message":"expected an object","param":"tools[0].parameters"}}`,
+	}
+	for _, response := range tests {
+		retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, []byte(response))
+		require.NoError(t, err)
+		require.False(t, changed)
+		require.Nil(t, retryBody)
+	}
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyFindsNamespacePathInMessage(t *testing.T) {
+	body := []byte(`{"input":[{"type":"function_call","namespace":"keep","arguments":"{}"},{"type":"function_call","namespace":"remove","arguments":"{}"}]}`)
+	responseBody := []byte(`{"error":{"code":"unknown_parameter","message":"input[0] was accepted; Unknown parameter: 'input[1].namespace'."}}`)
+
+	retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody)
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "keep", gjson.GetBytes(retryBody, "input.0.namespace").String())
+	require.False(t, gjson.GetBytes(retryBody, "input.1.namespace").Exists())
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyBindsNamespacePathToRejectionPhrase(t *testing.T) {
+	body := []byte(`{"input":[{"type":"function_call","namespace":"keep","arguments":"{}"},{"type":"function_call","namespace":"remove","arguments":"{}"}]}`)
+	responseBody := []byte(`{"error":{"code":"unknown_parameter","message":"input[0].namespace is supported; Unknown parameter: input[1].namespace."}}`)
+
+	retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody)
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "keep", gjson.GetBytes(retryBody, "input.0.namespace").String())
+	require.False(t, gjson.GetBytes(retryBody, "input.1.namespace").Exists())
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyDoesNotTreatMaxOutputTokensSuggestionAsRejection(t *testing.T) {
+	body := []byte(`{"max_tokens":4096,"max_output_tokens":2048}`)
+	responseBody := []byte(`{"error":{"code":"unknown_parameter","message":"Unknown parameter: max_tokens. Use max_output_tokens instead."}}`)
+
+	retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody)
+
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Nil(t, retryBody)
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyBindsMaxOutputTokensToRejectionPhrase(t *testing.T) {
+	body := []byte(`{"max_output_tokens":2048}`)
+	responseBody := []byte(`{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: max_output_tokens."}}`)
+
+	retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody)
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.False(t, gjson.GetBytes(retryBody, "max_output_tokens").Exists())
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRemovesExactIndexedStatus(t *testing.T) {
+	body := []byte(`{"input":[{"type":"message","status":"keep","content":"one"},{"type":"reasoning","status":"remove","summary":[]}]}`)
+	responses := []struct {
+		name string
+		body []byte
+	}{
+		{
+			name: "structured param",
+			body: []byte(`{"error":{"code":"unknown_parameter","message":"Unknown parameter: 'input[1].status'.","param":"input[1].status"}}`),
+		},
+		{
+			name: "message param",
+			body: []byte(`{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: input[1].status."}}`),
+		},
+	}
+	for _, tt := range responses {
+		t.Run(tt.name, func(t *testing.T) {
+			retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, tt.body)
+			require.NoError(t, err)
+			require.True(t, changed)
+			require.Equal(t, "keep", gjson.GetBytes(retryBody, "input.0.status").String())
+			require.False(t, gjson.GetBytes(retryBody, "input.1.status").Exists())
+		})
+	}
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyNormalizesExactNullContent(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       []byte
+		wantChange bool
+		wantValue  string
+		wantExists bool
+	}{
+		{
+			name:       "message becomes empty string",
+			body:       []byte(`{"input":[{"type":"message","role":"assistant","content":null}]}`),
+			wantChange: true,
+			wantValue:  "",
+			wantExists: true,
+		},
+		{
+			name:       "reasoning content is removed",
+			body:       []byte(`{"input":[{"type":"reasoning","content":null,"summary":[]}]}`),
+			wantChange: true,
+			wantExists: false,
+		},
+		{
+			name:       "unknown item is unchanged",
+			body:       []byte(`{"input":[{"type":"future_item","content":null}]}`),
+			wantChange: false,
+		},
+		{
+			name:       "non null content is unchanged",
+			body:       []byte(`{"input":[{"type":"message","content":"keep"}]}`),
+			wantChange: false,
+		},
+	}
+	responseBody := []byte(`{"error":{"code":"invalid_type","message":"Invalid type for 'input[0].content': expected one of a string or a list of input items, but got null instead.","param":"input[0].content"}}`)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, tt.body, responseBody)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantChange, changed)
+			if !tt.wantChange {
+				require.Nil(t, retryBody)
+				return
+			}
+			content := gjson.GetBytes(retryBody, "input.0.content")
+			require.Equal(t, tt.wantExists, content.Exists())
+			if tt.wantExists {
+				require.Equal(t, tt.wantValue, content.String())
+				require.Equal(t, gjson.String, content.Type)
+			}
+		})
+	}
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRemovesExactReasoningContentAboveMaximumZero(t *testing.T) {
+	body := []byte(`{"input":[{"type":"reasoning","content":[{"type":"reasoning_text","text":"remove"}],"summary":[]},{"type":"message","content":[{"type":"input_text","text":"keep"}]}]}`)
+	responseBody := []byte(`{"error":{"code":"array_above_max_length","message":"Invalid 'input[0].content': array too long. Expected an array with maximum length 0, but got an array with length 1 instead.","param":"input[0].content","type":"invalid_request_error"}}`)
+
+	retryBody, reason, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody)
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "indexed reasoning content maximum-length rejection", reason)
+	require.False(t, gjson.GetBytes(retryBody, "input.0.content").Exists())
+	require.Equal(t, "keep", gjson.GetBytes(retryBody, "input.1.content.0.text").String())
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRejectsUnsafeReasoningMaximumZeroMutations(t *testing.T) {
+	tests := []struct {
+		name         string
+		body         []byte
+		responseBody []byte
+	}{
+		{
+			name:         "message content is not reasoning",
+			body:         []byte(`{"input":[{"type":"message","content":[{"type":"input_text","text":"keep"}]}]}`),
+			responseBody: []byte(`{"error":{"code":"array_above_max_length","message":"Invalid 'input[0].content': array too long. Expected an array with maximum length 0, but got an array with length 1 instead.","param":"input[0].content"}}`),
+		},
+		{
+			name:         "structured param and message disagree",
+			body:         []byte(`{"input":[{"type":"reasoning","content":[{"text":"keep"}]},{"type":"reasoning","content":[{"text":"keep too"}]}]}`),
+			responseBody: []byte(`{"error":{"code":"array_above_max_length","message":"Invalid 'input[1].content': array too long. Expected an array with maximum length 0, but got an array with length 1 instead.","param":"input[0].content"}}`),
+		},
+		{
+			name:         "different error code",
+			body:         []byte(`{"input":[{"type":"reasoning","content":[{"text":"keep"}]}]}`),
+			responseBody: []byte(`{"error":{"code":"invalid_request_error","message":"Invalid 'input[0].content': array too long. Expected an array with maximum length 0, but got an array with length 1 instead.","param":"input[0].content"}}`),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, tt.body, tt.responseBody)
+			require.NoError(t, err)
+			require.False(t, changed)
+			require.Nil(t, retryBody)
+		})
+	}
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRemovesExplicitlyRejectedTopLevelTruncation(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.5","truncation":"auto","input":"keep"}`)
+	responses := [][]byte{
+		[]byte(`{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: 'truncation'.","param":"truncation"}}`),
+		[]byte(`{"error":{"code":"unknown_parameter","message":"Unknown parameter: truncation."}}`),
+	}
+	for _, responseBody := range responses {
+		retryBody, reason, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody)
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Equal(t, "truncation parameter rejection", reason)
+		require.False(t, gjson.GetBytes(retryBody, "truncation").Exists())
+		require.Equal(t, "keep", gjson.GetBytes(retryBody, "input").String())
+	}
+}
+
+func TestOpenAIGatewayService_APIKeyRetriesExplicitlyRejectedTopLevelTruncation(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.5","stream":false,"truncation":"auto","input":"keep"}`)
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, `{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: 'truncation'.","param":"truncation"}}`),
+		newOpenAIRejectedFieldTestResponse(http.StatusOK, `{"output":[],"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`),
+	}}
+
+	result, err := newOpenAIRejectedFieldTestService(upstream).Forward(
+		context.Background(), newOpenAIRejectedFieldTestContext(body), newOpenAIRejectedFieldTestAccount(), body,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.bodies, 2)
+	require.Equal(t, "auto", gjson.GetBytes(upstream.bodies[0], "truncation").String())
+	require.False(t, gjson.GetBytes(upstream.bodies[1], "truncation").Exists())
+	require.Equal(t, "keep", gjson.GetBytes(upstream.bodies[1], "input").String())
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRejectsUnsafeIndexedMutations(t *testing.T) {
+	tests := []struct {
+		name         string
+		body         []byte
+		responseBody []byte
+	}{
+		{
+			name:         "nested status path",
+			body:         []byte(`{"input":[{"type":"message","content":{"status":"keep"}}]}`),
+			responseBody: []byte(`{"error":{"code":"unknown_parameter","message":"Unknown parameter: input[0].content.status.","param":"input[0].content.status"}}`),
+		},
+		{
+			name:         "status index out of bounds",
+			body:         []byte(`{"input":[{"type":"message","status":"keep"}]}`),
+			responseBody: []byte(`{"error":{"code":"unknown_parameter","message":"Unknown parameter: input[4].status.","param":"input[4].status"}}`),
+		},
+		{
+			name:         "status path only mentioned",
+			body:         []byte(`{"input":[{"type":"message","status":"keep"}]}`),
+			responseBody: []byte(`{"error":{"code":"invalid_request_error","message":"input[0].status must be completed","param":"input[0].status"}}`),
+		},
+		{
+			name:         "content param and message disagree",
+			body:         []byte(`{"input":[{"type":"message","content":null},{"type":"message","content":null}]}`),
+			responseBody: []byte(`{"error":{"code":"invalid_type","message":"Invalid type for input[1].content: got null instead.","param":"input[0].content"}}`),
+		},
+		{
+			name:         "content error only mentions null",
+			body:         []byte(`{"input":[{"type":"message","content":null}]}`),
+			responseBody: []byte(`{"error":{"code":"invalid_type","message":"content cannot be null","param":"input[0].content"}}`),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, tt.body, tt.responseBody)
+			require.NoError(t, err)
+			require.False(t, changed)
+			require.Nil(t, retryBody)
+		})
+	}
+}
+
+func TestOpenAIGatewayService_OAuthRetriesExactRejectedStatus(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.5","stream":true,"instructions":"test","input":[{"type":"message","role":"user","status":"completed","content":"hello"}]}`)
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, `{"error":{"code":"unknown_parameter","message":"Unknown parameter: 'input[0].status'.","param":"input[0].status"}}`),
+		newOpenAIRejectedFieldTestResponse(http.StatusOK, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_ok\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\ndata: [DONE]\n\n"),
+	}}
+	upstream.responses[1].Header.Set("Content-Type", "text/event-stream")
+
+	result, err := newOpenAIRejectedFieldTestService(upstream).Forward(
+		context.Background(), newOpenAIRejectedFieldTestContext(body), newOpenAIOAuthNamespaceTestAccount(), body,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.bodies, 2)
+	require.Equal(t, "completed", gjson.GetBytes(upstream.bodies[0], "input.0.status").String())
+	require.False(t, gjson.GetBytes(upstream.bodies[1], "input.0.status").Exists())
+}
+
+func TestOpenAIGatewayService_APIKeyRetriesExactRejectedNullMessageContent(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.5","stream":false,"input":[{"type":"message","role":"assistant","content":null},{"type":"message","role":"user","content":"continue"}]}`)
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, `{"error":{"code":"invalid_type","message":"Invalid type for 'input[0].content': expected one of a string or a list of input items, but got null instead.","param":"input[0].content"}}`),
+		newOpenAIRejectedFieldTestResponse(http.StatusOK, `{"output":[],"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`),
+	}}
+
+	result, err := newOpenAIRejectedFieldTestService(upstream).Forward(
+		context.Background(), newOpenAIRejectedFieldTestContext(body), newOpenAIRejectedFieldTestAccount(), body,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.bodies, 2)
+	require.Equal(t, gjson.Null, gjson.GetBytes(upstream.bodies[0], "input.0.content").Type)
+	require.Equal(t, gjson.String, gjson.GetBytes(upstream.bodies[1], "input.0.content").Type)
+	require.Equal(t, "continue", gjson.GetBytes(upstream.bodies[1], "input.1.content").String())
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRemovesModelRejectedPromptCacheBreakpoint(t *testing.T) {
+	tests := []struct {
+		name         string
+		body         []byte
+		responseBody []byte
+		removedPath  string
+		preserved    string
+		reason       string
+	}{
+		{
+			name:         "top level",
+			body:         []byte(`{"model":"gpt-5.6-sol","prompt_cache_breakpoint":{"type":"message_start"},"input":"hello"}`),
+			responseBody: []byte(`{"error":{"code":"invalid_parameter","message":"prompt_cache_breakpoint is not supported on this model","param":"prompt_cache_breakpoint"}}`),
+			removedPath:  "prompt_cache_breakpoint",
+			preserved:    "input",
+			reason:       "prompt_cache_breakpoint parameter rejection",
+		},
+		{
+			name:         "indexed path from message",
+			body:         []byte(`{"input":[{"type":"message","prompt_cache_breakpoint":{"type":"message_start"}},{"type":"message","prompt_cache_breakpoint":{"type":"message_end"}}]}`),
+			responseBody: []byte(`{"error":{"code":"invalid_parameter","message":"input[1].prompt_cache_breakpoint is not supported on this model"}}`),
+			removedPath:  "input.1.prompt_cache_breakpoint",
+			preserved:    "input.0.prompt_cache_breakpoint",
+			reason:       "indexed prompt_cache_breakpoint parameter rejection",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			retryBody, reason, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, tt.body, tt.responseBody)
+
+			require.NoError(t, err)
+			require.True(t, changed)
+			require.Equal(t, tt.reason, reason)
+			require.False(t, gjson.GetBytes(retryBody, tt.removedPath).Exists())
+			require.True(t, gjson.GetBytes(retryBody, tt.preserved).Exists())
+		})
+	}
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRejectsAmbiguousPromptCacheBreakpointErrors(t *testing.T) {
+	body := []byte(`{"prompt_cache_breakpoint":{"type":"message_start"},"input":[{"type":"message","prompt_cache_breakpoint":{"type":"message_end"}}]}`)
+	tests := []struct {
+		name         string
+		responseBody []byte
+	}{
+		{
+			name:         "structured param disagrees",
+			responseBody: []byte(`{"error":{"code":"invalid_parameter","message":"input[0].prompt_cache_breakpoint is not supported on this model","param":"prompt_cache_breakpoint"}}`),
+		},
+		{
+			name:         "index out of bounds",
+			responseBody: []byte(`{"error":{"code":"invalid_parameter","message":"input[4].prompt_cache_breakpoint is not supported on this model","param":"input[4].prompt_cache_breakpoint"}}`),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, tt.responseBody)
+
+			require.NoError(t, err)
+			require.False(t, changed)
+			require.Nil(t, retryBody)
+		})
+	}
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyAcceptsEitherCacheModelRejectionSignal(t *testing.T) {
+	tests := []struct {
+		name         string
+		responseBody []byte
+	}{
+		{
+			name:         "invalid parameter code",
+			responseBody: []byte(`{"error":{"code":"invalid_parameter","message":"This optional cache hint cannot be used here","param":"prompt_cache_breakpoint"}}`),
+		},
+		{
+			name:         "model rejection message",
+			responseBody: []byte(`{"error":{"code":"invalid_request_error","message":"prompt_cache_breakpoint is not supported on this model","param":"prompt_cache_breakpoint"}}`),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, []byte(`{"prompt_cache_breakpoint":true,"input":"keep"}`), tt.responseBody)
+
+			require.NoError(t, err)
+			require.True(t, changed)
+			require.False(t, gjson.GetBytes(retryBody, "prompt_cache_breakpoint").Exists())
+			require.Equal(t, "keep", gjson.GetBytes(retryBody, "input").String())
+		})
+	}
+}
+
+func TestOpenAIResponsesRejectedFieldRetryStateAllowsPromptCacheBreakpointVariantOnce(t *testing.T) {
+	body := []byte(`{"input":[{"prompt_cache_breakpoint":{"type":"message_start"}}]}`)
+	responseBody := []byte(`{"error":{"code":"invalid_parameter","message":"input[0].prompt_cache_breakpoint is not supported on this model","param":"input[0].prompt_cache_breakpoint"}}`)
+	state := newOpenAIResponsesRejectedFieldRetryState(body)
+
+	retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.True(t, state.Allow(retryBody))
+	require.False(t, state.Allow(retryBody))
+}
+
+func TestOpenAIGatewayService_APIKeyStripsAllIndexedNamespacesBeforeFirstForward(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.5","stream":false,"input":[{"type":"function_call","name":"first","namespace":"remove-first","arguments":"{}"},{"type":"custom_tool_call","name":"second","namespace":"remove-second","input":"{}"}]}`)
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		newOpenAIRejectedFieldTestResponse(http.StatusOK, `{"output":[],"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`),
+	}}
+
+	result, err := newOpenAIRejectedFieldTestService(upstream).Forward(
+		context.Background(),
+		newOpenAIRejectedFieldTestContext(body),
+		newOpenAIRejectedFieldTestAccount(),
+		body,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.bodies, 1)
+	require.False(t, gjson.GetBytes(upstream.bodies[0], "input.0.namespace").Exists())
+	require.False(t, gjson.GetBytes(upstream.bodies[0], "input.1.namespace").Exists())
+}
+
+func TestOpenAIGatewayServiceProactivelyStripsCrossProviderReasoningContent(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.5","stream":false,"store":true,"input":[` +
+		`{"type":"message","role":"user","content":"one"},` +
+		`{"type":"message","role":"assistant","content":"two"},` +
+		`{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"},` +
+		`{"type":"function_call_output","call_id":"call_1","output":"ok"},` +
+		`{"type":"message","role":"user","content":"five"},` +
+		`{"type":"reasoning","summary":[{"type":"summary_text","text":"keep"}],"content":[{"type":"reasoning_text","text":"remove"}]}` +
+		`]}`)
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		newOpenAIRejectedFieldTestResponse(http.StatusOK, `{"output":[],"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`),
+	}}
+
+	result, err := newOpenAIRejectedFieldTestService(upstream).Forward(
+		context.Background(),
+		newOpenAIRejectedFieldTestContext(body),
+		newOpenAIRejectedFieldTestAccount(),
+		body,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.bodies, 1, "reasoning content should be normalized before the first upstream request")
+	require.Equal(t, "reasoning", gjson.GetBytes(upstream.bodies[0], "input.5.type").String())
+	require.False(t, gjson.GetBytes(upstream.bodies[0], "input.5.content").Exists())
+	require.Equal(t, "keep", gjson.GetBytes(upstream.bodies[0], "input.5.summary.0.text").String())
+}
+
+func TestOpenAIGatewayService_OpenAIHTTPStripsInputNamespacesBeforeFirstForward(t *testing.T) {
+	accounts := []struct {
+		name    string
+		account *Account
+	}{
+		{name: "oauth", account: newOpenAIOAuthNamespaceTestAccount()},
+		{name: "apikey", account: newOpenAIRejectedFieldTestAccount()},
+	}
+	for _, tt := range accounts {
+		for _, path := range []string{"/v1/responses", "/v1/responses/compact"} {
+			t.Run(tt.name+path, func(t *testing.T) {
+				body := []byte(`{"model":"gpt-5.5","stream":false,"instructions":"test","input":[{"type":"message","role":"user","namespace":"remove","content":[{"type":"input_text","text":"hello","namespace":"nested-keep"}]}]}`)
+				upstream := &httpUpstreamRecorder{responses: []*http.Response{
+					newOpenAIRejectedFieldTestResponse(http.StatusOK, `{"id":"resp_namespace_ok","output":[],"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`),
+				}}
+				c := newOpenAIRejectedFieldTestContext(body)
+				c.Request.URL.Path = path
+
+				result, err := newOpenAIRejectedFieldTestService(upstream).Forward(
+					context.Background(),
+					c,
+					tt.account,
+					body,
+				)
+
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				require.Len(t, upstream.bodies, 1, "namespace must be removed before the first upstream request")
+				require.False(t, gjson.GetBytes(upstream.bodies[0], "input.0.namespace").Exists())
+				require.Equal(t, "nested-keep", gjson.GetBytes(upstream.bodies[0], "input.0.content.0.namespace").String())
+			})
+		}
+	}
+}
+
+func TestOpenAIGatewayService_RetriesExplicitMaxOutputTokensRejection(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.5","stream":false,"max_output_tokens":4096,"input":[{"type":"message","role":"user","content":{"max_output_tokens":"keep"}}]}`)
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, `{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: max_output_tokens","param":"max_output_tokens","type":"invalid_request_error"}}`),
+		newOpenAIRejectedFieldTestResponse(http.StatusOK, `{"output":[],"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`),
+	}}
+
+	result, err := newOpenAIRejectedFieldTestService(upstream).Forward(
+		context.Background(),
+		newOpenAIRejectedFieldTestContext(body),
+		newOpenAIRejectedFieldTestAccount(),
+		body,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.bodies, 2)
+	require.Equal(t, int64(4096), gjson.GetBytes(upstream.bodies[0], "max_output_tokens").Int())
+	require.False(t, gjson.GetBytes(upstream.bodies[1], "max_output_tokens").Exists())
+	require.Equal(t, "keep", gjson.GetBytes(upstream.bodies[1], "input.0.content.max_output_tokens").String())
+}
+
+func TestOpenAIGatewayService_ComposesProactiveNamespaceStripWithRejectedFieldRetry(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.5","stream":false,"max_output_tokens":2048,"input":[{"type":"function_call","name":"first","namespace":"remove-first","arguments":"{}"},{"type":"custom_tool_call","name":"second","namespace":"remove-second","input":"{}"}]}`)
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, `{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: max_output_tokens","param":"max_output_tokens"}}`),
+		newOpenAIRejectedFieldTestResponse(http.StatusOK, `{"output":[],"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`),
+	}}
+
+	result, err := newOpenAIRejectedFieldTestService(upstream).Forward(
+		context.Background(),
+		newOpenAIRejectedFieldTestContext(body),
+		newOpenAIRejectedFieldTestAccount(),
+		body,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.bodies, 2)
+	for _, forwardedBody := range upstream.bodies {
+		require.False(t, gjson.GetBytes(forwardedBody, "input.0.namespace").Exists())
+		require.False(t, gjson.GetBytes(forwardedBody, "input.1.namespace").Exists())
+	}
+	require.Equal(t, int64(2048), gjson.GetBytes(upstream.bodies[0], "max_output_tokens").Int())
+	require.False(t, gjson.GetBytes(upstream.bodies[1], "max_output_tokens").Exists())
+}
+
+func newOpenAIRejectedFieldTestService(upstream *httpUpstreamRecorder) *OpenAIGatewayService {
+	return &OpenAIGatewayService{
+		cfg: &config.Config{Security: config.SecurityConfig{
+			URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+		}},
+		httpUpstream: upstream,
+	}
+}
+
+func newOpenAIRejectedFieldTestContext(body []byte) *gin.Context {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("User-Agent", "curl/8.0")
+	return c
+}
+
+func newOpenAIRejectedFieldTestAccount() *Account {
+	return &Account{
+		ID:          5107,
+		Name:        "responses-compatible",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "sk-test",
+			"base_url": "https://compat.example",
+		},
+		Extra: map[string]any{
+			openai_compat.ExtraKeyResponsesMode:      string(openai_compat.ResponsesSupportModeAuto),
+			openai_compat.ExtraKeyResponsesSupported: true,
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+}
+
+func newOpenAIOAuthNamespaceTestAccount() *Account {
+	return &Account{
+		ID:          5108,
+		Name:        "openai-oauth-namespace",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token":       "oauth-token",
+			"chatgpt_account_id": "chatgpt-account",
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+}
+
+func newOpenAIRejectedFieldTestResponse(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+// A replayed conversation carries many items of the same type, each with a
+// status the upstream schema rejects. One rejection must clear all of them:
+// clearing one index per round trip exhausts the bounded retry budget.
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyClearsStatusForWholeType(t *testing.T) {
+	input := make([]string, 0, 12)
+	for i := 0; i < 10; i++ {
+		input = append(input, `{"type":"tool_search_output","status":"completed","call_id":"call_`+strconv.Itoa(i)+`","tools":[]}`)
+	}
+	input = append(input, `{"type":"message","role":"user","status":"completed","content":"hi"}`)
+	body := []byte(`{"input":[` + strings.Join(input, ",") + `]}`)
+
+	responseBody := []byte(`{"error":{"code":"unknown_parameter","message":"Unknown parameter: 'input[7].status'.","param":"input[7].status"}}`)
+	retryBody, reason, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.NotEmpty(t, reason)
+
+	for i := 0; i < 10; i++ {
+		require.False(t, gjson.GetBytes(retryBody, "input."+strconv.Itoa(i)+".status").Exists(),
+			"every tool_search_output must lose its status in a single retry, index %d did not", i)
+		require.Equal(t, "call_"+strconv.Itoa(i), gjson.GetBytes(retryBody, "input."+strconv.Itoa(i)+".call_id").String(),
+			"unrelated fields must survive")
+	}
+	require.Equal(t, "completed", gjson.GetBytes(retryBody, "input.10.status").String(),
+		"a different item type keeps its status: the rejection only proves this type has none")
+}
+
+// The rejected item may carry no type to match on.
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyClearsUntypedStatusAtIndexOnly(t *testing.T) {
+	body := []byte(`{"input":[{"status":"keep_a"},{"status":"remove"}]}`)
+	responseBody := []byte(`{"error":{"code":"unknown_parameter","message":"Unknown parameter: 'input[1].status'.","param":"input[1].status"}}`)
+
+	retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "keep_a", gjson.GetBytes(retryBody, "input.0.status").String())
+	require.False(t, gjson.GetBytes(retryBody, "input.1.status").Exists())
+}
+
+// The gateway's own cached-only web_search declaration (external_web_access:false)
+// is removed when the rustponsesapi backend refuses hosted-tool metering; a
+// caller-declared hosted search is never dropped silently.
+func TestNormalizeOpenAIResponsesRejectedHostedWebSearchMetering(t *testing.T) {
+	const rejection = `{"error":{"message":"Hosted tool 'web_search' requires authorization and metering that are not supported by rustponsesapi.","type":"invalid_request_error","param":"tools","code":"unsupported_parameter"}}`
+	const rejectionNoParam = `{"error":{"code":"unsupported_parameter","message":"Hosted tool 'web_search' requires authorization and metering that are not supported by rustponsesapi.","type":"invalid_request_error"}}`
+	t.Run("injected declaration alone is removed with its tool_choice pin", func(t *testing.T) {
+		body := []byte(`{"input":[{"type":"web_search_call","id":"ws_1","status":"completed"},{"role":"user","content":"again"}],"tools":[{"type":"web_search","external_web_access":false}],"tool_choice":"none"}`)
+		retryBody, reason, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, []byte(rejection), true)
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Equal(t, "hosted web_search metering rejection", reason)
+		require.False(t, gjson.GetBytes(retryBody, "tools").Exists())
+		require.False(t, gjson.GetBytes(retryBody, "tool_choice").Exists())
+		require.Equal(t, int64(2), gjson.GetBytes(retryBody, "input.#").Int(), "history is untouched")
+	})
+	t.Run("injected declaration next to caller tools keeps the caller tools", func(t *testing.T) {
+		body := []byte(`{"input":"x","tools":[{"type":"function","name":"shell","parameters":{"type":"object"}},{"type":"web_search","external_web_access":false}],"tool_choice":"auto"}`)
+		retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, []byte(rejectionNoParam), true)
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Equal(t, int64(1), gjson.GetBytes(retryBody, "tools.#").Int())
+		require.Equal(t, "shell", gjson.GetBytes(retryBody, "tools.0.name").String())
+		require.Equal(t, "auto", gjson.GetBytes(retryBody, "tool_choice").String())
+	})
+	t.Run("caller declared hosted search is not removed", func(t *testing.T) {
+		for _, body := range []string{
+			`{"input":"x","tools":[{"type":"web_search","external_web_access":false}],"tool_choice":"auto"}`,
+			`{"input":"x","tools":[{"type":"web_search"}],"tool_choice":"auto"}`,
+			`{"input":"x","tools":[{"type":"web_search","external_web_access":true}]}`,
+			`{"input":"x","tools":[{"type":"web_search_preview","search_context_size":"low"}]}`,
+		} {
+			retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, []byte(body), []byte(rejection))
+			require.NoError(t, err)
+			require.False(t, changed, body)
+			require.Nil(t, retryBody)
+		}
+	})
+	t.Run("other unsupported_parameter messages do not touch tools", func(t *testing.T) {
+		body := []byte(`{"input":"x","tools":[{"type":"web_search","external_web_access":false}]}`)
+		retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, []byte(`{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: tools[0].filters","param":"tools","type":"invalid_request_error"}}`))
+		require.NoError(t, err)
+		require.False(t, changed)
+		require.Nil(t, retryBody)
+	})
+}

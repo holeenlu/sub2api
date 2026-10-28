@@ -1,0 +1,261 @@
+//go:build unit
+
+package repository
+
+import (
+	"context"
+	"database/sql"
+	"database/sql/driver"
+	"encoding/json"
+	"regexp"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/stretchr/testify/require"
+)
+
+var (
+	usageLogStaticInsertShapeRe = regexp.MustCompile(`(?s)INSERT INTO usage_logs \((.*?)\) VALUES \((.*?)\)`)
+	usageLogPlaceholderRe       = regexp.MustCompile(`\$(\d+)`)
+)
+
+// newSQLCapturingMock 返回把实际下发 SQL 记录到 captured 的 sqlmock；语句一律视为匹配，
+// 参数仍由 WithArgs 校验。
+func newSQLCapturingMock(t *testing.T, captured *[]string) (*sql.DB, sqlmock.Sqlmock) {
+	t.Helper()
+	matcher := sqlmock.QueryMatcherFunc(func(_, actualSQL string) error {
+		*captured = append(*captured, actualSQL)
+		return nil
+	})
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(matcher))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	return db, mock
+}
+
+// requireStaticInsertMatchesArgTypes 断言手写的 INSERT：列清单长度与 VALUES 占位符数量
+// 都等于 usageLogInsertArgTypes，且占位符恰为 $1..$N 各出现一次。
+func requireStaticInsertMatchesArgTypes(t *testing.T, query string) {
+	t.Helper()
+	m := usageLogStaticInsertShapeRe.FindStringSubmatch(query)
+	require.Len(t, m, 3, "unrecognised INSERT shape:\n%s", query)
+
+	want := len(usageLogInsertArgTypes)
+	columns := 0
+	for _, col := range strings.Split(m[1], ",") {
+		if strings.TrimSpace(col) != "" {
+			columns++
+		}
+	}
+	require.Equal(t, want, columns, "INSERT column list must match usageLogInsertArgTypes")
+	selected := strings.Split(usageLogSelectColumns, ", ")[1:]
+	for i, column := range strings.Split(m[1], ",") {
+		require.Equal(t, selected[i], strings.TrimSpace(column), "column %d", i)
+	}
+
+	seen := make(map[int]struct{}, want)
+	for _, ph := range usageLogPlaceholderRe.FindAllStringSubmatch(m[2], -1) {
+		n, err := strconv.Atoi(ph[1])
+		require.NoError(t, err)
+		_, dup := seen[n]
+		require.False(t, dup, "duplicate placeholder $%d", n)
+		seen[n] = struct{}{}
+	}
+	require.Len(t, seen, want, "VALUES placeholder count must match usageLogInsertArgTypes")
+	for i := 1; i <= want; i++ {
+		_, ok := seen[i]
+		require.True(t, ok, "missing placeholder $%d", i)
+	}
+}
+
+// TestUsageLogStaticInsertShape_PlaceholdersMatchArgTypes 覆盖两条不经占位符生成器、
+// 直接手写 $1..$N 的 INSERT 路径，防止加列后漏补占位符只在集成测试才暴露。
+func TestUsageLogStaticInsertShape_PlaceholdersMatchArgTypes(t *testing.T) {
+	upstreamRequestID := "20260902080329-oneapi"
+	log := &service.UsageLog{
+		UserID:                 1,
+		APIKeyID:               2,
+		AccountID:              3,
+		RequestID:              "client:insert-shape",
+		UpstreamRequestID:      &upstreamRequestID,
+		Model:                  "claude-3",
+		InputTokens:            10,
+		CacheCreationTokens:    34,
+		CacheCreation30mTokens: 13,
+		CacheCreation12hTokens: 21,
+		RequestType:            service.RequestTypeLive,
+		CreatedAt:              time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC),
+	}
+	prepared := prepareUsageLogInsert(log)
+	require.Equal(t, 34, prepared.args[13], "TTL counts are portions of the existing total")
+	require.Equal(t, []any{13, 21}, prepared.args[len(prepared.args)-3:len(prepared.args)-1])
+	require.Equal(t, []string{"integer", "integer"}, usageLogInsertArgTypes[len(usageLogInsertArgTypes)-3:len(usageLogInsertArgTypes)-1])
+	args := anySliceToDriverValues(prepared.args)
+
+	t.Run("createSingle", func(t *testing.T) {
+		var captured []string
+		db, mock := newSQLCapturingMock(t, &captured)
+		repo := &usageLogRepository{sql: db}
+
+		mock.ExpectQuery("INSERT INTO usage_logs").
+			WithArgs(args...).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(1), log.CreatedAt))
+
+		inserted, err := repo.Create(context.Background(), log)
+		require.NoError(t, err)
+		require.True(t, inserted)
+		require.NoError(t, mock.ExpectationsWereMet())
+		require.Len(t, captured, 1)
+		requireStaticInsertMatchesArgTypes(t, captured[0])
+	})
+
+	t.Run("execUsageLogInsertNoResult", func(t *testing.T) {
+		var captured []string
+		db, mock := newSQLCapturingMock(t, &captured)
+
+		mock.ExpectExec("INSERT INTO usage_logs").
+			WithArgs(args...).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+
+		require.NoError(t, execUsageLogInsertNoResult(context.Background(), db, prepared))
+		require.NoError(t, mock.ExpectationsWereMet())
+		require.Len(t, captured, 1)
+		requireStaticInsertMatchesArgTypes(t, captured[0])
+	})
+
+	t.Run("createSingle_conflict", func(t *testing.T) {
+		var captured []string
+		db, mock := newSQLCapturingMock(t, &captured)
+		repo := &usageLogRepository{sql: db}
+		mock.ExpectQuery("INSERT INTO usage_logs").WithArgs(args...).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}))
+		mock.ExpectQuery("SELECT id, created_at").WithArgs(log.RequestID, log.APIKeyID).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(1), log.CreatedAt))
+		inserted, err := repo.Create(context.Background(), log)
+		require.NoError(t, err)
+		require.False(t, inserted)
+		require.NoError(t, mock.ExpectationsWereMet())
+		require.Len(t, captured, 2)
+		requireStaticInsertMatchesArgTypes(t, captured[0])
+	})
+
+	t.Run("execUsageSettlementLog", func(t *testing.T) {
+		var captured []string
+		db, mock := newSQLCapturingMock(t, &captured)
+		mock.ExpectExec("INSERT INTO usage_logs").WithArgs(args...).WillReturnResult(sqlmock.NewResult(0, 1))
+		require.NoError(t, execUsageSettlementLog(context.Background(), db, prepared))
+		require.NoError(t, mock.ExpectationsWereMet())
+		require.Len(t, captured, 1)
+		requireStaticInsertMatchesArgTypes(t, captured[0])
+		require.Contains(t, captured[0], "cache_creation_30m_tokens=EXCLUDED.cache_creation_30m_tokens")
+		require.Contains(t, captured[0], "cache_creation_12h_tokens=EXCLUDED.cache_creation_12h_tokens")
+	})
+}
+
+// TestPrepareUsageLogInsert_UpstreamRequestIDArgWiring 把 upstream_request_id 钉在
+// session_id 之前，与参数类型表保持同位；缺失时落 NULL 而不是空串。
+func TestPrepareUsageLogInsert_UpstreamRequestIDArgWiring(t *testing.T) {
+	upstreamRequestID := "req_upstream_123"
+	prepared := prepareUsageLogInsert(&service.UsageLog{
+		UserID:            1,
+		APIKeyID:          2,
+		RequestID:         "client:wiring",
+		Model:             "gpt-5",
+		UpstreamRequestID: &upstreamRequestID,
+		CreatedAt:         time.Now().UTC(),
+	})
+	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
+
+	idx := len(prepared.args) - 8
+	arg, ok := prepared.args[idx].(sql.NullString)
+	require.True(t, ok, "upstream_request_id arg should be sql.NullString, got %T", prepared.args[idx])
+	require.True(t, arg.Valid)
+	require.Equal(t, upstreamRequestID, arg.String)
+	require.Equal(t, "text", usageLogInsertArgTypes[idx])
+
+	absent := prepareUsageLogInsert(&service.UsageLog{UserID: 1, APIKeyID: 2, RequestID: "client:absent", Model: "gpt-5", CreatedAt: time.Now().UTC()})
+	nullArg, ok := absent.args[idx].(sql.NullString)
+	require.True(t, ok)
+	require.False(t, nullArg.Valid, "absent upstream request id must be NULL")
+
+	require.Contains(t, usageLogSelectColumns, "upstream_request_id")
+}
+
+func TestUsageLogLatencyMetricsPersistAndRead(t *testing.T) {
+	zero, text := 0, 25
+	for _, tc := range []struct {
+		name    string
+		metrics *service.UsageLatencyMetrics
+	}{
+		{name: "legacy_null"},
+		{name: "measured_zero_and_unobserved_content", metrics: &service.UsageLatencyMetrics{Version: 1, FirstEventMs: &zero, FirstTextMs: &text, DurationMs: 50}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			legacy := 120
+			log := &service.UsageLog{UserID: 1, APIKeyID: 2, AccountID: 3, Model: "model", RequestID: "latency", FirstTokenMs: &legacy, LatencyMetrics: tc.metrics, CreatedAt: time.Now().UTC()}
+			prepared := prepareUsageLogInsert(log)
+			columns := strings.Split(usageLogSelectColumns, ", ")
+			index := -1
+			for i, column := range columns {
+				if column == "latency_metrics" {
+					index = i - 1
+				}
+			}
+			require.GreaterOrEqual(t, index, 0)
+			require.Equal(t, "jsonb", usageLogInsertArgTypes[index])
+			require.Len(t, prepared.args, len(usageLogInsertArgTypes))
+			if tc.metrics == nil {
+				require.Nil(t, prepared.args[index], "old records must remain SQL NULL")
+			} else {
+				var decoded service.UsageLatencyMetrics
+				require.NoError(t, json.Unmarshal([]byte(prepared.args[index].(string)), &decoded))
+				require.Equal(t, *tc.metrics, decoded)
+			}
+			key := usageLogBatchKey(log.RequestID, log.APIKeyID)
+			batchQuery, batchArgs := buildUsageLogBatchInsertQuery([]string{key}, map[string]usageLogInsertPrepared{key: prepared})
+			bestQuery, bestArgs := buildUsageLogBestEffortInsertQuery([]usageLogInsertPrepared{prepared})
+			for _, query := range []string{batchQuery, bestQuery} {
+				require.Equal(t, 3, strings.Count(query, "latency_metrics"), "CTE, INSERT and SELECT must carry the same snapshot")
+			}
+			require.Equal(t, prepared.args[index], batchArgs[index+1])
+			require.Equal(t, prepared.args[index], bestArgs[index])
+			require.Contains(t, usageLogInsertStatement, "latency_metrics")
+			requireStaticInsertMatchesArgTypes(t, usageLogInsertStatement)
+
+			db, mock := newSQLMock(t)
+			repo := &usageLogRepository{sql: db}
+			values := append([]driver.Value{int64(42)}, anySliceToDriverValues(prepared.args)...)
+			mock.ExpectQuery(regexp.QuoteMeta("SELECT " + usageLogSelectColumns + " FROM usage_logs WHERE id = $1")).WithArgs(int64(42)).
+				WillReturnRows(sqlmock.NewRows(columns).AddRow(values...))
+			got, err := repo.GetByID(context.Background(), 42)
+			require.NoError(t, err)
+			require.Equal(t, tc.metrics, got.LatencyMetrics)
+			require.Equal(t, &legacy, got.FirstTokenMs, "new metrics must not replace scheduler/legacy timing")
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestUsageLogLatencyMetricsPreparedSnapshotIsImmutable(t *testing.T) {
+	first := 0
+	metrics := &service.UsageLatencyMetrics{Version: 1, FirstEventMs: &first, DurationMs: 10}
+	prepared := prepareUsageLogInsert(&service.UsageLog{LatencyMetrics: metrics})
+	first, metrics.DurationMs = 999, 999
+	columns := strings.Split(usageLogSelectColumns, ", ")
+	for i, column := range columns {
+		if column == "latency_metrics" {
+			var decoded service.UsageLatencyMetrics
+			require.NoError(t, json.Unmarshal([]byte(prepared.args[i-1].(string)), &decoded))
+			require.Equal(t, 0, *decoded.FirstEventMs)
+			require.Nil(t, decoded.FirstContentMs)
+			require.Nil(t, decoded.FirstTextMs)
+			require.Equal(t, 10, decoded.DurationMs)
+			return
+		}
+	}
+	t.Fatal("latency_metrics column is missing")
+}

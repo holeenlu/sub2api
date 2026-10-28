@@ -1,0 +1,86 @@
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { uiFeedbackKey } from '@/shared/ui/feedback'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import LocaleSwitcher from '../LocaleSwitcher.vue'
+
+const { setLocale, showError } = vi.hoisted(() => ({ setLocale: vi.fn(), showError: vi.fn() }))
+
+vi.mock('@/i18n', () => ({
+  setLocale,
+  availableLocales: [
+    { code: 'en', name: 'English', flag: '🇺🇸' },
+    { code: 'zh', name: '中文', flag: '🇨🇳' }
+  ]
+}))
+
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'zh' }, t: (key: string) => key }) }))
+
+const reload = vi.fn()
+
+const mountSwitcher = () =>
+  mount(LocaleSwitcher, { global: { provide: { [uiFeedbackKey as symbol]: { success: vi.fn(), error: showError } }, stubs: { Icon: true, transition: false } } })
+
+enableAutoUnmount(afterEach)
+
+const choose = async (wrapper: ReturnType<typeof mountSwitcher>, name: string) => {
+  await wrapper.get('button').trigger('click')
+  const option = wrapper.findAll('button').find((button) => button.text().includes(name))
+  await option!.trigger('click')
+  await flushPromises()
+}
+
+describe('LocaleSwitcher', () => {
+  beforeEach(() => {
+    setLocale.mockReset().mockResolvedValue(true)
+    showError.mockReset()
+    reload.mockReset()
+    vi.stubGlobal('location', { ...window.location, reload })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  // 分组名称等内容由后端按请求语言返回，已加载的数据要靠整页刷新换成新语言
+  it('reloads the page after switching to another language', async () => {
+    const wrapper = mountSwitcher()
+
+    await choose(wrapper, 'English')
+
+    expect(setLocale).toHaveBeenCalledWith('en')
+    expect(reload).toHaveBeenCalledTimes(1)
+    expect(setLocale.mock.invocationCallOrder[0]).toBeLessThan(reload.mock.invocationCallOrder[0])
+  })
+
+  it('does nothing when the current language is chosen again', async () => {
+    const wrapper = mountSwitcher()
+
+    await choose(wrapper, '中文')
+
+    expect(setLocale).not.toHaveBeenCalled()
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('keeps the current page and permits retry after a language download fails', async () => {
+    setLocale.mockRejectedValueOnce(new Error('offline'))
+    const wrapper = mountSwitcher()
+    await choose(wrapper, 'English')
+    expect(showError).toHaveBeenCalledWith('common.languageLoadFailed')
+    expect(reload).not.toHaveBeenCalled()
+    expect(wrapper.get('button').attributes('disabled')).toBeUndefined()
+    const option = wrapper.findAll('button').find((button) => button.text().includes('English'))!
+    await option.trigger('click')
+    await flushPromises()
+    expect(reload).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not reload for a superseded selection', async () => {
+    setLocale.mockResolvedValue(false)
+    const wrapper = mountSwitcher()
+    await choose(wrapper, 'English')
+    expect(reload).not.toHaveBeenCalled()
+    expect(showError).not.toHaveBeenCalled()
+    expect(wrapper.get('button').attributes('disabled')).toBeUndefined()
+  })
+})

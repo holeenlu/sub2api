@@ -1,0 +1,67 @@
+package handler
+
+import (
+	"context"
+	"fmt"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
+)
+
+func TestOpenAIForwardMayFailoverOnlyAfterNonSemanticWrite(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	before := service.OpenAICompactKeepaliveAdjustedWrittenSize(c)
+
+	_, err := fmt.Fprint(c.Writer, ":\n\n")
+	require.NoError(t, err)
+	c.Writer.Flush()
+
+	require.Empty(t, openAIForwardRetryStopReason(c, before, &service.UpstreamFailoverError{
+		SafeToFailoverAfterWrite: true,
+	}))
+	require.Equal(t, service.OpenAIRetryStopDownstreamCommitted, openAIForwardRetryStopReason(c, before, &service.UpstreamFailoverError{}))
+}
+
+func TestOpenAIFirstOutputFailoverStopsAfterOneAccountSwitch(t *testing.T) {
+	failoverErr := &service.UpstreamFailoverError{SafeToFailoverAfterWrite: true}
+	count := 0
+
+	require.False(t, openAIFirstOutputFailoverExhausted(failoverErr, &count))
+	require.Equal(t, 1, count)
+	require.True(t, openAIFirstOutputFailoverExhausted(failoverErr, &count))
+	require.Equal(t, 1, count)
+}
+
+func TestOpenAICredentialFailoverDoesNotSpendFirstOutputSwitches(t *testing.T) {
+	count := 0
+	for _, reason := range []service.GatewayFailureReason{"basispoints_credentials_unavailable", "basispoints_credentials_rejected", "credential_preparation_failed"} {
+		failure := &service.UpstreamFailoverError{Stage: service.GatewayFailureStageAccountAuth, Reason: reason, SafeToFailoverAfterWrite: true}
+		for range 3 {
+			require.False(t, openAIFirstOutputFailoverExhausted(failure, &count))
+			require.Zero(t, count, "credential preparation is not a first-output timeout")
+		}
+	}
+	actualTimeout := &service.UpstreamFailoverError{SafeToFailoverAfterWrite: true}
+	require.False(t, openAIFirstOutputFailoverExhausted(actualTimeout, &count))
+	require.True(t, openAIFirstOutputFailoverExhausted(actualTimeout, &count))
+	require.False(t, openAIFirstOutputFailoverExhausted(&service.UpstreamFailoverError{Stage: service.GatewayFailureStageAccountAuth, SafeToFailoverAfterWrite: true}, &count))
+	require.Equal(t, 1, count, "the normal timeout allowance remains exhausted")
+}
+
+func TestOpenAIRequestAllowsFailoverReplayStopsCanceledClient(t *testing.T) {
+	require.False(t, openAIRequestAllowsFailoverReplay(nil))
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	requestCtx, cancel := context.WithCancel(context.Background())
+	c.Request = httptest.NewRequest("POST", "/v1/responses", nil).WithContext(requestCtx)
+
+	require.True(t, openAIRequestAllowsFailoverReplay(c))
+	cancel()
+	require.False(t, openAIRequestAllowsFailoverReplay(c))
+}

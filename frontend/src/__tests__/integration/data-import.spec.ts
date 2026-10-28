@@ -1,0 +1,248 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import { resourceEditorServicesKey, type ResourceEditorServices } from '@/features/resources/services'
+import ImportDataModal from '@/features/resources/components/AccountImportDataModal.vue'
+
+const showError = vi.fn()
+const showSuccess = vi.fn()
+const showWarning = vi.fn()
+
+const importServices = () => ({
+  scopeKey: () => 'data-import:admin:session-1',
+  access: { isSuperAdmin: true, isSimpleMode: false, canAuthorize: true },
+  notices: { showError, showSuccess, showWarning, showInfo: vi.fn() }
+}) satisfies Pick<ResourceEditorServices, 'scopeKey' | 'access' | 'notices'>
+
+const accountsApiFixture = vi.hoisted(() => ({
+      importData: vi.fn()
+    }))
+vi.mock('@/features/resources/accounts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/resources/accounts')>()
+  return { ...actual, default: accountsApiFixture }
+})
+
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
+  useI18n: () => ({
+    t: (key: string) => key
+  })
+}))
+
+const mountModal = () =>
+  mount(ImportDataModal, {
+    props: { show: true },
+    global: {
+      provide: { [resourceEditorServicesKey as symbol]: importServices() },
+      stubs: {
+        BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' }
+      }
+    }
+  })
+
+const makeJsonFile = (name: string, content: string, type = 'application/json') => {
+  const file = new File([content], name, { type })
+  Object.defineProperty(file, 'text', {
+    value: () => Promise.resolve(content)
+  })
+  return file
+}
+
+const setInputFiles = (element: Element, files: File[]) => {
+  Object.defineProperty(element, 'files', {
+    value: files,
+    configurable: true
+  })
+}
+
+describe('ImportDataModal', () => {
+  it('preserves native and BPS authorizations when combining v1 and v2 backups', async () => {
+
+    vi.mocked(accountsApiFixture.importData).mockResolvedValue({proxy_created:0,proxy_reused:0,proxy_failed:0,account_created:2,account_failed:0})
+    const wrapper = mountModal()
+    const input = wrapper.find('input[type="file"]')
+    const row = {
+      name: 'portable', credentials: { refresh_token: 'codex' },
+      bps_credentials: { refresh_token: 'excel' },
+      status: 'disabled', schedulable: false,
+      groups: [{name:'paid',platform:'openai',priority:17}]
+    }
+    setInputFiles(input.element, [
+      makeJsonFile('v1.json',JSON.stringify({type:'sub2api-data',version:1,proxies:[],accounts:[{name:'old'}]})),
+      makeJsonFile('v2.json',JSON.stringify({type:'sub2api-data',version:2,proxies:[],accounts:[row]}))
+    ])
+    await input.trigger('change'); await wrapper.find('form').trigger('submit'); await flushPromises()
+    expect(accountsApiFixture.importData).toHaveBeenCalledWith({data:expect.objectContaining({version:2,accounts:[{name:'old'},row]}),skip_default_group_bind:true})
+  })
+
+  it('rejects unsupported backup versions before sending credentials', async () => {
+
+    const wrapper = mountModal()
+    const input = wrapper.find('input[type="file"]')
+    setInputFiles(input.element, [makeJsonFile('unsupported.json', JSON.stringify({
+      type: 'sub2api-data', version: 3, proxies: [], accounts: [{ name: 'a' }]
+    }))])
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(accountsApiFixture.importData).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith('admin.accounts.dataImportInvalidFile')
+  })
+
+  beforeEach(async () => {
+    showError.mockReset()
+    showSuccess.mockReset()
+    showWarning.mockReset()
+
+    vi.mocked(accountsApiFixture.importData).mockReset()
+  })
+
+  it('未选择文件时提示错误', async () => {
+    const wrapper = mountModal()
+
+    await wrapper.find('form').trigger('submit')
+    expect(showError).toHaveBeenCalledWith('admin.accounts.dataImportSelectFile')
+  })
+
+  it('无效 JSON 时按文件名提示解析失败', async () => {
+
+    const wrapper = mountModal()
+
+    const input = wrapper.find('input[type="file"]')
+    setInputFiles(input.element, [makeJsonFile('data.json', 'invalid json')])
+
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(showError).toHaveBeenCalledWith('admin.accounts.dataImportParseFailedFile')
+    expect(accountsApiFixture.importData).not.toHaveBeenCalled()
+  })
+
+  it('不是导出数据的 JSON 按文件名拒绝', async () => {
+
+    const wrapper = mountModal()
+
+    const input = wrapper.find('input[type="file"]')
+    setInputFiles(input.element, [makeJsonFile('random.json', JSON.stringify({ name: 'test' }))])
+
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(showError).toHaveBeenCalledWith('admin.accounts.dataImportInvalidFile')
+    expect(accountsApiFixture.importData).not.toHaveBeenCalled()
+  })
+
+  it('无有效 JSON 的选择不清空已有选择', async () => {
+
+    vi.mocked(accountsApiFixture.importData).mockResolvedValue({
+      proxy_created: 0,
+      proxy_reused: 0,
+      proxy_failed: 0,
+      account_created: 1,
+      account_failed: 0
+    })
+
+    const wrapper = mountModal()
+    const input = wrapper.find('input[type="file"]')
+
+    const valid = makeJsonFile(
+      'valid.json',
+      JSON.stringify({ exported_at: '2026-07-05T00:00:00Z', proxies: [], accounts: [{ name: 'a' }] })
+    )
+    setInputFiles(input.element, [valid])
+    await input.trigger('change')
+
+    setInputFiles(input.element, [new File(['hello'], 'notes.txt', { type: 'text/plain' })])
+    await input.trigger('change')
+    expect(showError).toHaveBeenCalledWith('admin.accounts.dataImportSelectFile')
+
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(accountsApiFixture.importData).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        accounts: [{ name: 'a' }]
+      }),
+      skip_default_group_bind: true
+    })
+  })
+
+  it('merges multiple selected JSON files before importing', async () => {
+
+    vi.mocked(accountsApiFixture.importData).mockResolvedValue({
+      proxy_created: 0,
+      proxy_reused: 0,
+      proxy_failed: 0,
+      account_created: 2,
+      account_failed: 0
+    })
+
+    const wrapper = mountModal()
+
+    const input = wrapper.find('input[type="file"]')
+    const first = makeJsonFile(
+      'first.json',
+      JSON.stringify({ exported_at: '2026-07-05T00:00:00Z', proxies: [], accounts: [{ name: 'a' }] })
+    )
+    const second = makeJsonFile(
+      'second.json',
+      JSON.stringify({
+        exported_at: '2026-07-05T00:00:01Z',
+        proxies: [{ proxy_key: 'p' }],
+        accounts: [{ name: 'b' }]
+      })
+    )
+    setInputFiles(input.element, [first, second])
+
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(accountsApiFixture.importData).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        proxies: [{ proxy_key: 'p' }],
+        accounts: [{ name: 'a' }, { name: 'b' }]
+      }),
+      skip_default_group_bind: true
+    })
+    expect(showSuccess).toHaveBeenCalledWith('admin.accounts.dataImportSuccess')
+  })
+
+  it('部分成功时关闭弹窗仍通知父组件刷新', async () => {
+
+    vi.mocked(accountsApiFixture.importData).mockResolvedValue({
+      proxy_created: 0,
+      proxy_reused: 0,
+      proxy_failed: 0,
+      account_created: 1,
+      account_failed: 1
+    })
+
+    const wrapper = mountModal()
+    const input = wrapper.find('input[type="file"]')
+    setInputFiles(input.element, [
+      makeJsonFile(
+        'mixed.json',
+        JSON.stringify({
+          exported_at: '2026-07-05T00:00:00Z',
+          proxies: [],
+          accounts: [{ name: 'a' }, { name: 'b' }]
+        })
+      )
+    ])
+
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(showError).toHaveBeenCalledWith('admin.accounts.dataImportCompletedWithErrors')
+    expect(wrapper.emitted('imported')).toBeUndefined()
+
+    // 第二个 btn-secondary 是 footer 的取消按钮(第一个是选择文件)
+    await wrapper.findAll('button.btn-secondary')[1]!.trigger('click')
+
+    expect(wrapper.emitted('imported')).toHaveLength(1)
+    expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+})

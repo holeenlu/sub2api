@@ -1,0 +1,532 @@
+/**
+ * Authentication API endpoints
+ * Handles user login, registration, and logout operations
+ */
+
+import { apiClient } from '@/shared/http'
+import { serializeAdoptionDecision } from '../model/oauthCompletion'
+import { refreshAuthTokens, type RefreshTokenResponse } from '@/shared/http/tokenRefresh'
+export type { RefreshTokenResponse } from '@/shared/http/tokenRefresh'
+import type {
+  LoginRequest,
+  RegisterRequest,
+  AuthResponse,
+  CurrentUserResponse,
+  SendVerifyCodeRequest,
+  SendVerifyCodeResponse,
+  ActionCaptchaRequestProof,
+  TotpLoginResponse,
+  TotpLogin2FARequest
+} from './types'
+
+/**
+ * Login response type - can be either full auth or 2FA required
+ */
+export type LoginResponse = AuthResponse | TotpLoginResponse
+
+export type OAuthLoginProvider =
+  | 'github'
+  | 'google'
+  | 'linuxdo'
+  | 'dingtalk'
+  | 'wechat'
+  | 'oidc'
+
+export interface OAuthLoginStart {
+  provider: OAuthLoginProvider
+  params: Record<string, string>
+}
+
+export interface OAuthLoginStartResponse {
+  authorize_url: string
+}
+
+export function buildOAuthLoginStartURL(request: OAuthLoginStart): string {
+  const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined) || '/api/v1'
+  const normalized = apiBase.replace(/\/$/, '')
+  const query = new URLSearchParams(request.params).toString()
+  const path = `${normalized}/auth/oauth/${request.provider}/start`
+  return query ? `${path}?${query}` : path
+}
+
+export async function startOAuthLogin(
+  request: OAuthLoginStart,
+  proof: ActionCaptchaRequestProof
+): Promise<OAuthLoginStartResponse> {
+  const { data } = await apiClient.post<OAuthLoginStartResponse>(
+    `/auth/oauth/${request.provider}/start`,
+    proof,
+    { params: request.params }
+  )
+  return data
+}
+
+/**
+ * Type guard to check if login response requires 2FA
+ */
+export function isTotp2FARequired(response: LoginResponse): response is TotpLoginResponse {
+  return 'requires_2fa' in response && response.requires_2fa === true
+}
+
+/**
+ * Store authentication token in localStorage
+ */
+export function setAuthToken(token: string): void {
+  localStorage.setItem('auth_token', token)
+}
+
+/**
+ * Store refresh token in localStorage
+ */
+export function setRefreshToken(token: string): void {
+  localStorage.setItem('refresh_token', token)
+}
+
+/**
+ * Store token expiration timestamp in localStorage
+ * Converts expires_in (seconds) to absolute timestamp (milliseconds)
+ */
+export function setTokenExpiresAt(expiresIn: number): void {
+  const expiresAt = Date.now() + expiresIn * 1000
+  localStorage.setItem('token_expires_at', String(expiresAt))
+}
+
+/**
+ * Get authentication token from localStorage
+ */
+export function getAuthToken(): string | null {
+  return localStorage.getItem('auth_token')
+}
+
+/**
+ * Get refresh token from localStorage
+ */
+export function getRefreshToken(): string | null {
+  return localStorage.getItem('refresh_token')
+}
+
+/**
+ * Get token expiration timestamp from localStorage
+ */
+export function getTokenExpiresAt(): number | null {
+  const value = localStorage.getItem('token_expires_at')
+  return value ? parseInt(value, 10) : null
+}
+
+/**
+ * User login
+ * @param credentials - Email and password
+ * @returns Authentication response with token and user data, or 2FA required response
+ */
+export async function login(credentials: LoginRequest): Promise<LoginResponse> {
+  const { data } = await apiClient.post<LoginResponse>('/auth/login', credentials)
+
+  // Only store token if 2FA is not required
+  if (!isTotp2FARequired(data)) {
+    setAuthToken(data.access_token)
+    if (data.refresh_token) {
+      setRefreshToken(data.refresh_token)
+    }
+    if (data.expires_in) {
+      setTokenExpiresAt(data.expires_in)
+    }
+    localStorage.setItem('auth_user', JSON.stringify(data.user))
+  }
+
+  return data
+}
+
+/**
+ * Complete login with 2FA code
+ * @param request - Temp token and TOTP code
+ * @returns Authentication response with token and user data
+ */
+export async function login2FA(request: TotpLogin2FARequest): Promise<AuthResponse> {
+  const { data } = await apiClient.post<AuthResponse>('/auth/login/2fa', request)
+
+  // Store token and user data
+  setAuthToken(data.access_token)
+  if (data.refresh_token) {
+    setRefreshToken(data.refresh_token)
+  }
+  if (data.expires_in) {
+    setTokenExpiresAt(data.expires_in)
+  }
+  localStorage.setItem('auth_user', JSON.stringify(data.user))
+
+  return data
+}
+
+/**
+ * User registration
+ * @param userData - Registration data (username, email, password)
+ * @returns Authentication response with token and user data
+ */
+export async function register(userData: RegisterRequest): Promise<AuthResponse> {
+  const { data } = await apiClient.post<AuthResponse>('/auth/register', userData)
+
+  // Store token and user data
+  setAuthToken(data.access_token)
+  if (data.refresh_token) {
+    setRefreshToken(data.refresh_token)
+  }
+  if (data.expires_in) {
+    setTokenExpiresAt(data.expires_in)
+  }
+  localStorage.setItem('auth_user', JSON.stringify(data.user))
+
+  return data
+}
+
+/**
+ * Get current authenticated user
+ * @returns User profile data
+ */
+export async function getCurrentUser() {
+  return apiClient.get<CurrentUserResponse>('/auth/me')
+}
+
+/** Revoke the refresh token; the auth store owns local session cleanup. */
+export async function logout(): Promise<void> {
+  const refreshToken = getRefreshToken()
+  if (refreshToken) await apiClient.post('/auth/logout', { refresh_token: refreshToken })
+}
+
+/**
+ * Refresh token response
+ */
+export interface OAuthTokenResponse {
+  access_token: string
+  refresh_token?: string
+  expires_in?: number
+  token_type?: string
+}
+
+export interface PendingOAuthBindLoginResponse extends Partial<OAuthTokenResponse> {
+  auth_result?: string
+  redirect?: string
+  error?: string
+  requires_2fa?: boolean
+  temp_token?: string
+  user_email_masked?: string
+  adoption_required?: boolean
+  suggested_display_name?: string
+  suggested_avatar_url?: string
+}
+
+export type PendingOAuthExchangeResponse = PendingOAuthBindLoginResponse
+
+export interface PendingOAuthCreateAccountResponse extends OAuthTokenResponse {
+  auth_result?: string
+}
+
+export interface PendingOAuthSendVerifyCodeResponse extends SendVerifyCodeResponse {
+  auth_result?: string
+  provider?: string
+  redirect?: string
+}
+
+export type OAuthCompletionKind = 'login' | 'bind'
+
+export interface OAuthAdoptionDecision {
+  adoptDisplayName?: boolean
+  adoptAvatar?: boolean
+}
+
+
+export function isOAuthLoginCompletion(
+  completion: Partial<OAuthTokenResponse>
+): completion is OAuthTokenResponse {
+  return typeof completion.access_token === 'string' && completion.access_token.trim().length > 0
+}
+
+export function getOAuthCompletionKind(
+  completion: Partial<OAuthTokenResponse>
+): OAuthCompletionKind {
+  return isOAuthLoginCompletion(completion) ? 'login' : 'bind'
+}
+
+export function getPendingOAuthBindLoginKind(
+  completion: PendingOAuthBindLoginResponse
+): OAuthCompletionKind {
+  return getOAuthCompletionKind(completion)
+}
+
+export function hasPendingOAuthSuggestedProfile(
+  completion: Pick<
+    PendingOAuthBindLoginResponse,
+    'suggested_display_name' | 'suggested_avatar_url'
+  >
+): boolean {
+  return Boolean(completion.suggested_display_name || completion.suggested_avatar_url)
+}
+
+export function persistOAuthTokenContext(tokens: Partial<OAuthTokenResponse>): void {
+  if (tokens.refresh_token) {
+    setRefreshToken(tokens.refresh_token)
+  }
+  if (tokens.expires_in) {
+    setTokenExpiresAt(tokens.expires_in)
+  }
+}
+
+export async function prepareOAuthBindAccessTokenCookie(): Promise<void> {
+  if (!getAuthToken()) {
+    return
+  }
+  await apiClient.post('/auth/oauth/bind-token')
+}
+
+/**
+ * Refresh the access token using the refresh token
+ * @returns New token pair
+ */
+export async function refreshToken(): Promise<RefreshTokenResponse> {
+  return refreshAuthTokens()
+}
+
+/**
+ * Revoke all sessions for the current user
+ * @returns Response with message
+ */
+export async function revokeAllSessions(): Promise<{ message: string }> {
+  const { data } = await apiClient.post<{ message: string }>('/auth/revoke-all-sessions')
+  return data
+}
+
+/**
+ * Check if user is authenticated
+ * @returns True if user has valid token
+ */
+export function isAuthenticated(): boolean {
+  return getAuthToken() !== null
+}
+
+export type WeChatOAuthMode = 'open' | 'mp'
+export type WeChatOAuthUnavailableReason =
+  | 'not_configured'
+  | 'capability_unknown'
+  | 'external_browser_required'
+  | 'wechat_browser_required'
+  | 'native_app_required'
+
+export interface ResolvedWeChatOAuthStart {
+  mode: WeChatOAuthMode | null
+  openEnabled: boolean
+  mpEnabled: boolean
+  mobileEnabled: boolean
+  isWeChatBrowser: boolean
+  unavailableReason: WeChatOAuthUnavailableReason | null
+}
+
+export type WeChatOAuthPublicSettings = {
+  wechat_oauth_enabled?: boolean
+  wechat_oauth_open_enabled?: boolean
+  wechat_oauth_mp_enabled?: boolean
+  wechat_oauth_mobile_enabled?: boolean
+}
+
+export function isWeChatWebOAuthEnabled(
+  settings: WeChatOAuthPublicSettings | null | undefined,
+): boolean {
+  const legacyEnabled = settings?.wechat_oauth_enabled ?? false
+  const hasExplicitCapabilities =
+    typeof settings?.wechat_oauth_open_enabled === 'boolean' ||
+    typeof settings?.wechat_oauth_mp_enabled === 'boolean'
+
+  if (!hasExplicitCapabilities) {
+    return legacyEnabled
+  }
+
+  return settings?.wechat_oauth_open_enabled === true || settings?.wechat_oauth_mp_enabled === true
+}
+
+export function hasExplicitWeChatOAuthCapabilities(
+  settings: WeChatOAuthPublicSettings | null | undefined,
+): settings is WeChatOAuthPublicSettings & {
+  wechat_oauth_open_enabled: boolean
+  wechat_oauth_mp_enabled: boolean
+} {
+  return typeof settings?.wechat_oauth_open_enabled === 'boolean'
+    && typeof settings?.wechat_oauth_mp_enabled === 'boolean'
+}
+
+export function resolveWeChatOAuthStart(
+  settings: WeChatOAuthPublicSettings | null | undefined,
+  userAgent?: string
+): ResolvedWeChatOAuthStart {
+  const normalizedUserAgent = (userAgent
+    ?? (typeof navigator !== 'undefined' ? navigator.userAgent : '')
+    ?? '').trim()
+  const isWeChatBrowser = /MicroMessenger/i.test(normalizedUserAgent)
+  const legacyEnabled = settings?.wechat_oauth_enabled ?? false
+  const openEnabled = typeof settings?.wechat_oauth_open_enabled === 'boolean'
+    ? settings.wechat_oauth_open_enabled
+    : legacyEnabled
+  const mpEnabled = typeof settings?.wechat_oauth_mp_enabled === 'boolean'
+    ? settings.wechat_oauth_mp_enabled
+    : legacyEnabled
+  const mobileEnabled = typeof settings?.wechat_oauth_mobile_enabled === 'boolean'
+    ? settings.wechat_oauth_mobile_enabled
+    : false
+
+  if (isWeChatBrowser) {
+    if (mpEnabled) {
+      return { mode: 'mp', openEnabled, mpEnabled, mobileEnabled, isWeChatBrowser, unavailableReason: null }
+    }
+    if (openEnabled) {
+      return { mode: null, openEnabled, mpEnabled, mobileEnabled, isWeChatBrowser, unavailableReason: 'external_browser_required' }
+    }
+    return { mode: null, openEnabled, mpEnabled, mobileEnabled, isWeChatBrowser, unavailableReason: 'not_configured' }
+  }
+
+  if (openEnabled) {
+    return { mode: 'open', openEnabled, mpEnabled, mobileEnabled, isWeChatBrowser, unavailableReason: null }
+  }
+  if (mpEnabled) {
+    return { mode: null, openEnabled, mpEnabled, mobileEnabled, isWeChatBrowser, unavailableReason: 'wechat_browser_required' }
+  }
+  return { mode: null, openEnabled, mpEnabled, mobileEnabled, isWeChatBrowser, unavailableReason: 'not_configured' }
+}
+
+export function resolveWeChatOAuthStartStrict(
+  settings: WeChatOAuthPublicSettings | null | undefined,
+  userAgent?: string,
+): ResolvedWeChatOAuthStart {
+  const normalizedUserAgent = (userAgent
+    ?? (typeof navigator !== 'undefined' ? navigator.userAgent : '')
+    ?? '').trim()
+  const isWeChatBrowser = /MicroMessenger/i.test(normalizedUserAgent)
+
+  if (!hasExplicitWeChatOAuthCapabilities(settings)) {
+    return {
+      mode: null,
+      openEnabled: false,
+      mpEnabled: false,
+      mobileEnabled: false,
+      isWeChatBrowser,
+      unavailableReason: 'capability_unknown',
+    }
+  }
+
+  return resolveWeChatOAuthStart(settings, normalizedUserAgent)
+}
+
+/**
+ * Send verification code to email
+ * @param request - Email and optional Turnstile token
+ * @returns Response with countdown seconds
+ */
+export async function sendVerifyCode(
+  request: SendVerifyCodeRequest
+): Promise<SendVerifyCodeResponse> {
+  const { data } = await apiClient.post<SendVerifyCodeResponse>('/auth/send-verify-code', request)
+  return data
+}
+
+export async function sendPendingOAuthVerifyCode(
+  request: SendVerifyCodeRequest
+): Promise<PendingOAuthSendVerifyCodeResponse> {
+  const { data } = await apiClient.post<PendingOAuthSendVerifyCodeResponse>(
+    '/auth/oauth/pending/send-verify-code',
+    request
+  )
+  return data
+}
+
+/**
+ * Forgot password request
+ */
+export interface ForgotPasswordRequest {
+  email: string
+  turnstile_token?: string
+  tencent_captcha_ticket?: string
+  tencent_captcha_randstr?: string
+}
+
+/**
+ * Forgot password response
+ */
+export interface ForgotPasswordResponse {
+  message: string
+}
+
+/**
+ * Request password reset link
+ * @param request - Email and optional Turnstile token
+ * @returns Response with message
+ */
+export async function forgotPassword(request: ForgotPasswordRequest): Promise<ForgotPasswordResponse> {
+  const { data } = await apiClient.post<ForgotPasswordResponse>('/auth/forgot-password', request)
+  return data
+}
+
+/**
+ * Reset password request
+ */
+export interface ResetPasswordRequest {
+  email: string
+  token: string
+  new_password: string
+}
+
+/**
+ * Reset password response
+ */
+export interface ResetPasswordResponse {
+  message: string
+}
+
+/**
+ * Reset password with token
+ * @param request - Email, token, and new password
+ * @returns Response with message
+ */
+export async function resetPassword(request: ResetPasswordRequest): Promise<ResetPasswordResponse> {
+  const { data } = await apiClient.post<ResetPasswordResponse>('/auth/reset-password', request)
+  return data
+}
+
+export async function completePendingOAuthBindLogin(
+  decision?: OAuthAdoptionDecision
+): Promise<PendingOAuthBindLoginResponse> {
+  const { data } = await apiClient.post<PendingOAuthBindLoginResponse>(
+    '/auth/oauth/pending/exchange',
+    serializeAdoptionDecision(decision)
+  )
+  return data
+}
+
+export async function exchangePendingOAuthCompletion(
+  decision?: OAuthAdoptionDecision
+): Promise<PendingOAuthExchangeResponse> {
+  return completePendingOAuthBindLogin(decision)
+}
+
+export const authAPI = {
+  login,
+  login2FA,
+  isTotp2FARequired,
+  register,
+  getCurrentUser,
+  logout,
+  isAuthenticated,
+  setAuthToken,
+  setRefreshToken,
+  setTokenExpiresAt,
+  getAuthToken,
+  getRefreshToken,
+  getTokenExpiresAt,
+  sendVerifyCode,
+  sendPendingOAuthVerifyCode,
+  forgotPassword,
+  resetPassword,
+  refreshToken,
+  revokeAllSessions,
+  getPendingOAuthBindLoginKind,
+  hasPendingOAuthSuggestedProfile,
+  completePendingOAuthBindLogin,
+  exchangePendingOAuthCompletion,
+}
+
+export default authAPI

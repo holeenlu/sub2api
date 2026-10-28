@@ -1,0 +1,308 @@
+package middleware
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
+)
+
+func TestDeriveAuditAction(t *testing.T) {
+	cases := []struct {
+		method string
+		path   string
+		want   string
+	}{
+		{"PUT", "/api/v1/admin/accounts/:id", "admin.accounts.update"},
+		{"POST", "/api/v1/admin/accounts", "admin.accounts.create"},
+		{"DELETE", "/api/v1/admin/backups/:id", "admin.backups.delete"},
+		{"GET", "/api/v1/admin/users/:id/api-keys", "admin.users.api_keys.read"},
+		{"POST", "/api/v1/admin/accounts/batch-refresh", "admin.accounts.batch_refresh.create"},
+	}
+	for _, tc := range cases {
+		if got := deriveAuditAction(tc.method, tc.path); got != tc.want {
+			t.Fatalf("deriveAuditAction(%q, %q) = %q, want %q", tc.method, tc.path, got, tc.want)
+		}
+	}
+}
+
+type auditCaptureRepository struct {
+	mu   sync.Mutex
+	logs []*service.AuditLog
+}
+
+func (r *auditCaptureRepository) BatchInsert(_ context.Context, logs []*service.AuditLog) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.logs = append(r.logs, logs...)
+	return int64(len(logs)), nil
+}
+func (r *auditCaptureRepository) Insert(_ context.Context, log *service.AuditLog) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.logs = append(r.logs, log)
+	return nil
+}
+func (r *auditCaptureRepository) List(context.Context, service.AuditLogScope, *service.AuditLogFilter) (*service.AuditLogList, error) {
+	return &service.AuditLogList{}, nil
+}
+func (r *auditCaptureRepository) GetByID(context.Context, service.AuditLogScope, int64) (*service.AuditLog, error) {
+	return nil, service.ErrAuditLogNotFound
+}
+func (r *auditCaptureRepository) Count(context.Context, service.AuditLogScope) (int64, error) {
+	return 0, nil
+}
+func (r *auditCaptureRepository) TruncateAll(context.Context) error { return nil }
+func (r *auditCaptureRepository) DeleteBefore(context.Context, time.Time, int) (int64, error) {
+	return 0, nil
+}
+
+func TestPromptAuditAdminOperationsUseOmittedBodiesAndAllowlistedDetails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repository := &auditCaptureRepository{}
+	auditService := service.NewAuditLogService(repository, nil)
+	auditService.Start()
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(ContextKeyUser), AuthSubject{UserID: 77})
+		c.Set(string(ContextKeyUserRole), "admin")
+		c.Next()
+	})
+	router.Use(gin.HandlerFunc(NewAuditLogMiddleware(auditService)))
+	router.PUT("/api/v1/admin/prompt-audit/config", func(c *gin.Context) {
+		SetAuditExtra(c, map[string]any{
+			"result": "failed", "error_code": "prompt_audit_config_conflict", "config_version": int64(9),
+			"token": "audit-canary-secret", "raw_prompt": "audit-canary-prompt", "nested": map[string]any{"unsafe": true},
+		})
+		c.JSON(http.StatusConflict, gin.H{"ok": false})
+	})
+	router.POST("/api/v1/admin/prompt-audit/endpoints/probe", func(c *gin.Context) {
+		SetAuditExtra(c, map[string]any{
+			"result": "success", "guard_endpoint_id": "guard-1", "http_status": 200,
+			"latency_ms": 12, "token_applied": true,
+		})
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	for _, request := range []*http.Request{
+		httptest.NewRequest(http.MethodPut, "/api/v1/admin/prompt-audit/config", bytes.NewBufferString(`{"expected_config_version":8,"token":"audit-canary-secret"}`)),
+		httptest.NewRequest(http.MethodPost, "/api/v1/admin/prompt-audit/endpoints/probe", bytes.NewBufferString(`{"endpoint":{"token":"audit-canary-secret"}}`)),
+	} {
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+	}
+	auditService.Stop()
+
+	repository.mu.Lock()
+	logs := append([]*service.AuditLog(nil), repository.logs...)
+	repository.mu.Unlock()
+	require.Len(t, logs, 2)
+
+	byAction := make(map[string]*service.AuditLog, len(logs))
+	for _, entry := range logs {
+		byAction[entry.Action] = entry
+		require.Equal(t, "<credential-bearing body omitted>", entry.RequestBody)
+		require.NotContains(t, entry.RequestBody, "audit-canary")
+		require.NotContains(t, entry.Extra, "token")
+		require.NotContains(t, entry.Extra, "raw_prompt")
+		require.NotContains(t, entry.Extra, "nested")
+	}
+
+	config := byAction["admin.prompt_audit.config.update"]
+	require.NotNil(t, config)
+	require.Equal(t, http.StatusConflict, config.StatusCode)
+	require.Equal(t, "failed", config.Extra["result"])
+	require.Equal(t, "prompt_audit_config_conflict", config.Extra["error_code"])
+	require.EqualValues(t, 9, config.Extra["config_version"])
+
+	probe := byAction["admin.prompt_audit.endpoint.probe"]
+	require.NotNil(t, probe)
+	require.Equal(t, http.StatusOK, probe.StatusCode)
+	require.Equal(t, "success", probe.Extra["result"])
+	require.Equal(t, "guard-1", probe.Extra["guard_endpoint_id"])
+	require.Equal(t, true, probe.Extra["token_applied"])
+}
+
+func TestPromptAuditMutationAuditRoutesHaveStableActionsAndOmitBodies(t *testing.T) {
+	expected := map[string]string{
+		"PUT /api/v1/admin/prompt-audit/config":                   "admin.prompt_audit.config.update",
+		"POST /api/v1/admin/prompt-audit/endpoints/probe":         "admin.prompt_audit.endpoint.probe",
+		"DELETE /api/v1/admin/prompt-audit/events/:id":            "admin.prompt_audit.event.delete",
+		"POST /api/v1/admin/prompt-audit/events/batch-delete":     "admin.prompt_audit.events.batch_delete",
+		"POST /api/v1/admin/prompt-audit/events/delete-preview":   "admin.prompt_audit.events.delete_preview",
+		"POST /api/v1/admin/prompt-audit/events/delete-by-filter": "admin.prompt_audit.events.filter_delete",
+	}
+	for route, action := range expected {
+		require.Equal(t, action, auditActionOverrides[route])
+		_, omitted := auditBodyOmittedRoutes[route]
+		require.Truef(t, omitted, "%s must not persist its credential or confirmation-bearing body", route)
+	}
+}
+
+func TestPasskeyLoginAuditUsesCanonicalLoginActionAndOmitsCredentialBody(t *testing.T) {
+	route := "POST /api/v1/auth/passkey/login/finish"
+	require.Equal(t, service.AuditActionLogin, auditActionOverrides[route])
+	require.Contains(t, auditBodyOmittedRoutes, route)
+}
+
+// Ollama 会话保存的请求体整体就是浏览器 Cookie 明文，键级脱敏清单曾漏掉裸键
+// "session"，必须走整体不入库路径，防止会话凭证长期留存在 audit_logs。
+func TestOllamaCloudUsageSessionRouteOmitsAuditBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	require.Contains(t, auditBodyOmittedRoutes, "PUT /api/v1/admin/accounts/:id/ollama-cloud-usage/session")
+
+	repository := &auditCaptureRepository{}
+	auditService := service.NewAuditLogService(repository, nil)
+	auditService.Start()
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(ContextKeyUser), AuthSubject{UserID: 77})
+		c.Set(string(ContextKeyUserRole), "admin")
+		c.Next()
+	})
+	router.Use(gin.HandlerFunc(NewAuditLogMiddleware(auditService)))
+	router.PUT("/api/v1/admin/accounts/:id/ollama-cloud-usage/session", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/admin/accounts/7/ollama-cloud-usage/session",
+		bytes.NewBufferString(`{"session":"wos-session=audit-canary-cookie; __Secure-authjs.session-token.0=audit-canary-shard"}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	auditService.Stop()
+
+	repository.mu.Lock()
+	logs := append([]*service.AuditLog(nil), repository.logs...)
+	repository.mu.Unlock()
+	require.Len(t, logs, 1)
+	require.Equal(t, "<credential-bearing body omitted>", logs[0].RequestBody)
+	require.NotContains(t, logs[0].RequestBody, "audit-canary")
+}
+
+func TestAuditPreservesTruncatedRequestBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := service.NewAuditLogService(&auditCaptureRepository{}, nil)
+	svc.Start()
+	defer svc.Stop()
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAuditLogMiddleware(svc)))
+	router.POST("/api/v1/admin/groups", func(c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		require.Equal(t, "partial", string(body))
+		require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+		_, err = io.ReadAll(c.Request.Body)
+		require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+		c.Status(http.StatusNoContent)
+	})
+	raw := strings.Join([]string{"POST /api/v1/admin/groups HTTP/1.1", "Host: example.test", "Content-Type: application/json", "Content-Length: 100", "", "partial"}, "\r\n")
+	req, err := http.ReadRequest(bufio.NewReader(strings.NewReader(raw)))
+	require.NoError(t, err)
+	router.ServeHTTP(httptest.NewRecorder(), req)
+}
+
+func TestRestoredBodyRetainsTypedFailure(t *testing.T) {
+	for _, cause := range []error{io.ErrUnexpectedEOF, context.Canceled, &http.MaxBytesError{Limit: 32}} {
+		r := &restoredBody{Reader: strings.NewReader("prefix"), closer: io.NopCloser(strings.NewReader("")), readErr: cause}
+		data, err := io.ReadAll(r)
+		require.Equal(t, "prefix", string(data))
+		require.ErrorIs(t, err, cause)
+		_, err = io.ReadAll(r)
+		require.ErrorIs(t, err, cause)
+		require.NoError(t, r.Close())
+	}
+}
+
+type auditReadCloseProbe struct {
+	body   []byte
+	cause  error
+	closed int
+}
+
+func (r *auditReadCloseProbe) Read(p []byte) (int, error) {
+	n := copy(p, r.body)
+	r.body = r.body[n:]
+	if len(r.body) == 0 {
+		if r.cause != nil {
+			return n, r.cause
+		}
+		return n, io.EOF
+	}
+	return n, nil
+}
+func (r *auditReadCloseProbe) Close() error { r.closed++; return nil }
+func TestAuditBodyReplayCloseAndCaptureBoundary(t *testing.T) {
+	for _, failure := range []bool{false, true} {
+		t.Run(fmt.Sprint(failure), func(t *testing.T) {
+			payload := bytes.Repeat([]byte("x"), service.AuditRequestBodyCaptureLimit+20)
+			if failure {
+				payload = []byte("prefix-before-error")
+			}
+			probe := &auditReadCloseProbe{body: append([]byte(nil), payload...)}
+			if failure {
+				probe.cause = io.ErrUnexpectedEOF
+			}
+			svc := service.NewAuditLogService(&auditCaptureRepository{}, nil)
+			svc.Start()
+			defer svc.Stop()
+			router := gin.New()
+			router.Use(gin.HandlerFunc(NewAuditLogMiddleware(svc)))
+			router.POST("/api/v1/admin/groups", func(c *gin.Context) {
+				require.Zero(t, probe.closed)
+				got, err := io.ReadAll(c.Request.Body)
+				require.Equal(t, payload, got)
+				if failure {
+					require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+				} else {
+					require.NoError(t, err)
+				}
+				require.NoError(t, c.Request.Body.Close())
+				require.Equal(t, 1, probe.closed)
+				c.Status(204)
+			})
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/groups", nil)
+			req.Body = probe
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(httptest.NewRecorder(), req)
+		})
+	}
+}
+
+func TestAPIKeyDataAuditProtectsBackupCredentials(t *testing.T) {
+	require.Equal(t, "user.api_keys.export", auditSensitiveReads["GET /api/v1/keys/export"])
+	require.Equal(t, "user.api_keys.import", auditActionOverrides["POST /api/v1/keys/import"])
+	redacted := service.RedactAuditBody([]byte(`{"data":{"keys":[{"name":"client","key":"sk-secret-import-0123"}]}}`), "application/json")
+	require.NotContains(t, redacted, "sk-secret-import-0123")
+	require.Contains(t, redacted, "client")
+	repository := &auditCaptureRepository{}
+	auditService := service.NewAuditLogService(repository, nil)
+	auditService.Start()
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAuditLogMiddleware(auditService)))
+	router.GET("/api/v1/keys/export", func(c *gin.Context) {
+		require.Equal(t, "sk-secret-search-0123", c.Query("search"))
+		c.Status(http.StatusOK)
+	})
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/api/v1/keys/export?search=sk-secret-search-0123&status=active", nil))
+	auditService.Stop()
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	require.Len(t, repository.logs, 1)
+	require.Equal(t, "user.api_keys.export", repository.logs[0].Action)
+	require.Equal(t, "status=active", repository.logs[0].Extra["query"])
+}

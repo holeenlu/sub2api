@@ -1,0 +1,60 @@
+package middleware
+
+import (
+	"context"
+	"strings"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"go.uber.org/zap"
+)
+
+const requestIDHeader = "X-Request-ID"
+
+func requestLogPath(path string) string {
+	if strings.HasPrefix(path, "/api/bps-images/") {
+		return "/api/bps-images/[redacted]"
+	}
+	return path
+}
+
+// RequestLogger 在请求入口注入 request-scoped logger。
+func RequestLogger() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request == nil {
+			c.Next()
+			return
+		}
+
+		requestID, validRequestID := normalizeCorrelationID(c.GetHeader(requestIDHeader))
+		if !validRequestID {
+			requestID = uuid.NewString()
+		}
+		c.Header(requestIDHeader, requestID)
+
+		ctx := context.WithValue(c.Request.Context(), ctxkey.RequestID, requestID)
+		clientRequestID, _ := ctx.Value(ctxkey.ClientRequestID).(string)
+		clientRequestID, _ = normalizeCorrelationID(clientRequestID)
+
+		requestLogger := logger.With(
+			zap.String("component", "http"),
+			zap.String("request_id", requestID),
+			zap.String("client_request_id", strings.TrimSpace(clientRequestID)),
+			zap.String("path", requestLogPath(c.Request.URL.Path)),
+			zap.String("method", c.Request.Method),
+		)
+
+		// Client-provided IDs may identify a session and repeat across requests.
+		// Preserve them separately for proxy correlation; never replace the
+		// internally generated, per-request ClientRequestID with this value.
+		if originalID, valid := normalizeCorrelationID(c.GetHeader(clientRequestIDHeader)); valid {
+			requestLogger = requestLogger.With(zap.String("original_client_request_id", originalID))
+		}
+
+		ctx = logger.IntoContext(ctx, requestLogger)
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	}
+}

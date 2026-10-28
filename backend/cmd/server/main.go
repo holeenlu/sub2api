@@ -1,0 +1,246 @@
+package main
+
+//go:generate go run github.com/google/wire/cmd/wire
+
+import (
+	"context"
+	"database/sql"
+	_ "embed"
+	"errors"
+	"flag"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	_ "github.com/Wei-Shaw/sub2api/ent/runtime"
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/handler"
+	"github.com/Wei-Shaw/sub2api/internal/host"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/repository"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/internal/setup"
+	"github.com/Wei-Shaw/sub2api/internal/web"
+
+	"github.com/gin-gonic/gin"
+)
+
+//go:embed VERSION
+var embeddedVersion string
+
+// Build-time variables (can be set by ldflags)
+var (
+	Version   = ""
+	Commit    = "unknown"
+	Date      = "unknown"
+	BuildType = "source" // "source" for manual builds, "release" for CI builds (set by ldflags)
+	// UpstreamVersion 是本次构建所基于的上游 Sub2API 版本，由 ldflags 注入
+	// （-X main.UpstreamVersion=v0.2.1）。留空时回退到 embedded VERSION 文件。
+	UpstreamVersion = ""
+)
+
+func init() {
+	initVersion()
+	initUpstreamVersion()
+}
+
+func initVersion() {
+	// 如果 Version 已通过 ldflags 注入（例如 -X main.Version=...），则不要覆盖。
+	if strings.TrimSpace(Version) != "" {
+		return
+	}
+
+	// 默认从 embedded VERSION 文件读取版本号（编译期打包进二进制）。
+	Version = strings.TrimSpace(embeddedVersion)
+	if Version == "" {
+		Version = "0.0.0-dev"
+	}
+}
+
+// initUpstreamVersion 归一化上游版本号：始终以 "v" 开头，接受 ldflags 传入带或不带前缀的值。
+// 未注入时回退到 embedded VERSION 文件——该文件在上游打 tag 时才回写，只是兜底；
+// 派生构建应由构建流程注入实际同步到的上游版本。
+func initUpstreamVersion() {
+	UpstreamVersion = normalizeUpstreamVersion(UpstreamVersion, embeddedVersion)
+}
+
+func normalizeUpstreamVersion(injected, fallback string) string {
+	v := strings.TrimSpace(injected)
+	if v == "" {
+		v = strings.TrimSpace(fallback)
+	}
+	if v == "" {
+		return ""
+	}
+	return "v" + strings.TrimPrefix(v, "v")
+}
+
+// initLogger configures the default slog handler based on gin.Mode().
+// In non-release mode, Debug level logs are enabled.
+func main() {
+	logger.InitBootstrap()
+	defer logger.Sync()
+
+	// Parse command line flags
+	setupMode := flag.Bool("setup", false, "Run setup wizard in CLI mode")
+	showVersion := flag.Bool("version", false, "Show version information")
+	checkModelPolicy := flag.Bool("check-model-policy-migration", false, "Validate migration 263 using temporary tables; do not start or modify the application")
+	flag.Parse()
+
+	if *showVersion {
+		log.Printf(service.DefaultSiteName+" %s (commit: %s, built: %s)\n", Version, Commit, Date)
+		return
+	}
+	if *checkModelPolicy {
+		cfg, err := config.LoadForBootstrap()
+		if err != nil {
+			log.Fatalf("Preflight configuration: %v", err)
+		}
+		db, err := sql.Open("postgres", cfg.Database.DSN())
+		if err != nil {
+			log.Fatal("Cannot open database for migration preflight")
+		}
+		defer db.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		if err := repository.CheckModelPolicyMigration(ctx, db); err != nil {
+			log.Fatalf("PREFLIGHT FAILED: %v", err)
+		}
+		log.Print("PREFLIGHT OK: model policy migration; application data unchanged")
+		return
+	}
+
+	// CLI setup mode
+	if *setupMode {
+		if err := setup.RunCLI(); err != nil {
+			log.Fatalf("Setup failed: %v", err)
+		}
+		return
+	}
+
+	// Check if setup is needed
+	if setup.NeedsSetup() {
+		// Check if auto-setup is enabled (for Docker deployment)
+		if setup.AutoSetupEnabled() {
+			log.Println("Auto setup mode enabled...")
+			if err := setup.AutoSetupFromEnv(); err != nil {
+				log.Fatalf("Auto setup failed: %v", err)
+			}
+			// Continue to main server after auto-setup
+		} else {
+			log.Println("First run detected, starting setup wizard...")
+			if err := runSetupServer(); err != nil {
+				log.Fatalf("Setup server failed: %v", err)
+			}
+			return
+		}
+	}
+
+	// Normal server mode
+	if err := runMainServer(); err != nil {
+		log.Fatalf("Server failed after cleanup: %v", err)
+	}
+}
+
+func runSetupServer() error {
+	r := gin.New()
+	r.Use(middleware.Recovery())
+	r.Use(middleware.CORS(config.CORSConfig{}))
+	r.Use(middleware.SecurityHeaders(config.CSPConfig{Enabled: true, Policy: config.DefaultCSPPolicy}, nil))
+
+	// Register setup routes
+	bootstrapToken, err := setup.RegisterRoutes(r)
+	if err != nil {
+		log.Fatalf("Failed to initialize setup authorization: %v", err)
+	}
+	if strings.TrimSpace(os.Getenv("SETUP_BOOTSTRAP_TOKEN")) != "" {
+		log.Println("Setup authorization token is supplied through SETUP_BOOTSTRAP_TOKEN; it will not be written to logs")
+	} else {
+		log.Printf("Setup authorization token (operator only): %s", bootstrapToken)
+	}
+
+	// Serve embedded frontend if available
+	if web.HasEmbeddedFrontend() {
+		r.Use(web.ServeEmbeddedFrontend())
+	}
+
+	// Get server address from config.yaml or environment variables (SERVER_HOST, SERVER_PORT)
+	// This allows users to run setup on a different address if needed
+	addr := config.GetServerAddress()
+	log.Printf("Setup wizard available at http://%s", addr)
+	log.Println("Complete the setup wizard to configure " + service.DefaultSiteName)
+
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(true)
+	protocols.SetUnencryptedHTTP2(true)
+
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           r,
+		ReadHeaderTimeout: 30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		Protocols:         protocols,
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	return host.ServeHTTP(ctx, server, 5*time.Second)
+}
+
+func runMainServer() error {
+	cfg, err := config.LoadForBootstrap()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	if err := logger.Init(logger.OptionsFromConfig(cfg.Log)); err != nil {
+		return fmt.Errorf("initialize logger: %w", err)
+	}
+	if cfg.RunMode == config.RunModeSimple {
+		log.Println("⚠️  WARNING: Running in SIMPLE mode - billing and quota checks are DISABLED")
+	}
+
+	buildInfo := handler.BuildInfo{
+		Version:         Version,
+		BuildType:       BuildType,
+		UpstreamVersion: UpstreamVersion,
+		BuildCommit:     Commit,
+	}
+
+	signalCtx, stopSignal := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stopSignal()
+	lifetime, cancelLifetime := context.WithCancel(context.Background())
+	defer cancelLifetime()
+	resources := host.NewLifetime()
+	app, err := initializeApplication(buildInfo, resources)
+	if err != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		return errors.Join(fmt.Errorf("construct application: %w", err), resources.Cleanup(cleanupCtx))
+	}
+	if err := app.Start(lifetime); err != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		return errors.Join(err, app.Cleanup(cleanupCtx))
+	}
+	log.Printf("Server starting on %s", app.Server.Addr)
+	serveErr := app.Serve(signalCtx)
+	// One absolute shutdown budget covers grace, cancellation and all joins.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	gracefulCtx, stopGrace := context.WithTimeout(shutdownCtx, 30*time.Second)
+	cleanupErr := app.Cleanup(gracefulCtx)
+	stopGrace()
+	if errors.Is(cleanupErr, context.DeadlineExceeded) || errors.Is(cleanupErr, context.Canceled) {
+		cleanupErr = errors.Join(cleanupErr, app.Cleanup(shutdownCtx))
+	}
+	if cleanupErr != nil {
+		log.Printf("Application shutdown incomplete; unjoined resources=%v: %v", resources.Pending(), cleanupErr)
+	}
+	return errors.Join(serveErr, cleanupErr)
+}

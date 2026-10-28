@@ -1,0 +1,549 @@
+package service
+
+import (
+	"context"
+	"crypto/subtle"
+	"fmt"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
+	"github.com/redis/go-redis/v9"
+
+	"log/slog"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/authz"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+)
+
+// OpenAIOAuthService handles OpenAI OAuth authentication flows
+type OpenAIOAuthService struct {
+	rdb                  *redis.Client
+	excelAccountRepo     AccountRepository
+	excelEncryptor       SecretEncryptor
+	sessionStore         *openai.SessionStore
+	proxyRepo            ProxyRepository
+	oauthClient          OpenAIOAuthClient
+	privacyClientFactory PrivacyClientFactory // 用于调用 chatgpt.com/backend-api（ImpersonateChrome）
+}
+
+// NewOpenAIOAuthService creates a new OpenAI OAuth service
+func NewOpenAIOAuthService(proxyRepo ProxyRepository, oauthClient OpenAIOAuthClient, shared ...*redis.Client) *OpenAIOAuthService {
+	var rdb *redis.Client
+	if len(shared) > 0 {
+		rdb = shared[0]
+	}
+	return &OpenAIOAuthService{
+		rdb:          rdb,
+		sessionStore: openai.NewSessionStore(),
+		proxyRepo:    proxyRepo,
+		oauthClient:  oauthClient,
+	}
+}
+
+// SetPrivacyClientFactory 注入 ImpersonateChrome 客户端工厂，
+// 用于调用 chatgpt.com/backend-api 获取账号信息（plan_type 等）。
+func (s *OpenAIOAuthService) SetPrivacyClientFactory(factory PrivacyClientFactory) {
+	s.privacyClientFactory = factory
+}
+
+// OpenAIAuthURLResult contains the authorization URL and session info
+type OpenAIAuthURLResult struct {
+	AuthURL   string `json:"auth_url"`
+	SessionID string `json:"session_id"`
+}
+
+// GenerateAuthURL generates an OpenAI OAuth authorization URL
+func (s *OpenAIOAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64, redirectURI, platform string, profiles ...string) (*OpenAIAuthURLResult, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
+	if _, scoped := authz.VendorScopeFromContext(ctx); scoped {
+		return nil, authz.ErrAuthorizationExpired
+	}
+	// Generate PKCE values
+	state, err := openai.GenerateState()
+	if err != nil {
+		return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_OAUTH_STATE_FAILED", "failed to generate state: %v", err)
+	}
+
+	codeVerifier, err := openai.GenerateCodeVerifier()
+	if err != nil {
+		return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_OAUTH_VERIFIER_FAILED", "failed to generate code verifier: %v", err)
+	}
+
+	codeChallenge := openai.GenerateCodeChallenge(codeVerifier)
+
+	// Generate session ID
+	sessionID, err := openai.GenerateSessionID()
+	if err != nil {
+		return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_OAUTH_SESSION_FAILED", "failed to generate session ID: %v", err)
+	}
+
+	// Get proxy URL if specified
+	var proxyURL string
+	if proxyID != nil {
+		proxy, err := s.proxyRepo.GetByID(ctx, *proxyID)
+		if err != nil {
+			return nil, infraerrors.Newf(http.StatusBadRequest, "OPENAI_OAUTH_PROXY_NOT_FOUND", "proxy not found: %v", err)
+		}
+		if proxy != nil {
+			proxyURL = proxy.URL()
+		}
+	}
+
+	// Use default redirect URI if not specified
+	if redirectURI == "" {
+		redirectURI = openai.DefaultRedirectURI
+	}
+	normalizedPlatform := normalizeOpenAIOAuthPlatform(platform)
+	clientID, _ := openai.OAuthClientConfigByPlatform(normalizedPlatform)
+	excel := len(profiles) > 0 && profiles[0] == "excel"
+	if excel {
+		clientID = openai.ExcelClientID
+		redirectURI = openai.ExcelRedirectURI
+	}
+
+	// Store session
+	session := &openai.OAuthSession{
+		Authorization: authz.CaptureLease(ctx),
+		State:         state,
+		CodeVerifier:  codeVerifier,
+		ClientID:      clientID,
+		RedirectURI:   redirectURI,
+		ProxyURL:      proxyURL,
+		CreatedAt:     time.Now(),
+	}
+	if s.rdb != nil {
+		if err := oauth.PutSharedSession(ctx, s.rdb, "oauth:openai:"+sessionID, session, openai.SessionTTL); err != nil {
+			return nil, err
+		}
+	} else {
+		s.sessionStore.Set(sessionID, session)
+	}
+
+	// Build authorization URL
+	authURL := openai.BuildAuthorizationURLForPlatform(state, codeChallenge, redirectURI, normalizedPlatform)
+	if excel {
+		authURL = openai.BuildExcelAuthorizationURL(state, codeChallenge)
+	}
+
+	return &OpenAIAuthURLResult{
+		AuthURL:   authURL,
+		SessionID: sessionID,
+	}, nil
+}
+
+// OpenAIExchangeCodeInput represents the input for code exchange
+type OpenAIExchangeCodeInput struct {
+	SessionID   string
+	Code        string
+	State       string
+	RedirectURI string
+	ProxyID     *int64
+}
+
+// OpenAITokenInfo represents the token information for OpenAI
+type OpenAITokenInfo struct {
+	AccessToken           string `json:"access_token"`
+	RefreshToken          string `json:"refresh_token"`
+	IDToken               string `json:"id_token,omitempty"`
+	ExpiresIn             int64  `json:"expires_in"`
+	ExpiresAt             int64  `json:"expires_at"`
+	ClientID              string `json:"client_id,omitempty"`
+	AuthMode              string `json:"auth_mode,omitempty"`
+	Email                 string `json:"email,omitempty"`
+	ChatGPTAccountID      string `json:"chatgpt_account_id,omitempty"`
+	ChatGPTUserID         string `json:"chatgpt_user_id,omitempty"`
+	ChatGPTAccountFedRAMP bool   `json:"chatgpt_account_is_fedramp,omitempty"`
+	OrganizationID        string `json:"organization_id,omitempty"`
+	PlanType              string `json:"plan_type,omitempty"`
+	SubscriptionExpiresAt string `json:"subscription_expires_at,omitempty"`
+	PrivacyMode           string `json:"privacy_mode,omitempty"`
+}
+
+// ExchangeCode exchanges authorization code for tokens
+func (s *OpenAIOAuthService) ExchangeCode(ctx context.Context, input *OpenAIExchangeCodeInput) (*OpenAITokenInfo, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
+	if _, scoped := authz.VendorScopeFromContext(ctx); scoped {
+		return nil, authz.ErrAuthorizationExpired
+	}
+	if input == nil || input.SessionID == "" || strings.TrimSpace(input.Code) == "" {
+		return nil, fmt.Errorf("invalid OAuth exchange input")
+	}
+	// Get session
+	session, ok := s.sessionStore.Get(input.SessionID)
+	var raw string
+	if s.rdb != nil {
+		var err error
+		session, raw, err = oauth.ReadSharedSession[openai.OAuthSession](ctx, s.rdb, "oauth:openai:"+input.SessionID)
+		ok = err == nil
+	}
+	if !ok {
+		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_SESSION_NOT_FOUND", "session not found or expired")
+	}
+	if err := authz.CheckLease(ctx, session.Authorization, "accounts.authorize"); err != nil {
+		return nil, err
+	}
+	if input.State == "" {
+		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_STATE_REQUIRED", "oauth state is required")
+	}
+	if subtle.ConstantTimeCompare([]byte(input.State), []byte(session.State)) != 1 {
+		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_INVALID_STATE", "invalid oauth state")
+	}
+
+	// Get proxy URL: prefer input.ProxyID, fallback to session.ProxyURL
+	proxyURL := session.ProxyURL
+	if input.ProxyID != nil {
+		proxy, err := s.proxyRepo.GetByID(ctx, *input.ProxyID)
+		if err != nil {
+			return nil, infraerrors.Newf(http.StatusBadRequest, "OPENAI_OAUTH_PROXY_NOT_FOUND", "proxy not found: %v", err)
+		}
+		if proxy != nil {
+			proxyURL = proxy.URL()
+		}
+	}
+
+	// Use redirect URI from session or input
+	redirectURI := session.RedirectURI
+	if input.RedirectURI != "" && session.ClientID != openai.ExcelClientID {
+		redirectURI = input.RedirectURI
+	}
+	clientID := strings.TrimSpace(session.ClientID)
+	if clientID == "" {
+		clientID = openai.ClientID
+	}
+
+	// Atomically claim before the remote side effect; failures are not replayable.
+	if s.rdb != nil {
+		if _, err := oauth.CompareSwapSession(ctx, s.rdb, "oauth:openai:"+input.SessionID, raw, nil); err != nil {
+			return nil, oauth.ErrSessionConflict
+		}
+	} else if !s.sessionStore.Consume(input.SessionID, session) {
+		return nil, oauth.ErrSessionConflict
+	}
+	// Exchange code for token
+	tokenResp, err := s.oauthClient.ExchangeCode(ctx, input.Code, session.CodeVerifier, redirectURI, proxyURL, clientID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse ID token to get user info
+	var userInfo *openai.UserInfo
+	if tokenResp.IDToken != "" {
+		claims, parseErr := openai.ParseIDToken(tokenResp.IDToken)
+		if parseErr != nil {
+			slog.Warn("openai_oauth_id_token_parse_failed", "error", parseErr)
+		} else {
+			userInfo = claims.GetUserInfo()
+		}
+	}
+
+	if err := authz.CheckLease(ctx, session.Authorization, "accounts.authorize"); err != nil {
+		return nil, err
+	}
+
+	// Delete session after successful exchange
+	s.sessionStore.Delete(input.SessionID)
+
+	tokenInfo := &OpenAITokenInfo{
+		AccessToken:  tokenResp.AccessToken,
+		RefreshToken: tokenResp.RefreshToken,
+		IDToken:      tokenResp.IDToken,
+		ExpiresIn:    int64(tokenResp.ExpiresIn),
+		ExpiresAt:    time.Now().Unix() + int64(tokenResp.ExpiresIn),
+		ClientID:     clientID,
+	}
+
+	if userInfo != nil {
+		tokenInfo.Email = userInfo.Email
+		tokenInfo.ChatGPTAccountID = userInfo.ChatGPTAccountID
+		tokenInfo.ChatGPTUserID = userInfo.ChatGPTUserID
+		tokenInfo.OrganizationID = userInfo.OrganizationID
+		tokenInfo.PlanType = userInfo.PlanType
+	}
+
+	if clientID != openai.ExcelClientID {
+		s.enrichTokenInfo(ctx, tokenInfo, proxyURL)
+	}
+
+	return tokenInfo, nil
+}
+
+// RefreshToken refreshes an OpenAI OAuth token
+func (s *OpenAIOAuthService) RefreshToken(ctx context.Context, refreshToken string, proxyURL string) (*OpenAITokenInfo, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
+	return s.RefreshTokenWithClientID(ctx, refreshToken, proxyURL, "")
+}
+
+// RefreshTokenWithClientID refreshes an OpenAI OAuth token with optional client_id.
+func (s *OpenAIOAuthService) RefreshTokenWithClientID(ctx context.Context, refreshToken string, proxyURL string, clientID string) (*OpenAITokenInfo, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
+	tokenResp, err := s.oauthClient.RefreshTokenWithClientID(ctx, refreshToken, proxyURL, clientID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse ID token to get user info
+	var userInfo *openai.UserInfo
+	if tokenResp.IDToken != "" {
+		claims, parseErr := openai.ParseIDToken(tokenResp.IDToken)
+		if parseErr != nil {
+			slog.Warn("openai_oauth_id_token_parse_failed", "error", parseErr)
+		} else {
+			userInfo = claims.GetUserInfo()
+		}
+	}
+
+	tokenInfo := &OpenAITokenInfo{
+		AccessToken:  tokenResp.AccessToken,
+		RefreshToken: tokenResp.RefreshToken,
+		IDToken:      tokenResp.IDToken,
+		ExpiresIn:    int64(tokenResp.ExpiresIn),
+		ExpiresAt:    time.Now().Unix() + int64(tokenResp.ExpiresIn),
+	}
+	if trimmed := strings.TrimSpace(clientID); trimmed != "" {
+		tokenInfo.ClientID = trimmed
+	}
+
+	if userInfo != nil {
+		tokenInfo.Email = userInfo.Email
+		tokenInfo.ChatGPTAccountID = userInfo.ChatGPTAccountID
+		tokenInfo.ChatGPTUserID = userInfo.ChatGPTUserID
+		tokenInfo.OrganizationID = userInfo.OrganizationID
+		tokenInfo.PlanType = userInfo.PlanType
+	}
+
+	if clientID != openai.ExcelClientID {
+		s.enrichTokenInfo(ctx, tokenInfo, proxyURL)
+	}
+
+	return tokenInfo, nil
+}
+
+// enrichTokenInfo 通过 ChatGPT backend-api 补全 tokenInfo 并设置隐私（best-effort）。
+// 从 accounts/check 获取最新 plan_type、subscription_expires_at、email，
+// 然后尝试关闭训练数据共享。适用于所有获取/刷新 token 的路径。
+func (s *OpenAIOAuthService) enrichTokenInfo(ctx context.Context, tokenInfo *OpenAITokenInfo, proxyURL string) {
+	if tokenInfo.AccessToken == "" || s.privacyClientFactory == nil {
+		return
+	}
+
+	// 从 access_token JWT 中提取 orgID（poid），用于匹配正确的账号
+	orgID := tokenInfo.OrganizationID
+	if orgID == "" {
+		if atClaims, err := openai.DecodeIDToken(tokenInfo.AccessToken); err == nil && atClaims.OpenAIAuth != nil {
+			orgID = atClaims.OpenAIAuth.POID
+		}
+	}
+	// accounts/check 命中的记录不属于个人账号时，必须改用个人订阅端点拿到期时间，
+	// 否则会把 workspace 权益的 expires_at 当成个人订阅到期日展示。
+	forcePersonalSubscriptionLookup := false
+	if info := fetchChatGPTAccountInfo(ctx, s.privacyClientFactory, tokenInfo.AccessToken, proxyURL, orgID); info != nil {
+		// chatgpt_plan_type from the ID token is the canonical personal-plan value.
+		// accounts/check is a multi-account/workspace endpoint; inactive team or
+		// business workspaces can otherwise overwrite Pro/Free with internal
+		// workspace billing plan names such as self_serve_business_usage_based.
+		appliedAccountInfoPlanType := shouldApplyChatGPTAccountInfoPlanType(tokenInfo.PlanType, info.PlanType)
+		if appliedAccountInfoPlanType {
+			tokenInfo.PlanType = info.PlanType
+		}
+		// plan_type 与 subscription_expires_at 必须描述同一份订阅。套餐取自
+		// accounts/check 时，到期时间跟着取同一条记录；套餐保留了 JWT 里的个人值时，
+		// 只有该记录确实就是个人账号才能用它的 entitlement.expires_at——poid 指向的
+		// 默认 Personal workspace 与 chatgpt_account_id 可以是两个不同的标识，
+		// 混用会显示成「个人 Pro + workspace 到期时间」。
+		if info.SubscriptionExpiresAt != "" {
+			if appliedAccountInfoPlanType || chatGPTAccountInfoBelongsToTokenAccount(tokenInfo, info) {
+				tokenInfo.SubscriptionExpiresAt = info.SubscriptionExpiresAt
+			} else {
+				forcePersonalSubscriptionLookup = true
+			}
+		}
+		if tokenInfo.Email == "" && info.Email != "" {
+			tokenInfo.Email = info.Email
+		}
+	}
+	if forcePersonalSubscriptionLookup || strings.TrimSpace(tokenInfo.SubscriptionExpiresAt) == "" {
+		if expiresAt := fetchChatGPTSubscriptionExpiresAt(ctx, s.privacyClientFactory, tokenInfo.AccessToken, proxyURL, resolveChatGPTSubscriptionAccountID(tokenInfo, orgID)); expiresAt != "" {
+			tokenInfo.SubscriptionExpiresAt = expiresAt
+		}
+	}
+
+	// 尝试设置隐私（关闭训练数据共享），best-effort
+	tokenInfo.PrivacyMode = disableOpenAITraining(ctx, s.privacyClientFactory, tokenInfo.AccessToken, proxyURL)
+}
+
+func shouldApplyChatGPTAccountInfoPlanType(current, candidate string) bool {
+	return strings.TrimSpace(candidate) != "" && strings.TrimSpace(current) == ""
+}
+
+// chatGPTAccountInfoBelongsToTokenAccount 判断 accounts/check 命中的那条记录是不是
+// token 自己的个人 ChatGPT 账号。两侧任一缺 ID 时无法区分，返回 true 保持既有行为。
+func chatGPTAccountInfoBelongsToTokenAccount(tokenInfo *OpenAITokenInfo, info *ChatGPTAccountInfo) bool {
+	personalID := strings.TrimSpace(tokenInfo.ChatGPTAccountID)
+	sourceID := strings.TrimSpace(info.AccountID)
+	if personalID == "" || sourceID == "" {
+		return true
+	}
+	return strings.EqualFold(personalID, sourceID)
+}
+
+func resolveChatGPTSubscriptionAccountID(tokenInfo *OpenAITokenInfo, orgID string) string {
+	for _, candidate := range []string{
+		tokenInfo.ChatGPTAccountID,
+		tokenInfo.OrganizationID,
+		orgID,
+	} {
+		if trimmed := strings.TrimSpace(candidate); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+// RefreshAccountToken refreshes token for an OpenAI OAuth account
+func (s *OpenAIOAuthService) RefreshAccountToken(ctx context.Context, account *Account) (*OpenAITokenInfo, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
+	if account.Platform != PlatformOpenAI {
+		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_INVALID_ACCOUNT", "account is not an OpenAI account")
+	}
+	if account.Type != AccountTypeOAuth {
+		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_INVALID_ACCOUNT_TYPE", "account is not an OAuth account")
+	}
+
+	var proxyURL string
+	if account.ProxyID != nil && s.proxyRepo != nil {
+		proxy, err := s.proxyRepo.GetByID(ctx, *account.ProxyID)
+		if err == nil && proxy != nil {
+			proxyURL = proxy.URL()
+		}
+	}
+
+	accessToken := account.GetCredential("access_token")
+	if account.IsOpenAIPersonalAccessToken() {
+		if accessToken == "" {
+			return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_CODEX_PAT_REQUIRED", "access token is required")
+		}
+		return s.ValidateCodexPersonalAccessToken(ctx, accessToken, proxyURL)
+	}
+
+	refreshToken := account.GetCredential("refresh_token")
+	if refreshToken == "" {
+		if accessToken != "" {
+			tokenInfo := &OpenAITokenInfo{
+				AccessToken:           accessToken,
+				RefreshToken:          "",
+				IDToken:               account.GetCredential("id_token"),
+				ClientID:              account.GetCredential("client_id"),
+				Email:                 account.GetCredential("email"),
+				ChatGPTAccountID:      account.GetCredential("chatgpt_account_id"),
+				ChatGPTUserID:         account.GetCredential("chatgpt_user_id"),
+				OrganizationID:        account.GetCredential("organization_id"),
+				PlanType:              account.GetCredential("plan_type"),
+				SubscriptionExpiresAt: account.GetCredential("subscription_expires_at"),
+			}
+			if expiresAt := account.GetCredentialAsTime("expires_at"); expiresAt != nil {
+				tokenInfo.ExpiresAt = expiresAt.Unix()
+				tokenInfo.ExpiresIn = int64(time.Until(*expiresAt).Seconds())
+			}
+			if tokenInfo.ClientID != openai.ExcelClientID {
+				s.enrichTokenInfo(ctx, tokenInfo, proxyURL)
+			}
+			return tokenInfo, nil
+		}
+		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_NO_REFRESH_TOKEN", "no refresh token available")
+	}
+
+	clientID := account.GetCredential("client_id")
+	return s.RefreshTokenWithClientID(ctx, refreshToken, proxyURL, clientID)
+}
+
+// BuildAccountCredentials builds credentials map from token info
+func (s *OpenAIOAuthService) BuildAccountCredentials(tokenInfo *OpenAITokenInfo) map[string]any {
+	creds := map[string]any{
+		"access_token": tokenInfo.AccessToken,
+	}
+	if tokenInfo.ExpiresAt > 0 {
+		creds["expires_at"] = time.Unix(tokenInfo.ExpiresAt, 0).Format(time.RFC3339)
+	}
+	// 仅在刷新响应返回了新的 refresh_token 时才更新，防止用空值覆盖已有令牌
+	if strings.TrimSpace(tokenInfo.RefreshToken) != "" {
+		creds["refresh_token"] = tokenInfo.RefreshToken
+	}
+
+	if tokenInfo.IDToken != "" {
+		creds["id_token"] = tokenInfo.IDToken
+	}
+	if tokenInfo.Email != "" {
+		creds["email"] = tokenInfo.Email
+	}
+	if tokenInfo.ChatGPTAccountID != "" {
+		creds["chatgpt_account_id"] = tokenInfo.ChatGPTAccountID
+	}
+	if tokenInfo.ChatGPTUserID != "" {
+		creds["chatgpt_user_id"] = tokenInfo.ChatGPTUserID
+	}
+	if tokenInfo.OrganizationID != "" {
+		creds["organization_id"] = tokenInfo.OrganizationID
+	}
+	if tokenInfo.PlanType != "" {
+		creds["plan_type"] = tokenInfo.PlanType
+	}
+	if tokenInfo.SubscriptionExpiresAt != "" {
+		creds["subscription_expires_at"] = tokenInfo.SubscriptionExpiresAt
+	}
+	if strings.TrimSpace(tokenInfo.ClientID) != "" {
+		creds["client_id"] = strings.TrimSpace(tokenInfo.ClientID)
+	}
+	if tokenInfo.AuthMode == OpenAIAuthModePersonalAccessToken {
+		creds[openAIAuthModeCredentialKey] = OpenAIAuthModePersonalAccessToken
+		creds[openAIAuthModeLegacyCredentialKey] = "personal_access_token"
+		creds["token_type"] = "Bearer"
+		creds["chatgpt_account_is_fedramp"] = tokenInfo.ChatGPTAccountFedRAMP
+	} else if tokenInfo.ChatGPTAccountFedRAMP {
+		creds["chatgpt_account_is_fedramp"] = true
+	}
+
+	return NormalizeOpenAIPersonalAccessTokenCredentials(nil, tokenInfo, creds)
+}
+
+// Stop stops the session store cleanup goroutine
+// Start explicitly starts the session owner; constructors do not start workers.
+func (s *OpenAIOAuthService) Start(ctx context.Context) error {
+	return s.sessionStore.Start(ctx)
+}
+
+// Drain rejects new OAuth work and waits for admitted operations and the janitor.
+func (s *OpenAIOAuthService) Drain(ctx context.Context) error {
+	return s.sessionStore.Drain(ctx)
+}
+
+// Stop cancels and joins the same owner, retaining join state after a timeout.
+func (s *OpenAIOAuthService) Stop(ctx context.Context) error {
+	return s.sessionStore.Stop(ctx)
+}
+
+func normalizeOpenAIOAuthPlatform(platform string) string {
+	return openai.OAuthPlatformOpenAI
+}

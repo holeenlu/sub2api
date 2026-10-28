@@ -1,0 +1,7 @@
+export { default as GroupBadge } from './presentation/GroupBadge.vue'
+export { default as GroupOptionItem } from './presentation/GroupOptionItem.vue'
+export { default as GroupSelector } from './presentation/GroupSelector.vue'
+export { default as GroupCapacityBadge } from './presentation/GroupCapacityBadge.vue'
+export { groupPresentationKey } from './presentation/context'
+export type { GroupPresentation } from './presentation/context'
+export type { GroupBadgeProps, GroupOptionItemProps, GroupSelectorProps, GroupSelectionOption, GroupCapacityBadgeProps } from './presentation/types'

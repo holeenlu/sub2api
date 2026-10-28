@@ -1,0 +1,4081 @@
+{
+  "schema_version": 1,
+  "title": "sub2api独立重构首版测试用例",
+  "created_on": "2026-10-25",
+  "scope": "backend_and_system_integration",
+  "case_state_policy": "initial_status is an unexecuted case definition, not a live results database; execution evidence uses templates/ACCEPTANCE_RECORD.md",
+  "traceability": "acceptance_ids refer to VALIDATION.md; definitions remain in REQUIREMENTS.md and CONTRACTS.md; work-items.json alone owns task state",
+  "frontend_catalog": "see TEST_CASES.md frontend unique entry; no copied page cases",
+  "coverage_note": "existing_test_files are reusable anchors, not proof of complete case coverage; local_docker is a deployment level, not real_upstream; missing automation remains explicit",
+  "cases": [
+    {
+      "id": "TC-PROTO-01",
+      "title": "Responses原生字段与未知扩展保真",
+      "priority": "P1",
+      "work_packages": [
+        "WP-02",
+        "WP-09",
+        "WP-10"
+      ],
+      "acceptance_ids": [
+        "AT-01",
+        "AT-14",
+        "AT-35"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "可计数本地上游记录完整出站字节；不含真实凭据"
+      ],
+      "steps": [
+        "分别发送HTTP JSON、SSE及WS合法请求，含未知中性扩展、reasoning和stream options",
+        "对照原始字段、出站字段和返回事件",
+        "将有效input、显式null、空数组分别与非法messages/prompt同送；仅input缺省时运行别名转换。",
+        "明确persisted-item拒绝后，对完整client tool_search_call/output执行原有有界修复；与item_reference、缺call_id/正文及server模式分别比较。"
+      ],
+      "expected": [
+        "同协议中性字段按现有合同保留；不恢复全局白名单",
+        "必要转换具名且诊断可定位，工具身份与次序不丢失",
+        "原生input存在即优先，非法无关别名不阻断；只移除允许移除的顶层id，call_id、工具正文、数值与密文不变。"
+      ],
+      "existing_test_files": [
+        "backend/internal/pkg/apicompat/anthropic_responses_test.go",
+        "backend/internal/gateway/protocol/sse/sse_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-PROTO-02",
+      "title": "Chat/Messages/Gemini具名协议转换",
+      "priority": "P1",
+      "work_packages": [
+        "WP-02",
+        "WP-13",
+        "WP-14",
+        "WP-19"
+      ],
+      "acceptance_ids": [
+        "AT-01",
+        "AT-14",
+        "AT-35"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "使用各入口现有合法最小报文和同一合成工具结果"
+      ],
+      "steps": [
+        "依次发送文本、工具调用与第二轮工具结果",
+        "构造目标协议无法表达的执行字段"
+      ],
+      "expected": [
+        "可表达字段和call id完整对应",
+        "无法映射按具名合同拒绝或诊断，不能静默删除后继续生成"
+      ],
+      "existing_test_files": [
+        "backend/internal/pkg/apicompat/anthropic_responses_test.go",
+        "backend/internal/gateway/protocol/sse/sse_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-PROTO-03",
+      "title": "SSE分片边界和终态截断",
+      "priority": "P1",
+      "work_packages": [
+        "WP-02",
+        "WP-09",
+        "WP-10"
+      ],
+      "acceptance_ids": [
+        "AT-01",
+        "AT-14",
+        "AT-35"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "本地上游可逐字节写入与主动断开"
+      ],
+      "steps": [
+        "覆盖CR/LF、BOM、跨buffer UTF-8、拆开的data/event和空行",
+        "在最终事件中途断开，再发送一个完整终态作对照",
+        "将同一组response.created/terminal按一次Read、逐字节及不同SSE/JSON边界输入；故意混入不同response ID及同名usage的未知扩展。",
+        "比较failed/incomplete/canceled权威终态当帧最终累计快照、completed无最终快照、裸error、旧水位加EOF和终态尾部事件。"
+      ],
+      "expected": [
+        "完整事件只交付一次，增量解析不重复扫描/发送",
+        "截断终态不伪造成功或final usage",
+        "归属与测量结论不随网络分块变化；全部逻辑事实在相应wire交付前经同owner检查，未知扩展透传但不自封收费事实。",
+        "业务是否成功与用量是否完整分别判断；无可信最终测量不补零或提升Final，未知/冲突尾部不覆盖已确认事实。"
+      ],
+      "existing_test_files": [
+        "backend/internal/pkg/apicompat/anthropic_responses_test.go",
+        "backend/internal/gateway/protocol/sse/sse_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-PROTO-04",
+      "title": "Cloud完整客户端envelope",
+      "priority": "P1",
+      "work_packages": [
+        "WP-02",
+        "WP-12",
+        "WP-18"
+      ],
+      "acceptance_ids": [
+        "AT-02"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "复用仓库Cloud Codex夹具；记录夹具版本及局限"
+      ],
+      "steps": [
+        "加载additional/custom/namespace tools、迁移历史、图片和第二轮",
+        "分别扩大合法工具/历史数量并误放执行字段",
+        "首次和工具续接分别注入累计6MiB历史；再测试单个原子条目超过4MiB、注入第二批失败及修正后续接。",
+        "首轮期限过期后提交有效工具回复；在中断确认/目录更新期间取消，观测下一RPC次数；注入DB/Redis/JWKS/刷新故障。"
+      ],
+      "expected": [
+        "合法中性字段不触发旧数量/白名单限制",
+        "执行字段不能无声丢弃；digest只随相关有效输入变化",
+        "单RPC包含完整JSON开销且不超已核实边界；全批预检先于工具回复，失败不重放已发送前缀，不丢未决工具。",
+        "已接纳新请求使用当前期限；取消或已观测owner失效阻断新副作用；依赖故障为本地503/取消，不误罚凭据或换账号。"
+      ],
+      "existing_test_files": [
+        "backend/internal/service/openai_cloud_parser_plan_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-PROTO-05",
+      "title": "BPS工具与图片跨轮身份",
+      "priority": "P0",
+      "work_packages": [
+        "WP-11",
+        "WP-18"
+      ],
+      "acceptance_ids": [
+        "AT-03"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "BPS替身可计数上传和生成；至少两张不同图片"
+      ],
+      "steps": [
+        "执行function/code/cmd工具回传与第二轮",
+        "使第二张上传429，再恢复；用他人file id作为反例",
+        "以1/5张原图、32/258条reasoning及opaque compaction历史分别执行JSON/SSE、WS、previous及断线重连；比较上传次数和完整历史。",
+        "分别撤回附件授权、显式namespace工具、强制client tool_choice、CMD/未知工具续接；注入附件/状态存储/图片policy故障。"
+      ],
+      "expected": [
+        "成功附件不重复上传，内容顺序和call id正确",
+        "跨主体引用拒绝；上传失败不作为生成成功",
+        "opaque compaction发送前fresh upload，保留请求内去重与所有密文；不得用换号、删历史或未知执行重放伪造恢复。",
+        "成功终态实际交付才发布response-indexed continuation；固定TTL、身份/凭据/目录归属和跨池完整正文不丢。",
+        "namespace/name/kind精确匹配；本地依赖不冒充provider transport，真实授权模式和消费沿唯一账务链。"
+      ],
+      "existing_test_files": [
+        "backend/internal/service/openai_excel_bps_attachments_test.go",
+        "backend/internal/service/basispoints/tool_images_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-PROTO-06",
+      "title": "Native strict和aliases只作用于约定入口",
+      "priority": "P1",
+      "work_packages": [
+        "WP-02",
+        "WP-09",
+        "WP-10"
+      ],
+      "acceptance_ids": [
+        "AT-35"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "分别构造Native、BPS、Cloud请求"
+      ],
+      "steps": [
+        "原生字段与别名并存并制造冲突",
+        "切到不同模式重复合法中性字段请求"
+      ],
+      "expected": [
+        "Native按现有优先级选择原生字段",
+        "不能把Native strict泛化为所有协议额外准入"
+      ],
+      "existing_test_files": [
+        "backend/internal/service/openai_responses_strict_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-PROTO-07",
+      "title": "能力目录交集与撤回",
+      "priority": "P0",
+      "work_packages": [
+        "WP-07"
+      ],
+      "acceptance_ids": [
+        "AT-37"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "两候选能力集合不一致，另有缺失/空列表候选"
+      ],
+      "steps": [
+        "读取最终metadata与ETag",
+        "撤回一项能力，再更换账号或baseURL并读取"
+      ],
+      "expected": [
+        "只广告当前候选可证实的能力，unknown不冒充支持",
+        "最终内容变化同步ETag，缓存不跨供给身份复用"
+      ],
+      "existing_test_files": [
+        "backend/internal/service/openai_codex_model_metadata_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-PROTO-08",
+      "title": "平台模式传输完整组合",
+      "priority": "P1",
+      "work_packages": [
+        "WP-09",
+        "WP-11",
+        "WP-12",
+        "WP-13",
+        "WP-14",
+        "WP-15",
+        "WP-17",
+        "WP-19"
+      ],
+      "acceptance_ids": [
+        "AT-01",
+        "AT-03",
+        "AT-24",
+        "AT-27"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "以PROTOCOLS中的实际支持格为全集，不补造支持格"
+      ],
+      "steps": [
+        "逐格执行最小请求、错误、取消、工具第二轮",
+        "不支持格验证明确拒绝与零出站"
+      ],
+      "expected": [
+        "所有支持格有对应证据，不能用OpenAI成功代替其他平台",
+        "不支持组合不回落到另一账号模式产生生成"
+      ],
+      "existing_test_files": [],
+      "automation": "manual_or_gap",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-EXEC-01",
+      "title": "Prepare不生成及许可一次性",
+      "priority": "P0",
+      "work_packages": [
+        "WP-01",
+        "WP-08",
+        "WP-09",
+        "WP-10"
+      ],
+      "acceptance_ids": [
+        "AT-04",
+        "AT-05",
+        "AT-06",
+        "AT-07"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "替身记录实际生成请求数"
+      ],
+      "steps": [
+        "仅Prepare后检查计数",
+        "复制同一SendPermit并发消费，再更换正文/目标/授权身份消费",
+        "Operation结束后分别使用未消费permit、已消费permit、正在等authority的Admit及新的OpenPrepared/协议回调。"
+      ],
+      "expected": [
+        "Prepare发送数为0；同一许可最多一次真实发送",
+        "密封输入变化拒绝，错误保留原因链",
+        "不再产生发送、回调或新增预算，已颁permit不能复活；终态不变回Preparing，正常结束也不能用取消客户端伪装。"
+      ],
+      "existing_test_files": [
+        "backend/internal/gateway/execution/dispatch_test.go",
+        "backend/internal/gateway/execution/recovery_test.go",
+        "backend/internal/providers/openai/http_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-EXEC-02",
+      "title": "总预算在所有恢复路径共享",
+      "priority": "P0",
+      "work_packages": [
+        "WP-01",
+        "WP-08",
+        "WP-09",
+        "WP-10",
+        "WP-11",
+        "WP-18"
+      ],
+      "acceptance_ids": [
+        "AT-04",
+        "AT-05",
+        "AT-06",
+        "AT-07"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "固定原始总量、单目标、等待和owner预算",
+        "具备独立BPS/Native发送计数的替身、双授权和Excel-only合成账号、可核对403停用标记与条件恢复的真实隔离存储；Cloud关闭。"
+      ],
+      "steps": [
+        "顺序触发准备失败、401刷新、同账号重试、换候选、重定向",
+        "预算耗尽后再次触发adapter和transport恢复",
+        "HTTP JSON、SSE、Responses WS及进入同一BPS链的兼容入口分别注入能力不匹配、授权不可用/拒绝、429、上游失败和BPS候选耗尽，记录原Operation及所有候选的Native发送次数。",
+        "自动停用关闭/开启各执行一次符合既有分类的BPS 403；开启时核对持久开关关闭，并尝试让当前恢复循环重读账号或重选Native候选。",
+        "停用生效后发送不含旧续接的独立新请求，分别用有效原生授权与Excel-only账号；自动停用关闭的账号再次新请求仍选择BPS。",
+        "按既有条件执行显式恢复probe，并注入并发手动关闭、授权变化和分组变化；核对仅匹配条件时恢复开关，恢复后的独立新请求重新路由。",
+        "在generation、attachment、compaction和repair阶段分别注入账号403、模型权限403、文件归属403、请求能力/内容拒绝、5xx及本地依赖错误；记录账号开关、scope冷却和各候选状态，不只检查最终HTTP状态。",
+        "对映射到同一上游模型的两个alias和另一个模型，分别注入模型/端点/账号BPS范围429及有证据的共享配额429；比较其他模型/模式资格。",
+        "注入超过7200秒的有效Retry-After、HTTP日期、结构化reset、无效/缺失时间以及后到的较短冷却；在有效not-before前后发起新请求。",
+        "分别配置缺失、空、畸形和显式BPS模型列表；HTTP JSON/SSE/WS使用最终映射模型，并切换Cloud开关；核对独立新请求、模型目录和后台恢复探测的实际发送目标。"
+      ],
+      "expected": [
+        "各层发送计数可核对同一预算",
+        "不重建预算、不隐式生成；准备与等待预算不冒充发送数",
+        "依据CONTRACTS.md#bps-routing-20261027，所有选定BPS的原Operation对应Native发送数为0；只允许原合同内的BPS恢复，不换Operation冒充新请求，不丢失实际用量。",
+        "自动停用开启且条件匹配时真实持久化关闭BPS和停用标记；关闭时不误停用。当前请求不能利用已关闭开关转Native。",
+        "停用后的独立新请求在原生授权及权限有效时可以发送Native；Excel-only不发送Native，未停用时仍按BPS配置选择。",
+        "恢复probe继续使用独立生成与条件写入，不重放失败用户请求；并发管理员/凭据/分组变化不会被旧probe覆盖。",
+        "仅有可信账号故障证据且符合相应策略才关闭BPS；模型/文件/请求拒绝与5xx/本地故障不能冒充账号封禁，池耗尽不能批量改动未失败候选。",
+        "冷却按实际证据scope生效，alias按映射模型一致，未受限能力不被扩大处罚；普通429不关闭BPS开关，不因存在原生授权绕过BPS限流或隐式回退。",
+        "有效上游等待时间不被fallback最大值截短；新短信号不缩短长冷却，无有效上游时间才消费既有fallback。到期允许有界验证，不伪造恢复成功。",
+        "只有明确勾选的最终映射模型可进入BPS；缺失列表不等于全选，不自动迁移配置。未选模型的双授权新请求走Native，Excel-only拒绝；没有可探测选中模型时不发送默认BPS生成探测，Cloud往返不清空选择。"
+      ],
+      "existing_test_files": [
+        "backend/internal/gateway/execution/dispatch_test.go",
+        "backend/internal/gateway/execution/recovery_test.go",
+        "backend/internal/providers/openai/http_test.go",
+        "backend/internal/service/openai_excel_bps_ratelimit_test.go",
+        "backend/internal/service/openai_excel_bps_model_cooldown_test.go",
+        "backend/internal/service/openai_excel_bps_auto_disable_test.go",
+        "backend/internal/service/openai_excel_bps_attachments_test.go",
+        "backend/internal/service/openai_excel_bps_explicit_selection_review_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项",
+        "逐Operation及跨请求的BPS/Native发送计数、停用前后与恢复后的持久配置、HTTP/SSE/WS结果；旧回退正例不是新合同通过证据。"
+      ]
+    },
+    {
+      "id": "TC-EXEC-03",
+      "title": "NotSent必须有正面发送证据",
+      "priority": "P0",
+      "work_packages": [
+        "WP-01",
+        "WP-08",
+        "WP-09",
+        "WP-10"
+      ],
+      "acceptance_ids": [
+        "AT-04",
+        "AT-05",
+        "AT-06",
+        "AT-07"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "替身分别在拨号前拒绝和读完请求后断开"
+      ],
+      "steps": [
+        "对拨号前失败触发可允许重选",
+        "对接收后无响应/超时触发同一恢复入口"
+      ],
+      "expected": [
+        "仅可证明NotSent且未交付、仍有预算时受限重选",
+        "Sent/Ambiguous不能靠没有输出改写为NotSent"
+      ],
+      "existing_test_files": [
+        "backend/internal/gateway/execution/dispatch_test.go",
+        "backend/internal/gateway/execution/recovery_test.go",
+        "backend/internal/providers/openai/http_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-EXEC-04",
+      "title": "首次业务输出之后不重新生成",
+      "priority": "P0",
+      "work_packages": [
+        "WP-01",
+        "WP-08",
+        "WP-09",
+        "WP-10"
+      ],
+      "acceptance_ids": [
+        "AT-04",
+        "AT-05",
+        "AT-06",
+        "AT-07"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "SSE/WS替身先发送真实语义输出"
+      ],
+      "steps": [
+        "输出后上游断开、下游Flush失败、客户端取消",
+        "与仅发送非语义keepalive情况比较"
+      ],
+      "expected": [
+        "已Committed路径不自动重新生成或换号",
+        "非语义写出不被误当首业务输出；不丢真实取消原因"
+      ],
+      "existing_test_files": [
+        "backend/internal/gateway/execution/dispatch_test.go",
+        "backend/internal/gateway/execution/recovery_test.go",
+        "backend/internal/providers/openai/http_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-EXEC-05",
+      "title": "等待连接时许可到期",
+      "priority": "P0",
+      "work_packages": [
+        "WP-01",
+        "WP-08",
+        "WP-09",
+        "WP-10"
+      ],
+      "acceptance_ids": [
+        "AT-04",
+        "AT-05",
+        "AT-06",
+        "AT-07"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "可控RoundTripper阻塞连接获取；租约真实到期"
+      ],
+      "steps": [
+        "许可取得后阻塞至deadline，再交出连接",
+        "对照已写headers后较慢但正常返回的响应"
+      ],
+      "expected": [
+        "过期时零请求写出且取消等待",
+        "已合法开始的响应不因发送许可deadline被截断"
+      ],
+      "existing_test_files": [
+        "backend/internal/providers/openai/http_dispatch_deadline_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-EXEC-06",
+      "title": "GotConn后再次撤权及隐藏重发",
+      "priority": "P0",
+      "work_packages": [
+        "WP-01",
+        "WP-08",
+        "WP-09",
+        "WP-10"
+      ],
+      "acceptance_ids": [
+        "AT-04",
+        "AT-05",
+        "AT-06",
+        "AT-07"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "在取得连接回调点撤销权威授权"
+      ],
+      "steps": [
+        "触发GotConn后写headers前撤销",
+        "模拟transport试图重用请求再次写出"
+      ],
+      "expected": [
+        "撤权前最后复核阻止发送",
+        "已尝试写出后不允许transport自动重发"
+      ],
+      "existing_test_files": [
+        "backend/internal/providers/openai/http_dispatch_deadline_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-EXEC-07",
+      "title": "重定向每跳重新准入与凭据隔离",
+      "priority": "P0",
+      "work_packages": [
+        "WP-01",
+        "WP-08",
+        "WP-09",
+        "WP-10"
+      ],
+      "acceptance_ids": [
+        "AT-04",
+        "AT-05",
+        "AT-06",
+        "AT-07"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "本地同域/跨域/私网redirect端点，遵循现行出口策略"
+      ],
+      "steps": [
+        "分别执行303/307、相对Location和跨域跳转",
+        "跳转期间撤权、耗尽预算、制造禁止出口"
+      ],
+      "expected": [
+        "每个可生成跳转重新Prepare/Admit/Open并共用预算",
+        "敏感头按既有策略剥离；禁止目标不会发送"
+      ],
+      "existing_test_files": [
+        "backend/internal/service/native_dispatch_operation_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-EXEC-08",
+      "title": "密封重放输入与独占请求体",
+      "priority": "P0",
+      "work_packages": [
+        "WP-01",
+        "WP-08",
+        "WP-09",
+        "WP-10"
+      ],
+      "acceptance_ids": [
+        "AT-04",
+        "AT-05",
+        "AT-06",
+        "AT-07"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "普通密封字节与只能读一次的独占stream"
+      ],
+      "steps": [
+        "篡改外部GetBody后尝试重放",
+        "重定向或401后请求独占stream重发",
+        "在预读前挂入口预算，分别发送identity/gzip/deflate/zstd、缓存正文与会扩张的JSON规范化；覆盖alpha/search、systemone、embeddings及根别名。",
+        "发送超大zstd窗口、重复Content-Encoding、预读前取消；并发压缩后保留多个GetBody副本，通过真实TLS/redirect及Native seal再次核对字节。"
+      ],
+      "expected": [
+        "重放只来自已密封字节",
+        "独占流不得偷读或自动重放；URL userinfo不暗增Authorization",
+        "wire、解压、缓存及规范化均受同一最严格route预算；400/413/408/499分类与取消不写正文保持。",
+        "解码器窗口/资源受限；编码器独占复用且无固定四槽队列，旧正文/长度/重放副本不串号；封定后的transport不再改编码。"
+      ],
+      "existing_test_files": [
+        "backend/internal/providers/openai/http_reprepare_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-EXEC-09",
+      "title": "发送事实跨应用错误边界不丢失",
+      "priority": "P0",
+      "work_packages": [
+        "WP-01",
+        "WP-08",
+        "WP-09",
+        "WP-10"
+      ],
+      "acceptance_ids": [
+        "AT-04",
+        "AT-05",
+        "AT-06",
+        "AT-07"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "底层分别返回NotSent/Sent/Ambiguous和不同原因错误"
+      ],
+      "steps": [
+        "经过provider、service、handler真实错误转换链",
+        "检查恢复决策、健康反馈与下游错误格式",
+        "将实际principal撤权、资源/代理/凭据归属变化、容量/状态存储故障与provider自报相同code分别送入Report/Observe和原probe结束入口。"
+      ],
+      "expected": [
+        "发送事实和errors.Is原因链可追踪，不因包装丢失",
+        "本地权限拒绝不污染上游健康；不同入口保留原错误协议",
+        "可信来源与typed cause共同分类；资源变化不误关客户端，local/request失败不增加provider cooldown/健康样本，旧probe不能释放下一owner；真实provider故障仍按原规则。"
+      ],
+      "existing_test_files": [
+        "backend/internal/service/native_dispatch_operation_test.go",
+        "backend/internal/service/native_dispatch_operation_security_test.go",
+        "backend/internal/service/native_dispatch_operation_followup_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-ACCESS-01",
+      "title": "Key状态与错误顺序",
+      "priority": "P0",
+      "work_packages": [
+        "WP-03",
+        "WP-04",
+        "WP-10"
+      ],
+      "acceptance_ids": [
+        "AT-09",
+        "AT-10",
+        "AT-13",
+        "AT-18"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "普通、过期、禁用、额度耗尽Key和simple-mode对照"
+      ],
+      "steps": [
+        "对HTTP/Google/WS入口复用同一状态矩阵",
+        "比较认证错误、额度检查和实际发送计数"
+      ],
+      "expected": [
+        "状态顺序遵守已有合同而非新统一错误",
+        "被拒绝时零生成；simple-mode不扩大资源或平台权限"
+      ],
+      "existing_test_files": [
+        "backend/internal/access/key_test.go",
+        "backend/internal/access/dispatch_test.go",
+        "backend/internal/gateway/routing/capacity_scope_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-ACCESS-02",
+      "title": "排队期间撤销及组变更",
+      "priority": "P0",
+      "work_packages": [
+        "WP-03",
+        "WP-04",
+        "WP-10"
+      ],
+      "acceptance_ids": [
+        "AT-09",
+        "AT-10",
+        "AT-13",
+        "AT-18"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "请求在真实容量等待点阻塞"
+      ],
+      "steps": [
+        "在权威存储禁用用户/Key、移动组或撤销供给",
+        "释放槽并进入发送前复核"
+      ],
+      "expected": [
+        "复核使用当前权威事实，旧缓存不能放行",
+        "拒绝释放属于自己的资源，无残留准入"
+      ],
+      "existing_test_files": [
+        "backend/internal/access/key_test.go",
+        "backend/internal/access/dispatch_test.go",
+        "backend/internal/gateway/routing/capacity_scope_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-ACCESS-03",
+      "title": "nil组零组和空范围不放大",
+      "priority": "P0",
+      "work_packages": [
+        "WP-03",
+        "WP-04",
+        "WP-10"
+      ],
+      "acceptance_ids": [
+        "AT-09",
+        "AT-10",
+        "AT-13",
+        "AT-18"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "含未绑定Key、空组资源范围和有效独占组"
+      ],
+      "steps": [
+        "分别进入模型选择及供给准入",
+        "跨组或缺省资源作为反例"
+      ],
+      "expected": [
+        "未绑定与无权范围不混为全局访问",
+        "已授权兼容语义保留，不发明默认组"
+      ],
+      "existing_test_files": [
+        "backend/internal/access/key_test.go",
+        "backend/internal/access/dispatch_test.go",
+        "backend/internal/gateway/routing/capacity_scope_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-ACCESS-04",
+      "title": "OAuth/PAT/Excel凭据资格",
+      "priority": "P0",
+      "work_packages": [
+        "WP-03",
+        "WP-04",
+        "WP-10",
+        "WP-11",
+        "WP-18"
+      ],
+      "acceptance_ids": [
+        "AT-09",
+        "AT-10",
+        "AT-13",
+        "AT-18"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "明确分类的OAuth、PAT、Excel-only合成账号",
+        "双授权与Excel-only合成账号、独立Excel grant和可计数/分类的授权刷新替身；不使用真实凭据。"
+      ],
+      "steps": [
+        "OAuth缺到期证明和过期拒绝",
+        "PAT按真实账号分类验证；Excel-only请求Native",
+        "旧Excel access token收到401后分别刷新成功、有限刷新后明确拒绝、确认grant缺失/撤销/无refresh token；同时检查独立原生授权。",
+        "注入授权仓储读取/解密服务/锁/刷新端点超时、5xx及刷新保存确认丢失；与权威查无grant对比。",
+        "系统停用后重新授权为新grant，再返回旧401/刷新/probe结果；使用当前授权与配置启动恢复或显式开启。"
+      ],
+      "expected": [
+        "不伪造过期时间或授权epoch",
+        "PAT不误走OAuth刷新；Excel-only不借BPS可用性进入Native",
+        "可刷新时只使用原owner和总预算的有限刷新；确定授权不可用后自动停用BPS并保留真实原因，需重新授权时无自动生成probe时间，当前请求始终不转原生。",
+        "双授权的Excel故障不错误撤销独立原生凭据；依赖故障不伪装撤销/缺失、不因此关闭整池；正常token轮换与身份撤销分别判断。",
+        "新grant不被旧结果停用或恢复；新授权只按当前设置重新验证，保存结果不明先核对，不盲写状态。"
+      ],
+      "existing_test_files": [
+        "backend/internal/access/key_test.go",
+        "backend/internal/access/dispatch_test.go",
+        "backend/internal/gateway/routing/capacity_scope_test.go",
+        "backend/internal/service/openai_excel_oauth_test.go",
+        "backend/internal/service/vendor_excel_oauth_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-ACCESS-05",
+      "title": "有限和无限容量均需真实收据",
+      "priority": "P0",
+      "work_packages": [
+        "WP-03",
+        "WP-04",
+        "WP-10"
+      ],
+      "acceptance_ids": [
+        "AT-09",
+        "AT-10",
+        "AT-13",
+        "AT-18"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "固定真实并发策略，分别有限与显式无限"
+      ],
+      "steps": [
+        "未Acquire就Bind/Verify",
+        "Acquire后改变策略、取消或Release，再尝试发送"
+      ],
+      "expected": [
+        "无限不等于缺少容量证明",
+        "释放或策略变化使旧收据失效，零值不能合成无限"
+      ],
+      "existing_test_files": [
+        "backend/internal/gateway/routing/capacity_evidence_test.go",
+        "backend/internal/gateway/routing/owned_lease_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-ACCESS-06",
+      "title": "用户与账号容量归属及替换",
+      "priority": "P0",
+      "work_packages": [
+        "WP-03",
+        "WP-04",
+        "WP-10"
+      ],
+      "acceptance_ids": [
+        "AT-09",
+        "AT-10",
+        "AT-13",
+        "AT-18"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "同一operation取得用户和两个候选账号收据"
+      ],
+      "steps": [
+        "只Bind最终选中账号",
+        "旧收据释放与新收据取得并发"
+      ],
+      "expected": [
+        "旧回调不删新收据；未选候选不拥有发送上下文",
+        "实际用户/账号槽各自只释放一次"
+      ],
+      "existing_test_files": [
+        "backend/internal/access/key_test.go",
+        "backend/internal/access/dispatch_test.go",
+        "backend/internal/gateway/routing/capacity_scope_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-ACCESS-07",
+      "title": "Redis丢租约与续期竞争",
+      "priority": "P0",
+      "work_packages": [
+        "WP-03",
+        "WP-04",
+        "WP-10"
+      ],
+      "acceptance_ids": [
+        "AT-09",
+        "AT-10",
+        "AT-13",
+        "AT-18"
+      ],
+      "evidence_level": "R",
+      "preconditions": [
+        "专用可丢弃真实Redis；记录token和服务端时间"
+      ],
+      "steps": [
+        "阻塞续期并删除/过期所属token",
+        "释放与迟到续期同时执行，恢复Redis后重验"
+      ],
+      "expected": [
+        "有限宽限遵循合同，不永久放行",
+        "迟到确认不能恢复已失效权限；release join后无续期写"
+      ],
+      "existing_test_files": [
+        "backend/internal/gateway/routing/lease_test.go",
+        "backend/internal/repository/gateway_cache_cloud_integration_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "按现有harness回滚/删除本用例数据并停止仅本次启动的Testcontainers；记录实际资源ID",
+        "保留必要脱敏证据，确认未清空持续联调/生产数据库或其他任务Redis"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-ACCESS-08",
+      "title": "模型别名价格与资源资格不串用",
+      "priority": "P0",
+      "work_packages": [
+        "WP-04",
+        "WP-06",
+        "WP-07",
+        "WP-20"
+      ],
+      "acceptance_ids": [
+        "AT-09",
+        "AT-10",
+        "AT-13",
+        "AT-18"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "一个别名映射、两个实际模型与不同组定价"
+      ],
+      "steps": [
+        "请求别名并保存原始/实际模型与冻结价格",
+        "切换候选或配置后检查选择和账务"
+      ],
+      "expected": [
+        "原始请求身份、实际上游模型、账务身份明确分开",
+        "资格及价格来源不因展示名称变化扩大"
+      ],
+      "existing_test_files": [
+        "backend/internal/access/key_test.go",
+        "backend/internal/access/dispatch_test.go",
+        "backend/internal/gateway/routing/capacity_scope_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-SESSION-01",
+      "title": "跨用户Key和response强续接隔离",
+      "priority": "P0",
+      "work_packages": [
+        "WP-05",
+        "WP-10",
+        "WP-12"
+      ],
+      "acceptance_ids": [
+        "AT-10",
+        "AT-11",
+        "AT-12",
+        "AT-23",
+        "AT-36"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "两用户各两个Key和独立response历史"
+      ],
+      "steps": [
+        "用同用户另一Key、另一用户、另一tenant续接",
+        "合法原主体续接作正例",
+        "原response账号/连接/写入代际失效后续接；比较显式previous、网关合成增量和客户端已提交完整历史三种路径。"
+      ],
+      "expected": [
+        "强绑定按真实合同验证；错误不泄漏他人内容",
+        "合法延续复用原账务/会话身份而不新建无关线程",
+        "不能携旧ID普通换号；符合条件的明确推理前拒绝可按原预算同账号一次全量恢复；同WS可收标准恢复信号并补全历史。"
+      ],
+      "existing_test_files": [
+        "backend/internal/gateway/session/owner_test.go",
+        "backend/internal/gateway/session/response_history_test.go",
+        "backend/internal/service/openai_ws_multiplex_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-SESSION-02",
+      "title": "并发WS每轮独立准入与账务",
+      "priority": "P0",
+      "work_packages": [
+        "WP-05",
+        "WP-10",
+        "WP-12"
+      ],
+      "acceptance_ids": [
+        "AT-10",
+        "AT-11",
+        "AT-12",
+        "AT-23",
+        "AT-36"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "同连接两个命名流并发response.create"
+      ],
+      "steps": [
+        "交叉输出、工具回传和取消其中一轮",
+        "期间变更Key/费率后发第三轮",
+        "同连接同client/local correlation的两个stream均返回已计量错误且无provider response ID；另外一轮无Result但存在发送证据。"
+      ],
+      "expected": [
+        "operation/stream/provider turn/billing root不混淆",
+        "每轮当前准入和冻结价格独立，已准入轮不串新配置",
+        "不同逻辑操作的journal身份独立，同操作重试身份不变，内部money-ID不成为公开response/previous；实测cache/image桶不丢，Unknown/Partial不被伪造为Final或零。"
+      ],
+      "existing_test_files": [
+        "backend/internal/gateway/session/owner_test.go",
+        "backend/internal/gateway/session/response_history_test.go",
+        "backend/internal/service/openai_ws_multiplex_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-SESSION-03",
+      "title": "接收前准入及排队取消回收",
+      "priority": "P0",
+      "work_packages": [
+        "WP-05",
+        "WP-10",
+        "WP-12"
+      ],
+      "acceptance_ids": [
+        "AT-10",
+        "AT-11",
+        "AT-12",
+        "AT-23",
+        "AT-36"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "WS可控制读取队列和host drain"
+      ],
+      "steps": [
+        "接收多条response.create前启动tracking",
+        "cancel/drain时保留一条未出队并结束在途"
+      ],
+      "expected": [
+        "accepted turn先取得owner再入队",
+        "未出队/取消轮释放并join；终态交付及usage持久化之前不提前释放"
+      ],
+      "existing_test_files": [
+        "backend/internal/gateway/session/owner_test.go",
+        "backend/internal/gateway/session/response_history_test.go",
+        "backend/internal/service/openai_ws_multiplex_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-SESSION-04",
+      "title": "FIFO与fork跨流历史",
+      "priority": "P0",
+      "work_packages": [
+        "WP-05",
+        "WP-10",
+        "WP-12",
+        "WP-11",
+        "WP-18"
+      ],
+      "acceptance_ids": [
+        "AT-10",
+        "AT-11",
+        "AT-12",
+        "AT-23",
+        "AT-36"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "已交付完整响应及未完成响应各一条"
+      ],
+      "steps": [
+        "同stream排队后取消中间轮",
+        "另一stream显式fork并等待历史发布",
+        "BPS终态交付成功后注入continuation提交/abort读失败、CAS冲突及写返回未知；依赖恢复后重读同nonce/digest。",
+        "BPS 403自动停用生效后，分别提交旧previous_response_id、待回复工具call_id和定向取消；另发无旧续接的独立新轮作为对照，覆盖HTTP及WS。"
+      ],
+      "expected": [
+        "FIFO无跳序、取消不串账",
+        "只有完整交付并绑定身份的历史可发布，等待可取消",
+        "只对同一metadata做原有期限内的有界确认，结果/未知可观察；不发第二终态、不重新生成、不另建账务根；未确认历史保守不发布。",
+        "按CT-02 BPS修订，旧续接/工具回复/取消仍验证原归属及当前授权，不发往Native、不删除引用再生成；独立新轮可按已停用配置及有效原生授权路由，两者不能混淆。"
+      ],
+      "existing_test_files": [
+        "backend/internal/gateway/session/owner_test.go",
+        "backend/internal/gateway/session/response_history_test.go",
+        "backend/internal/service/openai_ws_multiplex_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-SESSION-05",
+      "title": "双进程owner失联与fencing",
+      "priority": "P0",
+      "work_packages": [
+        "WP-05",
+        "WP-10",
+        "WP-12"
+      ],
+      "acceptance_ids": [
+        "AT-10",
+        "AT-11",
+        "AT-12",
+        "AT-23",
+        "AT-36"
+      ],
+      "evidence_level": "M",
+      "preconditions": [
+        "两个独立网关进程共享专用PG/Redis和计数上游"
+      ],
+      "steps": [
+        "A取得owner并运行；终止A后B按模式合同claim",
+        "恢复旧A并重放旧命令/输出/清理",
+        "Cloud terminal之后再到usage，下一root开始后再到旧turn事件；另模拟已有100、新到200但Redis持续失败并重启恢复。"
+      ],
+      "expected": [
+        "旧epoch不能写新owner状态或释放新token",
+        "不宣称活socket可无损接管；账务根及发送数守恒",
+        "按原owner/turn/root归档真实迟到事实，不混给下一操作、不重算已结算账单；耐久失败保留实际错误，不把旧水位当最新完整事实。"
+      ],
+      "existing_test_files": [],
+      "automation": "manual_or_gap",
+      "initial_status": "not_run",
+      "cleanup": [
+        "恢复被修改的本用例配置/网络/故障条件，核对原卷及数据一致",
+        "停止或保留本次专用Compose资源须记录用途和ID；持续联调资源保持不变"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-SESSION-06",
+      "title": "跨轮凭据刷新与资源身份变化",
+      "priority": "P0",
+      "work_packages": [
+        "WP-05",
+        "WP-10",
+        "WP-12"
+      ],
+      "acceptance_ids": [
+        "AT-10",
+        "AT-11",
+        "AT-12",
+        "AT-23",
+        "AT-36"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "同OAuth身份刷新与更换账号两种场景"
+      ],
+      "steps": [
+        "第一轮完成后正常刷新token",
+        "再改变账号/baseURL/relay identity并尝试续接"
+      ],
+      "expected": [
+        "同一可确认身份刷新不无故断开业务续接",
+        "供给身份改变必须按合同隔离，不借刷新跨主体复用"
+      ],
+      "existing_test_files": [
+        "backend/internal/gateway/session/owner_test.go",
+        "backend/internal/gateway/session/response_history_test.go",
+        "backend/internal/service/openai_ws_multiplex_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-SESSION-07",
+      "title": "连接限制与慢读断线",
+      "priority": "P0",
+      "work_packages": [
+        "WP-05",
+        "WP-10",
+        "WP-12"
+      ],
+      "acceptance_ids": [
+        "AT-10",
+        "AT-11",
+        "AT-12",
+        "AT-23",
+        "AT-36"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "设置有限WS客户端上限；两个真实连接"
+      ],
+      "steps": [
+        "达到上限后再连接并关闭已接纳连接",
+        "慢读写阻塞、心跳丢失和lease丢失"
+      ],
+      "expected": [
+        "上限/关闭码遵守原契约，已关闭槽可重新使用",
+        "关闭join读写任务，无后台响应写到其他用户连接"
+      ],
+      "existing_test_files": [
+        "backend/internal/gateway/session/owner_test.go",
+        "backend/internal/gateway/session/response_history_test.go",
+        "backend/internal/service/openai_ws_multiplex_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-BILL-01",
+      "title": "相同幂等键并发重复结算",
+      "priority": "P0",
+      "work_packages": [
+        "WP-06",
+        "WP-10",
+        "WP-18"
+      ],
+      "acceptance_ids": [
+        "AT-15",
+        "AT-16",
+        "AT-17",
+        "AT-29"
+      ],
+      "evidence_level": "R",
+      "preconditions": [
+        "真实PG，记录余额/配额/usage/供应商双边基线"
+      ],
+      "steps": [
+        "两个独立调用并发提交同一root/event",
+        "收到成功后重放相同事件"
+      ],
+      "expected": [
+        "唯一账务结果和一次余额/配额影响",
+        "重复返回既有结果而非再扣费，双边归属一致"
+      ],
+      "existing_test_files": [
+        "backend/internal/billing/ledger_test.go",
+        "backend/internal/repository/usage_billing_repo_integration_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "按现有harness回滚/删除本用例数据并停止仅本次启动的Testcontainers；记录实际资源ID",
+        "保留必要脱敏证据，确认未清空持续联调/生产数据库或其他任务Redis"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-BILL-02",
+      "title": "事务各失败窗口全成或全败",
+      "priority": "P0",
+      "work_packages": [
+        "WP-06",
+        "WP-10",
+        "WP-18"
+      ],
+      "acceptance_ids": [
+        "AT-15",
+        "AT-16",
+        "AT-17",
+        "AT-29"
+      ],
+      "evidence_level": "R",
+      "preconditions": [
+        "隔离PG和可控失败点，不改生产迁移"
+      ],
+      "steps": [
+        "在journal、usage、余额、供应商记账阶段逐一失败",
+        "重新执行恢复worker并查询所有表",
+        "真实Final已观察后让原builder前置依赖失败，再让journal持久化成功/失败；比较正常待结算与明确log_only。",
+        "simple模式下将前一cycle的Result计数送入当前cycle事实，核对原始映射与日志副作用。"
+      ],
+      "expected": [
+        "失败无部分扣费或孤立usage",
+        "恢复复用同一幂等根和事务，不走直接扣余额旁路",
+        "Final原始事实与未决结算意图不因定价准备失败丢失；空command不能被解释为正常UsageRecorded/已付费；SQL失败不造durable回执。",
+        "非计费映射同样校验实测来源，拒绝过时计数且无错误日志/金额command；不复制定价计算。"
+      ],
+      "existing_test_files": [
+        "backend/internal/billing/ledger_test.go",
+        "backend/internal/repository/usage_billing_repo_integration_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "按现有harness回滚/删除本用例数据并停止仅本次启动的Testcontainers；记录实际资源ID",
+        "保留必要脱敏证据，确认未清空持续联调/生产数据库或其他任务Redis"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-BILL-03",
+      "title": "未知和实测零分离",
+      "priority": "P0",
+      "work_packages": [
+        "WP-06",
+        "WP-10",
+        "WP-18"
+      ],
+      "acceptance_ids": [
+        "AT-15",
+        "AT-16",
+        "AT-17",
+        "AT-29"
+      ],
+      "evidence_level": "R",
+      "preconditions": [
+        "分别无usage、实测0和完整非零usage"
+      ],
+      "steps": [
+        "正常结束、无确认断开、客户端取消逐一结算",
+        "检查API投影、持久化和成本",
+        "分别仅上报cache、image input/output、完成图片计数；比较裸error/EOF、带usage的可信终态及显式零。",
+        "对比Cloud v1历史记录及合法/非法v2三态冻结policy，切换当前simple配置后重放同一存量记录。"
+      ],
+      "expected": [
+        "unknown不能写0或标Final",
+        "实测零可与未知区分；未确认结束不凭水位收费",
+        "所有实测桶连同存在性耐久保存；未确认用量无第二Apply或假零日志；费用与响应成功分别判定。",
+        "writer仍v1；v1按原语义读取，v2按已冻结log_only/key_window_only/full_billing处理，未知版本不得按当前配置猜测收费。"
+      ],
+      "existing_test_files": [
+        "backend/internal/billing/ledger_test.go",
+        "backend/internal/repository/usage_billing_repo_integration_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "按现有harness回滚/删除本用例数据并停止仅本次启动的Testcontainers；记录实际资源ID",
+        "保留必要脱敏证据，确认未清空持续联调/生产数据库或其他任务Redis"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-BILL-04",
+      "title": "confirmed interrupted的lower_bound",
+      "priority": "P0",
+      "work_packages": [
+        "WP-06",
+        "WP-10",
+        "WP-18"
+      ],
+      "acceptance_ids": [
+        "AT-15",
+        "AT-16",
+        "AT-17",
+        "AT-29"
+      ],
+      "evidence_level": "R",
+      "preconditions": [
+        "明确failed/interrupted终态并含真实累计usage"
+      ],
+      "steps": [
+        "记录一轮中间水位与确认的提前终态",
+        "对照只有断线没有终态的场景"
+      ],
+      "expected": [
+        "确认提前终态按既有规则单根lower_bound",
+        "不冒充完整Final、不证明重放安全；未确认场景仍unknown"
+      ],
+      "existing_test_files": [
+        "backend/internal/billing/ledger_test.go",
+        "backend/internal/repository/usage_billing_repo_integration_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "按现有harness回滚/删除本用例数据并停止仅本次启动的Testcontainers；记录实际资源ID",
+        "保留必要脱敏证据，确认未清空持续联调/生产数据库或其他任务Redis"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-BILL-05",
+      "title": "迟到usage重复冲突与顺序",
+      "priority": "P0",
+      "work_packages": [
+        "WP-06",
+        "WP-10",
+        "WP-18"
+      ],
+      "acceptance_ids": [
+        "AT-15",
+        "AT-16",
+        "AT-17",
+        "AT-29"
+      ],
+      "evidence_level": "R",
+      "preconditions": [
+        "已结算根与多条累计/增量usage"
+      ],
+      "steps": [
+        "乱序投递、重复投递、迟到更大或冲突值",
+        "检查归档与既有幂等结果"
+      ],
+      "expected": [
+        "不把累计反复相加，不抹掉原始事实",
+        "按合同处理冲突，不自建补差或第二次根结算"
+      ],
+      "existing_test_files": [
+        "backend/internal/billing/ledger_test.go",
+        "backend/internal/repository/usage_billing_repo_integration_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "按现有harness回滚/删除本用例数据并停止仅本次启动的Testcontainers；记录实际资源ID",
+        "保留必要脱敏证据，确认未清空持续联调/生产数据库或其他任务Redis"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-BILL-06",
+      "title": "冻结价格及恢复胜出值",
+      "priority": "P0",
+      "work_packages": [
+        "WP-06",
+        "WP-10",
+        "WP-18"
+      ],
+      "acceptance_ids": [
+        "AT-15",
+        "AT-16",
+        "AT-17",
+        "AT-29"
+      ],
+      "evidence_level": "R",
+      "preconditions": [
+        "请求已冻结价格，随后管理员修改当前价格"
+      ],
+      "steps": [
+        "首次结算失败进入恢复",
+        "恢复期间再次修改价格并重试"
+      ],
+      "expected": [
+        "最终使用持久化胜出的冻结价格",
+        "不得用恢复时最新价格偷偷重计"
+      ],
+      "existing_test_files": [
+        "backend/internal/billing/ledger_test.go",
+        "backend/internal/repository/usage_billing_repo_integration_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "按现有harness回滚/删除本用例数据并停止仅本次启动的Testcontainers；记录实际资源ID",
+        "保留必要脱敏证据，确认未清空持续联调/生产数据库或其他任务Redis"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-BILL-07",
+      "title": "超管余额豁免不扩大额度",
+      "priority": "P0",
+      "work_packages": [
+        "WP-06",
+        "WP-10",
+        "WP-18"
+      ],
+      "acceptance_ids": [
+        "AT-15",
+        "AT-16",
+        "AT-17",
+        "AT-29"
+      ],
+      "evidence_level": "R",
+      "preconditions": [
+        "普通用户及super_admin个人Key的相同用量"
+      ],
+      "steps": [
+        "执行同价请求并记录个人余额、平台/Key配额及供应商费用",
+        "超过硬限额再请求"
+      ],
+      "expected": [
+        "仅约定的个人余额豁免；账务证据完整",
+        "配额、平台保护、并发和供应商成本不获豁免"
+      ],
+      "existing_test_files": [
+        "backend/internal/billing/ledger_test.go",
+        "backend/internal/repository/usage_billing_repo_integration_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "按现有harness回滚/删除本用例数据并停止仅本次启动的Testcontainers；记录实际资源ID",
+        "保留必要脱敏证据，确认未清空持续联调/生产数据库或其他任务Redis"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-BILL-08",
+      "title": "异步结算持有reservation到最后",
+      "priority": "P0",
+      "work_packages": [
+        "WP-06",
+        "WP-10",
+        "WP-18"
+      ],
+      "acceptance_ids": [
+        "AT-15",
+        "AT-16",
+        "AT-17",
+        "AT-29"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "handler结束但两个异步计费引用仍在运行"
+      ],
+      "steps": [
+        "逐个完成引用；同时触发drain/timeout",
+        "阻塞最后续期验证并调用Stop"
+      ],
+      "expected": [
+        "最后真实账务完成之前不释放reservation",
+        "Stop取消并join续期，超时保留未完成责任"
+      ],
+      "existing_test_files": [
+        "backend/internal/billing/reservation/handle_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-BILL-09",
+      "title": "迁移后历史根继续幂等",
+      "priority": "P0",
+      "work_packages": [
+        "WP-06",
+        "WP-24",
+        "WP-26"
+      ],
+      "acceptance_ids": [
+        "AT-15",
+        "AT-16",
+        "AT-17",
+        "AT-29"
+      ],
+      "evidence_level": "R",
+      "preconditions": [
+        "复制脱敏历史schema及已计费样本到专用空卷"
+      ],
+      "steps": [
+        "执行已批准迁移并重复启动",
+        "重放历史SIWC/Cloud事件并核对checksum"
+      ],
+      "expected": [
+        "历史迁移不可改写，启动幂等",
+        "旧幂等键仍识别，不重复收费或删除历史读者"
+      ],
+      "existing_test_files": [
+        "backend/internal/repository/integration_harness_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "按现有harness回滚/删除本用例数据并停止仅本次启动的Testcontainers；记录实际资源ID",
+        "保留必要脱敏证据，确认未清空持续联调/生产数据库或其他任务Redis"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-CONTROL-01",
+      "title": "RBAC在查询分页前过滤",
+      "priority": "P0",
+      "work_packages": [
+        "WP-20",
+        "WP-23"
+      ],
+      "acceptance_ids": [
+        "AT-19",
+        "AT-20",
+        "AT-28"
+      ],
+      "evidence_level": "R",
+      "preconditions": [
+        "super_admin、scoped admin、普通用户与L1/L2/empty供应商"
+      ],
+      "steps": [
+        "每种角色查询列表、详情、聚合与导出",
+        "改写对象id、vendor_id和group_id越权"
+      ],
+      "expected": [
+        "服务端范围先于分页/聚合，数量不泄露",
+        "无权对象不能读取/修改；空范围不等于全部"
+      ],
+      "existing_test_files": [
+        "backend/internal/server/middleware/admin_authorization_test.go",
+        "backend/internal/service/setting_service_update_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "按现有harness回滚/删除本用例数据并停止仅本次启动的Testcontainers；记录实际资源ID",
+        "保留必要脱敏证据，确认未清空持续联调/生产数据库或其他任务Redis"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-CONTROL-02",
+      "title": "批量操作原子拒绝",
+      "priority": "P0",
+      "work_packages": [
+        "WP-20",
+        "WP-23"
+      ],
+      "acceptance_ids": [
+        "AT-19",
+        "AT-20",
+        "AT-28"
+      ],
+      "evidence_level": "R",
+      "preconditions": [
+        "一组合法与受保护对象的混合选择"
+      ],
+      "steps": [
+        "提交包含越权对象的批量删除/变更",
+        "逐条查询全部对象并与操作前比较"
+      ],
+      "expected": [
+        "整批按合同拒绝，不出现部分写入",
+        "错误不泄露越权对象敏感字段"
+      ],
+      "existing_test_files": [
+        "backend/internal/server/middleware/admin_authorization_test.go",
+        "backend/internal/service/setting_service_update_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "按现有harness回滚/删除本用例数据并停止仅本次启动的Testcontainers；记录实际资源ID",
+        "保留必要脱敏证据，确认未清空持续联调/生产数据库或其他任务Redis"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-CONTROL-03",
+      "title": "Settings revision与字段权限",
+      "priority": "P0",
+      "work_packages": [
+        "WP-20",
+        "WP-23"
+      ],
+      "acceptance_ids": [
+        "AT-19",
+        "AT-20",
+        "AT-28"
+      ],
+      "evidence_level": "R",
+      "preconditions": [
+        "两个独立客户端持同一revision；备份测试字段"
+      ],
+      "steps": [
+        "A保存允许字段；B用旧revision提交不同字段",
+        "低权限账号把禁止字段夹入合法patch"
+      ],
+      "expected": [
+        "冲突保留A结果，不覆盖B草稿语义",
+        "revision正确不构成额外字段授权；最后恢复fixture"
+      ],
+      "existing_test_files": [
+        "backend/internal/server/middleware/admin_authorization_test.go",
+        "backend/internal/service/setting_service_update_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "按现有harness回滚/删除本用例数据并停止仅本次启动的Testcontainers；记录实际资源ID",
+        "保留必要脱敏证据，确认未清空持续联调/生产数据库或其他任务Redis"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-CONTROL-04",
+      "title": "提交成功但通知丢失",
+      "priority": "P0",
+      "work_packages": [
+        "WP-20",
+        "WP-23",
+        "WP-03",
+        "WP-04",
+        "WP-11",
+        "WP-18",
+        "WP-22"
+      ],
+      "acceptance_ids": [
+        "AT-19",
+        "AT-20",
+        "AT-28"
+      ],
+      "evidence_level": "M",
+      "preconditions": [
+        "两个独立网关实例，共享权威配置存储",
+        "真实隔离PostgreSQL及调度状态存储、两个独立网关进程、可阻塞的BPS恢复替身和可控时钟；系统自动停用/手动关闭/需重新授权各一组账号。"
+      ],
+      "steps": [
+        "提交新配置后中断通知；让B读取并发请求",
+        "排空重启B，再检查撤权和revision",
+        "两实例同时领取同一BPS自动停用scope的恢复probe，领取后重启一实例；持久冷却期间重启两实例并重读到期时间。",
+        "probe进行时经真实管理入口再次明确关闭已是false的BPS开关，再分别替换独立Excel grant、改模型/分组/代理、关闭自动恢复、启用Cloud、撤回全局BPS；随后交付旧probe成功结果。",
+        "对停用/恢复事务分别注入提交前失败与提交成功但确认/通知丢失；恢复依赖并由另一实例重读。",
+        "探测一个模型成功时，为同账号另一模型/端点保留未到期冷却；比较普通用量更新和真正授权/配置变更的影响。"
+      ],
+      "expected": [
+        "权威提交可恢复且不会永久依赖通知",
+        "即时撤销在发送前生效，旧已准入请求按合同完成",
+        "有效claim和not-before期间只有获准owner可探测，重启不导致密集重复探测；不承诺上游在模糊发送窗口具备exactly-once。",
+        "旧probe不能覆盖管理员重复关闭或新授权/配置/分组；手动关闭和需重新授权账号没有自动生成probe，Cloud不被后台开启。",
+        "开关、服务端原因/动作身份及发布保持一致，提交确认丢失须读回核对；失败不宣称已停用/恢复，不通过覆盖新状态修复。",
+        "只恢复被成功验证且仍匹配的系统故障scope，不清除其他模型/端点冷却；无关用量刷新不使合法恢复永久失效。"
+      ],
+      "existing_test_files": [
+        "backend/internal/server/middleware/admin_authorization_test.go",
+        "backend/internal/service/setting_service_update_test.go",
+        "backend/internal/repository/account_repo_excel_bps_recovery_integration_test.go",
+        "backend/internal/repository/account_repo_excel_bps_auto_disable_test.go",
+        "backend/internal/service/account_excel_bps_recovery_settings_test.go",
+        "tools/tests/rebuild_bps_control_acceptance.py"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "恢复被修改的本用例配置/网络/故障条件，核对原卷及数据一致",
+        "停止或保留本次专用Compose资源须记录用途和ID；持续联调资源保持不变"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项",
+        "两个真实进程的scope/claim/探测计数、PG停用与恢复条件结果、有效not-before、后台重启记录；单进程内存替身不能替代本用例的M级证据。"
+      ],
+      "local_docker_partial_note": "10-case opt-in BPS control suite validates real HTTP/PG stale-edit conflict, explicit enable/stop, supplier projections/retired fields and identity rejection. It does not cover two gateway processes, actual recovery probes or real OAuth replacement; those remain separate required variants."
+    },
+    {
+      "id": "TC-CONTROL-05",
+      "title": "敏感导出step-up及取消",
+      "priority": "P0",
+      "work_packages": [
+        "WP-20",
+        "WP-23"
+      ],
+      "acceptance_ids": [
+        "AT-19",
+        "AT-20",
+        "AT-28"
+      ],
+      "evidence_level": "R",
+      "preconditions": [
+        "仅合成凭据，TOTP未启用角色及有效step-up替身"
+      ],
+      "steps": [
+        "请求敏感导出；另用过期/跨用途/跨会话证明",
+        "用户取消二次验证后观察请求次数"
+      ],
+      "expected": [
+        "没有有效证明时拒绝且不导出秘密",
+        "取消不自动重试，证明不能跨操作复用"
+      ],
+      "existing_test_files": [
+        "backend/internal/server/middleware/admin_authorization_test.go",
+        "backend/internal/service/setting_service_update_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "按现有harness回滚/删除本用例数据并停止仅本次启动的Testcontainers；记录实际资源ID",
+        "保留必要脱敏证据，确认未清空持续联调/生产数据库或其他任务Redis"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-CONTROL-06",
+      "title": "合规未确认与合成历史状态分开",
+      "priority": "P0",
+      "work_packages": [
+        "WP-20",
+        "WP-23"
+      ],
+      "acceptance_ids": [
+        "AT-19",
+        "AT-20",
+        "AT-28"
+      ],
+      "evidence_level": "R",
+      "preconditions": [
+        "保留bootstrap admin未确认；专用合成已确认角色"
+      ],
+      "steps": [
+        "未确认角色读取status并访问管理资源",
+        "合成已确认角色读取同资源；不调用accept"
+      ],
+      "expected": [
+        "负例保持423且确认状态不被修改",
+        "合成历史记录仅用于测试，不冒充人类接受法律条款"
+      ],
+      "existing_test_files": [
+        "backend/internal/server/middleware/admin_authorization_test.go",
+        "backend/internal/service/setting_service_update_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "按现有harness回滚/删除本用例数据并停止仅本次启动的Testcontainers；记录实际资源ID",
+        "保留必要脱敏证据，确认未清空持续联调/生产数据库或其他任务Redis"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-HOST-01",
+      "title": "构造无后台副作用及显式Start",
+      "priority": "P0",
+      "work_packages": [
+        "WP-22",
+        "WP-23"
+      ],
+      "acceptance_ids": [
+        "AT-08",
+        "AT-21"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "准备计数器、ticker和网络替身"
+      ],
+      "steps": [
+        "只构造root及全部后台service并观察",
+        "执行Start两次、在第N个组件启动时失败"
+      ],
+      "expected": [
+        "构造不启动定时任务/网络/goroutine",
+        "Start幂等；部分失败逆序回收实际已启动组件"
+      ],
+      "existing_test_files": [
+        "backend/internal/host/lifetime_test.go",
+        "backend/internal/host/usage_worker_lifecycle_test.go",
+        "backend/internal/host/http_server_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-HOST-02",
+      "title": "停止接纳再排空真实在途",
+      "priority": "P0",
+      "work_packages": [
+        "WP-22",
+        "WP-23"
+      ],
+      "acceptance_ids": [
+        "AT-08",
+        "AT-21"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "HTTP、WS、RPC与后台producer同时在途"
+      ],
+      "steps": [
+        "Drain期间再提交新任务",
+        "让已有任务分别正常结束和取消"
+      ],
+      "expected": [
+        "新准入被拒绝；已accepted任务被追踪",
+        "不能仅发送cancel就宣布drain完成"
+      ],
+      "existing_test_files": [
+        "backend/internal/host/lifetime_test.go",
+        "backend/internal/host/usage_worker_lifecycle_test.go",
+        "backend/internal/host/http_server_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-HOST-03",
+      "title": "关闭顺序保留结算依赖",
+      "priority": "P0",
+      "work_packages": [
+        "WP-22",
+        "WP-23"
+      ],
+      "acceptance_ids": [
+        "AT-08",
+        "AT-21"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "阻塞producer、cache fill、usage、notification各一个任务"
+      ],
+      "steps": [
+        "逐步释放并观察真实Join顺序",
+        "在某一Join超时后检查PG/Redis是否还可用"
+      ],
+      "expected": [
+        "producer和cache fill先于最终usage/invalidation完成",
+        "未join成功时不提前关闭依赖库"
+      ],
+      "existing_test_files": [
+        "backend/internal/host/lifetime_test.go",
+        "backend/internal/host/usage_worker_lifecycle_test.go",
+        "backend/internal/host/http_server_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-HOST-04",
+      "title": "inline与排队usage都被拥有",
+      "priority": "P0",
+      "work_packages": [
+        "WP-22",
+        "WP-23"
+      ],
+      "acceptance_ids": [
+        "AT-08",
+        "AT-21"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "worker队列满，触发inline/sync路径"
+      ],
+      "steps": [
+        "同时执行queued和inline closure并调用Stop",
+        "使一个closure暂不响应取消"
+      ],
+      "expected": [
+        "两个路径都纳入同一等待和预算",
+        "超时保留后续Join，不伪造完成"
+      ],
+      "existing_test_files": [
+        "backend/internal/host/lifetime_test.go",
+        "backend/internal/host/usage_worker_lifecycle_test.go",
+        "backend/internal/host/http_server_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-HOST-05",
+      "title": "SMTP真实阻塞可被取消",
+      "priority": "P0",
+      "work_packages": [
+        "WP-22",
+        "WP-23"
+      ],
+      "acceptance_ids": [
+        "AT-08",
+        "AT-21"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "本地SMTP替身分别阻塞dial、TLS、AUTH和DATA"
+      ],
+      "steps": [
+        "启动通知后在每阶段取消/Stop",
+        "观察socket、任务Join和失败回执"
+      ],
+      "expected": [
+        "取消传到真实传输，连接与goroutine按合同退出",
+        "邮件失败不得永久阻塞host关闭或泄露凭据"
+      ],
+      "existing_test_files": [],
+      "automation": "manual_or_gap",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-HOST-06",
+      "title": "定时任务回调与最后flush",
+      "priority": "P0",
+      "work_packages": [
+        "WP-22",
+        "WP-23",
+        "WP-11",
+        "WP-18"
+      ],
+      "acceptance_ids": [
+        "AT-08",
+        "AT-21"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "真实计时器/cron及可阻塞回调，保留待flush数据",
+        "可计数的BPS定时恢复及授权替身；完整nonce终态、200后截断、429、失效授权和临时5xx响应。"
+      ],
+      "steps": [
+        "回调进行时Stop；制造flush失败",
+        "恢复依赖，再次Drain并观察新增时间戳",
+        "BPS恢复probe分别返回完整成功、nonce不符、200后EOF、429附Retry-After、确定授权撤销及5xx；多次触发tick并推进时钟。",
+        "探测阻塞、退避等待或领取后尚未发送时执行Drain/Stop，随后返回迟到响应；核对实际发送、任务Join与费用事实归属。"
+      ],
+      "expected": [
+        "Stop等待实际回调结束，无晚到tick",
+        "失败数据不丢，新写入不会被旧flush清掉",
+        "只以既有完整成功证据条件恢复；429尊重not-before，临时失败有限退避，确定需重新授权停止自动生成探测，不因每次tick重置预算。",
+        "probe不重放用户正文，发送/并发/期限有界；Stop后无新发送，迟到结果不得覆盖新owner/配置，已发生用量按原账务关联保留。"
+      ],
+      "existing_test_files": [
+        "backend/internal/host/lifetime_test.go",
+        "backend/internal/host/usage_worker_lifecycle_test.go",
+        "backend/internal/host/http_server_test.go",
+        "backend/internal/service/periodic_io_lifecycle_test.go",
+        "backend/internal/service/openai_excel_bps_recovery_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-HOST-07",
+      "title": "容器TERM与重启恢复",
+      "priority": "P0",
+      "work_packages": [
+        "WP-22",
+        "WP-23"
+      ],
+      "acceptance_ids": [
+        "AT-08",
+        "AT-21"
+      ],
+      "evidence_level": "M",
+      "preconditions": [
+        "最终API镜像；专用可恢复PG/Redis及计数上游"
+      ],
+      "steps": [
+        "在进行中HTTP/WS/usage任务时docker stop",
+        "重启同卷并核对任务、lease、usage与health"
+      ],
+      "expected": [
+        "停止耗时和未完成责任有实测证据",
+        "恢复不重复生成/扣费，资源与owner没有泄漏"
+      ],
+      "existing_test_files": [],
+      "automation": "manual_or_gap",
+      "initial_status": "not_run",
+      "cleanup": [
+        "恢复被修改的本用例配置/网络/故障条件，核对原卷及数据一致",
+        "停止或保留本次专用Compose资源须记录用途和ID；持续联调资源保持不变"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-MEDIA-01",
+      "title": "作业重复提交与账务恢复",
+      "priority": "P0",
+      "work_packages": [
+        "WP-16",
+        "WP-17",
+        "WP-19"
+      ],
+      "acceptance_ids": [
+        "AT-24",
+        "AT-26",
+        "AT-27"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "本地队列、持久化job和明确幂等键"
+      ],
+      "steps": [
+        "重复提交同一batch；持久化后崩溃重启",
+        "取消一个job并重复恢复worker"
+      ],
+      "expected": [
+        "不重复创建/扣费，价格沿用提交快照",
+        "已取消任务不能再次执行，失败保留可诊断状态"
+      ],
+      "existing_test_files": [
+        "backend/internal/service/batch_image_public_test.go",
+        "backend/internal/handler/grok_media_slots_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-MEDIA-02",
+      "title": "文件图片视频对象所有权",
+      "priority": "P0",
+      "work_packages": [
+        "WP-16",
+        "WP-17",
+        "WP-19"
+      ],
+      "acceptance_ids": [
+        "AT-24",
+        "AT-26",
+        "AT-27"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "两用户各有文件/图片/视频引用"
+      ],
+      "steps": [
+        "跨主体读取下载续接及删除",
+        "合法归属下载和过期引用作对照"
+      ],
+      "expected": [
+        "跨主体请求被拒绝且不泄漏内容",
+        "合法对象完整，过期与未知状态不混淆"
+      ],
+      "existing_test_files": [
+        "backend/internal/service/batch_image_public_test.go",
+        "backend/internal/handler/grok_media_slots_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-MEDIA-03",
+      "title": "Grok语音并发和自定义音色",
+      "priority": "P0",
+      "work_packages": [
+        "WP-16",
+        "WP-17",
+        "WP-19"
+      ],
+      "acceptance_ids": [
+        "AT-24",
+        "AT-26",
+        "AT-27"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "本地双向音频替身与两主体音色"
+      ],
+      "steps": [
+        "达到用户并发上限后再建语音会话",
+        "请求他人音色并取消合法会话"
+      ],
+      "expected": [
+        "上游之前执行真实用户容量检查",
+        "音色归属保持，取消后槽释放且无其他会话被关闭"
+      ],
+      "existing_test_files": [
+        "backend/internal/service/batch_image_public_test.go",
+        "backend/internal/handler/grok_media_slots_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-MEDIA-04",
+      "title": "双向音频半关闭及usage",
+      "priority": "P0",
+      "work_packages": [
+        "WP-16",
+        "WP-17",
+        "WP-19"
+      ],
+      "acceptance_ids": [
+        "AT-24",
+        "AT-26",
+        "AT-27"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "双向可计数帧替身、未知/已确认usage"
+      ],
+      "steps": [
+        "客户端发送结束但持续接收；再模拟上游断线",
+        "交叉音频帧和取消，检查终态与计费"
+      ],
+      "expected": [
+        "半关闭遵守协议，帧不串流",
+        "未知usage不补零，实际终态与计费根一致"
+      ],
+      "existing_test_files": [
+        "backend/internal/service/batch_image_public_test.go",
+        "backend/internal/handler/grok_media_slots_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-MEDIA-05",
+      "title": "故障检测和Fable阈值独立",
+      "priority": "P1",
+      "work_packages": [
+        "WP-13",
+        "WP-19"
+      ],
+      "acceptance_ids": [
+        "AT-25"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "合成质量分数、低置信度与真实429替身"
+      ],
+      "steps": [
+        "改变Fable阈值并保留其他模型配置",
+        "检测取消/配置变化后观察后续probe次数"
+      ],
+      "expected": [
+        "Fable阈值不影响其他模型与429保护",
+        "检测不私自换号生成，低置信度不冒充降智"
+      ],
+      "existing_test_files": [],
+      "automation": "manual_or_gap",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-SEC-01",
+      "title": "可信代理边界和IP白名单",
+      "priority": "P0",
+      "work_packages": [
+        "WP-03",
+        "WP-17",
+        "WP-20"
+      ],
+      "acceptance_ids": [
+        "AT-22",
+        "AT-42"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "受信与非受信代理请求，伪造X-Forwarded-For"
+      ],
+      "steps": [
+        "各入口发送相同伪造头与真实remote address",
+        "命中IP拒绝和允许边界作对照"
+      ],
+      "expected": [
+        "只信任配置的代理链，不用用户可控头绕过限制",
+        "HTTP/Google/WS使用同一安全来源语义"
+      ],
+      "existing_test_files": [
+        "backend/internal/pkg/ip/ip_test.go",
+        "backend/internal/util/urlvalidator/public_transport_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-SEC-02",
+      "title": "图片下载DNS代理及重定向保护",
+      "priority": "P0",
+      "work_packages": [
+        "WP-03",
+        "WP-17",
+        "WP-20"
+      ],
+      "acceptance_ids": [
+        "AT-22",
+        "AT-42"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "本地DNS/HTTP替身覆盖私网、loopback及转向私网"
+      ],
+      "steps": [
+        "对直连、代理和redirect分别请求受保护地址",
+        "公共允许地址和合法图片作对照"
+      ],
+      "expected": [
+        "现行出口限制每次实际连接和redirect生效",
+        "不通过代理/重绑定绕过，也不无依据拒绝合法内容"
+      ],
+      "existing_test_files": [
+        "backend/internal/pkg/ip/ip_test.go",
+        "backend/internal/util/urlvalidator/public_transport_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-SEC-03",
+      "title": "公开设置不包含秘密",
+      "priority": "P0",
+      "work_packages": [
+        "WP-03",
+        "WP-17",
+        "WP-20"
+      ],
+      "acceptance_ids": [
+        "AT-22",
+        "AT-42"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "合成管理配置包含可识别secret sentinel"
+      ],
+      "steps": [
+        "匿名读取public settings和UI初始配置",
+        "检查所有嵌套字段和响应头"
+      ],
+      "expected": [
+        "secret、内部DSN、SMTP口令及私钥不外泄",
+        "API展示地址不能改变管理令牌发送目标"
+      ],
+      "existing_test_files": [
+        "backend/internal/handler/dto/public_settings_injection_schema_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-SEC-04",
+      "title": "日志与错误的秘密脱敏",
+      "priority": "P0",
+      "work_packages": [
+        "WP-03",
+        "WP-17",
+        "WP-20"
+      ],
+      "acceptance_ids": [
+        "AT-22",
+        "AT-42"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "给合成凭据/URL/prompt加入独特测试标记"
+      ],
+      "steps": [
+        "触发认证、上游、SMTP、DB错误并记录request id",
+        "按现有审计权限查看日志/错误/指标"
+      ],
+      "expected": [
+        "常规日志及公共响应不泄漏token、密码、完整prompt",
+        "仍可按request/root关联错误，不以脱敏抹掉诊断事实"
+      ],
+      "existing_test_files": [],
+      "automation": "manual_or_gap",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-SEC-05",
+      "title": "安全输入与恶意品牌配置",
+      "priority": "P0",
+      "work_packages": [
+        "WP-03",
+        "WP-17",
+        "WP-20"
+      ],
+      "acceptance_ids": [
+        "AT-22",
+        "AT-42"
+      ],
+      "evidence_level": "S",
+      "preconditions": [
+        "仅合成名称、logo/doc/API展示地址"
+      ],
+      "steps": [
+        "提交HTML/脚本/危险scheme与超长字段",
+        "合法本地资产与HTTPS链接作正例"
+      ],
+      "expected": [
+        "现有转义/URL规则阻止脚本与危险跳转",
+        "显示配置不能执行宿主命令、改变provider或更新源"
+      ],
+      "existing_test_files": [
+        "backend/internal/service/setting_service_update_test.go"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "关闭本用例的server/连接并Cancel+Join任务；复位测试时钟与故障钩子",
+        "移除本用例临时目录，不改其他任务源码/缓存/服务"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-DEPLOY-01",
+      "title": "干净独立检出构建API",
+      "priority": "P1",
+      "work_packages": [
+        "WP-23",
+        "WP-25",
+        "WP-26",
+        "WP-27"
+      ],
+      "acceptance_ids": [
+        "AT-29",
+        "AT-30",
+        "AT-38",
+        "AT-39",
+        "AT-40",
+        "AT-41",
+        "AT-43"
+      ],
+      "evidence_level": "local_docker",
+      "preconditions": [
+        "冻结源码及生成输入，不依赖当前node_modules/.local/其他worktree"
+      ],
+      "steps": [
+        "从冻结tracked+明确新增文件构成的源快照执行现有Dockerfile",
+        "启动API角色并核对health、版本、镜像ID与源码fingerprint"
+      ],
+      "expected": [
+        "API独立编译部署，不引用开发机绝对目录",
+        "镜像内容和版本能追踪到同一冻结输入"
+      ],
+      "existing_test_files": [],
+      "automation": "manual_or_gap",
+      "initial_status": "not_run",
+      "cleanup": [
+        "恢复被修改的本用例配置/网络/故障条件，核对原卷及数据一致",
+        "停止或保留本次专用Compose资源须记录用途和ID；持续联调资源保持不变"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-DEPLOY-02",
+      "title": "全新空卷安装向导",
+      "priority": "P1",
+      "work_packages": [
+        "WP-23",
+        "WP-25",
+        "WP-26",
+        "WP-27"
+      ],
+      "acceptance_ids": [
+        "AT-29",
+        "AT-30",
+        "AT-38",
+        "AT-39",
+        "AT-40",
+        "AT-41",
+        "AT-43"
+      ],
+      "evidence_level": "local_docker",
+      "preconditions": [
+        "新一次性Compose project/端口/空卷，AUTO_SETUP=false；bootstrap token存0600文件"
+      ],
+      "steps": [
+        "访问/setup/status及真实安装向导，故意无效输入一次",
+        "完成合成管理员初始化，再访问/setup并重启"
+      ],
+      "expected": [
+        "向导错误可恢复，完成后不重复初始化",
+        "重启同卷保持管理员和设置；不触碰持续联调数据库"
+      ],
+      "existing_test_files": [],
+      "automation": "manual_or_gap",
+      "initial_status": "not_run",
+      "cleanup": [
+        "恢复被修改的本用例配置/网络/故障条件，核对原卷及数据一致",
+        "停止或保留本次专用Compose资源须记录用途和ID；持续联调资源保持不变"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-DEPLOY-03",
+      "title": "三角色制品与真实反向代理",
+      "priority": "P1",
+      "work_packages": [
+        "WP-23",
+        "WP-25",
+        "WP-26",
+        "WP-27"
+      ],
+      "acceptance_ids": [
+        "AT-29",
+        "AT-30",
+        "AT-38",
+        "AT-39",
+        "AT-40",
+        "AT-41",
+        "AT-43"
+      ],
+      "evidence_level": "local_docker",
+      "preconditions": [
+        "同一冻结API、主站、vendor构建产物，现有Compose配置"
+      ],
+      "steps": [
+        "逐个核对镜像、health、静态资源与API反代",
+        "刷新深层路由并访问真实登录入口"
+      ],
+      "expected": [
+        "API/main/vendor角色正确且没有占位页面",
+        "浏览器实际请求命中约定后端，404与API错误不会伪装HTML成功"
+      ],
+      "existing_test_files": [],
+      "automation": "manual_or_gap",
+      "initial_status": "not_run",
+      "cleanup": [
+        "恢复被修改的本用例配置/网络/故障条件，核对原卷及数据一致",
+        "停止或保留本次专用Compose资源须记录用途和ID；持续联调资源保持不变"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-DEPLOY-04",
+      "title": "供应商HTTPS和Origin严格一致",
+      "priority": "P0",
+      "work_packages": [
+        "WP-23",
+        "WP-25",
+        "WP-26",
+        "WP-27"
+      ],
+      "acceptance_ids": [
+        "AT-29",
+        "AT-30",
+        "AT-38",
+        "AT-39",
+        "AT-40",
+        "AT-41",
+        "AT-43"
+      ],
+      "evidence_level": "local_docker",
+      "preconditions": [
+        "受信本地TLS或隔离受控测试信任；portal_origin等于浏览器origin"
+      ],
+      "steps": [
+        "从正确HTTPS门户登录并访问me",
+        "从错协议/端口/无效Origin访问作负例"
+      ],
+      "expected": [
+        "正确门户可用，错误Origin被拒绝",
+        "不修改系统信任、不忽略证书错误、不放宽生产origin；缺前置则blocked"
+      ],
+      "existing_test_files": [],
+      "automation": "manual_or_gap",
+      "initial_status": "not_run",
+      "cleanup": [
+        "恢复被修改的本用例配置/网络/故障条件，核对原卷及数据一致",
+        "停止或保留本次专用Compose资源须记录用途和ID；持续联调资源保持不变"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-DEPLOY-05",
+      "title": "同制品双配置品牌部署",
+      "priority": "P1",
+      "work_packages": [
+        "WP-23",
+        "WP-25",
+        "WP-26",
+        "WP-27"
+      ],
+      "acceptance_ids": [
+        "AT-29",
+        "AT-30",
+        "AT-38",
+        "AT-39",
+        "AT-40",
+        "AT-41",
+        "AT-43"
+      ],
+      "evidence_level": "local_docker",
+      "preconditions": [
+        "两个隔离部署使用相同角色镜像digest与不同品牌配置"
+      ],
+      "steps": [
+        "设置不同名称/logo/API展示链接/项目容器镜像引用",
+        "刷新首屏、切换语言并改变logo为空"
+      ],
+      "expected": [
+        "无需重新编译；显示与数据隔离一致",
+        "默认sub2api；无原品牌闪现、广告/赞助请求；许可证保留"
+      ],
+      "existing_test_files": [],
+      "automation": "manual_or_gap",
+      "initial_status": "not_run",
+      "cleanup": [
+        "恢复被修改的本用例配置/网络/故障条件，核对原卷及数据一致",
+        "停止或保留本次专用Compose资源须记录用途和ID；持续联调资源保持不变"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-DEPLOY-06",
+      "title": "更名保留既有卷与数据",
+      "priority": "P0",
+      "work_packages": [
+        "WP-23",
+        "WP-25",
+        "WP-26",
+        "WP-27"
+      ],
+      "acceptance_ids": [
+        "AT-29",
+        "AT-30",
+        "AT-38",
+        "AT-39",
+        "AT-40",
+        "AT-41",
+        "AT-43"
+      ],
+      "evidence_level": "local_docker",
+      "preconditions": [
+        "隔离备份及显式卷映射，已有账号/余额/usage"
+      ],
+      "steps": [
+        "只改变项目/容器名和镜像引用",
+        "升级重启后核对实际volume ID、历史账务和登录"
+      ],
+      "expected": [
+        "不误挂空卷，不丢数据或重复计费",
+        "数据契约与显示品牌分离；回退能力按实际兼容证据说明"
+      ],
+      "existing_test_files": [],
+      "automation": "manual_or_gap",
+      "initial_status": "not_run",
+      "cleanup": [
+        "恢复被修改的本用例配置/网络/故障条件，核对原卷及数据一致",
+        "停止或保留本次专用Compose资源须记录用途和ID；持续联调资源保持不变"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-DEPLOY-07",
+      "title": "依赖失败健康与恢复",
+      "priority": "P0",
+      "work_packages": [
+        "WP-23",
+        "WP-25",
+        "WP-26",
+        "WP-27"
+      ],
+      "acceptance_ids": [
+        "AT-29",
+        "AT-30",
+        "AT-38",
+        "AT-39",
+        "AT-40",
+        "AT-41",
+        "AT-43"
+      ],
+      "evidence_level": "local_docker",
+      "preconditions": [
+        "专用PG/Redis；快照记录运行中的任务和probe"
+      ],
+      "steps": [
+        "逐个停掉依赖、制造短时断网后恢复",
+        "观察readiness、失败范围、日志、队列和重试预算"
+      ],
+      "expected": [
+        "不把依赖失败当无限容量或授权成功",
+        "恢复有界且不重复生成/计费；记录实际恢复时间"
+      ],
+      "existing_test_files": [],
+      "automation": "manual_or_gap",
+      "initial_status": "not_run",
+      "cleanup": [
+        "恢复被修改的本用例配置/网络/故障条件，核对原卷及数据一致",
+        "停止或保留本次专用Compose资源须记录用途和ID；持续联调资源保持不变"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-CLEAN-01",
+      "title": "旧执行路径与空wrapper清理",
+      "priority": "P1",
+      "work_packages": [
+        "WP-24",
+        "WP-26"
+      ],
+      "acceptance_ids": [
+        "AT-14",
+        "AT-31",
+        "AT-43"
+      ],
+      "evidence_level": "static_review",
+      "preconditions": [
+        "以RETIREMENT和各切片真实消费者为依据"
+      ],
+      "steps": [
+        "搜索旧新名称、动态注册、配置和导入",
+        "核对生成物及未跟踪新文件；执行受影响现有测试"
+      ],
+      "expected": [
+        "被替代路径真实退出，不靠隐藏/开关绕回",
+        "仍保留项有具体消费者、原因与移除条件"
+      ],
+      "existing_test_files": [],
+      "automation": "manual_or_gap",
+      "initial_status": "not_run",
+      "cleanup": [
+        "恢复本用例修改的配置/对象并记录恢复结果；纯只读步骤注明无状态变更",
+        "清理仅本任务临时输出，保留精简脱敏证据和必要恢复材料"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-CLEAN-02",
+      "title": "依赖方向和独立编译",
+      "priority": "P1",
+      "work_packages": [
+        "WP-24",
+        "WP-26"
+      ],
+      "acceptance_ids": [
+        "AT-14",
+        "AT-31",
+        "AT-43"
+      ],
+      "evidence_level": "static_review",
+      "preconditions": [
+        "最终gateway/model/protocol/execution及各provider输入"
+      ],
+      "steps": [
+        "使用现有depguard/编译检查实际依赖",
+        "检查protocol无网络存储，execution不导入具体provider/service"
+      ],
+      "expected": [
+        "边界可由源码与现有工具证明",
+        "不靠孤立复制文件或overlay冒充生产包编译成功"
+      ],
+      "existing_test_files": [],
+      "automation": "manual_or_gap",
+      "initial_status": "not_run",
+      "cleanup": [
+        "恢复本用例修改的配置/对象并记录恢复结果；纯只读步骤注明无状态变更",
+        "清理仅本任务临时输出，保留精简脱敏证据和必要恢复材料"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-CLEAN-03",
+      "title": "许可证来源与广告分离",
+      "priority": "P1",
+      "work_packages": [
+        "WP-24",
+        "WP-26"
+      ],
+      "acceptance_ids": [
+        "AT-14",
+        "AT-31",
+        "AT-43"
+      ],
+      "evidence_level": "static_review",
+      "preconditions": [
+        "最终源树和镜像静态资产清单"
+      ],
+      "steps": [
+        "扫描赞助商/推广链接与网络请求",
+        "核对LICENSE/NOTICE/被采用来源及历史迁移"
+      ],
+      "expected": [
+        "无关广告和专属实现退出",
+        "合法来源声明不被当品牌垃圾删除"
+      ],
+      "existing_test_files": [],
+      "automation": "manual_or_gap",
+      "initial_status": "not_run",
+      "cleanup": [
+        "恢复本用例修改的配置/对象并记录恢复结果；纯只读步骤注明无状态变更",
+        "清理仅本任务临时输出，保留精简脱敏证据和必要恢复材料"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-CLEAN-04",
+      "title": "下载包和语言生成物同步",
+      "priority": "P1",
+      "work_packages": [
+        "WP-24",
+        "WP-26"
+      ],
+      "acceptance_ids": [
+        "AT-14",
+        "AT-31",
+        "AT-43"
+      ],
+      "evidence_level": "static_review",
+      "preconditions": [
+        "使用已有docs下载与zh-TW工具；前端源已冻结"
+      ],
+      "steps": [
+        "执行现有下载包测试与locale --check、UI audit",
+        "核对ZIP内容、哈希、旧包名、遗留TW生成物"
+      ],
+      "expected": [
+        "包内容来自当前实际源，不引用缺失脚本",
+        "生成物无漂移；不安装/升级依赖来掩盖缺口"
+      ],
+      "existing_test_files": [
+        "tools/tests/test_docs_downloads.py",
+        "tools/tests/test_session_repair.py",
+        "tools/zh-tw/gen-locale.test.mjs"
+      ],
+      "automation": "existing_partial",
+      "initial_status": "not_run",
+      "cleanup": [
+        "恢复本用例修改的配置/对象并记录恢复结果；纯只读步骤注明无状态变更",
+        "清理仅本任务临时输出，保留精简脱敏证据和必要恢复材料"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-FINAL-01",
+      "title": "真实客户端完整回合",
+      "priority": "P1",
+      "work_packages": [
+        "WP-00",
+        "WP-25",
+        "WP-26"
+      ],
+      "acceptance_ids": [
+        "AT-32",
+        "AT-33",
+        "AT-34"
+      ],
+      "evidence_level": "C",
+      "preconditions": [
+        "指定真实客户端版本及本地网关，先用本地计数上游；脱敏记录"
+      ],
+      "steps": [
+        "完整文本/工具/图片第二轮、取消及错误回合",
+        "按PROTOCOLS逐实际支持模式记录入口到输出与账务"
+      ],
+      "expected": [
+        "客户端版本及完整报文有证据，不拿fixture文件名当真实调用",
+        "本地替身结果只证明该组合，不标真实上游通过"
+      ],
+      "existing_test_files": [],
+      "automation": "manual_or_gap",
+      "initial_status": "not_run",
+      "cleanup": [
+        "恢复本用例修改的配置/对象并记录恢复结果；纯只读步骤注明无状态变更",
+        "清理仅本任务临时输出，保留精简脱敏证据和必要恢复材料"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-FINAL-02",
+      "title": "真实上游待独立授权验证",
+      "priority": "P1",
+      "work_packages": [
+        "WP-00",
+        "WP-25",
+        "WP-26"
+      ],
+      "acceptance_ids": [
+        "AT-32",
+        "AT-33",
+        "AT-34"
+      ],
+      "evidence_level": "P",
+      "preconditions": [
+        "需要明确账号、模型、模式、预算与真实调用授权"
+      ],
+      "steps": [
+        "授权具备后逐Native/BPS/Cloud执行已定义场景",
+        "比较本地替身与真实上游差异并保留脱敏事实"
+      ],
+      "expected": [
+        "缺授权/凭据保持blocked，不自动消费真实账号",
+        "通过范围限定具体版本、模式和环境"
+      ],
+      "existing_test_files": [],
+      "automation": "manual_or_gap",
+      "initial_status": "not_run",
+      "authorization": "separate_required",
+      "cleanup": [
+        "仅在单独授权范围内回收测试会话/对象，记录实际消耗和未完成请求",
+        "不保存真实token或完整敏感请求；确认没有后台重试继续消费"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-FINAL-03",
+      "title": "性能和长运行资源基线",
+      "priority": "P1",
+      "work_packages": [
+        "WP-00",
+        "WP-25",
+        "WP-26"
+      ],
+      "acceptance_ids": [
+        "AT-32",
+        "AT-33",
+        "AT-34"
+      ],
+      "evidence_level": "local_docker",
+      "preconditions": [
+        "冻结同机工具链、数据、并发、上游替身；记录当前合同中的目标"
+      ],
+      "steps": [
+        "测启动、TTFT、吞吐、p95/p99、内存、goroutine、FD、DB连接、队列",
+        "固定负载前后对比并执行多轮取消和重启"
+      ],
+      "expected": [
+        "报告真实样本数、误差及资源回收；无假定提速数字",
+        "尚未商定阈值明确未判定，不编造SLO通过"
+      ],
+      "existing_test_files": [],
+      "automation": "manual_or_gap",
+      "initial_status": "not_run",
+      "cleanup": [
+        "恢复被修改的本用例配置/网络/故障条件，核对原卷及数据一致",
+        "停止或保留本次专用Compose资源须记录用途和ID；持续联调资源保持不变"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-FINAL-04",
+      "title": "最终完整验收与一次交付",
+      "priority": "P0",
+      "work_packages": [
+        "WP-00",
+        "WP-25",
+        "WP-26"
+      ],
+      "acceptance_ids": [
+        "AT-32",
+        "AT-33",
+        "AT-34"
+      ],
+      "evidence_level": "static_review",
+      "preconditions": [
+        "所有必需本地用例及前端唯一目录完成；缺口逐项列明"
+      ],
+      "steps": [
+        "复核源码fingerprint/镜像/依赖/fixtures与证据一致",
+        "记录失败修复重测、剩余外部条件和任务资源收尾"
+      ],
+      "expected": [
+        "零命中/Skip/blocked不当passed；未完成不得宣称全部验收",
+        "未达到用户首版完成条件不提交；达到后才统一根提交"
+      ],
+      "existing_test_files": [],
+      "automation": "manual_or_gap",
+      "initial_status": "not_run",
+      "cleanup": [
+        "恢复本用例修改的配置/对象并记录恢复结果；纯只读步骤注明无状态变更",
+        "清理仅本任务临时输出，保留精简脱敏证据和必要恢复材料"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-API-01",
+      "title": "匿名请求不能访问受保护API",
+      "priority": "P0",
+      "work_packages": [
+        "WP-20",
+        "WP-23",
+        "WP-25"
+      ],
+      "acceptance_ids": [
+        "AT-19"
+      ],
+      "evidence_level": "local_docker",
+      "preconditions": [
+        "最终冻结的本机API镜像及与构建回执一致的environment/fixture来源",
+        "六个合成角色和资源已准备；0600凭据文件；仅127.0.0.1；不触及真实上游或法律确认"
+      ],
+      "steps": [
+        "分别GET auth/me、admin/settings、vendor/me",
+        "不携带任何token与Origin"
+      ],
+      "expected": [
+        "三个入口均401",
+        "没有管理配置或用户对象泄露"
+      ],
+      "existing_test_files": [
+        "tools/tests/rebuild_api_acceptance.py"
+      ],
+      "automation": "ready_not_run",
+      "automation_entry": "RebuildAPIAcceptance.test_01_anonymous_management_requires_login",
+      "initial_status": "not_run",
+      "cleanup": [
+        "不修改fixture业务数据，不调用合规accept或真实上游；测试token只在内存，进程退出不写回凭据文件",
+        "保留持续联调Compose/数据库供后续页面验收，不删除共享用户或卷"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-API-02",
+      "title": "无效Bearer令牌拒绝",
+      "priority": "P0",
+      "work_packages": [
+        "WP-20",
+        "WP-23",
+        "WP-25"
+      ],
+      "acceptance_ids": [
+        "AT-19"
+      ],
+      "evidence_level": "local_docker",
+      "preconditions": [
+        "最终冻结的本机API镜像及与构建回执一致的environment/fixture来源",
+        "六个合成角色和资源已准备；0600凭据文件；仅127.0.0.1；不触及真实上游或法律确认"
+      ],
+      "steps": [
+        "用synthetic.invalid.token请求auth/me",
+        "检查HTTP状态"
+      ],
+      "expected": [
+        "必须401",
+        "不能返回登录身份"
+      ],
+      "existing_test_files": [
+        "tools/tests/rebuild_api_acceptance.py"
+      ],
+      "automation": "ready_not_run",
+      "automation_entry": "RebuildAPIAcceptance.test_02_malformed_bearer_is_rejected",
+      "initial_status": "not_run",
+      "cleanup": [
+        "不修改fixture业务数据，不调用合规accept或真实上游；测试token只在内存，进程退出不写回凭据文件",
+        "保留持续联调Compose/数据库供后续页面验收，不删除共享用户或卷"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-API-03",
+      "title": "六角色登录及me身份一致",
+      "priority": "P0",
+      "work_packages": [
+        "WP-20",
+        "WP-23",
+        "WP-25"
+      ],
+      "acceptance_ids": [
+        "AT-19"
+      ],
+      "evidence_level": "local_docker",
+      "preconditions": [
+        "最终冻结的本机API镜像及与构建回执一致的environment/fixture来源",
+        "六个合成角色和资源已准备；0600凭据文件；仅127.0.0.1；不触及真实上游或法律确认"
+      ],
+      "steps": [
+        "六角色用各自合成凭据登录",
+        "使用返回的新token读取me并与fixture比较"
+      ],
+      "expected": [
+        "user id完全一致",
+        "角色不能提升或串成另一用户"
+      ],
+      "existing_test_files": [
+        "tools/tests/rebuild_api_acceptance.py"
+      ],
+      "automation": "ready_not_run",
+      "automation_entry": "RebuildAPIAcceptance.test_03_login_and_me_keep_exact_role_identity",
+      "initial_status": "not_run",
+      "cleanup": [
+        "不修改fixture业务数据，不调用合规accept或真实上游；测试token只在内存，进程退出不写回凭据文件",
+        "保留持续联调Compose/数据库供后续页面验收，不删除共享用户或卷"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-API-04",
+      "title": "合成已确认超管可读分组",
+      "priority": "P0",
+      "work_packages": [
+        "WP-20",
+        "WP-23",
+        "WP-25"
+      ],
+      "acceptance_ids": [
+        "AT-19"
+      ],
+      "evidence_level": "local_docker",
+      "preconditions": [
+        "最终冻结的本机API镜像及与构建回执一致的environment/fixture来源",
+        "六个合成角色和资源已准备；0600凭据文件；仅127.0.0.1；不触及真实上游或法律确认"
+      ],
+      "steps": [
+        "GET admin/compliance",
+        "GET admin/groups"
+      ],
+      "expected": [
+        "required严格为false",
+        "分组返回200和成功对象"
+      ],
+      "existing_test_files": [
+        "tools/tests/rebuild_api_acceptance.py"
+      ],
+      "automation": "ready_not_run",
+      "automation_entry": "RebuildAPIAcceptance.test_04_synthetic_admin_can_read_groups",
+      "initial_status": "not_run",
+      "cleanup": [
+        "不修改fixture业务数据，不调用合规accept或真实上游；测试token只在内存，进程退出不写回凭据文件",
+        "保留持续联调Compose/数据库供后续页面验收，不删除共享用户或卷"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-API-05",
+      "title": "未确认管理员负例保持",
+      "priority": "P0",
+      "work_packages": [
+        "WP-20",
+        "WP-23",
+        "WP-25"
+      ],
+      "acceptance_ids": [
+        "AT-19"
+      ],
+      "evidence_level": "local_docker",
+      "preconditions": [
+        "最终冻结的本机API镜像及与构建回执一致的environment/fixture来源",
+        "六个合成角色和资源已准备；0600凭据文件；仅127.0.0.1；不触及真实上游或法律确认"
+      ],
+      "steps": [
+        "读取合规状态并请求分组",
+        "被拒后再次读取合规状态"
+      ],
+      "expected": [
+        "required前后均true",
+        "分组423及ADMIN_COMPLIANCE_ACK_REQUIRED；不调用accept"
+      ],
+      "existing_test_files": [
+        "tools/tests/rebuild_api_acceptance.py"
+      ],
+      "automation": "ready_not_run",
+      "automation_entry": "RebuildAPIAcceptance.test_05_unconfirmed_admin_stays_unconfirmed",
+      "initial_status": "not_run",
+      "cleanup": [
+        "不修改fixture业务数据，不调用合规accept或真实上游；测试token只在内存，进程退出不写回凭据文件",
+        "保留持续联调Compose/数据库供后续页面验收，不删除共享用户或卷"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-API-06",
+      "title": "有限管理员不能超出权限",
+      "priority": "P0",
+      "work_packages": [
+        "WP-20",
+        "WP-23",
+        "WP-25"
+      ],
+      "acceptance_ids": [
+        "AT-19"
+      ],
+      "evidence_level": "local_docker",
+      "preconditions": [
+        "最终冻结的本机API镜像及与构建回执一致的environment/fixture来源",
+        "六个合成角色和资源已准备；0600凭据文件；仅127.0.0.1；不触及真实上游或法律确认"
+      ],
+      "steps": [
+        "scoped admin请求groups",
+        "核对服务器结构化错误"
+      ],
+      "expected": [
+        "403",
+        "code为ADMIN_PERMISSION_DENIED"
+      ],
+      "existing_test_files": [
+        "tools/tests/rebuild_api_acceptance.py"
+      ],
+      "automation": "ready_not_run",
+      "automation_entry": "RebuildAPIAcceptance.test_06_scoped_admin_cannot_read_groups",
+      "initial_status": "not_run",
+      "cleanup": [
+        "不修改fixture业务数据，不调用合规accept或真实上游；测试token只在内存，进程退出不写回凭据文件",
+        "保留持续联调Compose/数据库供后续页面验收，不删除共享用户或卷"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-API-07",
+      "title": "供应商不能读取管理设置",
+      "priority": "P0",
+      "work_packages": [
+        "WP-20",
+        "WP-23",
+        "WP-25"
+      ],
+      "acceptance_ids": [
+        "AT-19"
+      ],
+      "evidence_level": "local_docker",
+      "preconditions": [
+        "最终冻结的本机API镜像及与构建回执一致的environment/fixture来源",
+        "六个合成角色和资源已准备；0600凭据文件；仅127.0.0.1；不触及真实上游或法律确认"
+      ],
+      "steps": [
+        "L1/L2/empty各用本域Origin和token",
+        "GET admin/settings"
+      ],
+      "expected": [
+        "三个角色均403",
+        "不能因供应商已登录而获得管理员设置"
+      ],
+      "existing_test_files": [
+        "tools/tests/rebuild_api_acceptance.py"
+      ],
+      "automation": "ready_not_run",
+      "automation_entry": "RebuildAPIAcceptance.test_07_vendors_cannot_read_admin_settings",
+      "initial_status": "not_run",
+      "cleanup": [
+        "不修改fixture业务数据，不调用合规accept或真实上游；测试token只在内存，进程退出不写回凭据文件",
+        "保留持续联调Compose/数据库供后续页面验收，不删除共享用户或卷"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-API-08",
+      "title": "供应商身份关联正确",
+      "priority": "P0",
+      "work_packages": [
+        "WP-20",
+        "WP-23",
+        "WP-25"
+      ],
+      "acceptance_ids": [
+        "AT-19"
+      ],
+      "evidence_level": "local_docker",
+      "preconditions": [
+        "最终冻结的本机API镜像及与构建回执一致的environment/fixture来源",
+        "六个合成角色和资源已准备；0600凭据文件；仅127.0.0.1；不触及真实上游或法律确认"
+      ],
+      "steps": [
+        "三个供应商角色GET vendor/me",
+        "对照各自登录user id"
+      ],
+      "expected": [
+        "接口成功",
+        "user_id为fixture对应账号，不串父级/子级"
+      ],
+      "existing_test_files": [
+        "tools/tests/rebuild_api_acceptance.py"
+      ],
+      "automation": "ready_not_run",
+      "automation_entry": "RebuildAPIAcceptance.test_08_vendor_identity_matches_logged_in_user",
+      "initial_status": "not_run",
+      "cleanup": [
+        "不修改fixture业务数据，不调用合规accept或真实上游；测试token只在内存，进程退出不写回凭据文件",
+        "保留持续联调Compose/数据库供后续页面验收，不删除共享用户或卷"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-API-09",
+      "title": "空供应商范围不扩大",
+      "priority": "P0",
+      "work_packages": [
+        "WP-20",
+        "WP-23",
+        "WP-25"
+      ],
+      "acceptance_ids": [
+        "AT-18",
+        "AT-19"
+      ],
+      "evidence_level": "local_docker",
+      "preconditions": [
+        "最终冻结的本机API镜像及与构建回执一致的environment/fixture来源",
+        "六个合成角色和资源已准备；0600凭据文件；仅127.0.0.1；不触及真实上游或法律确认"
+      ],
+      "steps": [
+        "empty分别查询accounts/proxies",
+        "核对total与items"
+      ],
+      "expected": [
+        "total均为0",
+        "items为空，不退化为全部资源"
+      ],
+      "existing_test_files": [
+        "tools/tests/rebuild_api_acceptance.py"
+      ],
+      "automation": "ready_not_run",
+      "automation_entry": "RebuildAPIAcceptance.test_09_empty_vendor_is_not_global_scope",
+      "initial_status": "not_run",
+      "cleanup": [
+        "不修改fixture业务数据，不调用合规accept或真实上游；测试token只在内存，进程退出不写回凭据文件",
+        "保留持续联调Compose/数据库供后续页面验收，不删除共享用户或卷"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-API-10",
+      "title": "对象ID不可绕过供应商范围",
+      "priority": "P0",
+      "work_packages": [
+        "WP-20",
+        "WP-23",
+        "WP-25"
+      ],
+      "acceptance_ids": [
+        "AT-18",
+        "AT-19"
+      ],
+      "evidence_level": "local_docker",
+      "preconditions": [
+        "最终冻结的本机API镜像及与构建回执一致的environment/fixture来源",
+        "六个合成角色和资源已准备；0600凭据文件；仅127.0.0.1；不触及真实上游或法律确认"
+      ],
+      "steps": [
+        "empty请求L1/L2真实fixture的account与proxy详情",
+        "核对四个响应"
+      ],
+      "expected": [
+        "四个响应均404",
+        "不返回对象内容"
+      ],
+      "existing_test_files": [
+        "tools/tests/rebuild_api_acceptance.py"
+      ],
+      "automation": "ready_not_run",
+      "automation_entry": "RebuildAPIAcceptance.test_10_empty_vendor_cannot_read_foreign_objects",
+      "initial_status": "not_run",
+      "cleanup": [
+        "不修改fixture业务数据，不调用合规accept或真实上游；测试token只在内存，进程退出不写回凭据文件",
+        "保留持续联调Compose/数据库供后续页面验收，不删除共享用户或卷"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-API-11",
+      "title": "供应商可读自己的对象",
+      "priority": "P0",
+      "work_packages": [
+        "WP-20",
+        "WP-23",
+        "WP-25"
+      ],
+      "acceptance_ids": [
+        "AT-18",
+        "AT-19"
+      ],
+      "evidence_level": "local_docker",
+      "preconditions": [
+        "最终冻结的本机API镜像及与构建回执一致的environment/fixture来源",
+        "六个合成角色和资源已准备；0600凭据文件；仅127.0.0.1；不触及真实上游或法律确认"
+      ],
+      "steps": [
+        "L1/L2读取自己的account/proxy详情",
+        "对照各自resource id"
+      ],
+      "expected": [
+        "四个读取成功",
+        "返回id与请求的已授权对象一致"
+      ],
+      "existing_test_files": [
+        "tools/tests/rebuild_api_acceptance.py"
+      ],
+      "automation": "ready_not_run",
+      "automation_entry": "RebuildAPIAcceptance.test_11_vendor_owned_objects_are_readable",
+      "initial_status": "not_run",
+      "cleanup": [
+        "不修改fixture业务数据，不调用合规accept或真实上游；测试token只在内存，进程退出不写回凭据文件",
+        "保留持续联调Compose/数据库供后续页面验收，不删除共享用户或卷"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-API-12",
+      "title": "敏感账号导出必须二次验证",
+      "priority": "P0",
+      "work_packages": [
+        "WP-20",
+        "WP-23",
+        "WP-25"
+      ],
+      "acceptance_ids": [
+        "AT-19"
+      ],
+      "evidence_level": "local_docker",
+      "preconditions": [
+        "最终冻结的本机API镜像及与构建回执一致的environment/fixture来源",
+        "六个合成角色和资源已准备；0600凭据文件；仅127.0.0.1；不触及真实上游或法律确认"
+      ],
+      "steps": [
+        "L1/L2提交自己合成账号的导出请求且不带step-up",
+        "检查响应状态及错误码"
+      ],
+      "expected": [
+        "403及STEP_UP_TOTP_NOT_ENABLED",
+        "未放宽全局策略，任何意外200都失败且不打印正文"
+      ],
+      "existing_test_files": [
+        "tools/tests/rebuild_api_acceptance.py"
+      ],
+      "automation": "ready_not_run",
+      "automation_entry": "RebuildAPIAcceptance.test_12_sensitive_export_requires_step_up",
+      "initial_status": "not_run",
+      "cleanup": [
+        "不修改fixture业务数据，不调用合规accept或真实上游；测试token只在内存，进程退出不写回凭据文件",
+        "保留持续联调Compose/数据库供后续页面验收，不删除共享用户或卷"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    },
+    {
+      "id": "TC-API-13",
+      "title": "公开设置不外泄敏感字段",
+      "priority": "P0",
+      "work_packages": [
+        "WP-20",
+        "WP-23",
+        "WP-25"
+      ],
+      "acceptance_ids": [
+        "AT-42"
+      ],
+      "evidence_level": "local_docker",
+      "preconditions": [
+        "最终冻结的本机API镜像及与构建回执一致的environment/fixture来源",
+        "六个合成角色和资源已准备；0600凭据文件；仅127.0.0.1；不触及真实上游或法律确认"
+      ],
+      "steps": [
+        "匿名GET settings/public",
+        "递归扫描嵌套对象与列表字段"
+      ],
+      "expected": [
+        "请求成功且data为对象",
+        "无password、smtp_password、client_secret、token、private_key、jwt_secret及database_url"
+      ],
+      "existing_test_files": [
+        "tools/tests/rebuild_api_acceptance.py"
+      ],
+      "automation": "ready_not_run",
+      "automation_entry": "RebuildAPIAcceptance.test_13_public_settings_exclude_credential_fields",
+      "initial_status": "not_run",
+      "cleanup": [
+        "不修改fixture业务数据，不调用合规accept或真实上游；测试token只在内存，进程退出不写回凭据文件",
+        "保留持续联调Compose/数据库供后续页面验收，不删除共享用户或卷"
+      ],
+      "required_evidence": [
+        "源码/依赖/工具链/fixture及所用镜像的同次输入记录",
+        "每个步骤的实际结果、命中/Skip/退出状态和对应AT/WP",
+        "脱敏日志/响应/截图或存储查询；实际证据级别不得高于环境",
+        "异常副作用、数据恢复、任务资源收尾及未完成项"
+      ]
+    }
+  ],
+  "maintenance_fix_reference": {
+    "main": "11ad379874ae35712a6dcfa386463f7730b2c63d",
+    "audit": "docs/architecture-rebuild/MAINTENANCE_FIX_AUDIT.md",
+    "threads": [
+      "整理 BPS 需求",
+      "Cloud 解析器重构",
+      "审查原生全链路数据处理",
+      "分析 Codex Proxy RS 移植方案"
+    ],
+    "status": "audit_and_adaptation_in_progress_not_acceptance"
+  },
+  "gateway_design_review": "docs/architecture-rebuild/GATEWAY_REVIEW.md"
+}

@@ -1,0 +1,102 @@
+package service
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"unicode/utf16"
+
+	"github.com/tidwall/gjson"
+)
+
+// fingerprintSalt 是计算 cc_version 后缀指纹的盐值。
+//
+// 来源：与 Parrot src/transform/cc_mimicry.py 的 FINGERPRINT_SALT 完全一致；
+// 这是真实 Claude Code CLI 抓包推导出的常量，改动会导致 fp 与 CLI 不一致，
+// 进一步触发 Anthropic 的第三方检测。
+const fingerprintSalt = "59cf53e54c78"
+
+// computeClaudeCodeFingerprint 复刻真实 Claude Code CLI 的 cc_version 指纹算法：
+//
+//  1. 取 messages 中第一条 role=user 的纯文本（首块 text）
+//  2. 取该文本的第 4、7、20 字符（不足以 '0' 补齐）
+//  3. SHA256(SALT + chars + cc_version) 取 hex 前 3 字符
+//
+// 盐值和采样下标已核对官方 2.1.301 可执行文件；JS 字符串按 UTF-16 code unit 采样。
+// CLI 在内部提醒合并前计算此值；版本不变时应保留客户端原后缀。
+func computeClaudeCodeFingerprint(body []byte, version string) string {
+	return computeClaudeCodeFingerprintFromText(extractFirstUserText(body), version)
+}
+
+func computeClaudeCodeFingerprintFromText(text, version string) string {
+	// JavaScript indexes strings by UTF-16 code unit, not UTF-8 byte.
+	firstText := utf16.Encode([]rune(text))
+	indices := []int{4, 7, 20}
+	chars := make([]uint16, 0, 3)
+	for _, i := range indices {
+		if i < len(firstText) {
+			chars = append(chars, firstText[i])
+		} else {
+			chars = append(chars, '0')
+		}
+	}
+	sum := sha256.Sum256([]byte(fingerprintSalt + string(utf16.Decode(chars)) + version))
+	return hex.EncodeToString(sum[:])[:3]
+}
+
+// extractFirstUserText 提取 messages 中第一条非 meta user 消息的首段 text 内容。
+// 兼容 string 和 []block 两种 content 格式。
+func extractFirstUserText(body []byte) string {
+	messages := gjson.GetBytes(body, "messages")
+	if !messages.IsArray() {
+		return ""
+	}
+	first := ""
+	messages.ForEach(func(_, msg gjson.Result) bool {
+		// Adapted from sub4api a3eaf63afc672ffedf7844e6cfc5cb6750d52a3e:
+		// internal meta messages do not contribute to the CLI billing fingerprint.
+		if msg.Get("role").String() != "user" || msg.Get("isMeta").Bool() || msg.Get("is_meta").Bool() {
+			return true
+		}
+		content := msg.Get("content")
+		if content.Type == gjson.String {
+			first = content.String()
+			return false
+		}
+		if content.IsArray() {
+			content.ForEach(func(_, block gjson.Result) bool {
+				if block.Get("type").String() == "text" {
+					first = block.Get("text").String()
+					return false
+				}
+				return true
+			})
+			return false
+		}
+		return false
+	})
+	return first
+}
+
+// buildBillingAttributionText 构造 system 数组的 billing attribution 文本。
+//
+// 形态对齐真实 Claude Code CLI：
+//
+//	x-anthropic-billing-header: cc_version=2.1.161.{fp}; cc_entrypoint=cli;
+//
+// CLI 2.1.301 omits cch for custom endpoints but still sends it to Anthropic.
+// finalizeClaudeCCH adds the verified version-specific checksum only after all
+// request body rewrites and official endpoint selection are complete.
+//
+// 此 block 不带 cache_control（与真实 CLI 一致；cache breakpoint 由后续的
+// Claude Code prompt block 承担）。
+func buildBillingAttributionText(body []byte, cliVersion string) (string, error) {
+	if cliVersion == "" {
+		return "", fmt.Errorf("cliVersion required")
+	}
+	fp := computeClaudeCodeFingerprint(body, cliVersion)
+	return fmt.Sprintf(
+		"x-anthropic-billing-header: cc_version=%s.%s; cc_entrypoint=cli;",
+		cliVersion, fp,
+	), nil
+}

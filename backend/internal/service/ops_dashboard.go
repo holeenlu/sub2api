@@ -1,0 +1,96 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"log"
+	"time"
+
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+)
+
+func (s *OpsService) GetDashboardOverview(ctx context.Context, filter *OpsDashboardFilter) (*OpsDashboardOverview, error) {
+	if err := s.RequireMonitoringEnabled(ctx); err != nil {
+		return nil, err
+	}
+	if s.opsRepo == nil {
+		return nil, infraerrors.ServiceUnavailable("OPS_REPO_UNAVAILABLE", "Ops repository not available")
+	}
+	if filter == nil {
+		return nil, infraerrors.BadRequest("OPS_FILTER_REQUIRED", "filter is required")
+	}
+	if filter.StartTime.IsZero() || filter.EndTime.IsZero() {
+		return nil, infraerrors.BadRequest("OPS_TIME_RANGE_REQUIRED", "start_time/end_time are required")
+	}
+	if filter.StartTime.After(filter.EndTime) {
+		return nil, infraerrors.BadRequest("OPS_TIME_RANGE_INVALID", "start_time must be <= end_time")
+	}
+
+	// Resolve query mode (requested via query param, or DB default).
+	filter.QueryMode = s.resolveOpsQueryMode(ctx, filter.QueryMode)
+
+	overview, err := s.opsRepo.GetDashboardOverview(ctx, filter)
+	if err != nil && shouldFallbackOpsPreagg(filter, err) {
+		rawFilter := cloneOpsFilterWithMode(filter, OpsQueryModeRaw)
+		overview, err = s.opsRepo.GetDashboardOverview(ctx, rawFilter)
+	}
+	if err != nil {
+		if errors.Is(err, ErrOpsPreaggregatedNotPopulated) {
+			return nil, infraerrors.Conflict("OPS_PREAGG_NOT_READY", "Pre-aggregated ops metrics are not populated yet")
+		}
+		return nil, err
+	}
+
+	// Best-effort system health + jobs; dashboard metrics should still render if these are missing.
+	// Resources and pool capacities come from the same per-node sample.
+	overview.SystemMetricsUnavailable = true
+	if s.nodeMetrics != nil {
+		nodes, err := s.nodeMetrics.ListNodeMetrics(ctx)
+		overview.SystemMetricsNodes = nodes
+		overview.SystemMetrics = summarizeOpsNodes(nodes)
+		overview.SystemMetricsUnavailable = opsNodesUnavailable(nodes, err)
+	}
+
+	if heartbeats, err := s.opsRepo.ListJobHeartbeats(ctx); err == nil {
+		overview.JobHeartbeats = heartbeats
+	} else {
+		log.Printf("[Ops] ListJobHeartbeats failed: %v", err)
+	}
+
+	now := time.Now().UTC()
+	for _, hb := range overview.JobHeartbeats {
+		if hb != nil {
+			hb.HealthStatus = opsJobHealthStatus(now, hb)
+		}
+	}
+	thresholds, err := s.GetMetricThresholds(ctx)
+	if err != nil {
+		log.Printf("[Ops] GetMetricThresholds failed: %v", err)
+	}
+	overview.HealthScore = computeDashboardHealthScore(now, overview, thresholds)
+
+	return overview, nil
+}
+
+func (s *OpsService) resolveOpsQueryMode(ctx context.Context, requested OpsQueryMode) OpsQueryMode {
+	if requested.IsValid() {
+		// Allow "auto" to be disabled via config until preagg is proven stable in production.
+		// Forced `preagg` via query param still works.
+		if requested == OpsQueryModeAuto && s != nil && s.cfg != nil && !s.cfg.Ops.UsePreaggregatedTables {
+			return OpsQueryModeRaw
+		}
+		return requested
+	}
+
+	mode := OpsQueryModeAuto
+	if s != nil && s.settingRepo != nil {
+		if raw, err := s.settingRepo.GetValue(ctx, SettingKeyOpsQueryModeDefault); err == nil {
+			mode = ParseOpsQueryMode(raw)
+		}
+	}
+
+	if mode == OpsQueryModeAuto && s != nil && s.cfg != nil && !s.cfg.Ops.UsePreaggregatedTables {
+		return OpsQueryModeRaw
+	}
+	return mode
+}

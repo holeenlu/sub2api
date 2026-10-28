@@ -1,0 +1,17 @@
+# Local deployment state; never commit credentials or runtime data.
+
+# Local bind-mount data, if explicitly configured by the operator.
+data/
+postgres_data/
+redis_data/
+
+# Environment configuration (contains sensitive information)
+.env
+
+# Backup files
+*.backup
+*.bak
+
+# Temporary files
+*.tmp
+*.log
