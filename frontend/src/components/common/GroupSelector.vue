@@ -44,7 +44,7 @@
           :rate-multiplier="group.rate_multiplier == null ? undefined : group.rate_multiplier"
           class="min-w-0 flex-1"
         />
-        <span class="shrink-0 text-xs text-gray-400">{{ group.account_count || 0 }}</span>
+        <span class="shrink-0 text-xs text-gray-400">{{ group.account_count ?? '—' }}</span>
       </label>
       <div
         v-if="filteredGroups.length === 0"
@@ -69,7 +69,8 @@ const authStore = useAuthStore()
 
 interface Props {
   modelValue: number[]
-  groups: (Group & { account_count?: number })[]
+  // Safe supplier projections omit billing and consumption-policy fields.
+  groups: (Pick<Group, 'id' | 'name'> & Partial<Omit<Group, 'id' | 'name'>> & { account_count?: number })[]
   platform?: GroupPlatform // Optional platform filter
   mixedScheduling?: boolean // For antigravity accounts: allow anthropic/gemini groups
   searchable?: boolean | 'auto'

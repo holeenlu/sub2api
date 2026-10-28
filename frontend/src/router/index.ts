@@ -5,6 +5,8 @@
 
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { isVendorOrigin, safePortalRedirect } from '@/features/vendor/helpers'
+import { useVendorStore } from '@/features/vendor/store'
 import { useAppStore } from '@/stores/app'
 import { useAdminSettingsStore } from '@/stores/adminSettings'
 import { useAdminComplianceStore } from '@/stores/adminCompliance'
@@ -12,12 +14,20 @@ import { useNavigationLoadingState } from '@/composables/useNavigationLoading'
 import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
-import { resolveRouteDocumentTitle } from './title'
+import { applyRouteMetaDescription, resolveRouteDocumentTitle } from './title'
+import { docsStaticItems, legacyAppRedirects } from '@/content/docs/nav'
 
 /**
  * Route definitions with lazy loading
  */
 const routes: RouteRecordRaw[] = [
+  { path: '/vendor', redirect: '/vendor/accounts' },
+  { path: '/vendor/:tab(accounts|proxies|usage|settlements|profile|platform|children|child-accounts|child-proxies|child-usage|payables)', name: 'VendorPortal', component: () => import('@/views/vendor/VendorPortalView.vue'), meta: { requiresAuth: true, titleKey: 'vendor.portal' } },
+  { path: '/vendor/security', redirect: '/vendor/profile' },
+  { path: '/vendor/audit', redirect: '/vendor/accounts' },
+  { path: '/vendor-unavailable', name: 'VendorUnavailable', component: () => import('@/views/vendor/VendorUnavailableView.vue'), meta: { requiresAuth: false, titleKey: 'vendor.portal' } },
+  // Supplier administration lives on the dedicated origin, including for superadmins.
+  { path: '/admin/vendors', redirect: '/admin/dashboard' },
   // ==================== Setup Routes ====================
   {
     path: '/setup',
@@ -25,7 +35,8 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/setup/SetupWizardView.vue'),
     meta: {
       requiresAuth: false,
-      title: 'Setup'
+      title: 'Setup',
+      titleKey: 'setup.pageTitle'
     }
   },
 
@@ -36,7 +47,11 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/HomeView.vue'),
     meta: {
       requiresAuth: false,
-      title: 'Home'
+      title: 'Home',
+      // 首页 SEO 标题自带站点名，不再附加一次
+      titleKey: 'home.seo.title',
+      titleStandalone: true,
+      metaDescriptionKey: 'home.seo.description'
     }
   },
   {
@@ -65,7 +80,8 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/auth/EmailVerifyView.vue'),
     meta: {
       requiresAuth: false,
-      title: 'Verify Email'
+      title: 'Verify Email',
+      titleKey: 'auth.verifyYourEmail'
     }
   },
   {
@@ -125,7 +141,8 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/auth/DingTalkEmailCompletionView.vue'),
     meta: {
       requiresAuth: false,
-      title: 'DingTalk Email Completion'
+      title: 'DingTalk Email Completion',
+      titleKey: 'auth.dingtalk.createAccountTitle'
     }
   },
   {
@@ -154,7 +171,8 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/auth/ResetPasswordView.vue'),
     meta: {
       requiresAuth: false,
-      title: 'Reset Password'
+      title: 'Reset Password',
+      titleKey: 'auth.resetPassword'
     }
   },
   {
@@ -164,6 +182,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: false,
       title: 'Key Usage',
+      titleKey: 'keyUsage.title',
     }
   },
   {
@@ -172,7 +191,8 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/public/LegalDocumentView.vue'),
     meta: {
       requiresAuth: false,
-      title: 'Legal Document'
+      title: 'Legal Document',
+      titleKey: 'legal.pageTitle'
     }
   },
   {
@@ -183,6 +203,29 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: false,
       title: 'Model Plaza',
       titleKey: 'modelPlaza.title'
+    }
+  },
+  ...legacyAppRedirects,
+  ...docsStaticItems.map((item, index): RouteRecordRaw => ({
+    path: item.path,
+    name: `DocsPage${index}`,
+    component: () => import('@/views/docs/DocsView.vue'),
+    meta: {
+      requiresAuth: false,
+      title: 'API Docs',
+      titleKey: item.titleKey,
+      metaDescriptionKey: item.descriptionKey
+    }
+  })),
+  {
+    path: '/docs/models/:modelId',
+    name: 'DocsModel',
+    component: () => import('@/views/docs/DocsView.vue'),
+    meta: {
+      requiresAuth: false,
+      title: 'Model - API Docs',
+      titleKey: 'docs.pages.models.title',
+      metaDescriptionKey: 'docs.pages.models.description'
     }
   },
 
@@ -238,30 +281,6 @@ const routes: RouteRecordRaw[] = [
       title: 'Usage Records',
       titleKey: 'usage.title',
       descriptionKey: 'usage.description'
-    }
-  },
-  {
-    path: '/redeem',
-    name: 'Redeem',
-    component: () => import('@/views/user/RedeemView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: false,
-      title: 'Redeem Code',
-      titleKey: 'redeem.title',
-      descriptionKey: 'redeem.description'
-    }
-  },
-  {
-    path: '/affiliate',
-    name: 'Affiliate',
-    component: () => import('@/views/user/AffiliateView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: false,
-      title: 'Affiliate',
-      titleKey: 'affiliate.title',
-      descriptionKey: 'affiliate.description'
     }
   },
   {
@@ -382,6 +401,7 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: false,
       requiresAdmin: false,
       title: 'Payment',
+      titleKey: 'payment.stripePay',
       requiresPayment: false
     }
   },
@@ -449,6 +469,12 @@ const routes: RouteRecordRaw[] = [
       titleKey: 'admin.users.title',
       descriptionKey: 'admin.users.description'
     }
+  },
+  {
+    path: '/admin/models',
+    name: 'AdminModels',
+    component: () => import('@/views/admin/ModelsView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, titleKey: 'modelManagement.title' }
   },
   {
     path: '/admin/groups',
@@ -562,30 +588,6 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/admin/redeem',
-    name: 'AdminRedeem',
-    component: () => import('@/views/admin/RedeemView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      title: 'Redeem Code Management',
-      titleKey: 'admin.redeem.title',
-      descriptionKey: 'admin.redeem.description'
-    }
-  },
-  {
-    path: '/admin/promo-codes',
-    name: 'AdminPromoCodes',
-    component: () => import('@/views/admin/PromoCodesView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      title: 'Promo Code Management',
-      titleKey: 'admin.promo.title',
-      descriptionKey: 'admin.promo.description'
-    }
-  },
-  {
     path: '/admin/settings',
     name: 'AdminSettings',
     component: () => import('@/views/admin/SettingsView.vue'),
@@ -635,46 +637,6 @@ const routes: RouteRecordRaw[] = [
       descriptionKey: 'admin.usage.description'
     }
   },
-  {
-    path: '/admin/affiliates',
-    redirect: '/admin/affiliates/invites'
-  },
-  {
-    path: '/admin/affiliates/invites',
-    name: 'AdminAffiliateInvites',
-    component: () => import('@/views/admin/affiliates/AdminAffiliateInvitesView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      title: 'Affiliate Invite Records',
-      titleKey: 'nav.affiliateInviteRecords',
-      descriptionKey: 'admin.affiliates.invitesDescription'
-    }
-  },
-  {
-    path: '/admin/affiliates/rebates',
-    name: 'AdminAffiliateRebates',
-    component: () => import('@/views/admin/affiliates/AdminAffiliateRebatesView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      title: 'Affiliate Rebate Records',
-      titleKey: 'nav.affiliateRebateRecords',
-      descriptionKey: 'admin.affiliates.rebatesDescription'
-    }
-  },
-  {
-    path: '/admin/affiliates/transfers',
-    name: 'AdminAffiliateTransfers',
-    component: () => import('@/views/admin/affiliates/AdminAffiliateTransfersView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      title: 'Affiliate Transfer Records',
-      titleKey: 'nav.affiliateTransferRecords',
-      descriptionKey: 'admin.affiliates.transfersDescription'
-    }
-  },
 
 
   // ==================== Payment Admin Routes ====================
@@ -721,7 +683,8 @@ const routes: RouteRecordRaw[] = [
     name: 'NotFound',
     component: () => import('@/views/NotFoundView.vue'),
     meta: {
-      title: '404 Not Found'
+      title: '404 Not Found',
+      titleKey: 'common.pageNotFound'
     }
   }
 ]
@@ -793,12 +756,49 @@ router.beforeEach(async (to, _from, next) => {
 
   // Set page title
   const appStore = useAppStore()
+  // Resolve the exact configured origin before any consumer/admin navigation.
+  if (!appStore.publicSettingsLoaded) {
+    try { await appStore.fetchPublicSettings() } catch { /* Supplier builds fail closed below; existing routes keep their own feature policy. */ }
+  }
+  const supplierOrigin = isVendorOrigin(appStore.cachedPublicSettings)
+  const supplierBuild = import.meta.env.VITE_VENDOR_PORTAL === 'true'
+  if (to.path === '/vendor-unavailable') { next(); return }
+  if (supplierOrigin || supplierBuild) {
+    if (!supplierOrigin || appStore.cachedPublicSettings?.vendor_console_enabled !== true) { next('/vendor-unavailable'); return }
+    const publicSupplierPath = ['/login', '/forgot-password', '/reset-password'].includes(to.path) || to.path.startsWith('/legal/')
+    if (publicSupplierPath) {
+      if (to.path === '/login' && authStore.isAuthenticated) next(safePortalRedirect(to.query.redirect))
+      else next()
+      return
+    }
+    if (!authStore.isAuthenticated) { next({path:'/login',query:{redirect:safePortalRedirect(to.fullPath)}}); return }
+    try {
+      await authStore.refreshUser()
+      const role = authStore.user?.role
+      if (role === 'super_admin') {
+        useVendorStore().clear()
+        if (to.path !== '/vendor/platform' && to.path !== '/vendor/profile') {
+          const tab = ['accounts', 'proxies', 'usage', 'settlements'].find(value => to.path === '/vendor/' + value)
+          next({ path: '/vendor/platform', query: tab ? { tab } : {} }); return
+        }
+      } else if (role === 'vendor_level1' || role === 'vendor_level2') {
+        await useVendorStore().refresh()
+        const level1Only = ['/vendor/children', '/vendor/child-accounts', '/vendor/child-proxies', '/vendor/child-usage', '/vendor/payables']
+        if (!to.path.startsWith('/vendor/') || to.path === '/vendor/platform' || (role === 'vendor_level2' && level1Only.includes(to.path))) {
+          next('/vendor/accounts'); return
+        }
+      } else { next('/vendor-unavailable'); return }
+    } catch { next('/vendor-unavailable'); return }
+    next(); return
+  }
+  if (to.path.startsWith('/vendor/')) { next('/vendor-unavailable'); return }
   const adminSettingsStore = useAdminSettingsStore()
   const customMenuItems = [
     ...(appStore.cachedPublicSettings?.custom_menu_items ?? []),
     ...(authStore.isAdmin ? adminSettingsStore.customMenuItems : []),
   ]
   document.title = resolveRouteDocumentTitle(to, appStore.siteName, customMenuItems)
+  applyRouteMetaDescription(to)
 
   // Check if route requires authentication
   const requiresAuth = to.meta.requiresAuth !== false // Default to true
@@ -827,7 +827,7 @@ router.beforeEach(async (to, _from, next) => {
         return
       }
       // Admin users go to admin dashboard, regular users go to user dashboard
-      next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+      next(authStore.adminLandingPath)
       return
     }
     // Model Plaza:公开路由但受「启用开关 + 可选强制登录」双重控制(后端同口径 fail-closed)
@@ -883,6 +883,17 @@ router.beforeEach(async (to, _from, next) => {
     return
   }
 
+  // A limited admin must load the server-owned role snapshot before navigation.
+  if (requiresAdmin && authStore.user?.role === 'admin' && authStore.user.policy_version === undefined) {
+    try { await authStore.refreshUser() } catch { next('/login'); return }
+  }
+  if (requiresAdmin && authStore.isAdmin && !authStore.canAccessAdminPage(to.path)) {
+    next(authStore.adminLandingPath)
+    return
+  }
+
+  const accessibleDashboard = authStore.isAdmin && authStore.canAccessAdminPage('/admin/dashboard') ? '/admin/dashboard' : '/dashboard'
+
   // Check admin requirement
   if (requiresAdmin && !authStore.isAdmin) {
     // User is authenticated but not admin, redirect to user dashboard
@@ -923,7 +934,7 @@ router.beforeEach(async (to, _from, next) => {
     appStore.publicSettingsLoaded &&
     appStore.cachedPublicSettings?.payment_enabled === false
   ) {
-    next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+    next(accessibleDashboard)
     return
   }
 
@@ -932,7 +943,7 @@ router.beforeEach(async (to, _from, next) => {
     appStore.publicSettingsLoaded &&
     appStore.cachedPublicSettings?.risk_control_enabled === false
   ) {
-    next(authStore.isAdmin ? '/admin/settings' : '/dashboard')
+    next(authStore.isAdmin && authStore.canAccessAdminPage('/admin/settings') ? '/admin/settings' : accessibleDashboard)
     return
   }
 
@@ -942,7 +953,7 @@ router.beforeEach(async (to, _from, next) => {
     appStore.publicSettingsLoaded &&
     appStore.cachedPublicSettings?.subscription_enabled === false
   ) {
-    next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+    next(accessibleDashboard)
     return
   }
 
@@ -950,14 +961,12 @@ router.beforeEach(async (to, _from, next) => {
   if (authStore.isSimpleMode) {
     const restrictedPaths = [
       '/admin/subscriptions',
-      '/admin/redeem',
       '/subscriptions',
-      '/redeem'
     ]
 
     if (restrictedPaths.some((path) => to.path.startsWith(path))) {
       // 简易模式下访问受限页面,重定向到仪表板
-      next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+      next(accessibleDashboard)
       return
     }
   }

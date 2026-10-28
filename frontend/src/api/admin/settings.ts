@@ -45,7 +45,12 @@ export type SchedulingThresholdPlatformType =
   | "opencode_go"
   | "command_code"
 
-export type AccountSchedulingThresholdsMap = Record<SchedulingThresholdPlatformType, number>
+/** 非平台的阈值 scope：Anthropic Fable 模型家族的独立停调阈值。 */
+export type SchedulingThresholdScopeType =
+  | SchedulingThresholdPlatformType
+  | "anthropic_fable"
+
+export type AccountSchedulingThresholdsMap = Record<SchedulingThresholdScopeType, number>
 
 // 与后端 AllowedSchedulingThresholdPlatforms 保持一致（deepseek 为余额型，
 // 走余额检测而非用量阈值；minimax Coding/Token Plan、OpenCode GO 与 Command Code 有滚动窗口）。
@@ -60,13 +65,19 @@ export const SCHEDULING_THRESHOLD_PLATFORMS: SchedulingThresholdPlatformType[] =
   "command_code",
 ]
 
+// 与后端 AllowedSchedulingThresholdScopes 保持一致：平台 + 非平台 scope。
+export const SCHEDULING_THRESHOLD_SCOPES: SchedulingThresholdScopeType[] = [
+  ...SCHEDULING_THRESHOLD_PLATFORMS,
+  "anthropic_fable",
+]
+
 export function normalizeAccountSchedulingThresholdsMap(
-  input?: Partial<Record<SchedulingThresholdPlatformType, number>> | null,
+  input?: Partial<Record<SchedulingThresholdScopeType, number>> | null,
 ): AccountSchedulingThresholdsMap {
   const result = {} as AccountSchedulingThresholdsMap
-  for (const platform of SCHEDULING_THRESHOLD_PLATFORMS) {
-    const value = input?.[platform]
-    result[platform] = typeof value === "number" && Number.isFinite(value)
+  for (const scope of SCHEDULING_THRESHOLD_SCOPES) {
+    const value = input?.[scope]
+    result[scope] = typeof value === "number" && Number.isFinite(value)
       ? Math.min(100, Math.max(1, Math.trunc(value)))
       : 100
   }
@@ -138,14 +149,12 @@ export type WeChatConnectMode = "open" | "mp" | "mobile";
 
 export interface PaymentVisibleMethodSourceOption {
   value: PaymentVisibleMethodSource;
-  labelZh: string;
-  labelEn: string;
+  labelKey: string;
 }
 
 export interface WeChatConnectModeOption {
   value: WeChatConnectMode;
-  labelZh: string;
-  labelEn: string;
+  labelKey: string;
 }
 
 const AUTH_SOURCE_TYPES: AuthSourceType[] = [
@@ -164,29 +173,25 @@ const PAYMENT_VISIBLE_METHOD_SOURCE_OPTIONS: Record<
   PaymentVisibleMethodSourceOption[]
 > = {
   alipay: [
-    { value: "", labelZh: "未配置", labelEn: "Not configured" },
+    { value: "", labelKey: "ui.notConfigured", },
     {
       value: "official_alipay",
-      labelZh: "支付宝官方",
-      labelEn: "Official Alipay",
+      labelKey: "ui.officialAlipay",
     },
     {
       value: "easypay_alipay",
-      labelZh: "易支付支付宝",
-      labelEn: "EasyPay Alipay",
+      labelKey: "ui.easypayAlipay",
     },
   ],
   wxpay: [
-    { value: "", labelZh: "未配置", labelEn: "Not configured" },
+    { value: "", labelKey: "ui.notConfigured", },
     {
       value: "official_wxpay",
-      labelZh: "微信官方",
-      labelEn: "Official WeChat Pay",
+      labelKey: "ui.officialWechatPay",
     },
     {
       value: "easypay_wxpay",
-      labelZh: "易支付微信",
-      labelEn: "EasyPay WeChat Pay",
+      labelKey: "ui.easypayWechatPay",
     },
   ],
 };
@@ -213,16 +218,14 @@ const PAYMENT_VISIBLE_METHOD_SOURCE_ALIASES: Record<
   },
 };
 const WECHAT_CONNECT_MODE_OPTIONS: WeChatConnectModeOption[] = [
-  { value: "open", labelZh: "PC 应用", labelEn: "PC App" },
+  { value: "open", labelKey: "ui.pcApp", },
   {
     value: "mp",
-    labelZh: "公众号",
-    labelEn: "Official Account",
+    labelKey: "ui.officialAccount",
   },
   {
     value: "mobile",
-    labelZh: "移动应用",
-    labelEn: "Mobile App",
+    labelKey: "ui.mobileApp",
   },
 ];
 const WECHAT_CONNECT_MODE_ALIASES: Record<string, WeChatConnectMode> = {
@@ -293,7 +296,7 @@ export function appendAuthSourceDefaultsToUpdateRequest(
   payload: UpdateSettingsRequest,
   authSourceDefaults: AuthSourceDefaultsState,
 ): UpdateSettingsRequest {
-  const target = payload as Record<string, unknown>;
+  const target = payload as unknown as Record<string, unknown>;
 
   for (const source of AUTH_SOURCE_TYPES) {
     const current = authSourceDefaults[source];
@@ -403,15 +406,16 @@ export function deriveWeChatConnectStoredMode(
  * System settings interface
  */
 export interface SystemSettings {
+  revision?: string;
+  vendor_console_enabled: boolean;
+  vendor_portal_origin: string;
   // Registration settings
   registration_enabled: boolean;
   email_verify_enabled: boolean;
   registration_email_suffix_whitelist: string[];
   registration_email_domain_quota_enabled: boolean;
-  promo_code_enabled: boolean;
   password_reset_enabled: boolean;
   frontend_url: string;
-  invitation_code_enabled: boolean;
   totp_enabled: boolean; // TOTP 双因素认证
   totp_encryption_key_configured: boolean; // TOTP 加密密钥是否已配置
   passkey_enabled: boolean;
@@ -427,11 +431,6 @@ export interface SystemSettings {
   login_agreement_documents: LoginAgreementDocument[];
   // Default settings
   default_balance: number;
-  affiliate_rebate_rate: number;
-  affiliate_rebate_freeze_hours: number;
-  affiliate_rebate_duration_days: number;
-  affiliate_rebate_per_invitee_cap: number;
-  affiliate_admin_recharge_enabled: boolean;
   default_concurrency: number;
   default_user_rpm_limit: number;
   default_subscriptions: DefaultSubscriptionSetting[];
@@ -489,7 +488,6 @@ export interface SystemSettings {
   doc_url: string;
   home_content: string;
   compact_home_enabled: boolean;
-  hide_ccs_import_button: boolean;
   table_default_page_size: number;
   table_page_size_options: number[];
   backend_mode_enabled: boolean;
@@ -697,31 +695,7 @@ export interface SystemSettings {
   openai_low_upstream_rate_priority_enabled?: boolean;
   /** null means OAuth accounts use their individual account rates. */
   openai_oauth_scheduling_rate_multiplier?: number | null;
-  openai_advanced_scheduler_enabled?: boolean;
-  openai_advanced_scheduler_sticky_weighted_enabled?: boolean;
   openai_advanced_scheduler_subscription_priority_enabled?: boolean;
-  openai_advanced_scheduler_lb_top_k?: string;
-  openai_advanced_scheduler_weight_priority?: string;
-  openai_advanced_scheduler_weight_load?: string;
-  openai_advanced_scheduler_weight_queue?: string;
-  openai_advanced_scheduler_weight_error_rate?: string;
-  openai_advanced_scheduler_weight_ttft?: string;
-  openai_advanced_scheduler_weight_reset?: string;
-  openai_advanced_scheduler_weight_quota_headroom?: string;
-  openai_advanced_scheduler_weight_upstream_cost?: string;
-  openai_advanced_scheduler_weight_previous_response?: string;
-  openai_advanced_scheduler_weight_session_sticky?: string;
-  openai_advanced_scheduler_effective_lb_top_k?: string;
-  openai_advanced_scheduler_effective_weight_priority?: string;
-  openai_advanced_scheduler_effective_weight_load?: string;
-  openai_advanced_scheduler_effective_weight_queue?: string;
-  openai_advanced_scheduler_effective_weight_error_rate?: string;
-  openai_advanced_scheduler_effective_weight_ttft?: string;
-  openai_advanced_scheduler_effective_weight_reset?: string;
-  openai_advanced_scheduler_effective_weight_quota_headroom?: string;
-  openai_advanced_scheduler_effective_weight_upstream_cost?: string;
-  openai_advanced_scheduler_effective_weight_previous_response?: string;
-  openai_advanced_scheduler_effective_weight_session_sticky?: string;
 
   // 余额、订阅到期与账号限额通知
   balance_low_notify_enabled: boolean;
@@ -751,25 +725,40 @@ export interface SystemSettings {
   model_plaza_description: string;
   plugin_management_enabled: boolean;
 
-  // Affiliate (邀请返利) feature switch
-  affiliate_enabled: boolean;
-
   // OpenAI fast/flex policy
   openai_fast_policy_settings?: OpenAIFastPolicySettings;
 
   // Allow user view error requests
   allow_user_view_error_requests: boolean;
+  excel_bps_enabled: boolean
+  excel_bps_image_mode: 'relay' | 'native'
+  excel_bps_image_relay_enabled: boolean;
+  excel_bps_image_base_url: string;
+  excel_bps_image_body_limit_mib: number;
+  excel_bps_image_budget_mib: number;
+  excel_bps_image_max_requests: number;
+  excel_bps_image_max_image_mib: number;
+  excel_bps_image_max_images: number;
+  excel_bps_image_limit_policy: "off" | "auto_compact" | "warn";
+  excel_bps_image_warning_remaining: number;
+  excel_bps_image_compact_reserve: number;
+
+  excel_bps_image_max_total_mib: number;
+  excel_bps_image_storage_mib: number;
+  excel_bps_image_storage_entries: number;
+  excel_bps_image_ttl_minutes: number;
 }
 
 export interface UpdateSettingsRequest {
+  revision: string;
+  vendor_console_enabled?: boolean;
+  vendor_portal_origin?: string;
   registration_enabled?: boolean;
   email_verify_enabled?: boolean;
   registration_email_suffix_whitelist?: string[];
   registration_email_domain_quota_enabled?: boolean;
-  promo_code_enabled?: boolean;
   password_reset_enabled?: boolean;
   frontend_url?: string;
-  invitation_code_enabled?: boolean;
   totp_enabled?: boolean; // TOTP 双因素认证
   passkey_enabled?: boolean;
   session_binding_enabled?: boolean; // 会话 IP/UA 绑定
@@ -780,11 +769,6 @@ export interface UpdateSettingsRequest {
   login_agreement_updated_at?: string;
   login_agreement_documents?: LoginAgreementDocument[];
   default_balance?: number;
-  affiliate_rebate_rate?: number;
-  affiliate_rebate_freeze_hours?: number;
-  affiliate_rebate_duration_days?: number;
-  affiliate_rebate_per_invitee_cap?: number;
-  affiliate_admin_recharge_enabled?: boolean;
   default_concurrency?: number;
   default_user_rpm_limit?: number;
   default_subscriptions?: DefaultSubscriptionSetting[];
@@ -841,7 +825,6 @@ export interface UpdateSettingsRequest {
   doc_url?: string;
   home_content?: string;
   compact_home_enabled?: boolean;
-  hide_ccs_import_button?: boolean;
   table_default_page_size?: number;
   table_page_size_options?: number[];
   backend_mode_enabled?: boolean;
@@ -1021,20 +1004,7 @@ export interface UpdateSettingsRequest {
   openai_low_upstream_rate_priority_enabled?: boolean;
   /** Omit to preserve the override; null clears it; zero is an explicit rate. */
   openai_oauth_scheduling_rate_multiplier?: number | null;
-  openai_advanced_scheduler_enabled?: boolean;
-  openai_advanced_scheduler_sticky_weighted_enabled?: boolean;
   openai_advanced_scheduler_subscription_priority_enabled?: boolean;
-  openai_advanced_scheduler_lb_top_k?: string;
-  openai_advanced_scheduler_weight_priority?: string;
-  openai_advanced_scheduler_weight_load?: string;
-  openai_advanced_scheduler_weight_queue?: string;
-  openai_advanced_scheduler_weight_error_rate?: string;
-  openai_advanced_scheduler_weight_ttft?: string;
-  openai_advanced_scheduler_weight_reset?: string;
-  openai_advanced_scheduler_weight_quota_headroom?: string;
-  openai_advanced_scheduler_weight_upstream_cost?: string;
-  openai_advanced_scheduler_weight_previous_response?: string;
-  openai_advanced_scheduler_weight_session_sticky?: string;
   // 余额、订阅到期与账号限额通知
   balance_low_notify_enabled?: boolean;
   balance_low_notify_threshold?: number;
@@ -1063,13 +1033,27 @@ export interface UpdateSettingsRequest {
   model_plaza_description?: string;
   plugin_management_enabled?: boolean;
 
-  // Affiliate (邀请返利) feature switch
-  affiliate_enabled?: boolean;
-
   // OpenAI fast/flex policy
   openai_fast_policy_settings?: OpenAIFastPolicySettings;
 
   allow_user_view_error_requests?: boolean;
+  excel_bps_enabled?: boolean
+  excel_bps_image_mode?: 'relay' | 'native'
+  excel_bps_image_relay_enabled?: boolean;
+  excel_bps_image_base_url?: string;
+  excel_bps_image_body_limit_mib?: number;
+  excel_bps_image_budget_mib?: number;
+  excel_bps_image_max_requests?: number;
+  excel_bps_image_max_image_mib?: number;
+  excel_bps_image_max_images?: number;
+  excel_bps_image_limit_policy?: "off" | "auto_compact" | "warn";
+  excel_bps_image_warning_remaining?: number;
+  excel_bps_image_compact_reserve?: number;
+
+  excel_bps_image_max_total_mib?: number;
+  excel_bps_image_storage_mib?: number;
+  excel_bps_image_storage_entries?: number;
+  excel_bps_image_ttl_minutes?: number;
 }
 
 /**

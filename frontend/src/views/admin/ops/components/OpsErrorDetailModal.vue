@@ -28,7 +28,7 @@
           </div>
         </div>
 
-        <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
+        <div v-if="!isUpstreamError(detail) || authStore.isSuperAdmin" class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
           <div class="text-xs font-bold uppercase tracking-wider text-gray-400">
             {{ isUpstreamError(detail) ? t('admin.ops.errorDetail.account') : t('admin.ops.errorDetail.user') }}
           </div>
@@ -85,11 +85,12 @@
         </div>
 
         <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
-          <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.errorDetail.status') }}</div>
+          <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t(detail.request_status_code != null ? 'admin.ops.errorDetail.requestStatus' : 'admin.ops.errorDetail.status') }}</div>
           <div class="mt-1">
             <span :class="['inline-flex items-center rounded-lg px-2 py-1 text-xs font-black ring-1 ring-inset shadow-sm', statusClass]">
-              {{ detail.status_code }}
+              {{ requestStatusCode }}
             </span>
+            <span v-if="isRecoveredOpsError(detail)" class="ml-2 text-xs font-medium text-emerald-700 dark:text-emerald-300">{{ t('admin.ops.errorLog.recovered') }}</span>
           </div>
         </div>
 
@@ -111,8 +112,8 @@
 
         <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
           <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.errorDetail.message') }}</div>
-          <div class="mt-1 break-words text-sm font-medium text-gray-900 dark:text-white" :title="rootCauseMessage">
-            {{ rootCauseMessage || '—' }}
+          <div class="mt-1 break-words text-sm font-medium text-gray-900 dark:text-white" :title="displayMessage">
+            {{ displayMessage || '—' }}
           </div>
         </div>
 
@@ -211,10 +212,14 @@
         </div>
       </div>
     </div>
-    <template v-if="backToList" #footer>
+    <template #footer>
+      <button v-if="detail && errorId" type="button" class="btn btn-secondary" :disabled="exporting" data-testid="error-detail-export" @click="exportDiagnostics">
+        {{ t('admin.ops.errorDetail.exportDiagnostics') }}
+      </button>
       <button
         type="button"
         class="btn btn-secondary"
+        v-if="backToList"
         data-testid="error-detail-back-to-list"
         @click="goBack"
       >
@@ -226,13 +231,16 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { saveAs } from 'file-saver'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores'
+import { useAuthStore } from '@/stores/auth'
 import { opsAPI, type OpsErrorDetail } from '@/api/admin/ops'
 import { formatDateTime } from '@/utils/format'
-import { resolveUpstreamPayload } from '../utils/errorDetailResponse'
+import { resolveUpstreamPayload, splitSchedulingDiagnostics } from '../utils/errorDetailResponse'
+import { isRecoveredOpsError } from '../utils/opsFormatters'
 
 interface Props {
   show: boolean
@@ -251,39 +259,80 @@ const emit = defineEmits<Emits>()
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const authStore = useAuthStore()
 
 const loading = ref(false)
 const detail = ref<OpsErrorDetail | null>(null)
+const exporting = ref(false)
+async function exportDiagnostics() {
+  const errorId = props.errorId
+  const errorType = props.errorType || (detail.value?.phase === 'upstream' ? 'upstream' : 'request')
+  if (!errorId || exporting.value) return
+  exporting.value = true
+  try {
+    const data = await opsAPI.getErrorDiagnostics(errorId, errorType)
+    const exported = {
+      ...data,
+      // Keep API payloads unchanged and identify values derived for the modal separately.
+      display: {
+        message: getDisplayMessage(data),
+        root_cause: getRootCauseMessage(data),
+        diagnostic_payloads: getDiagnosticPayloadSections(data),
+        upstream_errors: data.correlated_upstream_errors.map(ev => ({
+          id: ev.id,
+          response_preview: getUpstreamResponsePreview(ev)
+        }))
+      }
+    }
+    saveAs(new Blob([JSON.stringify(exported, null, 2)], { type: 'application/json' }), `request-diagnostics-${errorId}.json`)
+  } catch {
+    appStore.showError(t('admin.ops.errorDetail.exportFailed'))
+  } finally { exporting.value = false }
+}
+
 
 const showUpstreamList = computed(() => props.errorType === 'request')
 
 const requestId = computed(() => detail.value?.request_id || detail.value?.client_request_id || '')
 
-type DiagnosticPayloadKey = 'client' | 'upstream_message' | 'upstream_detail' | 'upstream_events'
+type DiagnosticPayloadKey = 'client' | 'upstream_message' | 'upstream_detail' | 'upstream_events' | 'scheduling_trace'
 
-const rootCauseMessage = computed(() => {
-  const current = detail.value
+function getRootCauseMessage(current: OpsErrorDetail | null): string {
   if (!current) return ''
   for (const candidate of [current.upstream_error_message, current.upstream_error_detail, current.message, current.error_body]) {
     const value = meaningfulPayload(candidate)
     if (value) return value
   }
   return ''
-})
+}
 
-const diagnosticPayloadSections = computed(() => {
-  const current = detail.value
+const rootCauseMessage = computed(() => getRootCauseMessage(detail.value))
+
+function getDisplayMessage(current: OpsErrorDetail | null): string {
+  if (current && (isRecoveredOpsError(current) || current.message?.includes('recovery not confirmed'))) {
+    return current.message
+  }
+  return getRootCauseMessage(current)
+}
+
+const displayMessage = computed(() => getDisplayMessage(detail.value))
+
+function getDiagnosticPayloadSections(current: OpsErrorDetail | null): Array<{ key: DiagnosticPayloadKey; value: string }> {
   if (!current) return []
+  const diagnostics = splitSchedulingDiagnostics(current.upstream_errors)
   const candidates: Array<{ key: DiagnosticPayloadKey; value: string }> = [
     { key: 'client', value: meaningfulPayload(current.error_body) },
     { key: 'upstream_message', value: meaningfulPayload(current.upstream_error_message) },
     { key: 'upstream_detail', value: meaningfulPayload(current.upstream_error_detail) },
-    { key: 'upstream_events', value: meaningfulPayload(current.upstream_errors) }
+    { key: 'upstream_events', value: meaningfulPayload(diagnostics.upstream) },
+    { key: 'scheduling_trace', value: meaningfulPayload(diagnostics.scheduling) }
   ]
   return candidates.filter((section, index, all) => {
     return section.value && all.findIndex(candidate => candidate.value === section.value) === index
   })
-})
+}
+
+const diagnosticPayloadSections = computed(() => getDiagnosticPayloadSections(detail.value))
 
 function meaningfulPayload(candidate: unknown): string {
   const value = String(candidate || '').trim()
@@ -430,7 +479,8 @@ function statusBadgeClass(code: number): string {
   return 'bg-gray-50 text-gray-700 ring-gray-600/20 dark:bg-gray-900/30 dark:text-gray-400 dark:ring-gray-500/30'
 }
 
-const statusClass = computed(() => statusBadgeClass(detail.value?.status_code ?? 0))
+const requestStatusCode = computed(() => detail.value?.request_status_code ?? detail.value?.status_code ?? 0)
+const statusClass = computed(() => statusBadgeClass(requestStatusCode.value))
 
 const upstreamStatusClass = computed(() => statusBadgeClass(detail.value?.upstream_status_code ?? 0))
 

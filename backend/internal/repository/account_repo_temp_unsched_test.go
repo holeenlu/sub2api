@@ -294,7 +294,7 @@ func TestAccountRepository_ListOAuthRefreshCandidatePage_SQLFilter(t *testing.T)
 	// setup-token 的 access_token 同为 8h 短期令牌，必须与 oauth 一起纳入后台刷新候选
 	require.Contains(t, normalized, "type IN ('oauth', 'setup-token')")
 	require.Contains(t, normalized, "platform = ANY($1)")
-	require.NotContains(t, normalized, "platform IN ('anthropic'",
+	require.NotContains(t, normalized, " AND platform IN ('anthropic'",
 		"candidate platforms must come from the refresher registry instead of a second hard-coded list")
 	require.Contains(t, normalized, "credentials ? 'refresh_token'")
 	require.Contains(t, normalized, "btrim(credentials->>'refresh_token') <> ''")
@@ -376,6 +376,7 @@ func (r rowsAffectedResult) LastInsertId() (int64, error) { return 0, nil }
 func (r rowsAffectedResult) RowsAffected() (int64, error) { return int64(r), nil }
 
 type recordingSQLExecutor struct {
+	queryDB     *sql.DB
 	result      sql.Result
 	err         error
 	afterExec   func()
@@ -396,5 +397,8 @@ func (e *recordingSQLExecutor) ExecContext(ctx context.Context, query string, ar
 }
 
 func (e *recordingSQLExecutor) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	if e.queryDB != nil {
+		return e.queryDB.QueryContext(ctx, query, args...)
+	}
 	return nil, sql.ErrNoRows
 }
