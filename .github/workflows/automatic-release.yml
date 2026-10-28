@@ -1,9 +1,10 @@
-name: NewAPI Build binaries
+name: Manual versioned release
 
 run-name: NewAPI manual binary release · ${{ inputs.version || github.ref_name }}
 
-# A push to NewAPI only runs quality-gate.yml. Binary compilation and release
-# are deliberately manual so source pushes never publish an artifact.
+# Reuse the workflow path registered on the default branch. Dispatch with
+# --ref NewAPI to run THIS branch's implementation without changing main.
+# Pushes only run quality-gate.yml; publishing is always manual.
 on:
   workflow_dispatch:
     inputs:
@@ -22,6 +23,7 @@ concurrency:
 jobs:
   build-binaries:
     name: build-binaries (linux, amd64)
+    if: github.repository == 'holeenlu/sub2api' && github.ref == 'refs/heads/NewAPI'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -30,8 +32,10 @@ jobs:
       CGO_ENABLED: '0'
       VERSION: ${{ inputs.version }}
       COMMIT: ${{ github.sha }}
-      DATE: ${{ github.run_started_at }}
       LATEST_TAG: NewAPI/latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout selected NewAPI commit
         uses: actions/checkout@v4
@@ -47,6 +51,7 @@ jobs:
               exit 1
               ;;
           esac
+          echo "DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -58,7 +63,7 @@ jobs:
       - name: Run release contract tests
         working-directory: backend
         run: >-
-          go test -mod=readonly -tags=unit -count=1 -p=1 -timeout=180s
+          go test -mod=readonly -tags=unit -count=1 -timeout=180s
           ./internal/service ./internal/repository ./internal/handler ./internal/server/routes
           -run 'Test(ModelManagement|AccountModelReferences|ManagedModel|ModelPolicy|ModelPricing|NativeHTTPFixture|VendorAdminProbe|AdminAuthorization|Route.*Model)'
 
@@ -76,8 +81,9 @@ jobs:
           mkdir -p dist/package
           cp dist/sub2api dist/package/sub2api
           cp LICENSE dist/package/LICENSE
-          tar -C dist/package -czf "dist/NewAPI-${VERSION}-linux-amd64.tar.gz" sub2api LICENSE
-          sha256sum "dist/NewAPI-${VERSION}-linux-amd64.tar.gz" > "dist/NewAPI-${VERSION}-linux-amd64.tar.gz.sha256"
+          cp -R backend/resources dist/package/resources
+          tar -C dist/package -czf "dist/NewAPI-${VERSION}-linux-amd64.tar.gz" sub2api LICENSE resources
+          (cd dist && sha256sum "NewAPI-${VERSION}-linux-amd64.tar.gz" > "NewAPI-${VERSION}-linux-amd64.tar.gz.sha256")
           file dist/sub2api
           sha256sum "dist/NewAPI-${VERSION}-linux-amd64.tar.gz" "dist/NewAPI-${VERSION}-linux-amd64.tar.gz.sha256"
 
@@ -93,26 +99,52 @@ jobs:
           Source commit: ${COMMIT}
           Target: linux/amd64
 
-          This release contains the NewAPI backend binary only.
+          This release contains the NewAPI backend binary and pricing resources only.
+          The frontend is deployed separately. No container images are published.
           EOF
 
           if gh release view "$LATEST_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release edit "$LATEST_TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$COMMIT" \
-              --title "$title" \
-              --notes-file "$notes_file"
+            # Upload both verified assets before moving the existing tag.
             gh release upload "$LATEST_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               "dist/NewAPI-${VERSION}-linux-amd64.tar.gz" \
               "dist/NewAPI-${VERSION}-linux-amd64.tar.gz.sha256" \
               --clobber
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$LATEST_TAG" \
+              -f sha="$COMMIT" -F force=true > /dev/null
+            gh release edit "$LATEST_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$title" \
+              --notes-file "$notes_file" \
+              --latest=false
           else
+            # Check repository access instead of treating an API outage as absence.
+            gh api "repos/$GITHUB_REPOSITORY/releases?per_page=1" > /dev/null
+            tag_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$LATEST_TAG" \
+              --jq '.[] | select(.ref == "refs/tags/NewAPI/latest") | .object.sha')
+            if [ -n "$tag_sha" ]; then
+              gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$LATEST_TAG" \
+                -f sha="$COMMIT" -F force=true > /dev/null
+            fi
             gh release create "$LATEST_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$COMMIT" \
               --title "$title" \
               --notes-file "$notes_file" \
+              --latest=false \
               "dist/NewAPI-${VERSION}-linux-amd64.tar.gz" \
               "dist/NewAPI-${VERSION}-linux-amd64.tar.gz.sha256"
           fi
+
+          # Keep only this version's assets on the NewAPI release. Other channels
+          # and their historical releases/tags are outside this workflow's scope.
+          assets=$(gh release view "$LATEST_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json assets --jq '.assets[].name')
+          while IFS= read -r asset; do
+            case "$asset" in
+              "NewAPI-${VERSION}-linux-amd64.tar.gz"|"NewAPI-${VERSION}-linux-amd64.tar.gz.sha256"|'') ;;
+              NewAPI-*-linux-amd64.tar.gz|NewAPI-*-linux-amd64.tar.gz.sha256)
+                gh release delete-asset "$LATEST_TAG" "$asset" --repo "$GITHUB_REPOSITORY" --yes
+                ;;
+            esac
+          done <<< "$assets"

@@ -1,5 +1,19 @@
 # sub2api 独立重构交付规范
 
+## 2026-10-28 NewAPI 手动二进制发布
+
+NewAPI 使用 `.github/workflows/automatic-release.yml`，复用默认分支已登记的工作流路径，实际定义由手动选择的 NewAPI 分支提供；不向 main、TapModels、tokensavy 合入本重构代码。旧命令中的 `newapi-build-publish.yml` 仅存在于非默认分支，GitHub 无法查到其工作流登记，已删除该入口。
+
+仅用户主动运行以下命令或在 Actions 的 **Manual versioned release** 中选择 **NewAPI** 才发版；提交和推送不会发版，本次修复交付也不自动运行发布：
+
+```sh
+gh workflow run automatic-release.yml --repo holeenlu/sub2api --ref NewAPI -f version=1.0.0
+```
+
+发布工作流只有 `build-binaries (linux, amd64)` 一个任务，复用 Go 模块与编译缓存，以 runner 默认并行度执行相关合同测试，只构建 API 二进制，随包提供许可证和定价资源，不编译前端、不发布镜像。前端继续独立部署。构建日期在 runner 中生成，不引用不存在的上下文字段。
+
+每次发布复用唯一 `NewAPI/latest` Git 标签及 Release；已有标签显式移动到本次源码提交，上传完成后清除该 Release 内旧版 NewAPI 二进制及校验文件。校验文件使用包名相对路径，解压前可在下载目录执行 `sha256sum -c NewAPI-1.0.0-linux-amd64.tar.gz.sha256`。不创建每版本 Git 标签，也不删除维护分支的标签或历史 Release；`--latest=false` 防止覆盖维护版的仓库全局 Latest。
+
 范围：codex/sub2api-rebuild。依据2026-10-25用户新建独立项目分支、多子智能体协作及删除无用旧实现的明确指令。此规范仅作用于新重构分支；6f48d6ab6fcc29763af84410690530aeaa957403仅保留为历史源码来源；维护main及品牌分支和本地恢复引用保留旧历史，新重构分支采用无父提交的独立根历史，不再继承维护版祖先链或发布流程。
 
 ## 分支与授权
