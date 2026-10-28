@@ -1,6 +1,9 @@
 name: Quality gate
 
 on:
+  push:
+    branches:
+      - NewAPI
   workflow_dispatch:
 
 permissions:

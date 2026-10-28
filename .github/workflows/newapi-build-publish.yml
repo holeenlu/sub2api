@@ -1,0 +1,142 @@
+name: NewAPI Build and publish
+
+on:
+  push:
+    branches:
+      - NewAPI
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish API and UI images to GHCR
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_OWNER: ${{ github.repository_owner }}
+
+jobs:
+  validate:
+    name: Validate NewAPI sources
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout NewAPI
+        uses: actions/checkout@v4
+
+      - name: Validate deployment contracts
+        run: python3 -B -m unittest deploy.tests.test_runtime_permissions deploy.tests.test_api_compose -v
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache-dependency-path: backend/go.sum
+
+      - name: Build backend
+        working-directory: backend
+        run: go build ./...
+
+      - name: Run NewAPI focused backend tests
+        working-directory: backend
+        run: >-
+          go test -tags=unit -count=1 -p=1 -timeout=180s
+          ./internal/service ./internal/repository ./internal/handler ./internal/server/routes
+          -run 'Test(ModelManagement|AccountModelReferences|ManagedModel|ModelPolicy|ModelPricing|NativeHTTPFixture|VendorAdminProbe|AdminAuthorization|Route.*Model)'
+
+  publish:
+    name: Build and publish NewAPI images
+    needs: validate
+    if: github.event_name == 'push' || inputs.publish == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout NewAPI
+        uses: actions/checkout@v4
+
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata for API
+        id: api-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ env.IMAGE_OWNER }}/newapi-api
+          tags: |
+            type=raw,value=newapi
+            type=sha,prefix=sha-
+
+      - name: Docker metadata for main UI
+        id: web-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ env.IMAGE_OWNER }}/newapi-web
+          tags: |
+            type=raw,value=newapi
+            type=sha,prefix=sha-
+
+      - name: Docker metadata for supplier UI
+        id: vendor-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ env.IMAGE_OWNER }}/newapi-vendor
+          tags: |
+            type=raw,value=newapi
+            type=sha,prefix=sha-
+
+      - name: Build and publish API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.api-meta.outputs.tags }}
+          labels: ${{ steps.api-meta.outputs.labels }}
+          build-args: |
+            COMMIT=${{ github.sha }}
+            VERSION=NewAPI-${{ github.run_number }}
+            DATE=${{ github.event.head_commit.timestamp || github.run_started_at }}
+          cache-from: type=gha,scope=newapi-api
+          cache-to: type=gha,mode=max,scope=newapi-api
+
+      - name: Build and publish main UI image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/web/Dockerfile
+          target: main
+          push: true
+          tags: ${{ steps.web-meta.outputs.tags }}
+          labels: ${{ steps.web-meta.outputs.labels }}
+          build-args: |
+            COMMIT=${{ github.sha }}
+            VERSION=NewAPI-${{ github.run_number }}
+            SOURCE_SHA256=${{ github.sha }}
+          cache-from: type=gha,scope=newapi-ui
+          cache-to: type=gha,mode=max,scope=newapi-ui
+
+      - name: Build and publish supplier UI image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/web/Dockerfile
+          target: vendor
+          push: true
+          tags: ${{ steps.vendor-meta.outputs.tags }}
+          labels: ${{ steps.vendor-meta.outputs.labels }}
+          build-args: |
+            COMMIT=${{ github.sha }}
+            VERSION=NewAPI-${{ github.run_number }}
+            SOURCE_SHA256=${{ github.sha }}
+          cache-from: type=gha,scope=newapi-ui
+          cache-to: type=gha,mode=max,scope=newapi-ui
