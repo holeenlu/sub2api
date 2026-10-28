@@ -1,18 +1,18 @@
 # sub2api 独立重构交付规范
 
-## 2026-10-28 NewAPI 手动二进制发布
+## 2026-10-28 NewAPI 完整手动发布
 
-NewAPI 使用 `.github/workflows/automatic-release.yml`，复用默认分支已登记的工作流路径，实际定义由手动选择的 NewAPI 分支提供；不向 main、TapModels、tokensavy 合入本重构代码。旧命令中的 `newapi-build-publish.yml` 仅存在于非默认分支，GitHub 无法查到其工作流登记，已删除该入口。
+用户明确要求按 main 的编译发版流程完整构建，并减少时间。本次授权补齐发布流程、提交推送到 `holeenlu/sub2api:NewAPI` 并实际运行 `version=1.0.0` 发布，不包含生产部署或收取其他会话的未提交前端改动。只修改 NewAPI，维护三个品牌保持。
 
-仅用户主动运行以下命令或在 Actions 的 **Manual versioned release** 中选择 **NewAPI** 才发版；提交和推送不会发版，本次修复交付也不自动运行发布：
+入口仍为 `.github/workflows/automatic-release.yml`，仅 `workflow_dispatch`；prepare → build-frontend → build-binaries → publish → promote。前后端并行，Go 模块/编译缓存与 pnpm 锁定依赖缓存复用；主站/供应商共用一次类型与翻译检查，Vite 各输出一套。镜像使用同一批已编译产物，通过现有 Dockerfile 的 release target 打包，不再重复构建 Go/Node。所有检出固定 prepare 的源码 SHA。
 
 ```sh
 gh workflow run automatic-release.yml --repo holeenlu/sub2api --ref NewAPI -f version=1.0.0
 ```
 
-发布工作流只有 `build-binaries (linux, amd64)` 一个任务，复用 Go 模块与编译缓存，以 runner 默认并行度执行相关合同测试，只构建 API 二进制，随包提供许可证和定价资源，不编译前端、不发布镜像。前端继续独立部署。构建日期在 runner 中生成，不引用不存在的上下文字段。
+产物：API 二进制包、包含两套静态前端和 API 的完整部署包、固定三个镜像摘要的五服务 Compose、环境模板、安装说明、checksums.txt 及 release-manifest.json。API/web/vendor 镜像均 linux/amd64，未发布时不提升数字版本或 latest。发布前在 runner 临时新数据库上实际启动 API、PG、Redis、主站、门户，检查登录、代理和重启持久化，并复用现有 WS/SSE fixture 测试。只读/非 root UI 运行限制保持；不把 fixture 或安装成功当作全产品、真实上游和生产迁移验收。
 
-每次发布复用唯一 `NewAPI/latest` Git 标签及 Release；已有标签显式移动到本次源码提交，上传完成后清除该 Release 内旧版 NewAPI 二进制及校验文件。校验文件使用包名相对路径，解压前可在下载目录执行 `sha256sum -c NewAPI-1.0.0-linux-amd64.tar.gz.sha256`。不创建每版本 Git 标签，也不删除维护分支的标签或历史 Release；`--latest=false` 防止覆盖维护版的仓库全局 Latest。
+继续复用唯一 `NewAPI/latest` 标签/Release，所有附件写入绑定其 Release ID，上传后核验哈希；完成新产物后才清理该 Release 的旧 NewAPI 包。`make_latest=false`，不更改维护版的全局 Latest、标签和附件。部署说明以 [完整部署包](../deploy/release/README.md) 为准，旧后端-only 发版说明由本流程替代。
 
 范围：codex/sub2api-rebuild。依据2026-10-25用户新建独立项目分支、多子智能体协作及删除无用旧实现的明确指令。此规范仅作用于新重构分支；6f48d6ab6fcc29763af84410690530aeaa957403仅保留为历史源码来源；维护main及品牌分支和本地恢复引用保留旧历史，新重构分支采用无父提交的独立根历史，不再继承维护版祖先链或发布流程。
 

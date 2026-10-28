@@ -24,7 +24,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
 
 # Keep the existing PostgreSQL backup/restore tools and runtime versions.
 FROM postgres:18-alpine AS pg-client
-FROM alpine:3.21 AS runtime
+FROM alpine:3.21 AS runtime-base
 LABEL org.opencontainers.image.title="sub2api API" \
       org.opencontainers.image.source="https://github.com/holeenlu/sub2api"
 
@@ -37,8 +37,6 @@ COPY --from=pg-client /usr/local/lib/libpq.so.5* /usr/local/lib/
 # This new API role uses its own neutral runtime identity and entrypoint.
 RUN addgroup -g 1000 sub2api && adduser -u 1000 -G sub2api -s /bin/sh -D sub2api
 WORKDIR /app
-COPY --from=builder --chown=sub2api:sub2api --chmod=755 /out/sub2api /app/sub2api
-COPY --from=builder --chown=sub2api:sub2api /src/backend/resources /app/resources
 COPY LICENSE /app/LICENSE
 RUN mkdir -p /app/data && chown sub2api:sub2api /app /app/data
 COPY --chmod=755 deploy/api/docker-entrypoint.sh /app/docker-entrypoint.sh
@@ -48,3 +46,13 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
     CMD wget -q -T 5 -O /dev/null http://127.0.0.1:${SERVER_PORT:-8080}/health || exit 1
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["/app/sub2api"]
+
+# CI supplies its already tested binary through an explicit named context.
+# Building the default runtime below still compiles only this checkout.
+FROM runtime-base AS release
+COPY --from=release-artifacts --chown=sub2api:sub2api --chmod=755 /sub2api /app/sub2api
+COPY --from=release-artifacts --chown=sub2api:sub2api /resources /app/resources
+
+FROM runtime-base AS runtime
+COPY --from=builder --chown=sub2api:sub2api --chmod=755 /out/sub2api /app/sub2api
+COPY --from=builder --chown=sub2api:sub2api /src/backend/resources /app/resources

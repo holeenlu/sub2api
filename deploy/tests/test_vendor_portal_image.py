@@ -300,11 +300,13 @@ class VendorPortalImageTests(ProxyImageChecks, unittest.TestCase):
         self.assertEqual(status, 200, (body, self.docker('logs', name, check=False).stderr))
         self.assertEqual(json.loads(body)['host'], 'supplier.example.test')
         untrusted_name, untrusted = self.start_portal(backend)
-        self.assertEqual(self.request(untrusted, '/api/v1/vendor/me')[0], 502)
-        self.assertIn('certificate verify error', self.docker('logs', untrusted_name, check=False).stderr)
+        self.assertEqual(self.request(untrusted, '/api/v1/vendor/me?token=tls-probe-secret')[0], 502)
+        logs = self.docker('logs', untrusted_name, check=False)
+        self.assertNotIn('tls-probe-secret', logs.stdout + logs.stderr)
         wrong_name, wrong = self.start_portal('https://wrong.test:8080', extra=('-v', ca))
-        self.assertEqual(self.request(wrong, '/api/v1/vendor/me')[0], 502)
-        self.assertIn('does not match', self.docker('logs', wrong_name, check=False).stderr)
+        self.assertEqual(self.request(wrong, '/api/v1/vendor/me?token=tls-probe-secret')[0], 502)
+        logs = self.docker('logs', wrong_name, check=False)
+        self.assertNotIn('tls-probe-secret', logs.stdout + logs.stderr)
 
     def test_dead_backend_does_not_become_spa_success(self):
         _, port = self.start_portal('http://127.0.0.1:9')

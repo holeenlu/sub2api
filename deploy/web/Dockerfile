@@ -30,6 +30,7 @@ RUN printf '%s' "$VERSION" | grep -Eq '^[0-9A-Za-z.-]+$' \
     && printf '{"version":"%s","commit":"%s","source_sha256":"%s"}\n' "$VERSION" "$COMMIT" "$SOURCE_SHA256" > /etc/nginx/ui-build.json \
     && rm -rf /usr/share/nginx/html/*
 LABEL org.opencontainers.image.title="sub2api UI" \
+      org.opencontainers.image.source="https://github.com/holeenlu/sub2api" \
       org.opencontainers.image.version="$VERSION" \
       org.opencontainers.image.revision="$COMMIT" \
       io.sub2api.source.sha256="$SOURCE_SHA256"
@@ -39,16 +40,25 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD wget -q -O /dev/null http://127.0.0.1:8080/health
 
-FROM runtime AS main
+FROM runtime AS main-base
 COPY deploy/web/nginx.conf.template /etc/nginx/web.conf.template
 COPY --chmod=755 deploy/web/entrypoint.sh /usr/local/bin/web-entrypoint
-COPY --from=frontend-builder /app/frontend/dist/ /usr/share/nginx/html/
 ENTRYPOINT ["/usr/local/bin/web-entrypoint"]
 CMD ["nginx", "-c", "/tmp/web/nginx.conf", "-g", "daemon off;"]
 
-FROM runtime AS vendor
+FROM runtime AS vendor-base
 COPY deploy/vendor-portal/nginx.conf.template /etc/nginx/vendor-portal.conf.template
 COPY --chmod=755 deploy/vendor-portal/entrypoint.sh /usr/local/bin/vendor-portal-entrypoint
-COPY --from=frontend-builder /app/frontend/dist-vendor/ /usr/share/nginx/html/
 ENTRYPOINT ["/usr/local/bin/vendor-portal-entrypoint"]
 CMD ["nginx", "-c", "/tmp/vendor-portal/nginx.conf", "-g", "daemon off;"]
+
+# Release images reuse both frontend artifacts; no Node or rebuild in this path.
+FROM main-base AS release-main
+COPY --from=release-artifacts /main/ /usr/share/nginx/html/
+FROM vendor-base AS release-vendor
+COPY --from=release-artifacts /vendor/ /usr/share/nginx/html/
+
+FROM main-base AS main
+COPY --from=frontend-builder /app/frontend/dist/ /usr/share/nginx/html/
+FROM vendor-base AS vendor
+COPY --from=frontend-builder /app/frontend/dist-vendor/ /usr/share/nginx/html/

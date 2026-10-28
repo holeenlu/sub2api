@@ -1,5 +1,7 @@
 # 独立主站与供应商 UI
 
+完整发版现已同时提供 API、主站和供应商镜像及固定 digest 的 Compose，见[完整部署包](../release/README.md)。源码构建仍用下述 main/vendor target；CI 的 release-main/release-vendor target 使用显式 release-artifacts 命名上下文，复用已编译前端，不再次执行 Node 构建。
+
 根 Dockerfile 只构建 API。deploy/web/Dockerfile 是唯一前端镜像构建入口：main、vendor 两个 target 共享一次依赖安装、i18n/类型检查及两种 Vite 产物构建。固定 Node 24、nginx 1.30.6、pnpm 9.15.9；不使用会隐式 install 的本机 pnpm fallback，不更新锁文件。VERSION、COMMIT、SOURCE_SHA256 只影响运行镜像的版本层。
 
 当前frontend是单包构建，固定使用pnpm9.15.9。主任务误调用fallback包装器生成的无效pnpm-workspace占位已确认归属并删除；不存在workspace绕过分支。以后若正式引入workspace，必须同时审查依赖输入和构建合同。

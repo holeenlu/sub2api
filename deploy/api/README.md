@@ -1,5 +1,7 @@
 # sub2api API 部署
 
+完整 GitHub 发版及现成镜像部署请先看[完整部署包](../release/README.md)。下文是保留的源码构建与 API-only 部署方式。
+
 本分支的唯一后端镜像由仓库根 `Dockerfile` 和 `.dockerignore` 构建；本目录提供稳定的运行部署配置。从同一 checkout 的 `backend/cmd/server` 编译，不使用 `embed` tag、Node、frontend、另一工作树或预生成二进制。完整前端由门户会话接入，首页/安装向导页面不包含在 API 镜像中。部署验收必须使用新的隔离数据，不覆盖生产 Compose 或数据卷。
 
 复用基线 `6f48d6ab6fcc29763af84410690530aeaa957403` 的 Go `1.27.3`、PostgreSQL `18-alpine`、Redis `8-alpine`、Alpine `3.21`，不升级依赖。Dockerfile 保留现有 `pg_dump`/`psql` 和定价资源；SQL 迁移、VERSION、Wire/Ent 生成源码及其他 Go embed 资源均来自该 checkout。

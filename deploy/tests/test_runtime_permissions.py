@@ -13,8 +13,8 @@ class RuntimePermissionsTests(unittest.TestCase):
         self.assertEqual(binary, '/app/sub2api')
         for destination in (binary, '/app/docker-entrypoint.sh'):
             copies = [shlex.split(x) for x in lines if x.startswith('COPY ') and shlex.split(x)[-1] == destination]
-            self.assertEqual(len(copies), 1)
-            self.assertIn('--chmod=755', copies[0])
+            self.assertEqual(len(copies), 2 if destination == binary else 1)
+            self.assertTrue(all('--chmod=755' in copy for copy in copies))
 
     def test_api_build_has_no_frontend_or_external_artifact_input(self):
         source = (ROOT / 'Dockerfile').read_text()
