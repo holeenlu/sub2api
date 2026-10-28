@@ -60,9 +60,10 @@ type OpsAggregationService struct {
 	redisClient *redis.Client
 	instanceID  string
 
-	stopCh    chan struct{}
-	startOnce sync.Once
-	stopOnce  sync.Once
+	lifecycleMu sync.Mutex
+	runCancel   context.CancelFunc
+	runDone     chan struct{}
+	stopped     bool
 
 	hourlyMu sync.Mutex
 	dailyMu  sync.Mutex
@@ -92,29 +93,46 @@ func (s *OpsAggregationService) Start() {
 	if s == nil {
 		return
 	}
-	s.startOnce.Do(func() {
-		if s.stopCh == nil {
-			s.stopCh = make(chan struct{})
-		}
-		go s.hourlyLoop()
-		go s.dailyLoop()
-	})
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.stopped || s.runCancel != nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.runCancel = cancel
+	done := make(chan struct{})
+	s.runDone = done
+	go func() {
+		var workers sync.WaitGroup
+		workers.Add(2)
+		go func() { defer workers.Done(); s.hourlyLoop(ctx) }()
+		go func() { defer workers.Done(); s.dailyLoop(ctx) }()
+		workers.Wait()
+		close(done)
+	}()
 }
 
 func (s *OpsAggregationService) Stop() {
 	if s == nil {
 		return
 	}
-	s.stopOnce.Do(func() {
-		if s.stopCh != nil {
-			close(s.stopCh)
-		}
-	})
+	s.lifecycleMu.Lock()
+	s.stopped = true
+	cancel, done := s.runCancel, s.runDone
+	s.lifecycleMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if done != nil {
+		// Queries, heartbeats and leader-lock cleanup finish before shared
+		// infrastructure can be closed by the application cleanup owner.
+		<-done
+	}
 }
 
-func (s *OpsAggregationService) hourlyLoop() {
+func (s *OpsAggregationService) hourlyLoop(ctx context.Context) {
 	// First run immediately.
-	s.aggregateHourly()
+	s.aggregateHourly(ctx)
 
 	ticker := time.NewTicker(opsAggHourlyInterval)
 	defer ticker.Stop()
@@ -122,16 +140,16 @@ func (s *OpsAggregationService) hourlyLoop() {
 	for {
 		select {
 		case <-ticker.C:
-			s.aggregateHourly()
-		case <-s.stopCh:
+			s.aggregateHourly(ctx)
+		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-func (s *OpsAggregationService) dailyLoop() {
+func (s *OpsAggregationService) dailyLoop(ctx context.Context) {
 	// First run immediately.
-	s.aggregateDaily()
+	s.aggregateDaily(ctx)
 
 	ticker := time.NewTicker(opsAggDailyInterval)
 	defer ticker.Stop()
@@ -139,15 +157,15 @@ func (s *OpsAggregationService) dailyLoop() {
 	for {
 		select {
 		case <-ticker.C:
-			s.aggregateDaily()
-		case <-s.stopCh:
+			s.aggregateDaily(ctx)
+		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-func (s *OpsAggregationService) aggregateHourly() {
-	if s == nil || s.opsRepo == nil {
+func (s *OpsAggregationService) aggregateHourly(lifecycleCtx context.Context) {
+	if s == nil || s.opsRepo == nil || lifecycleCtx.Err() != nil {
 		return
 	}
 	if s.cfg != nil {
@@ -159,7 +177,7 @@ func (s *OpsAggregationService) aggregateHourly() {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), opsAggHourlyTimeout)
+	ctx, cancel := context.WithTimeout(lifecycleCtx, opsAggHourlyTimeout)
 	defer cancel()
 
 	if !s.isMonitoringEnabled(ctx) {
@@ -186,7 +204,7 @@ func (s *OpsAggregationService) aggregateHourly() {
 
 	// Resume from the latest bucket with overlap.
 	{
-		ctxMax, cancelMax := context.WithTimeout(context.Background(), opsAggMaxQueryTimeout)
+		ctxMax, cancelMax := context.WithTimeout(ctx, opsAggMaxQueryTimeout)
 		latest, ok, err := s.opsRepo.GetLatestHourlyBucketStart(ctxMax)
 		cancelMax()
 		if err != nil {
@@ -199,6 +217,9 @@ func (s *OpsAggregationService) aggregateHourly() {
 		}
 	}
 
+	if lifecycleCtx.Err() != nil {
+		return
+	}
 	start = utcFloorToHour(start)
 	if !start.Before(end) {
 		return
@@ -217,11 +238,14 @@ func (s *OpsAggregationService) aggregateHourly() {
 	finishedAt := time.Now().UTC()
 	durationMs := finishedAt.Sub(startedAt).Milliseconds()
 	dur := durationMs
+	if lifecycleCtx.Err() != nil {
+		return
+	}
 
 	if aggErr != nil {
 		msg := truncateString(aggErr.Error(), 2048)
 		errAt := finishedAt
-		hbCtx, hbCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		hbCtx, hbCancel := context.WithTimeout(lifecycleCtx, 2*time.Second)
 		defer hbCancel()
 		_ = s.opsRepo.UpsertJobHeartbeat(hbCtx, &OpsUpsertJobHeartbeatInput{
 			JobName:        opsAggHourlyJobName,
@@ -234,7 +258,7 @@ func (s *OpsAggregationService) aggregateHourly() {
 	}
 
 	successAt := finishedAt
-	hbCtx, hbCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	hbCtx, hbCancel := context.WithTimeout(lifecycleCtx, 2*time.Second)
 	defer hbCancel()
 	result := truncateString(fmt.Sprintf("window=%s..%s", start.Format(time.RFC3339), end.Format(time.RFC3339)), 2048)
 	_ = s.opsRepo.UpsertJobHeartbeat(hbCtx, &OpsUpsertJobHeartbeatInput{
@@ -246,8 +270,8 @@ func (s *OpsAggregationService) aggregateHourly() {
 	})
 }
 
-func (s *OpsAggregationService) aggregateDaily() {
-	if s == nil || s.opsRepo == nil {
+func (s *OpsAggregationService) aggregateDaily(lifecycleCtx context.Context) {
+	if s == nil || s.opsRepo == nil || lifecycleCtx.Err() != nil {
 		return
 	}
 	if s.cfg != nil {
@@ -259,7 +283,7 @@ func (s *OpsAggregationService) aggregateDaily() {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), opsAggDailyTimeout)
+	ctx, cancel := context.WithTimeout(lifecycleCtx, opsAggDailyTimeout)
 	defer cancel()
 
 	if !s.isMonitoringEnabled(ctx) {
@@ -284,7 +308,7 @@ func (s *OpsAggregationService) aggregateDaily() {
 	start := end.Add(-opsAggBackfillWindow)
 
 	{
-		ctxMax, cancelMax := context.WithTimeout(context.Background(), opsAggMaxQueryTimeout)
+		ctxMax, cancelMax := context.WithTimeout(ctx, opsAggMaxQueryTimeout)
 		latest, ok, err := s.opsRepo.GetLatestDailyBucketDate(ctxMax)
 		cancelMax()
 		if err != nil {
@@ -297,6 +321,9 @@ func (s *OpsAggregationService) aggregateDaily() {
 		}
 	}
 
+	if lifecycleCtx.Err() != nil {
+		return
+	}
 	start = utcFloorToDay(start)
 	if !start.Before(end) {
 		return
@@ -315,11 +342,14 @@ func (s *OpsAggregationService) aggregateDaily() {
 	finishedAt := time.Now().UTC()
 	durationMs := finishedAt.Sub(startedAt).Milliseconds()
 	dur := durationMs
+	if lifecycleCtx.Err() != nil {
+		return
+	}
 
 	if aggErr != nil {
 		msg := truncateString(aggErr.Error(), 2048)
 		errAt := finishedAt
-		hbCtx, hbCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		hbCtx, hbCancel := context.WithTimeout(lifecycleCtx, 2*time.Second)
 		defer hbCancel()
 		_ = s.opsRepo.UpsertJobHeartbeat(hbCtx, &OpsUpsertJobHeartbeatInput{
 			JobName:        opsAggDailyJobName,
@@ -332,7 +362,7 @@ func (s *OpsAggregationService) aggregateDaily() {
 	}
 
 	successAt := finishedAt
-	hbCtx, hbCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	hbCtx, hbCancel := context.WithTimeout(lifecycleCtx, 2*time.Second)
 	defer hbCancel()
 	result := truncateString(fmt.Sprintf("window=%s..%s", start.Format(time.RFC3339), end.Format(time.RFC3339)), 2048)
 	_ = s.opsRepo.UpsertJobHeartbeat(hbCtx, &OpsUpsertJobHeartbeatInput{

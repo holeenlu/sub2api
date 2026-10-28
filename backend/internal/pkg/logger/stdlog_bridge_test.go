@@ -164,3 +164,65 @@ func TestLegacyPrintfRoutesLevels(t *testing.T) {
 		t.Fatalf("stderr missing component field: %s", stderrText)
 	}
 }
+
+func TestLegacyPrintfLevelBypassesKeywordInference(t *testing.T) {
+	origStdout := os.Stdout
+	origStderr := os.Stderr
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stdout pipe: %v", err)
+	}
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stderr pipe: %v", err)
+	}
+	os.Stdout = stdoutW
+	os.Stderr = stderrW
+	t.Cleanup(func() {
+		os.Stdout = origStdout
+		os.Stderr = origStderr
+		_ = stdoutR.Close()
+		_ = stdoutW.Close()
+		_ = stderrR.Close()
+		_ = stderrW.Close()
+	})
+
+	if err := Init(InitOptions{
+		Level:       "debug",
+		Format:      "json",
+		ServiceName: "sub2api",
+		Environment: "test",
+		Output: OutputOptions{
+			ToStdout: true,
+			ToFile:   false,
+		},
+		Sampling: SamplingOptions{Enabled: false},
+	}); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	// 信息日志的事件名/字段名含 error、fail、fallback 关键字，显式级别必须优先于推断。
+	LegacyPrintfLevel(LevelInfo, "service.test", "ingress_ws_error_event account_id=%d fallback_reason=%s", 7, "upstream_err_event")
+	LegacyPrintfLevel(LevelWarn, "service.test", "conn pool shrink")
+	// Skip Sync() — on Windows, fsync on pipes deadlocks (FlushFileBuffers).
+
+	_ = stdoutW.Close()
+	_ = stderrW.Close()
+	stdoutBytes, _ := io.ReadAll(stdoutR)
+	stderrBytes, _ := io.ReadAll(stderrR)
+	stdoutText := string(stdoutBytes)
+	stderrText := string(stderrBytes)
+
+	if !strings.Contains(stdoutText, "ingress_ws_error_event account_id=7 fallback_reason=upstream_err_event") {
+		t.Fatalf("stdout missing explicit info log: %s", stdoutText)
+	}
+	if strings.Contains(stderrText, "ingress_ws_error_event") {
+		t.Fatalf("explicit info log was promoted by keyword inference: %s", stderrText)
+	}
+	if !strings.Contains(stderrText, "conn pool shrink") {
+		t.Fatalf("stderr missing explicit warn log: %s", stderrText)
+	}
+	if !strings.Contains(stdoutText, "\"legacy_printf\":true") || !strings.Contains(stdoutText, "\"component\":\"service.test\"") {
+		t.Fatalf("stdout missing legacy_printf/component fields: %s", stdoutText)
+	}
+}

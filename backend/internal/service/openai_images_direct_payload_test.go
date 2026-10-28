@@ -50,6 +50,21 @@ func TestCodexDirectImagesMultipartEdit(t *testing.T) {
 	require.EqualValues(t, 75, gjson.GetBytes(upstreamBody, "output_compression").Int())
 	require.EqualValues(t, 2, gjson.GetBytes(upstreamBody, "partial_images").Int())
 	require.False(t, gjson.GetBytes(upstreamBody, "tools").Exists())
+	upstream := &httpUpstreamRecorder{resp: openAIImagesJSONResponse()}
+	svc.httpUpstream = upstream
+	account := directImagesTestAccount()
+	account.Extra = map[string]any{OpenAICloudEnabledKey: true}
+	result, err := svc.ForwardImages(t.Context(), c, account, body.Bytes(), parsed, "")
+	require.NoError(t, err)
+	require.Equal(t, target, upstream.lastReq.URL.String())
+	var want, sent map[string]any
+	require.NoError(t, json.Unmarshal(upstreamBody, &want))
+	require.NoError(t, json.Unmarshal(upstream.lastBody, &sent))
+	require.NotEmpty(t, sent["client_metadata"], "preserve native scoped identity metadata")
+	delete(sent, "client_metadata")
+	require.Equal(t, want, sent)
+	require.Equal(t, UsageAuthorizationModeNative, result.AuthorizationMode)
+	require.False(t, result.CloudManagedBilling)
 }
 
 func TestCodexDirectImagesPricingAndUsage(t *testing.T) {

@@ -3,17 +3,22 @@ package admin
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestAccountHandlerListLiteUsesCompactDTOAndETag(t *testing.T) {
@@ -242,7 +247,7 @@ func TestAccountHandlerListReturnsSchedulerScoresPerGroup(t *testing.T) {
 	require.Equal(t, "openai", high.SchedulerScores[0].GroupName)
 	require.Equal(t, 100, *high.SchedulerScores[0].GroupPriority)
 	require.Equal(t, 1, *low.SchedulerScores[0].GroupPriority)
-	require.Greater(t, high.SchedulerScores[0].BaseScore, low.SchedulerScores[0].BaseScore)
+	require.Equal(t, high.SchedulerScores[0].BaseScore, low.SchedulerScores[0].BaseScore, "business priority is a tier, not a soft score")
 }
 
 func TestAccountHandlerListSkipsSchedulerScoresByDefault(t *testing.T) {
@@ -404,4 +409,99 @@ func TestAccountHandlerListSchedulerScoreIgnoresPagination(t *testing.T) {
 	require.Equal(t, int64(301), payload.Data.Items[0].ID)
 	require.Less(t, payload.Data.Items[0].SchedulerScore.BaseScore, 3.75)
 	require.Empty(t, payload.Data.Items[0].SchedulerScores)
+}
+
+// The list must aggregate by each account's actual window, not one global start.
+type listWindowUsageRepo struct {
+	service.UsageLogRepository
+	mu    sync.Mutex
+	calls map[time.Time][]int64
+	fail  bool
+}
+
+func (r *listWindowUsageRepo) GetAccountWindowStatsBatch(_ context.Context, ids []int64, start time.Time) (map[int64]*usagestats.AccountStats, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls[start] = append(r.calls[start], ids...)
+	if r.fail {
+		return nil, errors.New("database unavailable")
+	}
+	result := make(map[int64]*usagestats.AccountStats)
+	for _, id := range ids {
+		result[id] = &usagestats.AccountStats{StandardCost: float64(id), Cost: 999, UserCost: 888}
+	}
+	return result, nil
+}
+func TestAccountHandlerListBatchesWindowCostsWithoutChangingWindows(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(strconv.FormatBool(fail), func(t *testing.T) {
+			now := time.Now().UTC()
+			start, end := now.Add(-time.Hour), now.Add(time.Hour)
+			otherStart := start.Add(-time.Hour)
+			repo := &listWindowUsageRepo{calls: map[time.Time][]int64{}, fail: fail}
+			usage := service.NewAccountUsageService(nil, repo, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			adminSvc := newStubAdminService()
+			adminSvc.accounts = nil
+			// Forty accounts sharing a window require one aggregate, plus one for a different window.
+			for i := 1; i <= 41; i++ {
+				windowStart := &start
+				if i == 41 {
+					windowStart = &otherStart
+				}
+				adminSvc.accounts = append(adminSvc.accounts, service.Account{
+					ID: int64(i), Platform: service.PlatformAnthropic, Type: service.AccountTypeOAuth,
+					SessionWindowStart: windowStart, SessionWindowEnd: &end,
+					Extra: map[string]any{"window_cost_limit": float64(100)},
+				})
+			}
+			// No window limit: must not run a window query.
+			adminSvc.accounts = append(adminSvc.accounts, service.Account{ID: 42, Platform: service.PlatformAnthropic, Type: service.AccountTypeOAuth})
+			handler := &AccountHandler{adminService: adminSvc, accountUsageService: usage}
+			router := gin.New()
+			router.GET("/accounts", handler.List)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/accounts?lite=1&page_size=100", nil))
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.Len(t, repo.calls, 2)
+			require.Len(t, repo.calls[start], 40)
+			require.Equal(t, []int64{41}, repo.calls[otherStart])
+			items := gjson.Get(rec.Body.String(), "data.items").Array()
+			require.Len(t, items, 42)
+			for _, item := range items {
+				id := item.Get("id").Int()
+				cost := item.Get("current_window_cost")
+				if fail || id == 42 {
+					require.False(t, cost.Exists())
+				} else {
+					require.Equal(t, float64(id), cost.Float())
+				}
+			}
+		})
+	}
+}
+
+func TestAccountHandlerListPolicyCapacityDeadline(t *testing.T) {
+	for _, lite := range []string{"0", "1"} {
+		t.Run(lite, func(t *testing.T) {
+			router, adminSvc := setupAccountListRouter()
+			now := time.Now().UTC()
+			adminSvc.accounts = []service.Account{{ID: 501, Name: "policy", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, CreatedAt: now, UpdatedAt: now, Extra: map[string]any{service.PolicyCapacityUnavailableUntilKey: now.Add(time.Hour).UnixMilli()}}}
+			path := "/api/v1/admin/accounts?page=1&page_size=20&lite=" + lite
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+			require.Equal(t, http.StatusOK, rec.Code)
+			until := gjson.GetBytes(rec.Body.Bytes(), "data.items.0.policy_capacity_unavailable_until").String()
+			deadline, err := time.Parse(time.RFC3339Nano, until)
+			require.NoError(t, err)
+			require.Equal(t, now.Add(time.Hour).UnixMilli(), deadline.UnixMilli())
+			require.False(t, gjson.GetBytes(rec.Body.Bytes(), "data.items.0.codex_diagnostic").Exists())
+			adminSvc.accounts[0].Extra[service.PolicyCapacityUnavailableUntilKey] = now.Add(-time.Second).UnixMilli()
+			expired := httptest.NewRecorder()
+			req := httptest.NewRequest("GET", path, nil)
+			req.Header.Set("If-None-Match", rec.Header().Get("ETag"))
+			router.ServeHTTP(expired, req)
+			require.Equal(t, http.StatusOK, expired.Code)
+			require.False(t, gjson.GetBytes(expired.Body.Bytes(), "data.items.0.policy_capacity_unavailable_until").Exists())
+		})
+	}
 }

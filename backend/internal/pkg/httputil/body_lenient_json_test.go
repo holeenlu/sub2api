@@ -2,13 +2,42 @@ package httputil
 
 import (
 	"bytes"
+	"compress/gzip"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/tidwall/gjson"
 )
+
+func TestReadLenientJSONHonorsEndpointDecodedBudget(t *testing.T) {
+	raw := []byte(`{"input":"` + strings.Repeat("x", maxDecompressedBodySize) + `"}`)
+	var encoded bytes.Buffer
+	writer := gzip.NewWriter(&encoded)
+	if _, err := writer.Write(raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, limit := range []int64{int64(len(raw)), int64(len(raw) - 1)} {
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(encoded.Bytes()))
+		req.Header.Set("Content-Encoding", "gzip")
+		got, err := ReadLenientJSONRequestBodyWithPrealloc(req, limit)
+		if limit == int64(len(raw)) {
+			if err != nil || !bytes.Equal(got, raw) {
+				t.Fatalf("endpoint budget rejected above legacy 64 MiB cap: %v", err)
+			}
+		} else {
+			var size *http.MaxBytesError
+			if !errors.As(err, &size) {
+				t.Fatalf("expected bounded decode rejection, got %v", err)
+			}
+		}
+	}
+}
 
 func TestNormalizeLenientJSONRequestBody_accepts_client_control_chars_in_strings(t *testing.T) {
 	tests := []struct {

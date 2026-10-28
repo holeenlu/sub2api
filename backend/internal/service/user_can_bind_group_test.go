@@ -20,6 +20,9 @@ func TestUserCanBindGroup(t *testing.T) {
 		isExclusive bool
 		want        bool
 	}{
+		{name: "active root can bind an exclusive standard group", user: User{Role: RoleSuperAdmin, Status: StatusActive, RestrictPublicGroups: true}, groupID: exclusiveGroupA, isExclusive: true, want: true},
+		{name: "inactive root does not gain an exclusive group grant", user: User{Role: RoleSuperAdmin, Status: StatusDisabled, RestrictPublicGroups: true}, groupID: exclusiveGroupA, isExclusive: true, want: false},
+		{name: "ordinary administrator still needs a standard group grant", user: User{Role: RoleAdmin, Status: StatusActive, RestrictPublicGroups: true}, groupID: exclusiveGroupA, isExclusive: true, want: false},
 		{
 			name:    "public group is bindable by default",
 			user:    User{},
