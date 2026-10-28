@@ -648,32 +648,24 @@ func codexHandlerManifestSlugs(t *testing.T, recorder *httptest.ResponseRecorder
 
 func requireCompleteCodexModelsHandlerResponse(t *testing.T, recorder *httptest.ResponseRecorder, slug string) {
 	t.Helper()
-
 	var envelope struct {
 		Models []map[string]any `json:"models"`
 	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
-		t.Fatalf("decode body: %v; body=%s", err, recorder.Body.String())
-	}
-	if len(envelope.Models) != 1 {
-		t.Fatalf("models count: got %d, want 1; body=%s", len(envelope.Models), recorder.Body.String())
-	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &envelope))
+	require.Len(t, envelope.Models, 1)
 	model := envelope.Models[0]
-	if got := model["slug"]; got != slug {
-		t.Fatalf("slug: got %v, want %q", got, slug)
-	}
-	if levels, ok := model["supported_reasoning_levels"].([]any); !ok || len(levels) == 0 {
-		t.Fatalf("supported_reasoning_levels must be populated: %v", model["supported_reasoning_levels"])
-	}
-	if messages, ok := model["model_messages"].(map[string]any); !ok || messages["instructions_template"] == "" {
-		t.Fatalf("model_messages.instructions_template must be populated: %v", model["model_messages"])
-	}
-	if policy, ok := model["truncation_policy"].(map[string]any); !ok || len(policy) == 0 {
-		t.Fatalf("truncation_policy must be populated: %v", model["truncation_policy"])
-	}
-	modalities, ok := model["input_modalities"].([]any)
-	if !ok || len(modalities) != 2 || modalities[0] != "text" || modalities[1] != "image" {
-		t.Fatalf("known GPT model modalities: got %v, want [text image]", model["input_modalities"])
+	require.Equal(t, slug, model["slug"])
+	require.NotEmpty(t, model["display_name"])
+	require.NotEmpty(t, model["supported_reasoning_levels"])
+	messages, ok := model["model_messages"].(map[string]any)
+	require.True(t, ok)
+	require.NotEmpty(t, messages["instructions_template"])
+	policy, ok := model["truncation_policy"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "tokens", policy["mode"])
+	require.Positive(t, policy["limit"])
+	for _, field := range []string{"context_window", "input_modalities", "default_reasoning_level"} {
+		require.NotContains(t, model, field, "only required native fields are completed")
 	}
 }
 
@@ -1027,6 +1019,58 @@ func TestCodexModelsDiscoveryProjectsWildcardMappingWithoutAllowlist(t *testing.
 			require.NotEmpty(t, first.Header().Get("ETag"))
 			second := performCodexModelsRequestForGroup(t, handler, group, first.Header().Get("ETag"))
 			require.Equal(t, http.StatusNotModified, second.Code)
+		})
+	}
+}
+
+func TestCodexModelsPinnedCatalogSourcesPreserveNativeSemanticsAndAuthorization(t *testing.T) {
+	for _, source := range []struct {
+		name, body string
+		native     bool
+	}{
+		{"native manifest", `{"models":[{"slug":"gpt-5.6-sol","display_name":"Native","supported_reasoning_levels":[],"shell_type":"unified_exec","visibility":"list","supported_in_api":true,"priority":0,"support_verbosity":false,"truncation_policy":{"mode":"tokens","limit":10000},"experimental_supported_tools":[],"base_instructions":"Native instructions","context_window":null,"model_messages":{"instructions_template":null,"unknown_nested":true},"service_tiers":[],"use_responses_lite":true,"unknown":{"number":9007199254740993}}, {"slug":"blocked"}],"unknown_top":null}`, true},
+		{"ordinary ID list", `{"data":[{"id":"gpt-5.6-sol"},{"id":"blocked"}]}`, false},
+	} {
+		t.Run(source.name, func(t *testing.T) {
+			account := newPinnedCodexAccount(1, service.StatusActive, true, false)
+			account.Credentials["model_mapping"] = map[string]any{"public-model": "gpt-5.6-sol"}
+			accounts := []service.Account{account}
+			upstream := &codexModelsPinnedHTTPUpstream{bodies: map[int64]string{1: source.body}}
+			handler := newPinnedCodexTestHandler(accounts, upstream, 3)
+			group := &service.Group{ID: 84, Platform: service.PlatformOpenAI,
+				CodexModelsManifestConfig: service.GroupCodexModelsManifestConfig{Enabled: true, AccountIDs: []int64{1}},
+				ModelAllowlist:            service.GroupModelAllowlist{Enabled: true, Models: []string{"public-model"}},
+			}
+			first := performCodexModelsRequestForGroup(t, handler, group, "")
+			require.Equal(t, http.StatusOK, first.Code, first.Body.String())
+			require.Equal(t, []string{"public-model"}, codexHandlerManifestSlugs(t, first))
+			var envelope struct {
+				Models []map[string]json.RawMessage `json:"models"`
+			}
+			require.NoError(t, json.Unmarshal(first.Body.Bytes(), &envelope))
+			model := envelope.Models[0]
+			require.JSONEq(t, `false`, string(model["use_responses_lite"]), "the established custom-provider full Responses requirement remains")
+			if source.native {
+				require.JSONEq(t, `null`, string(model["context_window"]))
+				require.JSONEq(t, `[]`, string(model["service_tiers"]))
+				require.JSONEq(t, `{"instructions_template":null,"unknown_nested":true}`, string(model["model_messages"]))
+				require.NotContains(t, model, "default_reasoning_level")
+				require.NotContains(t, model, "max_context_window")
+				require.Contains(t, string(model["unknown"]), "9007199254740993")
+				require.Contains(t, first.Body.String(), `"unknown_top":null`)
+			} else {
+				require.NotEqual(t, "null", string(model["context_window"]))
+				require.NotEmpty(t, model["supported_reasoning_levels"])
+				require.Contains(t, string(model["model_messages"]), "instructions_template")
+			}
+			second := performCodexModelsRequestForGroup(t, handler, group, first.Header().Get("ETag"))
+			require.Equal(t, http.StatusNotModified, second.Code)
+			require.Equal(t, []int64{1}, upstream.calls)
+
+			accounts[0].Status = service.StatusDisabled
+			revoked := performCodexModelsRequestForGroup(t, handler, group, "")
+			require.Equal(t, http.StatusServiceUnavailable, revoked.Code, "cached discovery cannot bypass current account eligibility")
+			require.Equal(t, []int64{1}, upstream.calls)
 		})
 	}
 }

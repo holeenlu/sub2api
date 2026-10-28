@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -46,6 +47,20 @@ func writeOpenAIModelsError(c *gin.Context, status int, errorType, message strin
 }
 
 func writeOpenAIModelsResponse(c *gin.Context, manifest *service.OpenAIModelsResponse) {
+	if len(manifest.Body) > 0 {
+		body, err := filterManagedCatalog(c, manifest.Body)
+		if err != nil {
+			writeOpenAIModelsError(c, 503, "api_error", "Model configuration unavailable")
+			return
+		}
+		cloned := *manifest
+		manifest = &cloned
+		manifest.Body = body
+		manifest.ETag = service.CodexModelsManifestETag(body)
+		if etag := c.GetString("managed-models-if-none-match"); etag != "" && c.Param("model") == "" {
+			manifest.NotModified = service.CodexModelsManifestETagMatches(etag, manifest.ETag)
+		}
+	}
 	if c.Param("model") != "" {
 		writeRetrievedModel(c, manifest.Body)
 		return
@@ -65,16 +80,12 @@ func writeOpenAIModelsResponse(c *gin.Context, manifest *service.OpenAIModelsRes
 // selection and allowlist filtering. Preserve every field on the selected entry.
 func writeModelsListResponse(c *gin.Context, models any) {
 	response := gin.H{"object": "list", "data": models}
-	if c.Param("model") == "" {
-		c.JSON(http.StatusOK, response)
-		return
-	}
 	body, err := json.Marshal(response)
 	if err != nil {
-		writeOpenAIModelsError(c, http.StatusInternalServerError, "api_error", "Failed to encode model catalogue")
+		writeOpenAIModelsError(c, 500, "api_error", "Failed to encode model catalogue")
 		return
 	}
-	writeRetrievedModel(c, body)
+	writeOpenAIModelsResponse(c, &service.OpenAIModelsResponse{Body: body})
 }
 
 func writeRetrievedModel(c *gin.Context, body []byte) {
@@ -106,4 +117,19 @@ func writeRetrievedModel(c *gin.Context, body []byte) {
 		"type": "invalid_request_error", "code": "model_not_found", "param": "model",
 		"message": fmt.Sprintf("Model %q does not exist or is not available for this group", modelID),
 	}})
+}
+
+func filterManagedCatalog(c *gin.Context, body []byte) ([]byte, error) {
+	settings := service.ModelManagementFromContext(c.Request.Context())
+	if settings == nil {
+		return body, nil
+	}
+	platform := ""
+	if key, ok := middleware2.GetAPIKeyFromContext(c); ok && key != nil && key.Group != nil {
+		platform = key.Group.Platform
+	}
+	if forced, ok := middleware2.GetForcePlatformFromContext(c); ok {
+		platform = forced
+	}
+	return settings.FilterManagedManifest(c.Request.Context(), platform, body)
 }

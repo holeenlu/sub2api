@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,6 +16,41 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+type asyncImageRenewingSlots struct{ concurrencyCacheMock }
+
+func (*asyncImageRenewingSlots) ConcurrencySlotTTL() time.Duration { return time.Minute }
+func (*asyncImageRenewingSlots) RefreshAccountSlot(context.Context, int64, string) (bool, error) {
+	return true, nil
+}
+func (*asyncImageRenewingSlots) RefreshUserSlot(context.Context, int64, string) (bool, error) {
+	return true, nil
+}
+func (*asyncImageRenewingSlots) RefreshAPIKeySlot(context.Context, int64, string) (bool, error) {
+	return true, nil
+}
+
+func TestAsyncImageContextOwnsConcurrencyAfterSubmissionFinishes(t *testing.T) {
+	submission, finishSubmission := service.WithConcurrencySlotLifecycle(t.Context())
+	defer finishSubmission()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations/async", nil).WithContext(submission)
+	task, _, finishTask := newAsyncImageContext(c, []byte(`{"model":"gpt-image-1","prompt":"cat"}`), time.Minute)
+	defer finishTask()
+	cache := &asyncImageRenewingSlots{concurrencyCacheMock: concurrencyCacheMock{
+		acquireUserSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil },
+	}}
+	slot, err := service.NewConcurrencyService(cache).AcquireUserSlot(task.Request.Context(), 7, 1)
+	require.NoError(t, err)
+	require.True(t, slot.Acquired)
+	finishSubmission()
+	require.NoError(t, task.Request.Context().Err(), "submission cleanup must not cancel the background owner")
+	require.Zero(t, atomic.LoadInt32(&cache.releaseUserCalled), "submission cleanup must not release background capacity")
+	finishTask()
+	require.EqualValues(t, 1, atomic.LoadInt32(&cache.releaseUserCalled))
+	slot.ReleaseFunc()
+	require.EqualValues(t, 1, atomic.LoadInt32(&cache.releaseUserCalled))
+}
 
 type asyncImageMemoryStore struct {
 	mu    sync.RWMutex

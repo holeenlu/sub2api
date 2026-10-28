@@ -12,14 +12,16 @@ func firstNonEmpty(values ...string) string {
 }
 
 type SystemSettings struct {
+	Revision                            string `json:"revision"`
+	VendorConsoleEnabled                bool   `json:"vendor_console_enabled"`
+	VendorPortalOrigin                  string `json:"vendor_portal_origin"`
+	ExcelBPSEnabled                     bool   `json:"excel_bps_enabled"`
 	RegistrationEnabled                 bool
 	EmailVerifyEnabled                  bool
 	RegistrationEmailSuffixWhitelist    []string
 	RegistrationEmailDomainQuotaEnabled bool // 白名单非空时放行非白名单域名限量注册（默认关闭）
-	PromoCodeEnabled                    bool
 	PasswordResetEnabled                bool
 	FrontendURL                         string
-	InvitationCodeEnabled               bool
 	TotpEnabled                         bool // TOTP 双因素认证
 	PasskeyEnabled                      bool // Passkey 登录
 	SessionBindingEnabled               bool // 会话 IP/UA 绑定（变更即失效）
@@ -157,7 +159,6 @@ type SystemSettings struct {
 	DocURL                      string
 	HomeContent                 string
 	CompactHomeEnabled          bool
-	HideCcsImportButton         bool
 	PurchaseSubscriptionEnabled bool
 	PurchaseSubscriptionURL     string
 	TableDefaultPageSize        int
@@ -165,20 +166,14 @@ type SystemSettings struct {
 	CustomMenuItems             string // JSON array of custom menu items
 	CustomEndpoints             string // JSON array of custom endpoints
 
-	DefaultConcurrency           int
-	DefaultBalance               float64
-	RiskControlEnabled           bool
-	CyberSessionBlockEnabled     bool
-	CyberPolicyUserAllowlist     string
-	CyberSessionBlockTTLSeconds  int
-	AffiliateEnabled             bool
-	AffiliateRebateRate          float64
-	AffiliateRebateFreezeHours   int
-	AffiliateRebateDurationDays  int
-	AffiliateRebatePerInviteeCap float64
-	AdminRechargeRebateEnabled   bool
-	DefaultUserRPMLimit          int
-	DefaultSubscriptions         []DefaultSubscriptionSetting
+	DefaultConcurrency          int
+	DefaultBalance              float64
+	RiskControlEnabled          bool
+	CyberSessionBlockEnabled    bool
+	CyberPolicyUserAllowlist    string
+	CyberSessionBlockTTLSeconds int
+	DefaultUserRPMLimit         int
+	DefaultSubscriptions        []DefaultSubscriptionSetting
 
 	// Model fallback configuration
 	EnableModelFallback      bool   `json:"enable_model_fallback"`
@@ -271,33 +266,9 @@ type SystemSettings struct {
 	PaymentVisibleMethodWxpayEnabled  bool
 
 	// OpenAI 账号调度
-	OpenAILowUpstreamRatePriorityEnabled                   bool
-	OpenAIOAuthSchedulingRateMultiplier                    *float64
-	OpenAIAdvancedSchedulerEnabled                         bool
-	OpenAIAdvancedSchedulerStickyWeightedEnabled           bool
-	OpenAIAdvancedSchedulerSubscriptionPriorityEnabled     bool
-	OpenAIAdvancedSchedulerLBTopK                          string
-	OpenAIAdvancedSchedulerWeightPriority                  string
-	OpenAIAdvancedSchedulerWeightLoad                      string
-	OpenAIAdvancedSchedulerWeightQueue                     string
-	OpenAIAdvancedSchedulerWeightErrorRate                 string
-	OpenAIAdvancedSchedulerWeightTTFT                      string
-	OpenAIAdvancedSchedulerWeightReset                     string
-	OpenAIAdvancedSchedulerWeightQuotaHeadroom             string
-	OpenAIAdvancedSchedulerWeightUpstreamCost              string
-	OpenAIAdvancedSchedulerWeightPreviousResponse          string
-	OpenAIAdvancedSchedulerWeightSessionSticky             string
-	OpenAIAdvancedSchedulerEffectiveLBTopK                 string
-	OpenAIAdvancedSchedulerEffectiveWeightPriority         string
-	OpenAIAdvancedSchedulerEffectiveWeightLoad             string
-	OpenAIAdvancedSchedulerEffectiveWeightQueue            string
-	OpenAIAdvancedSchedulerEffectiveWeightErrorRate        string
-	OpenAIAdvancedSchedulerEffectiveWeightTTFT             string
-	OpenAIAdvancedSchedulerEffectiveWeightReset            string
-	OpenAIAdvancedSchedulerEffectiveWeightQuotaHeadroom    string
-	OpenAIAdvancedSchedulerEffectiveWeightUpstreamCost     string
-	OpenAIAdvancedSchedulerEffectiveWeightPreviousResponse string
-	OpenAIAdvancedSchedulerEffectiveWeightSessionSticky    string
+	OpenAILowUpstreamRatePriorityEnabled               bool
+	OpenAIOAuthSchedulingRateMultiplier                *float64
+	OpenAIAdvancedSchedulerSubscriptionPriorityEnabled bool
 
 	// 余额不足提醒
 	BalanceLowNotifyEnabled     bool
@@ -318,7 +289,22 @@ type SystemSettings struct {
 	AccountSchedulingThresholds map[string]int `json:"account_scheduling_thresholds"`
 
 	// 允许终端用户在用量页查看自己的失败请求
-	AllowUserViewErrorRequests bool
+	AllowUserViewErrorRequests    bool
+	ExcelBPSImageMode             string
+	ExcelBPSImageRelayEnabled     bool
+	ExcelBPSImageBaseURL          string
+	ExcelBPSImageBodyLimitMiB     int
+	ExcelBPSImageBudgetMiB        int
+	ExcelBPSImageMaxRequests      int
+	ExcelBPSImageMaxImageMiB      int
+	ExcelBPSImageMaxImages        int
+	ExcelBPSImageLimitPolicy      string
+	ExcelBPSImageWarningRemaining int
+	ExcelBPSImageCompactReserve   int
+	ExcelBPSImageMaxTotalMiB      int
+	ExcelBPSImageStorageMiB       int
+	ExcelBPSImageStorageEntries   int
+	ExcelBPSImageTTLMinutes       int
 }
 
 type DefaultSubscriptionSetting struct {
@@ -327,14 +313,14 @@ type DefaultSubscriptionSetting struct {
 }
 
 type PublicSettings struct {
+	VendorConsoleEnabled                bool   `json:"vendor_console_enabled"`
+	VendorPortalOrigin                  string `json:"vendor_portal_origin"`
 	RegistrationEnabled                 bool
 	EmailVerifyEnabled                  bool
 	ForceEmailOnThirdPartySignup        bool
 	RegistrationEmailSuffixWhitelist    []string
 	RegistrationEmailDomainQuotaEnabled bool
-	PromoCodeEnabled                    bool
 	PasswordResetEnabled                bool
-	InvitationCodeEnabled               bool
 	TotpEnabled                         bool // TOTP 双因素认证
 	PasskeyEnabled                      bool
 	LoginAgreementEnabled               bool
@@ -359,7 +345,6 @@ type PublicSettings struct {
 	DocURL                              string
 	HomeContent                         string
 	CompactHomeEnabled                  bool
-	HideCcsImportButton                 bool
 
 	PurchaseSubscriptionEnabled bool
 	PurchaseSubscriptionURL     string
@@ -411,9 +396,6 @@ type PublicSettings struct {
 	ModelPlazaEnabled       bool `json:"model_plaza_enabled"`
 	ModelPlazaRequireAuth   bool `json:"model_plaza_require_auth"`
 	PluginManagementEnabled bool `json:"plugin_management_enabled"`
-
-	// Affiliate (邀请返利) feature toggle
-	AffiliateEnabled bool `json:"affiliate_enabled"`
 
 	// 风控中心功能开关
 	RiskControlEnabled bool `json:"risk_control_enabled"`

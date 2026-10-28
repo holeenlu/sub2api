@@ -96,16 +96,6 @@ func executeAdminIdempotentJSONWithTimeout(
 	executeAdminIdempotentJSONWithMode(c, scope, payload, ttl, executionTimeout, idempotencyStoreUnavailableFailClose, execute)
 }
 
-func executeAdminIdempotentJSONFailOpenOnStoreUnavailable(
-	c *gin.Context,
-	scope string,
-	payload any,
-	ttl time.Duration,
-	execute func(context.Context) (any, error),
-) {
-	executeAdminIdempotentJSONWithMode(c, scope, payload, ttl, 0, idempotencyStoreUnavailableFailOpen, execute)
-}
-
 func executeAdminIdempotentJSONWithMode(
 	c *gin.Context,
 	scope string,

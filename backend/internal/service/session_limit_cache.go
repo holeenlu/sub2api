@@ -27,7 +27,9 @@ type SessionLimitCache interface {
 	// 返回:
 	//   allowed: true 表示允许（在限制内或会话已存在），false 表示拒绝（超出限制且是新会话）
 	//   error: 操作错误
-	RegisterSession(ctx context.Context, accountID int64, sessionUUID string, maxSessions int, idleTimeout time.Duration) (allowed bool, err error)
+	RegisterSession(ctx context.Context, accountID int64, sessionUUID string, maxSessions int, idleTimeout time.Duration) (registration SessionRegistration, err error)
+
+	GetSessionAdmissionBatch(ctx context.Context, accountIDs []int64, sessionID string, idleTimeouts map[int64]time.Duration) (map[int64]SessionAdmission, error)
 
 	// RefreshSession 刷新现有会话的时间戳
 	// 用于活跃会话保持活动状态
@@ -67,4 +69,17 @@ type SessionLimitCache interface {
 	// GetWindowCostBatch 批量获取窗口费用缓存
 	// 返回 map[accountID]cost，缓存未命中的账号不在 map 中
 	GetWindowCostBatch(ctx context.Context, accountIDs []int64) (map[int64]float64, error)
+}
+
+// Known false is an unavailable observation, never proof of free capacity.
+type SessionAdmission struct {
+	ActiveCount   int
+	SessionActive bool
+	Known         bool
+	Err           error
+}
+
+type SessionRegistration struct {
+	Allowed bool
+	Created bool
 }

@@ -46,13 +46,13 @@ func TestDefaultModelsContainsSonnet55(t *testing.T) {
 
 func TestDefaultModelsContainsHaiku55(t *testing.T) {
 	t.Parallel()
-
+	count := 0
 	for _, model := range DefaultModels {
 		if model.ID == "claude-haiku-5-5" {
 			require.Equal(t, "Claude Haiku 5.5", model.DisplayName)
 			require.Equal(t, "2026-10-07T00:00:00Z", model.CreatedAt)
-			return
+			count++
 		}
 	}
-	t.Fatal("claude-haiku-5-5 missing from DefaultModels")
+	require.Equal(t, 1, count, "claude-haiku-5-5 must occur exactly once")
 }

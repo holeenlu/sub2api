@@ -1,7 +1,6 @@
 package routes
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 
@@ -9,6 +8,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/requestmodel"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -17,6 +17,23 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
+
+// Select the matched route's budget before any authentication/admission preread.
+// FullPath is the registered template, so dynamic model names cannot select a
+// text-only policy. Text endpoints remain bounded by the general limit as well.
+func gatewayRequestBodyLimit(maxBytes, textMaxBytes int64) gin.HandlerFunc {
+	general := middleware.RequestBodyLimit(maxBytes)
+	text := middleware.RequestBodyLimit(min(maxBytes, textMaxBytes))
+	return func(c *gin.Context) {
+		switch c.FullPath() {
+		case "/v1/systemone", "/v1/alpha/search", "/alpha/search",
+			"/backend-api/codex/alpha/search", "/v1/embeddings", "/embeddings":
+			text(c)
+		default:
+			general(c)
+		}
+	}
+}
 
 // RegisterGatewayRoutes 注册 API 网关路由（Claude/OpenAI/Gemini 兼容）
 func RegisterGatewayRoutes(
@@ -30,12 +47,25 @@ func RegisterGatewayRoutes(
 	compositeResolver *service.CompositeRouteResolver,
 	cfg *config.Config,
 ) {
-	bodyLimit := middleware.RequestBodyLimit(cfg.Gateway.MaxBodySize)
-	textBodyLimit := middleware.RequestBodyLimit(cfg.Gateway.TextMaxBodySize)
+	r.GET("/api/bps-images/:token", h.OpenAIGateway.ExcelBPSImage)
+	r.HEAD("/api/bps-images/:token", h.OpenAIGateway.ExcelBPSImage)
+	imageAdmission := middleware.ExcelBPSImageAdmission()
+	bodyLimit := gatewayRequestBodyLimit(cfg.Gateway.MaxBodySize, cfg.Gateway.TextMaxBodySize)
 	clientRequestID := middleware.ClientRequestID()
-	opsErrorLogger := handler.OpsErrorLoggerMiddleware(opsService)
+	slotLifecycle := func(c *gin.Context) {
+		ctx, finish := service.WithConcurrencySlotLifecycle(c.Request.Context())
+		defer finish()
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	}
+	captureErrors := handler.OpsErrorLoggerMiddleware(opsService)
+	opsErrorLogger := func(c *gin.Context) {
+		finish := service.GuardSSEWrites(c)
+		defer finish()
+		captureErrors(c)
+	}
 	endpointNorm := handler.InboundEndpointMiddleware()
-	compositeTarget := compositeTargetPlatformMiddleware(compositeResolver)
+	compositeTarget := compositeTargetPlatformMiddleware(compositeResolver, cfg.Gateway.MaxBodySize)
 	compositeGeminiTarget := compositeGeminiTargetPlatformMiddleware(compositeResolver)
 
 	// 未分组 Key 拦截中间件（按协议格式区分错误响应）
@@ -44,7 +74,8 @@ func RegisterGatewayRoutes(
 
 	// 分组级模型白名单准入：在 apiKeyAuth 之后、compositeTarget 之前，
 	// 保证校验发生在合成路由改写与调度之前，且只看客户端书写的模型名。
-	groupModelAllowlist := middleware.GroupModelAllowlist()
+	groupModelAllowlist := middleware.GroupModelAllowlistWithBodyLimit(cfg.Gateway.MaxBodySize)
+	managedModels := middleware.ManagedModels(settingService, cfg.Gateway.MaxBodySize)
 
 	isOpenAIResponsesCompatibleGatewayPlatform := func(c *gin.Context) bool {
 		// openai、grok 与多协议 API Key 供应商经 OpenAI 网关转发（平台清单）。
@@ -180,12 +211,15 @@ func RegisterGatewayRoutes(
 	gateway := r.Group("/v1")
 	gateway.Use(bodyLimit)
 	gateway.Use(clientRequestID)
+	gateway.Use(slotLifecycle)
 	gateway.Use(opsErrorLogger)
 	gateway.Use(endpointNorm)
 	gateway.Use(gin.HandlerFunc(apiKeyAuth))
 	gateway.GET("/sub2api/billing", h.Gateway.KeyBillingInfo)
+	gateway.Use(imageAdmission)
 	gateway.Use(groupModelAllowlist)
 	gateway.Use(compositeTarget)
+	gateway.Use(managedModels)
 	gateway.Use(requireGroupAnthropic)
 	{
 		// /v1/messages: auto-route based on group platform
@@ -197,7 +231,7 @@ func RegisterGatewayRoutes(
 			h.Gateway.Messages(c)
 		})
 		// System One carries only JSON text, so it uses the text body limit.
-		gateway.POST("/systemone", textBodyLimit, h.Gateway.SystemOne)
+		gateway.POST("/systemone", h.Gateway.SystemOne)
 		// /v1/messages/count_tokens: OpenAI bridges upstream, Grok estimates
 		// locally, and Anthropic-compatible platforms retain their existing path.
 		gateway.POST("/messages/count_tokens", countTokensHandler)
@@ -225,7 +259,7 @@ func RegisterGatewayRoutes(
 			}
 			h.Gateway.Responses(c)
 		}))
-		gateway.POST("/alpha/search", textBodyLimit, h.OpenAIGateway.AlphaSearch)
+		gateway.POST("/alpha/search", h.OpenAIGateway.AlphaSearch)
 		gateway.GET("/responses", func(c *gin.Context) {
 			h.OpenAIGateway.ResponsesWebSocket(c)
 		})
@@ -237,7 +271,7 @@ func RegisterGatewayRoutes(
 			}
 			h.Gateway.ChatCompletions(c)
 		})
-		gateway.POST("/embeddings", textBodyLimit, func(c *gin.Context) {
+		gateway.POST("/embeddings", func(c *gin.Context) {
 			if !isOpenAIOnlyEndpointGatewayPlatform(c) {
 				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 				c.JSON(http.StatusNotFound, gin.H{
@@ -338,11 +372,13 @@ func RegisterGatewayRoutes(
 	gemini := r.Group("/v1beta")
 	gemini.Use(bodyLimit)
 	gemini.Use(clientRequestID)
+	gemini.Use(slotLifecycle)
 	gemini.Use(opsErrorLogger)
 	gemini.Use(endpointNorm)
 	gemini.Use(middleware.APIKeyAuthWithSubscriptionGoogle(apiKeyService, subscriptionService, cfg))
 	gemini.Use(groupModelAllowlist)
 	gemini.Use(compositeGeminiTarget)
+	gemini.Use(managedModels)
 	gemini.Use(requireGroupGoogle)
 	{
 		gemini.GET("/models", h.Gateway.GeminiV1BetaListModels)
@@ -367,45 +403,45 @@ func RegisterGatewayRoutes(
 	}
 	// 根路径别名共用中间件链：白名单准入在 apiKeyAuth 之后、compositeTarget
 	// 之前，避免逐条路由手工维护链导致漏挂。
-	rootRoute := func(method, path string, limit gin.HandlerFunc, handler gin.HandlerFunc) {
-		r.Handle(method, path, limit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), groupModelAllowlist, compositeTarget, requireGroupAnthropic, handler)
+	rootRoute := func(method, path string, handler gin.HandlerFunc) {
+		r.Handle(method, path, bodyLimit, clientRequestID, slotLifecycle, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), imageAdmission, groupModelAllowlist, compositeTarget, requireGroupAnthropic, handler)
 	}
 	for _, prefix := range []string{"/api/v3", "/v3", "/v1", ""} {
-		rootRoute(http.MethodPost, prefix+"/contents/generations/tasks", bodyLimit, h.OpenAIGateway.SeedanceTasks)
-		rootRoute(http.MethodGet, prefix+"/contents/generations/tasks/:task_id", bodyLimit, h.OpenAIGateway.SeedanceTasks)
-		rootRoute(http.MethodDelete, prefix+"/contents/generations/tasks/:task_id", bodyLimit, h.OpenAIGateway.SeedanceTasks)
+		rootRoute(http.MethodPost, prefix+"/contents/generations/tasks", h.OpenAIGateway.SeedanceTasks)
+		rootRoute(http.MethodGet, prefix+"/contents/generations/tasks/:task_id", h.OpenAIGateway.SeedanceTasks)
+		rootRoute(http.MethodDelete, prefix+"/contents/generations/tasks/:task_id", h.OpenAIGateway.SeedanceTasks)
 	}
-	rootRoute(http.MethodPost, "/responses", bodyLimit, responsesHandler)
-	rootRoute(http.MethodPost, "/responses/*subpath", bodyLimit, guardResponsesSubpath(responsesHandler))
-	rootRoute(http.MethodPost, "/alpha/search", textBodyLimit, h.OpenAIGateway.AlphaSearch)
-	rootRoute(http.MethodGet, "/responses", bodyLimit, func(c *gin.Context) {
+	rootRoute(http.MethodPost, "/responses", responsesHandler)
+	rootRoute(http.MethodPost, "/responses/*subpath", guardResponsesSubpath(responsesHandler))
+	rootRoute(http.MethodPost, "/alpha/search", h.OpenAIGateway.AlphaSearch)
+	rootRoute(http.MethodGet, "/responses", func(c *gin.Context) {
 		h.OpenAIGateway.ResponsesWebSocket(c)
 	})
-	rootRoute(http.MethodGet, "/models", bodyLimit, modelsHandler)
-	rootRoute(http.MethodGet, "/models/:model", bodyLimit, h.Gateway.Models)
-	rootRoute(http.MethodPost, "/messages/count_tokens", bodyLimit, countTokensHandler)
+	rootRoute(http.MethodGet, "/models", modelsHandler)
+	rootRoute(http.MethodGet, "/models/:model", h.Gateway.Models)
+	rootRoute(http.MethodPost, "/messages/count_tokens", countTokensHandler)
 	codexDirect := r.Group("/backend-api/codex")
-	codexDirect.Use(bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), groupModelAllowlist, compositeTarget, requireGroupAnthropic)
+	codexDirect.Use(bodyLimit, clientRequestID, slotLifecycle, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), imageAdmission, groupModelAllowlist, compositeTarget, requireGroupAnthropic)
 	{
 		codexDirect.POST("/realtime/calls", h.OpenAIGateway.Live)
 		codexDirect.GET("/:call_id", h.OpenAIGateway.LiveSideband)
 		codexDirect.POST("/responses", responsesHandler)
 		codexDirect.POST("/responses/*subpath", guardResponsesSubpath(responsesHandler))
-		codexDirect.POST("/alpha/search", textBodyLimit, h.OpenAIGateway.AlphaSearch)
+		codexDirect.POST("/alpha/search", h.OpenAIGateway.AlphaSearch)
 		codexDirect.GET("/responses", func(c *gin.Context) {
 			h.OpenAIGateway.ResponsesWebSocket(c)
 		})
 		codexDirect.GET("/models", codexModelsHandler)
 	}
 	// OpenAI Chat Completions API（不带v1前缀的别名）— auto-route based on group platform
-	rootRoute(http.MethodPost, "/chat/completions", bodyLimit, func(c *gin.Context) {
+	rootRoute(http.MethodPost, "/chat/completions", func(c *gin.Context) {
 		if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 			h.OpenAIGateway.ChatCompletions(c)
 			return
 		}
 		h.Gateway.ChatCompletions(c)
 	})
-	rootRoute(http.MethodPost, "/embeddings", textBodyLimit, func(c *gin.Context) {
+	rootRoute(http.MethodPost, "/embeddings", func(c *gin.Context) {
 		if !isOpenAIOnlyEndpointGatewayPlatform(c) {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 			c.JSON(http.StatusNotFound, gin.H{
@@ -418,23 +454,23 @@ func RegisterGatewayRoutes(
 		}
 		h.OpenAIGateway.Embeddings(c)
 	})
-	rootRoute(http.MethodPost, "/images/generations", bodyLimit, imagesHandler)
-	rootRoute(http.MethodPost, "/images/edits", bodyLimit, imagesHandler)
-	rootRoute(http.MethodPost, "/images/generations/async", bodyLimit, h.AsyncImage.Submit)
-	rootRoute(http.MethodPost, "/images/edits/async", bodyLimit, h.AsyncImage.Submit)
-	rootRoute(http.MethodGet, "/images/tasks/:task_id", bodyLimit, h.AsyncImage.Get)
-	rootRoute(http.MethodPost, "/videos", bodyLimit, videoGenerationHandler)
-	rootRoute(http.MethodPost, "/videos/generations", bodyLimit, videoGenerationHandler)
-	rootRoute(http.MethodPost, "/videos/edits", bodyLimit, videoEditHandler)
-	rootRoute(http.MethodPost, "/videos/extensions", bodyLimit, videoExtensionHandler)
-	rootRoute(http.MethodGet, "/videos/generations/:request_id/content", bodyLimit, videoContentHandler)
-	rootRoute(http.MethodGet, "/videos/edits/:request_id/content", bodyLimit, videoContentHandler)
-	rootRoute(http.MethodGet, "/videos/extensions/:request_id/content", bodyLimit, videoContentHandler)
-	rootRoute(http.MethodGet, "/videos/generations/:request_id", bodyLimit, videoStatusHandler)
-	rootRoute(http.MethodGet, "/videos/edits/:request_id", bodyLimit, videoStatusHandler)
-	rootRoute(http.MethodGet, "/videos/extensions/:request_id", bodyLimit, videoStatusHandler)
-	rootRoute(http.MethodGet, "/videos/:request_id", bodyLimit, videoStatusHandler)
-	rootRoute(http.MethodGet, "/videos/:request_id/content", bodyLimit, videoContentHandler)
+	rootRoute(http.MethodPost, "/images/generations", imagesHandler)
+	rootRoute(http.MethodPost, "/images/edits", imagesHandler)
+	rootRoute(http.MethodPost, "/images/generations/async", h.AsyncImage.Submit)
+	rootRoute(http.MethodPost, "/images/edits/async", h.AsyncImage.Submit)
+	rootRoute(http.MethodGet, "/images/tasks/:task_id", h.AsyncImage.Get)
+	rootRoute(http.MethodPost, "/videos", videoGenerationHandler)
+	rootRoute(http.MethodPost, "/videos/generations", videoGenerationHandler)
+	rootRoute(http.MethodPost, "/videos/edits", videoEditHandler)
+	rootRoute(http.MethodPost, "/videos/extensions", videoExtensionHandler)
+	rootRoute(http.MethodGet, "/videos/generations/:request_id/content", videoContentHandler)
+	rootRoute(http.MethodGet, "/videos/edits/:request_id/content", videoContentHandler)
+	rootRoute(http.MethodGet, "/videos/extensions/:request_id/content", videoContentHandler)
+	rootRoute(http.MethodGet, "/videos/generations/:request_id", videoStatusHandler)
+	rootRoute(http.MethodGet, "/videos/edits/:request_id", videoStatusHandler)
+	rootRoute(http.MethodGet, "/videos/extensions/:request_id", videoStatusHandler)
+	rootRoute(http.MethodGet, "/videos/:request_id", videoStatusHandler)
+	rootRoute(http.MethodGet, "/videos/:request_id/content", videoContentHandler)
 
 	rootVoiceHandler := func(endpoint string) gin.HandlerFunc {
 		return func(c *gin.Context) {
@@ -446,9 +482,9 @@ func RegisterGatewayRoutes(
 			h.OpenAIGateway.GrokVoice(c, endpoint)
 		}
 	}
-	rootRoute(http.MethodPost, "/tts", bodyLimit, rootVoiceHandler("tts"))
-	rootRoute(http.MethodPost, "/stt", bodyLimit, rootVoiceHandler("stt"))
-	rootRoute(http.MethodPost, "/custom-voices", bodyLimit, rootVoiceHandler("custom-voices"))
+	rootRoute(http.MethodPost, "/tts", rootVoiceHandler("tts"))
+	rootRoute(http.MethodPost, "/stt", rootVoiceHandler("stt"))
+	rootRoute(http.MethodPost, "/custom-voices", rootVoiceHandler("custom-voices"))
 	rootCustomVoicePathHandler := func(c *gin.Context) {
 		if getGroupPlatform(c) != service.PlatformGrok {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
@@ -457,12 +493,12 @@ func RegisterGatewayRoutes(
 		}
 		h.OpenAIGateway.GrokVoice(c, grokCustomVoiceEndpoint(c))
 	}
-	rootRoute(http.MethodGet, "/custom-voices", bodyLimit, rootVoiceHandler("custom-voices"))
-	rootRoute(http.MethodGet, "/custom-voices/:voice_id/audio", bodyLimit, rootCustomVoicePathHandler)
-	rootRoute(http.MethodGet, "/custom-voices/:voice_id", bodyLimit, rootCustomVoicePathHandler)
-	rootRoute(http.MethodPatch, "/custom-voices/:voice_id", bodyLimit, rootCustomVoicePathHandler)
-	rootRoute(http.MethodDelete, "/custom-voices/:voice_id", bodyLimit, rootCustomVoicePathHandler)
-	rootRoute(http.MethodGet, "/realtime", bodyLimit, func(c *gin.Context) {
+	rootRoute(http.MethodGet, "/custom-voices", rootVoiceHandler("custom-voices"))
+	rootRoute(http.MethodGet, "/custom-voices/:voice_id/audio", rootCustomVoicePathHandler)
+	rootRoute(http.MethodGet, "/custom-voices/:voice_id", rootCustomVoicePathHandler)
+	rootRoute(http.MethodPatch, "/custom-voices/:voice_id", rootCustomVoicePathHandler)
+	rootRoute(http.MethodDelete, "/custom-voices/:voice_id", rootCustomVoicePathHandler)
+	rootRoute(http.MethodGet, "/realtime", func(c *gin.Context) {
 		if getGroupPlatform(c) != service.PlatformGrok {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 			c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"type": "not_found_error", "message": "Realtime API is not supported for this platform"}})
@@ -470,7 +506,7 @@ func RegisterGatewayRoutes(
 		}
 		h.OpenAIGateway.GrokRealtime(c)
 	})
-	rootRoute(http.MethodPost, "/web_search", bodyLimit, func(c *gin.Context) {
+	rootRoute(http.MethodPost, "/web_search", func(c *gin.Context) {
 		if getGroupPlatform(c) != service.PlatformGrok {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 			c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"type": "not_found_error", "message": "Web Search API is not supported for this platform"}})
@@ -478,7 +514,7 @@ func RegisterGatewayRoutes(
 		}
 		h.Gateway.WebSearch(c)
 	})
-	rootRoute(http.MethodPost, "/x_search", bodyLimit, func(c *gin.Context) {
+	rootRoute(http.MethodPost, "/x_search", func(c *gin.Context) {
 		if getGroupPlatform(c) != service.PlatformGrok {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 			c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"type": "not_found_error", "message": "X Search API is not supported for this platform"}})
@@ -494,6 +530,7 @@ func RegisterGatewayRoutes(
 	antigravityV1 := r.Group("/antigravity/v1")
 	antigravityV1.Use(bodyLimit)
 	antigravityV1.Use(clientRequestID)
+	antigravityV1.Use(slotLifecycle)
 	antigravityV1.Use(opsErrorLogger)
 	antigravityV1.Use(endpointNorm)
 	antigravityV1.Use(middleware.ForcePlatform(service.PlatformAntigravity))
@@ -510,6 +547,7 @@ func RegisterGatewayRoutes(
 	antigravityV1Beta := r.Group("/antigravity/v1beta")
 	antigravityV1Beta.Use(bodyLimit)
 	antigravityV1Beta.Use(clientRequestID)
+	antigravityV1Beta.Use(slotLifecycle)
 	antigravityV1Beta.Use(opsErrorLogger)
 	antigravityV1Beta.Use(endpointNorm)
 	antigravityV1Beta.Use(middleware.ForcePlatform(service.PlatformAntigravity))
@@ -546,9 +584,13 @@ func getGroupPlatform(c *gin.Context) string {
 	return apiKey.Group.Platform
 }
 
-func compositeTargetPlatformMiddleware(resolver *service.CompositeRouteResolver) gin.HandlerFunc {
+func compositeTargetPlatformMiddleware(resolver *service.CompositeRouteResolver, maxBodySize ...int64) gin.HandlerFunc {
 	if resolver == nil {
 		resolver = service.NewCompositeRouteResolver(nil)
+	}
+	var bodyLimit int64
+	if len(maxBodySize) > 0 {
+		bodyLimit = maxBodySize[0]
 	}
 	return func(c *gin.Context) {
 		apiKey, ok := middleware.GetAPIKeyFromContext(c)
@@ -561,16 +603,18 @@ func compositeTargetPlatformMiddleware(resolver *service.CompositeRouteResolver)
 			return
 		}
 
-		body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
+		// JSON 请求体与网关 handler 同样做宽松规范化（multipart 含二进制字段，原样读取）。
+		var body []byte
+		var err error
+		if requestmodel.IsMultipartContentType(c.GetHeader("Content-Type")) {
+			body, err = pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
+		} else {
+			body, err = pkghttputil.ReadLenientJSONRequestBodyWithPrealloc(c.Request, bodyLimit)
+		}
 		if err != nil {
-			status := http.StatusBadRequest
-			message := "Failed to read request body"
-			var maxErr *http.MaxBytesError
-			if errors.As(err, &maxErr) {
-				status = http.StatusRequestEntityTooLarge
-				message = "Request body is too large"
-			}
-			c.JSON(status, gin.H{"error": gin.H{"type": "invalid_request_error", "message": message}})
+			pkghttputil.LogRequestBodyReadFailure(logger.FromContext(c.Request.Context()), c.Request, err, "composite_routing")
+			status, errType, message := pkghttputil.DescribeRequestBodyReadFailure(c.Request, err).Response()
+			c.JSON(status, gin.H{"error": gin.H{"type": errType, "message": message}})
 			c.Abort()
 			return
 		}

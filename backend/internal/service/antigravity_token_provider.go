@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/selectionbudget"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -66,6 +67,9 @@ func (p *AntigravityTokenProvider) SetTempUnschedCache(cache TempUnschedCache) {
 
 // GetAccessToken returns a valid access_token.
 func (p *AntigravityTokenProvider) GetAccessToken(ctx context.Context, account *Account) (string, error) {
+	ctx = selectionbudget.PreparationContext(ctx)
+	ctx, stopPreparation := OpenAITurnWaitContext(ctx)
+	defer stopPreparation()
 	if account == nil {
 		return "", errors.New("account is nil")
 	}

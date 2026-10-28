@@ -16,7 +16,7 @@ function usage() {
   sub2api-admin.js accounts update <id> --json '{...}' | --file patch.json
   sub2api-admin.js accounts get <id>
   sub2api-admin.js accounts delete <id>
-  sub2api-admin.js accounts keep-only --name <account-name>
+  sub2api-admin.js accounts keep-only --name <account-name> [--execute --ids 1,2] [--dry-run]
   sub2api-admin.js accounts usage <id> [--source SOURCE] [--force]
   sub2api-admin.js accounts stats <id> [--days 30]
   sub2api-admin.js accounts today-stats <id>
@@ -368,11 +368,49 @@ async function commandAccounts(args) {
   if (sub === "keep-only") {
     const name = args.flags.name;
     if (!name) throw new Error("accounts keep-only requires --name");
-    const data = await listAccounts({ pageSize: Number(args.flags["page-size"] || 500) });
-    const items = data.items || [];
-    const keep = items.find((item) => item.name === name);
-    if (!keep) throw new Error(`account not found: ${name}`);
-    const targets = items.filter((item) => item.name !== name);
+    const pageSize = Number(args.flags["page-size"] || 200);
+    if (!Number.isInteger(pageSize) || pageSize < 1) throw new Error("invalid page size");
+    const items = [];
+    const seen = new Set();
+    let expectedTotal;
+    for (let page = 1; ; page++) {
+      const data = await listAccounts({ page, pageSize, sortBy: "id", sortOrder: "asc" });
+      if (!Array.isArray(data.items) || !Number.isInteger(data.total) || data.total < 0) {
+        throw new Error("Invalid account pagination; no accounts deleted");
+      }
+      if (expectedTotal !== undefined && expectedTotal !== data.total) {
+        throw new Error("Account count changed during preview; retry before deleting");
+      }
+      expectedTotal = data.total;
+      for (const item of data.items) {
+        if (!Number.isSafeInteger(item.id) || item.id < 1 || seen.has(item.id)) {
+          throw new Error("Invalid or repeated account ID; no accounts deleted");
+        }
+        seen.add(item.id);
+        items.push(item);
+      }
+      if (items.length === expectedTotal) break;
+      if (!data.items.length || items.length > expectedTotal) {
+        throw new Error("Incomplete account pagination; no accounts deleted");
+      }
+    }
+    const matches = items.filter((item) => item.name === name);
+    if (matches.length !== 1) throw new Error("Expected exactly one account matching --name");
+    const keep = matches[0];
+    const targets = items.filter((item) => item.id !== keep.id);
+    const preview = { kept: { id: keep.id, name: keep.name }, targets: targets.map(({ id, name }) => ({ id, name })) };
+    const execute = args.flags.execute !== undefined && parseBool(args.flags.execute, "--execute");
+    const dryRun = args.flags["dry-run"] !== undefined && parseBool(args.flags["dry-run"], "--dry-run");
+    if (!execute || dryRun || !targets.length) {
+      printJson({ ...preview, dry_run: true });
+      return;
+    }
+    const approved = parseIds(args.flags.ids);
+    if (approved.length !== targets.length || new Set(approved).size !== approved.length ||
+        targets.some((item) => !approved.includes(item.id))) {
+      throw new Error("--ids must match the complete preview target set; no accounts deleted");
+    }
+    printJson({ ...preview, dry_run: false });
     const results = [];
     for (const item of targets) {
       const out = await deleteAccount(item.id);

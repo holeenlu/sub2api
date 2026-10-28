@@ -38,7 +38,7 @@ func (s *userHandlerRepoStub) GetByEmail(context.Context, string) (*service.User
 	cloned := *s.user
 	return &cloned, nil
 }
-func (s *userHandlerRepoStub) GetFirstAdmin(context.Context) (*service.User, error) {
+func (s *userHandlerRepoStub) GetFirstSuperAdmin(context.Context) (*service.User, error) {
 	cloned := *s.user
 	return &cloned, nil
 }
@@ -538,7 +538,7 @@ func TestUserHandlerBindEmailIdentityReturnsProfileResponse(t *testing.T) {
 		},
 	}
 	emailService := service.NewEmailService(nil, emailCache)
-	authService := service.NewAuthService(nil, repo, nil, nil, cfg, nil, emailService, nil, nil, nil, nil, nil, nil)
+	authService := service.NewAuthService(nil, repo, nil, cfg, nil, emailService, nil, nil, nil, nil)
 	handler := NewUserHandler(service.NewUserService(repo, nil, nil, nil), authService, nil, nil, nil, nil)
 
 	body := []byte(`{"email":"new@example.com","verify_code":"123456","password":"new-password"}`)
@@ -652,7 +652,7 @@ func TestUserHandlerUnbindIdentityRevokesAllUserSessionsWhenAuthServiceConfigure
 			ExpireHour: 1,
 		},
 	}
-	authService := service.NewAuthService(nil, repo, nil, refreshTokenCache, cfg, nil, nil, nil, nil, nil, nil, nil, nil)
+	authService := service.NewAuthService(nil, repo, refreshTokenCache, cfg, nil, nil, nil, nil, nil, nil)
 	handler := NewUserHandler(service.NewUserService(repo, nil, nil, nil), authService, nil, nil, nil, nil)
 
 	recorder := httptest.NewRecorder()
@@ -699,7 +699,7 @@ func TestUserHandlerUnbindIdentityDoesNotRevokeSessionsWhenNothingWasUnbound(t *
 			ExpireHour: 1,
 		},
 	}
-	authService := service.NewAuthService(nil, repo, nil, refreshTokenCache, cfg, nil, nil, nil, nil, nil, nil, nil, nil)
+	authService := service.NewAuthService(nil, repo, refreshTokenCache, cfg, nil, nil, nil, nil, nil, nil)
 	handler := NewUserHandler(service.NewUserService(repo, nil, nil, nil), authService, nil, nil, nil, nil)
 
 	recorder := httptest.NewRecorder()
@@ -743,7 +743,7 @@ func TestUserHandlerBindEmailIdentityRejectsWrongCurrentPasswordForBoundEmail(t 
 		},
 	}
 	emailService := service.NewEmailService(nil, emailCache)
-	authService := service.NewAuthService(nil, repo, nil, nil, cfg, nil, emailService, nil, nil, nil, nil, nil, nil)
+	authService := service.NewAuthService(nil, repo, nil, cfg, nil, emailService, nil, nil, nil, nil)
 	handler := NewUserHandler(service.NewUserService(repo, nil, nil, nil), authService, nil, nil, nil, nil)
 
 	body := []byte(`{"email":"new@example.com","verify_code":"123456","password":"wrong-password"}`)
@@ -827,4 +827,64 @@ func (s *userHandlerEmailCacheStub) IncrNotifyVerifyCodeAttempts(context.Context
 
 func (s *userHandlerEmailCacheStub) ConsumePasswordResetToken(context.Context, string, string) (bool, error) {
 	return false, nil
+}
+
+type selfBalanceHistoryStub struct {
+	userID         int64
+	page, pageSize int
+	filter         service.BalanceHistoryFilter
+	err            error
+}
+
+func (s *selfBalanceHistoryStub) GetBalanceHistory(_ context.Context, userID int64, page, pageSize int, filter service.BalanceHistoryFilter) (*service.BalanceHistoryPage, error) {
+	s.userID, s.page, s.pageSize, s.filter = userID, page, pageSize, filter
+	return &service.BalanceHistoryPage{Items: []service.BalanceHistoryItem{}, TotalRecharged: 12}, s.err
+}
+
+func TestUserBalanceHistoryOwnershipAndFailures(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, role := range []string{"user", "admin", "super_admin"} {
+		t.Run(role, func(t *testing.T) {
+			reader := &selfBalanceHistoryStub{}
+			h := &UserHandler{balanceHistory: reader}
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodGet, "/user/balance-history?user_id=999&id=999&page=2&page_size=15&category=other&source=admin&direction=decrease", nil)
+			c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 11})
+			c.Set(string(middleware2.ContextKeyUserRole), role)
+			h.GetBalanceHistory(c)
+			require.Equal(t, http.StatusOK, recorder.Code)
+			require.EqualValues(t, 11, reader.userID)
+			require.Equal(t, 2, reader.page)
+			require.Equal(t, 15, reader.pageSize)
+			require.Equal(t, service.BalanceHistoryFilter{Category: "other", Source: "admin", Direction: "decrease"}, reader.filter)
+			require.Contains(t, recorder.Body.String(), `"items":[]`)
+		})
+	}
+	for _, tc := range []struct {
+		query         string
+		authenticated bool
+		err           error
+		status        int
+	}{
+		{"", false, nil, http.StatusUnauthorized},
+		{"?category=all", true, nil, http.StatusBadRequest},
+		{"?source=unknown", true, nil, http.StatusBadRequest},
+		{"?direction=unknown", true, nil, http.StatusBadRequest},
+		{"", true, errors.New("database unavailable"), http.StatusInternalServerError},
+	} {
+		reader := &selfBalanceHistoryStub{err: tc.err}
+		h := &UserHandler{balanceHistory: reader}
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodGet, "/user/balance-history"+tc.query, nil)
+		if tc.authenticated {
+			c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 11})
+		}
+		h.GetBalanceHistory(c)
+		require.Equal(t, tc.status, recorder.Code)
+		if tc.err == nil {
+			require.Zero(t, reader.userID)
+		}
+	}
 }

@@ -2,16 +2,38 @@ package service
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"fmt"
 	"net/url"
+	"sort"
 	"strings"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
 var codexToolCapabilityFields = []string{
-	"service_tiers",
+	"service_tiers", "experimental_supported_tools",
 	"supports_search_tool", "apply_patch_tool_type", "comp_hash", "tool_mode", "use_responses_lite",
 	"multi_agent_reasoning_effort", "multi_agent_version",
+	"supports_reasoning_effort_updates",
+}
+
+// One capability declaration for locally generated and proxied directories.
+// The group directory must describe every route that can serve a model.
+var cloudCodexToolCapabilities = deriveCloudCodexToolCapabilities()
+
+func deriveCloudCodexToolCapabilities() map[string]json.RawMessage {
+	out := make(map[string]json.RawMessage)
+	for _, rule := range cloudCapabilities {
+		for _, projection := range strings.Split(rule.Catalog, ";") {
+			key, value, ok := strings.Cut(projection, "=")
+			if ok {
+				out[key] = json.RawMessage(value)
+			}
+		}
+	}
+	return out
 }
 
 func applyCodexToolCapabilities(dst, src map[string]json.RawMessage, overwrite bool) bool {
@@ -21,17 +43,23 @@ func applyCodexToolCapabilities(dst, src map[string]json.RawMessage, overwrite b
 		if len(value) == 0 {
 			continue
 		}
-		if field == "service_tiers" && bytes.Equal(value, []byte("null")) {
+		if (field == "service_tiers" || field == "experimental_supported_tools") && bytes.Equal(value, []byte("null")) {
 			value = []byte("[]")
 		}
 		// These Codex fields are nullable booleans or strings, never arbitrary objects.
 		if !bytes.Equal(value, []byte("null")) {
-			if field == "service_tiers" {
+			if field == "experimental_supported_tools" {
+				tools, valid := decodeCodexExperimentalTools(value)
+				if !valid {
+					continue
+				}
+				value, _ = json.Marshal(tools)
+			} else if field == "service_tiers" {
 				var tiers []configuredCodexServiceTier
 				if json.Unmarshal(value, &tiers) != nil {
 					continue
 				}
-			} else if field == "supports_search_tool" || field == "use_responses_lite" {
+			} else if field == "supports_search_tool" || field == "use_responses_lite" || field == "supports_reasoning_effort_updates" {
 				if !bytes.Equal(value, []byte("true")) && !bytes.Equal(value, []byte("false")) {
 					continue
 				}
@@ -59,6 +87,10 @@ func accountCodexToolCapabilities(account *Account, modelID string) map[string]j
 	}
 	if metadata, ok := account.GetUpstreamModelMetadata(modelID); ok {
 		applyCodexToolCapabilities(capabilities, metadata.CodexToolCapabilities, true)
+		snapshot := account.GetUpstreamModelMetadataSnapshot()
+		if snapshot == nil || snapshot.CapabilityScope != codexCapabilityScope(account) {
+			delete(capabilities, "experimental_supported_tools")
+		}
 	}
 	if account.IsOpenAI() && shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
 		// This bridge implements client-side tool discovery, even without a native manifest.
@@ -96,6 +128,24 @@ func accountCodexToolCapabilities(account *Account, modelID string) map[string]j
 		if disabled && bytes.Equal(capabilities["use_responses_lite"], []byte("true")) {
 			capabilities["use_responses_lite"] = json.RawMessage("false")
 		}
+	}
+	// This function receives the mapped upstream model. A BPS relay does not
+	// implement Codex's native encrypted multi-agent message contract, even
+	// when the underlying ChatGPT model advertises it. Explicit nulls override
+	// synced/bundled declarations without disabling ordinary plaintext tools.
+	if account.isExcelBPSUpstreamModelEnabled(modelID) {
+		capabilities["multi_agent_version"] = json.RawMessage("null")
+		capabilities["multi_agent_reasoning_effort"] = json.RawMessage("null")
+		capabilities["use_responses_lite"] = json.RawMessage("false")
+	}
+	// Cloud adapts standard Responses to App Server dynamic tools registered at
+	// thread start. It cannot load client tools mid-turn (tool_search), speak
+	// Responses Lite, host client code mode, carry encrypted multi-agent
+	// messages or honor a non-default service tier. Declaring that makes Codex
+	// send deferred tools directly in the standard shape instead of failing.
+	if account.IsOpenAICloudConfigured() {
+		applyCodexToolCapabilities(capabilities, cloudCodexToolCapabilities, true)
+		return capabilities
 	}
 	// API Astra publicly supports Ultrafast. OAuth must advertise it in its
 	// account manifest; a subscription label alone does not grant the capability.
@@ -274,6 +324,22 @@ func intersectUpstreamModelMetadata(modelID string, candidates []UpstreamModelMe
 	result := codexModelMetadataOverride{UpstreamModelMetadata: UpstreamModelMetadata{ID: strings.TrimSpace(modelID)}}
 	result.CodexToolCapabilities = make(map[string]json.RawMessage)
 	for _, field := range codexToolCapabilityFields {
+		if field == "experimental_supported_tools" {
+			shared, _ := decodeCodexExperimentalTools(candidates[0].CodexToolCapabilities[field])
+			for _, candidate := range candidates[1:] {
+				values, valid := decodeCodexExperimentalTools(candidate.CodexToolCapabilities[field])
+				if !valid {
+					shared = nil
+					break
+				}
+				shared = intersectOrderedStrings(shared, values)
+			}
+			if shared == nil {
+				shared = []string{}
+			}
+			result.CodexToolCapabilities[field], _ = json.Marshal(shared)
+			continue
+		}
 		value := bytes.TrimSpace(candidates[0].CodexToolCapabilities[field])
 		shared := len(value) > 0
 		declared := shared
@@ -288,7 +354,7 @@ func intersectUpstreamModelMetadata(modelID string, candidates []UpstreamModelMe
 		} else if declared {
 			fallback := json.RawMessage("null")
 			switch field {
-			case "supports_search_tool", "use_responses_lite":
+			case "supports_search_tool", "use_responses_lite", "supports_reasoning_effort_updates":
 				fallback = json.RawMessage("false")
 			case "service_tiers":
 				fallback = json.RawMessage("[]")
@@ -503,4 +569,85 @@ func stringSliceContains(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func decodeCodexExperimentalTools(raw json.RawMessage) ([]string, bool) {
+	var names []string
+	if len(raw) > 32768 || len(raw) == 0 || json.Unmarshal(raw, &names) != nil {
+		return nil, false
+	}
+	if len(names) > 128 {
+		return nil, false
+	}
+	seen := map[string]bool{}
+	result := make([]string, 0, len(names))
+	for _, name := range names {
+		if name == "" || len(name) > 256 || strings.TrimSpace(name) != name {
+			return nil, false
+		}
+		if !seen[name] {
+			seen[name] = true
+			result = append(result, name)
+		}
+	}
+	sort.Strings(result)
+	return result, true
+}
+
+// A refreshed token for the same OAuth identity does not invalidate discovery.
+// Different providers, identities and relay keys cannot inherit old capabilities.
+func codexCapabilityScope(account *Account) string {
+	if account == nil {
+		return ""
+	}
+	identity := codexAccountIdentityNamespace(account)
+	if identity == "" {
+		identity = account.GetOpenAIAccessToken() + account.GetCredential("api_key")
+	}
+	value := fmt.Sprintf("%d|%s|%s|%s|%s", account.ID, account.Platform, account.Type, account.GetOpenAIBaseURL(), identity)
+	digest := sha256.Sum256([]byte(value))
+	return fmt.Sprintf("%x", digest[:])
+}
+
+// Apply account intersection to every entry, including models fetched from one
+// account's live directory; the final body's ETag is computed by the caller.
+func restrictCodexExperimentalToolsManifest(body []byte, accounts []Account, group *Group) ([]byte, bool, error) {
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return body, false, err
+	}
+	var models []json.RawMessage
+	if err := json.Unmarshal(envelope["models"], &models); err != nil {
+		return body, false, err
+	}
+	changed := false
+	for i, raw := range models {
+		var model map[string]json.RawMessage
+		if json.Unmarshal(raw, &model) != nil {
+			continue
+		}
+		var slug string
+		if json.Unmarshal(model["slug"], &slug) != nil {
+			continue
+		}
+		metadata, ok := groupCodexModelMetadata(group.Platform, slug, accounts, group, nil, false)
+		value := json.RawMessage("[]")
+		if ok && len(metadata.CodexToolCapabilities["experimental_supported_tools"]) > 0 {
+			value = metadata.CodexToolCapabilities["experimental_supported_tools"]
+		}
+		if _, present := model["experimental_supported_tools"]; !present && bytes.Equal(value, []byte("[]")) {
+			continue
+		}
+		if !bytes.Equal(bytes.TrimSpace(model["experimental_supported_tools"]), value) {
+			model["experimental_supported_tools"] = value
+			models[i], _ = json.Marshal(model)
+			changed = true
+		}
+	}
+	if !changed {
+		return body, false, nil
+	}
+	envelope["models"], _ = json.Marshal(models)
+	next, err := json.Marshal(envelope)
+	return next, err == nil, err
 }

@@ -77,11 +77,10 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 
 	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 	if err != nil {
-		if maxErr, ok := extractMaxBytesError(err); ok {
-			imageTaskJSONError(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
-			return
-		}
-		imageTaskJSONError(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		logRequestBodyReadFailure(requestLogger(c, "handler.async_image"), c.Request, err)
+		writeRequestBodyReadError(c, err, func(status int, errType, message string) {
+			imageTaskJSONError(c, status, errType, message)
+		})
 		return
 	}
 	if len(body) == 0 {
@@ -137,7 +136,11 @@ func (h *AsyncImageHandler) checkSecurityAuditBeforeSubmit(c *gin.Context, apiKe
 	model := ""
 	moderationBody := body
 	if platform == service.PlatformGrok {
-		parsed := service.ParseGrokMediaRequest(c.GetHeader("Content-Type"), body)
+		parsed, err := service.ParseGrokMediaRequest(c.GetHeader("Content-Type"), body)
+		if err != nil {
+			imageTaskJSONError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+			return false
+		}
 		model, moderationBody = parsed.Model, parsed.ModerationBody()
 	} else if h.openAI.gatewayService != nil {
 		parsed, err := h.openAI.gatewayService.ParseOpenAIImagesRequest(c, body)
@@ -192,7 +195,10 @@ func (h *AsyncImageHandler) validateRequest(c *gin.Context, platform string, bod
 		return nil
 	}
 	if platform == service.PlatformGrok {
-		parsed := service.ParseGrokMediaRequest(c.GetHeader("Content-Type"), body)
+		parsed, err := service.ParseGrokMediaRequest(c.GetHeader("Content-Type"), body)
+		if err != nil {
+			return err
+		}
 		if strings.TrimSpace(parsed.Model) == "" {
 			return errors.New("model is required")
 		}
@@ -261,6 +267,9 @@ func (h *AsyncImageHandler) failTask(taskID string, statusCode int, taskErr json
 func newAsyncImageContext(c *gin.Context, body []byte, timeoutDuration time.Duration) (*gin.Context, *httptest.ResponseRecorder, context.CancelFunc) {
 	base := context.WithoutCancel(c.Request.Context())
 	executionCtx, cancel := context.WithTimeout(base, timeoutDuration)
+	// Background execution owns its slots after the submission handler exits.
+	// Replace the inherited HTTP owner instead of sharing its finish signal.
+	executionCtx, finishSlots := service.WithConcurrencySlotLifecycle(executionCtx)
 	request := c.Request.Clone(executionCtx)
 	request.Body = io.NopCloser(bytes.NewReader(body))
 	request.GetBody = func() (io.ReadCloser, error) {
@@ -274,7 +283,7 @@ func newAsyncImageContext(c *gin.Context, body []byte, timeoutDuration time.Dura
 	recorderCtx, _ := gin.CreateTestContext(recorder)
 	taskCtx.Writer = recorderCtx.Writer
 	taskCtx.Request = request
-	return taskCtx, recorder, cancel
+	return taskCtx, recorder, func() { finishSlots(); cancel() }
 }
 
 func asyncImageRequestStreams(contentType string, body []byte) bool {
