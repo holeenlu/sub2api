@@ -35,6 +35,18 @@ func (e ResponsesStreamEvent) MarshalJSON() ([]byte, error) {
 		}
 		return json.Marshal(m)
 
+	case "response.refusal.delta", "response.refusal.done":
+		m := e.wireBase()
+		e.putItemID(m)
+		m["output_index"] = e.OutputIndex
+		m["content_index"] = e.ContentIndex
+		if e.Type == "response.refusal.done" {
+			m["refusal"] = e.Refusal
+		} else {
+			m["delta"] = e.Delta
+		}
+		return json.Marshal(m)
+
 	case "response.content_part.added", "response.content_part.done":
 		m := e.wireBase()
 		e.putItemID(m)
@@ -128,6 +140,9 @@ func (e ResponsesStreamEvent) putItemID(m map[string]any) {
 // outputTextPartWire renders a content part for a message's output_text, always
 // carrying text/annotations/logprobs (matching cc-switch's push_text_delta).
 func outputTextPartWire(part *ResponsesContentPart) map[string]any {
+	if part != nil && part.Type == "refusal" {
+		return map[string]any{"type": "refusal", "refusal": part.Refusal}
+	}
 	text := ""
 	if part != nil {
 		text = part.Text
@@ -214,7 +229,11 @@ func messageContentWire(parts []ResponsesContentPart) []map[string]any {
 		if typ == "" {
 			typ = "output_text"
 		}
-		out = append(out, map[string]any{"type": typ, "text": p.Text})
+		if typ == "refusal" {
+			out = append(out, map[string]any{"type": typ, "refusal": p.Refusal})
+		} else {
+			out = append(out, map[string]any{"type": typ, "text": p.Text})
+		}
 	}
 	return out
 }
@@ -230,4 +249,25 @@ func reasoningSummaryWire(summary []ResponsesSummary) []map[string]any {
 		out = append(out, map[string]any{"type": typ, "text": s.Text})
 	}
 	return out
+}
+
+// UnmarshalJSON accepts the object argument form used by some compatible
+// upstreams while keeping the protocol's string form internally.
+func (e *ResponsesStreamEvent) UnmarshalJSON(data []byte) error {
+	type eventAlias ResponsesStreamEvent
+	var wire struct {
+		eventAlias
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*e = ResponsesStreamEvent(wire.eventAlias)
+	if len(wire.Arguments) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(wire.Arguments, &e.Arguments); err != nil || string(wire.Arguments) == "null" {
+		e.Arguments = string(wire.Arguments)
+	}
+	return nil
 }

@@ -7,6 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 )
 
 const (
@@ -75,6 +77,12 @@ func (s *AuditLogService) Record(entry *AuditLog) {
 	if entry.CreatedAt.IsZero() {
 		entry.CreatedAt = time.Now().UTC()
 	}
+	if entry.Visibility == "" {
+		entry.Visibility = RoleSuperAdmin
+		if (entry.ActorRole == RoleAdmin || entry.ActorRole == RoleUser) && entry.AuthMethod != AuditAuthMethodAdminAPIKey {
+			entry.Visibility = "staff"
+		}
+	}
 	select {
 	case <-s.ctx.Done():
 		return
@@ -89,12 +97,19 @@ func (s *AuditLogService) Record(entry *AuditLog) {
 
 // List 分页查询审计日志。
 func (s *AuditLogService) List(ctx context.Context, filter *AuditLogFilter) (*AuditLogList, error) {
-	return s.repo.List(ctx, filter)
+	scope := AuditScopeFromContext(ctx)
+	if scope == AuditScopeNone {
+		return nil, ErrAdminPermissionDenied
+	}
+	return s.repo.List(ctx, scope, filter)
 }
 
-// GetByID 查询单条详情。
 func (s *AuditLogService) GetByID(ctx context.Context, id int64) (*AuditLog, error) {
-	return s.repo.GetByID(ctx, id)
+	scope := AuditScopeFromContext(ctx)
+	if scope == AuditScopeNone {
+		return nil, ErrAdminPermissionDenied
+	}
+	return s.repo.GetByID(ctx, scope, id)
 }
 
 // ClearAll 全量清空审计日志并写入留痕记录。
@@ -102,7 +117,10 @@ func (s *AuditLogService) GetByID(ctx context.Context, id int64) (*AuditLog, err
 //  1. 统计并清空全表
 //  2. 同步写入一条 "audit_log.clear" 留痕记录（绕过异步队列，保证落库）
 func (s *AuditLogService) ClearAll(ctx context.Context, trace *AuditLog) (int64, error) {
-	deleted, err := s.repo.Count(ctx)
+	if actor, ok := authz.FromContext(ctx); ok && actor.Role != RoleSuperAdmin {
+		return 0, ErrAdminPermissionDenied
+	}
+	deleted, err := s.repo.Count(ctx, AuditScopeAll)
 	if err != nil {
 		return 0, fmt.Errorf("count audit logs: %w", err)
 	}

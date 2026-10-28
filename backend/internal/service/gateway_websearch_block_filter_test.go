@@ -23,7 +23,7 @@ const emulatedWebSearchBody = `{"model":"claude-sonnet-4-6","max_tokens":1024,"m
 
 // genuineWebSearchBody carries real Anthropic web-search blocks (upstream IDs
 // do NOT have the local srvtoolu_ws_ prefix).
-const genuineWebSearchBody = `{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[` +
+const genuineWebSearchBody = `{"model":"claude-sonnet-4-6","max_tokens":1024,"tools":[{"type":"web_search_20250305","name":"web_search"}],"messages":[` +
 	`{"role":"user","content":[{"type":"text","text":"search"}]},` +
 	`{"role":"assistant","content":[` +
 	`{"type":"server_tool_use","id":"srvtoolu_01ABCDEF","name":"web_search","input":{"query":"weather"}},` +
@@ -137,4 +137,41 @@ func TestFilterWebSearchHistoryBlocks_PreservesOtherToolBlocks(t *testing.T) {
 	out := FilterWebSearchHistoryBlocks(body, "glm-4.7")
 
 	require.Equal(t, []string{"tool_use", "text", "tool_result"}, collectContentTypes(t, out))
+}
+
+func TestFilterWebSearchHistoryBlocks_UndeclaredNativeHistoryBecomesVisibleText(t *testing.T) {
+	for _, tools := range []string{`null`, `[]`, `[{"name":"web_search","description":"client search","input_schema":{"type":"object"}}]`} {
+		body := []byte(`{"tools":` + tools + `,"messages":[{"role":"assistant","content":[
+		{"type":"server_tool_use","id":"srv_native","name":"web_search","input":{"query":"weather"},"cache_control":{"type":"ephemeral"}},
+		{"type":"web_search_tool_result","tool_use_id":"srv_native","content":[{"type":"web_search_result","title":"Forecast","url":"https://example.com","encrypted_content":"opaque-private","content":[{"type":"text","text":"Sunny"}]}]},
+		{"type":"text","text":"summary"}]}]}`)
+		out := FilterWebSearchHistoryBlocks(body, "claude-sonnet-4-6")
+		require.Equal(t, []string{"text", "text", "text"}, collectContentTypes(t, out))
+		for _, visible := range []string{"weather", "Forecast", "https://example.com", "Sunny", "summary"} {
+			require.Contains(t, string(out), visible)
+		}
+		require.NotContains(t, string(out), "opaque-private")
+		require.Equal(t, "ephemeral", gjson.GetBytes(out, "messages.0.content.0.cache_control.type").String())
+		require.JSONEq(t, tools, gjson.GetBytes(out, "tools").Raw)
+	}
+}
+
+func TestFilterWebSearchHistoryBlocks_PreservesClientPairsAndOtherEncryptedHistory(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"assistant","content":[
+	{"type":"tool_use","id":"tool_1","name":"lookup","input":{"id":9007199254740993}},
+	{"type":"server_tool_use","id":"fetch_1","name":"web_fetch","input":{"url":"https://other.test"}},
+	{"type":"thinking","thinking":"keep","signature":"keep-signature"}]},
+	{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool_1","is_error":false,"content":[
+	{"type":"search_result","title":"Paper","source":"https://paper.test","encrypted_content":"private-search","content":[{"type":"text","text":"Visible finding"}]},
+	{"type":"image","source":{"type":"base64","data":"preserve-image"}}]}]}]}`)
+	out := FilterWebSearchHistoryBlocks(body, "claude-sonnet-4-6")
+	require.Equal(t, "9007199254740993", gjson.GetBytes(out, "messages.0.content.0.input.id").Raw)
+	require.Equal(t, "tool_1", gjson.GetBytes(out, "messages.1.content.0.tool_use_id").String())
+	require.False(t, gjson.GetBytes(out, "messages.1.content.0.is_error").Bool())
+	require.Equal(t, "text", gjson.GetBytes(out, "messages.1.content.0.content.0.type").String())
+	require.Contains(t, string(out), "Visible finding")
+	require.Contains(t, string(out), "preserve-image")
+	require.Contains(t, string(out), "keep-signature")
+	require.Contains(t, string(out), "web_fetch")
+	require.NotContains(t, string(out), "private-search")
 }

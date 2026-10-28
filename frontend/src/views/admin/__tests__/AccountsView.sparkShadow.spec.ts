@@ -3,9 +3,9 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 import AccountsView from '../AccountsView.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
+import AccountInfoCell from '@/components/common/AccountInfoCell.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
-import HelpTooltip from '@/components/common/HelpTooltip.vue'
 
 // 外审 F2:AccountActionMenu emit 'create-spark-shadow',但 AccountsView 此前未监听,
 // 导致按钮点击无效。本测试通过真实组件引用 emit 该事件,断言父页面接线调用 API。
@@ -55,7 +55,7 @@ vi.mock('@/stores/app', () => ({
 }))
 
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ token: 'test-token' })
+  useAuthStore: () => ({ token: 'test-token', isSuperAdmin: true, can: () => true })
 }))
 
 vi.mock('vue-i18n', async () => {
@@ -295,7 +295,7 @@ describe('admin AccountsView — 账号行展示', () => {
     await flushPromises()
 
     // 1. email 单元格通过 OR 兜底渲染 parent_email
-    expect(wrapper.text()).toContain('parent@example.com')
+    expect(wrapper.getComponent(AccountInfoCell).props('email')).toBe('parent@example.com')
 
     // 2. PlatformTypeBadge 收到 parent_plan_type 和 parent_privacy_mode
     const badge = wrapper.findComponent(PlatformTypeBadge)
@@ -323,25 +323,9 @@ describe('admin AccountsView — 账号行展示', () => {
     const wrapper = mountViewWithRow()
     await flushPromises()
 
-    const links = wrapper.findAll('a')
-    expect(links).toHaveLength(1)
-    const [link] = links
-    expect(link.text()).toBe('relay-account')
-    expect(link.attributes()).toMatchObject({
-      href: 'https://relay.example.com',
-      target: '_blank',
-      rel: 'noopener noreferrer',
-    })
-    expect(link.classes()).toEqual(expect.arrayContaining([
-      'border-dotted',
-      'text-gray-900',
-      'dark:text-white',
-    ]))
-    expect(link.classes()).not.toContain('text-primary-600')
-    const tooltip = wrapper.findComponent(HelpTooltip)
-    expect(tooltip.props('content')).toBe('https://relay.example.com')
-    expect(tooltip.props('widthClass')).toBe('w-max max-w-sm break-all')
-    expect(tooltip.classes()).toEqual(expect.arrayContaining(['self-start']))
+    expect(wrapper.findAllComponents(AccountInfoCell).map(cell => cell.props('homepage'))).toEqual([
+      'https://relay.example.com', '', '',
+    ])
     expect(wrapper.text()).toContain('oauth-account')
     expect(wrapper.text()).toContain('invalid-url')
 
@@ -468,7 +452,7 @@ describe('admin AccountsView — 账号行展示', () => {
     const wrapper = mountViewWithRow()
     await flushPromises()
 
-    const badges = wrapper.findAllComponents(PlatformTypeBadge)
+    const badges = wrapper.findAllComponents(PlatformTypeBadge).filter(badge => !badge.props('summary'))
     expect(badges.map((badge) => badge.props('planType'))).toEqual([
       'FREE',
       'SuperGrok Heavy',
@@ -537,7 +521,7 @@ describe('admin AccountsView — 账号行展示', () => {
     const wrapper = mountViewWithRow()
     await flushPromises()
 
-    expect(wrapper.findAllComponents(PlatformTypeBadge).map((badge) => badge.props('planType'))).toEqual([
+    expect(wrapper.findAllComponents(PlatformTypeBadge).filter(badge => !badge.props('summary')).map((badge) => badge.props('planType'))).toEqual([
       'SuperGrok',
       'SuperGrok Heavy',
       undefined,
