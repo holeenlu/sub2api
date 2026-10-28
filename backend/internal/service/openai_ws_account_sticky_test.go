@@ -48,7 +48,7 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_Hit(t *testing.T
 	}
 }
 
-func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_QuotaAutoPausedMiss(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_QuotaAutoPausedUnavailable(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(23)
 	account := Account{
@@ -78,7 +78,7 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_QuotaAutoPausedM
 	require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_prev_quota", account.ID, time.Hour))
 
 	selection, err := svc.SelectAccountByPreviousResponseID(ctx, &groupID, "resp_prev_quota", "gpt-5.1", nil, false)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrOpenAIContinuationUnavailable)
 	require.Nil(t, selection, "超过 5h 配额阈值的账号不应继续命中 previous_response_id 粘连")
 
 	// Auto-pause is transient, so the binding is preserved: the chain can resume on the
@@ -88,7 +88,7 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_QuotaAutoPausedM
 	require.Equal(t, account.ID, boundAccountID)
 }
 
-func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_RateLimitedMiss(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_RateLimitedUnavailable(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(23)
 	rateLimitedUntil := time.Now().Add(30 * time.Minute)
@@ -118,14 +118,14 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_RateLimitedMiss(
 	require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_prev_rl", account.ID, time.Hour))
 
 	selection, err := svc.SelectAccountByPreviousResponseID(ctx, &groupID, "resp_prev_rl", "gpt-5.1", nil, false)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrOpenAIContinuationUnavailable)
 	require.Nil(t, selection, "限额中的账号不应继续命中 previous_response_id 粘连")
 	boundAccountID, getErr := store.GetResponseAccount(ctx, groupID, "resp_prev_rl")
 	require.NoError(t, getErr)
-	require.Zero(t, boundAccountID)
+	require.Equal(t, account.ID, boundAccountID)
 }
 
-func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_DBRuntimeRecheckRateLimitedMiss(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_DBRuntimeRecheckRateLimitedUnavailable(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(24)
 	rateLimitedUntil := time.Now().Add(30 * time.Minute)
@@ -170,11 +170,11 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_DBRuntimeRecheck
 	require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_prev_db_rl", dbAccount.ID, time.Hour))
 
 	selection, err := svc.SelectAccountByPreviousResponseID(ctx, &groupID, "resp_prev_db_rl", "gpt-5.1", nil, false)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrOpenAIContinuationUnavailable)
 	require.Nil(t, selection, "DB 中已限流的账号不应继续命中 previous_response_id 粘连")
 	boundAccountID, getErr := store.GetResponseAccount(ctx, groupID, "resp_prev_db_rl")
 	require.NoError(t, getErr)
-	require.Zero(t, boundAccountID)
+	require.Equal(t, dbAccount.ID, boundAccountID)
 }
 
 func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_Excluded(t *testing.T) {
@@ -205,7 +205,7 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_Excluded(t *test
 	require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_prev_2", account.ID, time.Hour))
 
 	selection, err := svc.SelectAccountByPreviousResponseID(ctx, &groupID, "resp_prev_2", "gpt-5.1", map[int64]struct{}{account.ID: {}}, false)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrOpenAIContinuationUnavailable)
 	require.Nil(t, selection)
 }
 
@@ -247,7 +247,7 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_APIKeyForceHTTPH
 	}
 }
 
-func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_OAuthForceHTTPIgnored(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_OAuthForceHTTPUnavailable(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(23)
 	account := Account{
@@ -275,7 +275,7 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_OAuthForceHTTPIg
 	require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_prev_oauth_force_http", account.ID, time.Hour))
 
 	selection, err := svc.SelectAccountByPreviousResponseID(ctx, &groupID, "resp_prev_oauth_force_http", "gpt-5.1", nil, false)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrOpenAIContinuationUnavailable)
 	require.Nil(t, selection, "OAuth HTTP fallback cannot preserve WSv2 continuation state")
 }
 
@@ -384,7 +384,7 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_CapabilityMismat
 		OpenAIEndpointCapabilityEmbeddings,
 		false,
 	)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrOpenAIContinuationUnavailable)
 	require.Nil(t, selection)
 	boundAccountID, getErr := store.GetResponseAccount(ctx, groupID, "resp_prev_capability")
 	require.NoError(t, getErr)
@@ -399,4 +399,25 @@ func newOpenAIWSV2TestConfig() *config.Config {
 	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
 	cfg.Gateway.OpenAIWS.StickyResponseIDTTLSeconds = 3600
 	return cfg
+}
+
+func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_BPSHTTPHit(t *testing.T) {
+	groupID := int64(23)
+	account := excelAccount()
+	account.Extra["openai_ws_force_http"] = true
+	account.GroupIDs = []int64{groupID}
+	cache := &stubGatewayCache{}
+	store := NewOpenAIWSStateStore(cache)
+	svc := excelBPSGatewayTestService(nil)
+	svc.accountRepo = stubOpenAIAccountRepo{accounts: []Account{*account}}
+	svc.cache, svc.openaiWSStateStore = cache, store
+	svc.concurrencyService = NewConcurrencyService(stubConcurrencyCache{})
+	require.NoError(t, store.BindResponseAccount(t.Context(), groupID, "resp_bps_http", account.ID, time.Hour))
+	selection, err := svc.SelectAccountByPreviousResponseID(t.Context(), &groupID, "resp_bps_http", "gpt-6-astra", nil, false)
+	require.NoError(t, err)
+	require.NotNil(t, selection, "BPS reconnect must retain its snapshot's account even with native WS off")
+	require.Equal(t, account.ID, selection.Account.ID)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
 }

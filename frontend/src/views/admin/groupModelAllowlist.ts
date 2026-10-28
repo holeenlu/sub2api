@@ -14,9 +14,6 @@ export interface ModelAllowlistState {
   items: ModelAllowlistItem[]
 }
 
-// 自定义条目校验错误码，由视图映射为 i18n 提示。
-export type ModelAllowlistAddError = 'empty' | 'duplicate'
-
 export const createModelAllowlistState = (
   config?: Partial<ModelAllowlistConfig> | null,
 ): ModelAllowlistState => ({
@@ -103,26 +100,6 @@ export const moveModelAllowlistItem = (
   }
   const [item] = state.items.splice(fromIndex, 1)
   state.items.splice(toIndex, 0, item)
-}
-
-// addCustomModelAllowlistItem 把手工输入的条目追加到白名单末尾（选中状态）。
-// 去重；`*` 可出现在任意位置。返回错误码或 null（成功）。
-export const addCustomModelAllowlistItem = (
-  state: ModelAllowlistState,
-  raw: string,
-): ModelAllowlistAddError | null => {
-  const entry = raw.trim()
-  if (!entry) {
-    return 'empty'
-  }
-  if (
-    state.items.some(item => item.id.toLowerCase() === entry.toLowerCase()) ||
-    state.savedModels.some(model => model.toLowerCase() === entry.toLowerCase())
-  ) {
-    return 'duplicate'
-  }
-  state.items.push({ id: entry, selected: true })
-  return null
 }
 
 export const buildModelAllowlistConfig = (

@@ -14,6 +14,9 @@ type opsRepoMock struct {
 	ListSystemLogsFn              func(ctx context.Context, filter *OpsSystemLogFilter) (*OpsSystemLogList, error)
 	DeleteSystemLogsFn            func(ctx context.Context, filter *OpsSystemLogCleanupFilter) (int64, error)
 	InsertSystemLogCleanupAuditFn func(ctx context.Context, input *OpsSystemLogCleanupAudit) error
+	GetSystemMetricsWindowFn      func(ctx context.Context, start, end time.Time) (*OpsInsertSystemMetricsInput, error)
+	InsertSystemMetricsFn         func(ctx context.Context, input *OpsInsertSystemMetricsInput) error
+	CleanupOpsTableFn             func(ctx context.Context, table string, cutoff time.Time, truncate bool, batchSize int) (int64, error)
 }
 
 func (m *opsRepoMock) InsertErrorLog(ctx context.Context, input *OpsInsertErrorLogInput) (int64, error) {
@@ -110,7 +113,24 @@ func (m *opsRepoMock) GetOpenAITokenStats(ctx context.Context, filter *OpsOpenAI
 }
 
 func (m *opsRepoMock) InsertSystemMetrics(ctx context.Context, input *OpsInsertSystemMetricsInput) error {
+	if m.InsertSystemMetricsFn != nil {
+		return m.InsertSystemMetricsFn(ctx, input)
+	}
 	return nil
+}
+
+func (m *opsRepoMock) GetSystemMetricsWindow(ctx context.Context, start, end time.Time) (*OpsInsertSystemMetricsInput, error) {
+	if m.GetSystemMetricsWindowFn != nil {
+		return m.GetSystemMetricsWindowFn(ctx, start, end)
+	}
+	return &OpsInsertSystemMetricsInput{}, nil
+}
+
+func (m *opsRepoMock) CleanupOpsTable(ctx context.Context, table string, cutoff time.Time, truncate bool, batchSize int) (int64, error) {
+	if m.CleanupOpsTableFn != nil {
+		return m.CleanupOpsTableFn(ctx, table, cutoff, truncate, batchSize)
+	}
+	return 0, nil
 }
 
 func (m *opsRepoMock) GetLatestSystemMetrics(ctx context.Context, windowMinutes int) (*OpsSystemMetricsSnapshot, error) {

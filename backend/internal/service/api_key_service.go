@@ -214,11 +214,12 @@ type APIKeyAuthCacheInvalidator interface {
 
 // CreateAPIKeyRequest 创建API Key请求
 type CreateAPIKeyRequest struct {
-	Name        string   `json:"name"`
-	GroupID     *int64   `json:"group_id"`
-	CustomKey   *string  `json:"custom_key"`   // 可选的自定义key
-	IPWhitelist []string `json:"ip_whitelist"` // IP 白名单
-	IPBlacklist []string `json:"ip_blacklist"` // IP 黑名单
+	importData  *APIKeyDataRow // Only the validated backup path can restore state at creation.
+	Name        string         `json:"name"`
+	GroupID     *int64         `json:"group_id"`
+	CustomKey   *string        `json:"custom_key"`   // 可选的自定义key
+	IPWhitelist []string       `json:"ip_whitelist"` // IP 白名单
+	IPBlacklist []string       `json:"ip_blacklist"` // IP 黑名单
 
 	// Quota fields
 	Quota         float64 `json:"quota"`           // Quota limit in USD (0 = unlimited)
@@ -311,6 +312,7 @@ type APIKeyService struct {
 	authInvalidationCancel    context.CancelFunc
 	authInvalidationWG        sync.WaitGroup
 	authInvalidationConnected atomic.Bool
+	authCacheL1Epoch          atomic.Uint64
 	authInvalidationFailures  atomic.Uint64
 	lastUsedTouchL1           sync.Map // keyID -> nextAllowedAt(time.Time)
 	lastUsedTouchSF           singleflight.Group
@@ -481,6 +483,9 @@ func (s *APIKeyService) incrementAPIKeyErrorCount(ctx context.Context, userID in
 // 对于订阅类型分组：检查用户是否有有效订阅
 // 对于标准类型分组：使用原有的 AllowedGroups 和 IsExclusive 逻辑
 func (s *APIKeyService) canUserBindGroup(ctx context.Context, user *User, group *Group) bool {
+	if user.IsVendor() {
+		return false
+	}
 	// 订阅类型分组：需要有效订阅
 	if group.IsSubscriptionType() {
 		_, err := s.userSubRepo.GetActiveByUserIDAndGroupID(ctx, user.ID, group.ID)
@@ -499,6 +504,10 @@ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIK
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("get user: %w", err)
+	}
+
+	if user.IsVendor() {
+		return nil, ErrVendorDenied
 	}
 
 	// 验证 IP 白名单格式
@@ -587,6 +596,10 @@ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIK
 	if req.ExpiresInDays != nil && *req.ExpiresInDays > 0 {
 		expiresAt := time.Now().AddDate(0, 0, *req.ExpiresInDays)
 		apiKey.ExpiresAt = &expiresAt
+	}
+
+	if req.importData != nil {
+		req.importData.restore(apiKey)
 	}
 
 	if err := s.apiKeyRepo.Create(ctx, apiKey); err != nil {
@@ -738,7 +751,13 @@ func (s *APIKeyService) GetByID(ctx context.Context, id int64) (*APIKey, error) 
 }
 
 // GetByKey 根据Key字符串获取API Key（用于认证）
-func (s *APIKeyService) GetByKey(ctx context.Context, key string) (*APIKey, error) {
+func (s *APIKeyService) GetByKey(ctx context.Context, key string) (result *APIKey, err error) {
+	defer func() {
+		if result != nil && result.User != nil && result.User.IsVendor() {
+			result = nil
+			err = ErrVendorDenied
+		}
+	}()
 	if len(key) == 0 || len(key) > MaxAPIKeyCredentialBytes {
 		return nil, ErrAPIKeyNotFound
 	}
@@ -755,7 +774,7 @@ func (s *APIKeyService) GetByKey(ctx context.Context, key string) (*APIKey, erro
 	}
 
 	if s.authCfg.singleflight {
-		value, err, _ := s.authGroup.Do(cacheKey, func() (any, error) {
+		value, err, _ := s.authGroup.Do(fmt.Sprintf("%d:%s", s.authCacheL1Epoch.Load(), cacheKey), func() (any, error) {
 			return s.loadAuthCacheEntry(ctx, key, cacheKey)
 		})
 		if err != nil {
@@ -802,9 +821,14 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 		return nil, fmt.Errorf("get api key: %w", err)
 	}
 
-	// 验证所有权
 	if apiKey.UserID != userID {
-		return nil, ErrInsufficientPerms
+		ids, err := s.VerifyOwnership(ctx, userID, []int64{id})
+		if err != nil {
+			return nil, err
+		}
+		if len(ids) != 1 {
+			return nil, ErrInsufficientPerms
+		}
 	}
 
 	// 验证 IP 白名单格式
@@ -836,7 +860,7 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 
 	if req.GroupID != nil {
 		// 验证分组权限
-		user, err := s.userRepo.GetByID(ctx, userID)
+		user, err := s.userRepo.GetByID(ctx, apiKey.UserID)
 		if err != nil {
 			return nil, fmt.Errorf("get user: %w", err)
 		}
@@ -953,9 +977,14 @@ func (s *APIKeyService) Delete(ctx context.Context, id int64, userID int64) erro
 		return fmt.Errorf("get api key: %w", err)
 	}
 
-	// 验证当前用户是否为该 API Key 的所有者
 	if ownerID != userID {
-		return ErrInsufficientPerms
+		ids, err := s.VerifyOwnership(ctx, userID, []int64{id})
+		if err != nil {
+			return err
+		}
+		if len(ids) != 1 {
+			return ErrInsufficientPerms
+		}
 	}
 
 	// 事务内:写审计 + 软删除(tombstone)。
@@ -1122,6 +1151,20 @@ func (s *APIKeyService) GetUserGroupVisibility(ctx context.Context, userID int64
 	}
 	for _, sub := range subscriptions {
 		allowed[sub.GroupID] = struct{}{}
+	}
+	// Standard-group role grants must agree with the Key group selector.
+	// Keep subscription visibility tied to explicit grants/subscriptions and
+	// preserve the ordinary user's storefront visibility semantics above.
+	if user.IsSuperAdmin() && user.IsActive() {
+		groups, err := s.groupRepo.ListActive(ctx)
+		if err != nil {
+			return nil, false, fmt.Errorf("list visible groups: %w", err)
+		}
+		for _, group := range groups {
+			if !group.IsSubscriptionType() && user.CanBindGroup(group.ID, group.IsExclusive) {
+				allowed[group.ID] = struct{}{}
+			}
+		}
 	}
 	return allowed, user.RestrictPublicGroups, nil
 }

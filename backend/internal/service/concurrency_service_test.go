@@ -5,14 +5,269 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+type renewingSlotCacheForTest struct {
+	stubConcurrencyCacheForTest
+	ttl       time.Duration
+	refresh   func(context.Context, string) (bool, error)
+	refreshed atomic.Int64
+	released  atomic.Int64
+}
+
+type unrenewableSlotCacheForTest struct{ stubConcurrencyCacheForTest }
+
+func (*unrenewableSlotCacheForTest) ConcurrencySlotTTL() time.Duration { return time.Minute }
+
+func (c *renewingSlotCacheForTest) ConcurrencySlotTTL() time.Duration { return c.ttl }
+func (c *renewingSlotCacheForTest) renew(ctx context.Context, scope string) (bool, error) {
+	c.refreshed.Add(1)
+	if c.refresh != nil {
+		return c.refresh(ctx, scope)
+	}
+	return true, nil
+}
+func (c *renewingSlotCacheForTest) RefreshAccountSlot(ctx context.Context, _ int64, _ string) (bool, error) {
+	return c.renew(ctx, "account")
+}
+func (c *renewingSlotCacheForTest) RefreshUserSlot(ctx context.Context, _ int64, _ string) (bool, error) {
+	return c.renew(ctx, "user")
+}
+func (c *renewingSlotCacheForTest) RefreshAPIKeySlot(ctx context.Context, _ int64, _ string) (bool, error) {
+	return c.renew(ctx, "api_key")
+}
+func (c *renewingSlotCacheForTest) ReleaseAccountSlot(context.Context, int64, string) error {
+	c.released.Add(1)
+	return nil
+}
+func (c *renewingSlotCacheForTest) ReleaseUserSlot(context.Context, int64, string) error {
+	c.released.Add(1)
+	return nil
+}
+func (c *renewingSlotCacheForTest) ReleaseAPIKeySlot(context.Context, int64, string) error {
+	c.released.Add(1)
+	return nil
+}
+
+func TestConcurrencySlotLeaseOutlivesSelectionAndTTL(t *testing.T) {
+	for _, scope := range []string{"account", "user"} {
+		t.Run(scope, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, finish := WithConcurrencySlotLifecycle(context.Background())
+				defer finish()
+				cache := &renewingSlotCacheForTest{stubConcurrencyCacheForTest: stubConcurrencyCacheForTest{acquireResult: true}, ttl: 12 * time.Second}
+				svc := NewConcurrencyService(cache)
+				selection, endSelection := context.WithTimeout(ctx, time.Second)
+				acquire := svc.AcquireAccountSlot
+				if scope == "user" {
+					acquire = svc.AcquireUserSlot
+				}
+				result, err := acquire(selection, 7, 1)
+				require.NoError(t, err)
+				require.True(t, result.Acquired)
+				endSelection()
+				time.Sleep(3 * cache.ttl)
+				synctest.Wait()
+				require.NoError(t, ctx.Err())
+				require.GreaterOrEqual(t, cache.refreshed.Load(), int64(8))
+				result.ReleaseFunc()
+				result.ReleaseFunc()
+				finish()
+				require.EqualValues(t, 1, cache.released.Load())
+				count := cache.refreshed.Load()
+				time.Sleep(cache.ttl)
+				require.Equal(t, count, cache.refreshed.Load(), "release joins renewal before returning")
+			})
+		})
+	}
+}
+
+func TestConcurrencySlotLeaseTransientFailureRecovers(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, finish := WithConcurrencySlotLifecycle(context.Background())
+		defer finish()
+		cache := &renewingSlotCacheForTest{stubConcurrencyCacheForTest: stubConcurrencyCacheForTest{acquireResult: true}, ttl: 12 * time.Second}
+		cache.refresh = func(context.Context, string) (bool, error) {
+			if cache.refreshed.Load() <= 2 {
+				return false, errors.New("temporary redis failure")
+			}
+			return true, nil
+		}
+		result, err := NewConcurrencyService(cache).AcquireAccountSlot(ctx, 7, 1)
+		require.NoError(t, err)
+		defer result.ReleaseFunc()
+		time.Sleep(2 * cache.ttl)
+		synctest.Wait()
+		require.NoError(t, ctx.Err())
+		require.Greater(t, cache.refreshed.Load(), int64(3))
+	})
+}
+
+func TestConcurrencySlotLeaseLossCancelsDetachedUpstream(t *testing.T) {
+	for _, mode := range []string{"missing", "expired"} {
+		t.Run(mode, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, finish := WithConcurrencySlotLifecycle(context.Background())
+				defer finish()
+				cache := &renewingSlotCacheForTest{stubConcurrencyCacheForTest: stubConcurrencyCacheForTest{acquireResult: true}, ttl: 12 * time.Second}
+				cache.refresh = func(context.Context, string) (bool, error) {
+					if mode == "expired" {
+						return false, errors.New("redis unavailable")
+					}
+					return false, nil
+				}
+				result, err := NewConcurrencyService(cache).AcquireAccountSlot(ctx, 7, 1)
+				require.NoError(t, err)
+				defer result.ReleaseFunc()
+				upstream, release := detachUpstreamContext(ctx)
+				defer release()
+				req, err := http.NewRequestWithContext(upstream, http.MethodPost, "https://upstream.invalid/responses", nil)
+				require.NoError(t, err)
+				time.Sleep(cache.ttl)
+				synctest.Wait()
+				want := ErrConcurrencySlotLeaseLost
+				if mode == "expired" {
+					want = ErrConcurrencySlotLeaseExpired
+				}
+				require.ErrorIs(t, context.Cause(ctx), want)
+				require.ErrorIs(t, context.Cause(req.Context()), want, "the upstream request must observe slot loss despite client detachment")
+				billing, finishBilling := detachedBillingContext(ctx)
+				defer finishBilling()
+				require.NoError(t, billing.Err(), "already confirmed usage can still settle after upstream cancellation")
+			})
+		})
+	}
+}
+
+func TestConcurrencySlotLeaseDetachedWorkSurvivesClientCancellation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		client, cancelClient := context.WithCancel(context.Background())
+		ctx, finish := WithConcurrencySlotLifecycle(client)
+		defer finish()
+		cache := &renewingSlotCacheForTest{stubConcurrencyCacheForTest: stubConcurrencyCacheForTest{acquireResult: true}, ttl: 12 * time.Second}
+		var lost atomic.Bool
+		cache.refresh = func(context.Context, string) (bool, error) { return !lost.Load(), nil }
+		result, err := NewConcurrencyService(cache).AcquireUserSlot(ctx, 7, 1)
+		require.NoError(t, err)
+		defer result.ReleaseFunc()
+		upstream, release := detachUpstreamContext(ctx, time.Minute)
+		defer release()
+		cancelClient()
+		time.Sleep(cache.ttl)
+		synctest.Wait()
+		require.NoError(t, upstream.Err(), "detached generation keeps its existing client-disconnect policy")
+		require.Greater(t, cache.refreshed.Load(), int64(1))
+		lost.Store(true)
+		time.Sleep(cache.ttl / 3)
+		synctest.Wait()
+		require.ErrorIs(t, context.Cause(upstream), ErrConcurrencySlotLeaseLost)
+	})
+}
+
+func TestConcurrencySlotLeaseReleaseCancelsAndJoinsRenewal(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, finish := WithConcurrencySlotLifecycle(context.Background())
+		defer finish()
+		entered := make(chan struct{})
+		cache := &renewingSlotCacheForTest{stubConcurrencyCacheForTest: stubConcurrencyCacheForTest{acquireResult: true}, ttl: 12 * time.Second}
+		cache.refresh = func(ctx context.Context, _ string) (bool, error) {
+			close(entered)
+			<-ctx.Done()
+			return false, ctx.Err()
+		}
+		result, err := NewConcurrencyService(cache).AcquireAccountSlot(ctx, 7, 1)
+		require.NoError(t, err)
+		<-entered
+		result.ReleaseFunc()
+		result.ReleaseFunc()
+		require.EqualValues(t, 1, cache.released.Load())
+		require.NoError(t, ctx.Err(), "intentional release must not report lease loss")
+	})
+}
+
+func TestConcurrencySlotLeaseAPIKeyObservationCannotCancelRequest(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, finish := WithConcurrencySlotLifecycle(context.Background())
+		defer finish()
+		cache := &renewingSlotCacheForTest{ttl: 12 * time.Second, refresh: func(context.Context, string) (bool, error) { return false, nil }}
+		release := NewConcurrencyService(cache).TrackAPIKeySlot(ctx, 9)
+		time.Sleep(cache.ttl)
+		synctest.Wait()
+		require.NoError(t, ctx.Err())
+		release()
+		finish()
+		require.EqualValues(t, 1, cache.released.Load())
+	})
+}
+
+func TestConcurrencySlotLeaseRequiresRequestLifecycle(t *testing.T) {
+	cache := &renewingSlotCacheForTest{stubConcurrencyCacheForTest: stubConcurrencyCacheForTest{acquireResult: true}, ttl: time.Minute}
+	_, err := NewConcurrencyService(cache).AcquireAccountSlot(context.Background(), 7, 1)
+	require.ErrorIs(t, err, ErrConcurrencySlotLifecycle)
+	ctx, finish := WithConcurrencySlotLifecycle(t.Context())
+	defer finish()
+	_, err = NewConcurrencyService(&unrenewableSlotCacheForTest{}).AcquireAccountSlot(ctx, 7, 1)
+	require.ErrorIs(t, err, ErrConcurrencySlotLifecycle, "a positive-TTL store must not silently fall back to unrenewed slots")
+}
+
+func TestConcurrencySlotLeaseDeadlineCancelsBeforeStalledRefreshReturns(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, finish := WithConcurrencySlotLifecycle(context.Background())
+		defer finish()
+		allowReturn := make(chan struct{})
+		cache := &renewingSlotCacheForTest{stubConcurrencyCacheForTest: stubConcurrencyCacheForTest{acquireResult: true}, ttl: 12 * time.Second}
+		cache.refresh = func(context.Context, string) (bool, error) {
+			<-allowReturn // Simulate a socket read that does not promptly honor context cancellation.
+			return true, nil
+		}
+		result, err := NewConcurrencyService(cache).AcquireAccountSlot(ctx, 7, 1)
+		require.NoError(t, err)
+		time.Sleep(cache.ttl)
+		synctest.Wait()
+		require.ErrorIs(t, context.Cause(ctx), ErrConcurrencySlotLeaseExpired)
+		close(allowReturn)
+		result.ReleaseFunc()
+		require.EqualValues(t, 1, cache.released.Load())
+	})
+}
+
+func TestConcurrencySlotLeaseConcurrentFinishAndRegistrationReleaseOnce(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		for range 20 {
+			ctx, finish := WithConcurrencySlotLifecycle(context.Background())
+			cache := &renewingSlotCacheForTest{stubConcurrencyCacheForTest: stubConcurrencyCacheForTest{acquireResult: true}, ttl: time.Minute}
+			start := make(chan struct{})
+			result := make(chan *AcquireResult, 1)
+			var wg sync.WaitGroup
+			wg.Add(2)
+			go func() {
+				defer wg.Done()
+				<-start
+				acquired, _ := NewConcurrencyService(cache).AcquireAccountSlot(ctx, 7, 1)
+				result <- acquired
+			}()
+			go func() { defer wg.Done(); <-start; finish() }()
+			close(start)
+			wg.Wait()
+			acquired := <-result
+			require.NotNil(t, acquired)
+			require.EqualValues(t, 1, cache.released.Load(), "finish must cover acquisitions racing with registration")
+			acquired.ReleaseFunc()
+			finish()
+			require.EqualValues(t, 1, cache.released.Load())
+		}
+	})
+}
 
 // stubConcurrencyCacheForTest 用于并发服务单元测试的缓存桩
 type stubConcurrencyCacheForTest struct {
@@ -90,6 +345,8 @@ var _ OpenAIWSIngressLeaseCache = (*ingressLeaseCacheForTest)(nil)
 func (c *stubConcurrencyCacheForTest) AcquireAccountSlot(_ context.Context, _ int64, _ int, _ string) (bool, error) {
 	return c.acquireResult, c.acquireErr
 }
+
+func (*stubConcurrencyCacheForTest) ConcurrencySlotTTL() time.Duration { return 0 }
 func (c *stubConcurrencyCacheForTest) ReleaseAccountSlot(_ context.Context, accountID int64, requestID string) error {
 	c.releasedAccountIDs = append(c.releasedAccountIDs, accountID)
 	c.releasedRequestIDs = append(c.releasedRequestIDs, requestID)
@@ -167,30 +424,26 @@ func (c *stubConcurrencyCacheForTest) CleanupExpiredAccountSlotKeys(_ context.Co
 	return c.cleanupErr
 }
 
-func (c *stubConcurrencyCacheForTest) CleanupStaleProcessSlots(_ context.Context, _ string) error {
-	return c.cleanupErr
-}
-
 type trackingConcurrencyCache struct {
 	stubConcurrencyCacheForTest
-	cleanupPrefix string
+	cleanupCalled bool
 }
 
-func (c *trackingConcurrencyCache) CleanupStaleProcessSlots(_ context.Context, prefix string) error {
-	c.cleanupPrefix = prefix
+func (c *trackingConcurrencyCache) CleanupExpiredAccountSlotKeys(_ context.Context) error {
+	c.cleanupCalled = true
 	return c.cleanupErr
 }
 
-func TestCleanupStaleProcessSlots_NilCache(t *testing.T) {
+func TestCleanupExpiredSlots_NilCache(t *testing.T) {
 	svc := &ConcurrencyService{cache: nil}
-	require.NoError(t, svc.CleanupStaleProcessSlots(context.Background()))
+	require.NoError(t, svc.CleanupExpiredSlots(context.Background()))
 }
 
-func TestCleanupStaleProcessSlots_DelegatesPrefix(t *testing.T) {
+func TestCleanupExpiredSlots_DelegatesTTLBasedCleanup(t *testing.T) {
 	cache := &trackingConcurrencyCache{}
 	svc := NewConcurrencyService(cache)
-	require.NoError(t, svc.CleanupStaleProcessSlots(context.Background()))
-	require.Equal(t, RequestIDPrefix(), cache.cleanupPrefix)
+	require.NoError(t, svc.CleanupExpiredSlots(context.Background()))
+	require.True(t, cache.cleanupCalled)
 }
 
 func TestAcquireAccountSlot_Success(t *testing.T) {
@@ -615,4 +868,21 @@ func TestIncrementAccountWaitCount_NilCache(t *testing.T) {
 	allowed, err := svc.IncrementAccountWaitCount(context.Background(), 1, 10)
 	require.NoError(t, err)
 	require.True(t, allowed)
+}
+
+func TestLoadCacheReusesOverlappingBatchesAndCurrentCapacity(t *testing.T) {
+	cache := &stubConcurrencyCacheForTest{loadBatch: map[int64]*AccountLoadInfo{1: {AccountID: 1, CurrentConcurrency: 1, LoadRate: 10}, 2: {AccountID: 2, CurrentConcurrency: 2, LoadRate: 20}}}
+	svc := NewConcurrencyService(cache)
+	svc.SetAccountLoadBatchCacheTTL(time.Second)
+	_, err := svc.GetAccountsLoadBatch(t.Context(), []AccountWithConcurrency{{ID: 1, MaxConcurrency: 10}, {ID: 2, MaxConcurrency: 10}})
+	require.NoError(t, err)
+	loads, err := svc.GetAccountsLoadBatch(t.Context(), []AccountWithConcurrency{{ID: 2, MaxConcurrency: 2}, {ID: 1, MaxConcurrency: 1}})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), cache.loadBatchCalls.Load())
+	require.Equal(t, 100, loads[1].LoadRate)
+	require.Equal(t, 100, loads[2].LoadRate)
+	loads[1].CurrentConcurrency = 99
+	again, err := svc.GetAccountsLoadBatch(t.Context(), []AccountWithConcurrency{{ID: 1, MaxConcurrency: 1}})
+	require.NoError(t, err)
+	require.Equal(t, 1, again[1].CurrentConcurrency, "callers cannot mutate cached evidence")
 }

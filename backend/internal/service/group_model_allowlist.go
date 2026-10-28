@@ -1,13 +1,11 @@
 package service
 
 import (
-	"net/http"
 	"slices"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
-	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
@@ -48,13 +46,11 @@ func supplementUnmappedOpenAIModels(accounts []Account, models []string) []strin
 
 // normalizeGroupModelAllowlist 归一化管理端提交的分组模型白名单：
 // 条目 TrimSpace、按小写去重保序；`*` 可出现在任意位置；
-// enabled=true 且列表为空视为配置错误，返回 400 而不是运行时静默放行/拒绝。
+// 空列表继承目录与资源权限，不追加分组限制。
 func normalizeGroupModelAllowlist(cfg GroupModelAllowlist) (GroupModelAllowlist, error) {
 	out := GroupModelAllowlist{Enabled: cfg.Enabled}
 	if len(cfg.Models) == 0 {
-		if out.Enabled {
-			return out, infraerrors.New(http.StatusBadRequest, "INVALID_MODEL_ALLOWLIST", "model allowlist cannot be enabled with an empty model list")
-		}
+		out.Enabled = false
 		return out, nil
 	}
 
@@ -73,9 +69,7 @@ func normalizeGroupModelAllowlist(cfg GroupModelAllowlist) (GroupModelAllowlist,
 		out.Models = append(out.Models, model)
 	}
 	if len(out.Models) == 0 {
-		if out.Enabled {
-			return out, infraerrors.New(http.StatusBadRequest, "INVALID_MODEL_ALLOWLIST", "model allowlist cannot be enabled with an empty model list")
-		}
+		out.Enabled = false
 		out.Models = nil
 	}
 	return out, nil
@@ -84,7 +78,7 @@ func normalizeGroupModelAllowlist(cfg GroupModelAllowlist) (GroupModelAllowlist,
 // ModelAllowlistEnabled 报告该分组是否启用了模型白名单。
 // 开启后所有携带模型的网关请求与模型列表接口都受白名单约束。
 func (g *Group) ModelAllowlistEnabled() bool {
-	return g != nil && g.ModelAllowlist.Enabled
+	return g != nil && g.ModelAllowlist.Enabled && len(g.ModelAllowlist.Models) > 0
 }
 
 // Allows 判断客户端请求的模型是否命中白名单。
@@ -92,7 +86,7 @@ func (g *Group) ModelAllowlistEnabled() bool {
 // 候选形式覆盖代码中已有的模型名等价规则（Gemini models/ 前缀、
 // Antigravity/Claude -thinking 宽容规则、OpenAI 推理后缀），不做模糊匹配。
 func (a GroupModelAllowlist) Allows(model string) bool {
-	if !a.Enabled {
+	if !a.Enabled || len(a.Models) == 0 {
 		return true
 	}
 	model = strings.TrimSpace(model)
@@ -167,15 +161,9 @@ func groupModelAllowlistCandidates(model string) []string {
 // 可直接输出白名单模式：它的所有实例都属于 source。其他未处理的无限
 // 交集不会被枚举为模型 ID，列表可能省略仍可请求的模型。
 func (a GroupModelAllowlist) FilterForListing(source []string) []string {
-	if !a.Enabled {
+	if !a.Enabled || len(a.Models) == 0 {
 		return source
 	}
-	if len(a.Models) == 0 {
-		// 开启但为空的配置在管理端已被拒绝；对遗留脏数据保持“看到什么 = 能调什么”，
-		// 列表与准入同时返回空。
-		return nil
-	}
-
 	patterns := make([]string, 0, len(source))
 	for _, pattern := range source {
 		pattern = strings.TrimSpace(pattern)

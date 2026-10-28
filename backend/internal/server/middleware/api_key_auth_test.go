@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -48,6 +49,37 @@ func TestAPIKeyAuthRejectsOversizedCredentialsBeforeLookup(t *testing.T) {
 		require.Equal(t, http.StatusUnauthorized, w.Code)
 	}
 	require.Zero(t, calls.Load())
+}
+
+func TestValidateAPIKeyContinuationRechecksAccess(t *testing.T) {
+	for _, scenario := range []string{"active", "disabled", "expired", "user disabled", "group disabled", "quota exhausted"} {
+		t.Run(scenario, func(t *testing.T) {
+			group := &service.Group{ID: 1, Status: service.StatusActive, Hydrated: true}
+			key := &service.APIKey{ID: 1, Status: service.StatusActive, GroupID: &group.ID, Group: group, User: &service.User{ID: 1, Status: service.StatusActive}}
+			switch scenario {
+			case "disabled":
+				key.Status = service.StatusDisabled
+			case "expired":
+				expired := time.Now().Add(-time.Hour)
+				key.ExpiresAt = &expired
+			case "user disabled":
+				key.User.Status = service.StatusDisabled
+			case "group disabled":
+				group.Status = service.StatusDisabled
+			case "quota exhausted":
+				key.Quota = 1
+				key.QuotaUsed = 1
+			}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+			err := ValidateAPIKeyContinuation(c, key, &config.Config{})
+			if scenario == "active" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+		})
+	}
 }
 
 func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
@@ -1791,4 +1823,51 @@ func (r *stubUserSubscriptionRepo) IncrementUsage(ctx context.Context, id int64,
 
 func (r *stubUserSubscriptionRepo) BatchUpdateExpiredStatus(ctx context.Context) (int64, error) {
 	return 0, errors.New("not implemented")
+}
+
+func TestSuperAdminAPIKeyBalanceExemptionPreservesKeyGuards(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, google := range []bool{false, true} {
+		for _, tc := range []struct {
+			name, role, status string
+			quota, used        float64
+			expired, allowed   bool
+		}{
+			{"super without balance", service.RoleSuperAdmin, service.StatusActive, 10, 1, false, true},
+			{"ordinary admin still pays", service.RoleAdmin, service.StatusActive, 10, 1, false, false},
+			{"user still pays", service.RoleUser, service.StatusActive, 10, 1, false, false},
+			{"super exhausted total", service.RoleSuperAdmin, service.StatusActive, 10, 10, false, false},
+			{"super exhausted status", service.RoleSuperAdmin, service.StatusAPIKeyQuotaExhausted, 10, 1, false, false},
+			{"super expired", service.RoleSuperAdmin, service.StatusActive, 10, 1, true, false},
+			{"super disabled key", service.RoleSuperAdmin, service.StatusDisabled, 10, 1, false, false},
+		} {
+			t.Run(fmt.Sprintf("%t/%s", google, tc.name), func(t *testing.T) {
+				user := &service.User{ID: 10, Role: tc.role, Status: service.StatusActive, Balance: -1}
+				key := &service.APIKey{ID: 11, UserID: 10, Key: "super-admin-budget-test", Status: tc.status, User: user, Quota: tc.quota, QuotaUsed: tc.used}
+				if tc.expired {
+					at := time.Now().Add(-time.Hour)
+					key.ExpiresAt = &at
+				}
+				repo := &stubApiKeyRepo{getByKey: func(context.Context, string) (*service.APIKey, error) { return key, nil }}
+				cfg := &config.Config{RunMode: config.RunModeStandard}
+				svc := service.NewAPIKeyService(repo, nil, nil, nil, nil, nil, cfg)
+				r := gin.New()
+				if google {
+					r.Use(APIKeyAuthWithSubscriptionGoogle(svc, nil, cfg))
+				} else {
+					r.Use(apiKeyAuthWithSubscription(svc, nil, cfg))
+				}
+				r.GET("/t", func(c *gin.Context) { c.Status(http.StatusOK) })
+				req := httptest.NewRequest(http.MethodGet, "/t", nil)
+				if google {
+					req.Header.Set("x-goog-api-key", key.Key)
+				} else {
+					req.Header.Set("x-api-key", key.Key)
+				}
+				w := httptest.NewRecorder()
+				r.ServeHTTP(w, req)
+				require.Equal(t, tc.allowed, w.Code == http.StatusOK, "%s", w.Body.String())
+			})
+		}
+	}
 }

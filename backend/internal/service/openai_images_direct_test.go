@@ -18,24 +18,43 @@ func directImagesTestAccount() *Account {
 }
 
 func TestCodexDirectImagesRouting(t *testing.T) {
+	t.Run("native", func(t *testing.T) { testCodexDirectImagesRouting(t, false) })
+	t.Run("cloud_enabled", func(t *testing.T) { testCodexDirectImagesRouting(t, true) })
+}
+
+func testCodexDirectImagesRouting(t *testing.T, cloud bool) {
+	t.Helper()
 	for _, model := range []string{"gpt-image-1.5", "gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2.5-flare-2026-09-08", "gpt-image-2.5-sunburst-2026-09-08"} {
 		t.Run(model, func(t *testing.T) {
 			body := []byte(fmt.Sprintf(`{"model":%q,"prompt":"  原样保留 prompt  ","quality":"max","size":"auto","response_format":"url","extra":{"preserve":true}}`, model))
 			c, rec := newOpenAIImagesTestContext(t, body)
 			upstream := &httpUpstreamRecorder{resp: openAIImagesJSONResponse()}
-			svc := newOpenAIImagesTestService(upstream)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			// 发送前取消不启动生成（见 TestForwardImagesCanceledBeforeDispatchDoesNotStartGeneration），
+			// 这里在发送后取消，验证已开始的生成不随客户端断开中止。
+			svc := newOpenAIImagesTestService(&codexModelsHTTPUpstreamStub{do: func(req *http.Request, proxy string, id int64, concurrency int) (*http.Response, error) {
+				resp, err := upstream.Do(req, proxy, id, concurrency)
+				cancel()
+				require.NoError(t, req.Context().Err())
+				return resp, err
+			}})
 			parsed, err := svc.ParseOpenAIImagesRequest(c, body)
 			require.NoError(t, err)
-			ctx, cancel := context.WithCancel(context.Background())
-			cancel()
-			result, err := svc.ForwardImages(ctx, c, directImagesTestAccount(), body, parsed, "")
+			account := directImagesTestAccount()
+			account.Extra = map[string]any{OpenAICloudEnabledKey: cloud}
+			result, err := svc.ForwardImages(ctx, c, account, body, parsed, "")
 			require.NoError(t, err)
 			require.Equal(t, 1, result.ImageCount)
+			require.Equal(t, UsageAuthorizationModeNative, result.AuthorizationMode)
+			require.False(t, result.CloudManagedBilling)
 			require.Equal(t, 20, result.Usage.ImageOutputTokens)
 			require.Equal(t, model, result.UpstreamModel)
 			require.Equal(t, "/backend-api/codex/images/generations", result.UpstreamEndpoint)
 			require.Equal(t, "https://chatgpt.com/backend-api/codex/images/generations", upstream.lastReq.URL.String())
-			require.NoError(t, upstream.lastReq.Context().Err())
+			require.Len(t, upstream.requests, 1)
+			require.NoError(t, upstream.contextErrAtDo)
+			require.ErrorIs(t, upstream.lastReq.Context().Err(), context.Canceled, "完成后释放上游 context")
 			require.Equal(t, "Bearer test-token", upstream.lastReq.Header.Get("Authorization"))
 			require.Equal(t, "application/json", upstream.lastReq.Header.Get("Accept"))
 			require.Empty(t, upstream.lastReq.Header.Get("OpenAI-Beta"))
