@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -12,9 +13,10 @@ type BatchImageWorkerRuntime struct {
 	billingRecovery *BatchImageBillingRecoveryService
 	cfg             *config.Config
 
-	mu     sync.Mutex
-	cancel context.CancelFunc
-	done   chan struct{}
+	mu      sync.Mutex
+	stopped bool
+	cancel  context.CancelFunc
+	done    chan struct{}
 }
 
 func NewBatchImageWorkerRuntime(worker *BatchImageWorker, cfg *config.Config) *BatchImageWorkerRuntime {
@@ -57,21 +59,28 @@ func ProvideBatchImageWorkerRuntime(
 		StaleAfter: NewBatchImageWorkerOptionsFromConfig(cfg).StaleActiveAfter,
 		Limit:      NewBatchImageWorkerOptionsFromConfig(cfg).RecoverLimit,
 	}
-	runtime.Start()
 	return runtime
 }
 
-func (r *BatchImageWorkerRuntime) Start() {
-	if r == nil || r.worker == nil || r.cfg == nil || !r.cfg.BatchImage.QueueEnabled {
-		return
+func (r *BatchImageWorkerRuntime) Start(parent context.Context) error {
+	if r == nil {
+		return nil
+	}
+	if err := parent.Err(); err != nil {
+		return err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.cancel != nil {
-		return
+	if r.stopped {
+		return errors.New("batch image worker stopped")
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
+	if r.cancel != nil {
+		return nil
+	}
+	if r.worker == nil || r.cfg == nil || !r.cfg.BatchImage.QueueEnabled {
+		return nil
+	}
+	ctx, cancel := context.WithCancel(parent)
 	done := make(chan struct{})
 	r.cancel = cancel
 	r.done = done
@@ -98,6 +107,7 @@ func (r *BatchImageWorkerRuntime) Start() {
 		wg.Wait()
 		close(done)
 	}()
+	return nil
 }
 
 func (r *BatchImageWorkerRuntime) runBillingRecovery(ctx context.Context) {
@@ -114,22 +124,33 @@ func (r *BatchImageWorkerRuntime) runBillingRecovery(ctx context.Context) {
 	}
 }
 
-func (r *BatchImageWorkerRuntime) Stop() {
+// Drain cancels reservation loops and joins the existing durable queue worker.
+// Its established cancellation/requeue/recovery path retains accepted jobs.
+func (r *BatchImageWorkerRuntime) Drain(ctx context.Context) error { return r.Stop(ctx) }
+func (r *BatchImageWorkerRuntime) Stop(ctx context.Context) error {
 	if r == nil {
-		return
+		return nil
 	}
 	r.mu.Lock()
-	cancel := r.cancel
-	done := r.done
-	r.cancel = nil
-	r.done = nil
+	r.stopped = true
+	cancel, done := r.cancel, r.done
 	r.mu.Unlock()
-
 	if cancel != nil {
 		cancel()
 	}
-	if done != nil {
-		<-done
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	default:
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -139,5 +160,13 @@ func (r *BatchImageWorkerRuntime) Running() bool {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.cancel != nil
+	if r.cancel == nil {
+		return false
+	}
+	select {
+	case <-r.done:
+		return false
+	default:
+		return true
+	}
 }

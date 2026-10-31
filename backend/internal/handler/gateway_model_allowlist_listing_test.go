@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Wei-Shaw/sub2api/internal/service"
-
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -47,7 +47,7 @@ func TestGatewayModels_ModelAllowlistWildcardExpandsAgainstSource(t *testing.T) 
 		Group: &service.Group{
 			ID:       groupID,
 			Platform: service.PlatformOpenAI,
-			ModelAllowlist: service.GroupModelAllowlist{
+			ModelAllowlist: catalog.ModelAllowlist{
 				Enabled: true,
 				Models:  []string{"gpt-5.5-*", "gpt-5.4"},
 			},
@@ -107,7 +107,7 @@ func TestGeminiV1BetaListModels_FiltersFallbackByAllowlist(t *testing.T) {
 		Group: &service.Group{
 			ID:       geminiGroupID,
 			Platform: service.PlatformGemini,
-			ModelAllowlist: service.GroupModelAllowlist{
+			ModelAllowlist: catalog.ModelAllowlist{
 				Enabled: true,
 				Models:  []string{"gemini-3.8-flash-high", "gemini-3-*"},
 			},
@@ -148,7 +148,7 @@ func TestAntigravityModels_FiltersByAllowlist(t *testing.T) {
 		Group: &service.Group{
 			ID:       51,
 			Platform: service.PlatformAntigravity,
-			ModelAllowlist: service.GroupModelAllowlist{
+			ModelAllowlist: catalog.ModelAllowlist{
 				Enabled: true,
 				Models:  []string{"gemini-2.5-flash"},
 			},
@@ -174,7 +174,7 @@ func TestAntigravityModels_FiltersByAllowlist(t *testing.T) {
 }
 
 func TestFilterUpstreamGeminiModelsBody(t *testing.T) {
-	allowlist := service.GroupModelAllowlist{Enabled: true, Models: []string{"gemini-2.5-pro"}}
+	allowlist := catalog.ModelAllowlist{Enabled: true, Models: []string{"gemini-2.5-pro"}}
 
 	t.Run("full hit returns original body with dropped=false", func(t *testing.T) {
 		body := []byte(`{"models":[{"name":"models/gemini-2.5-pro"},{"name":"models/gemini-2.5-pro"}]}`)
@@ -222,12 +222,12 @@ func TestFilterBatchImageModelsByAllowlist(t *testing.T) {
 	}
 
 	t.Run("disabled allowlist keeps everything", func(t *testing.T) {
-		got := filterBatchImageModelsByAllowlist(models, service.GroupModelAllowlist{Enabled: false})
+		got := filterBatchImageModelsByAllowlist(models, catalog.ModelAllowlist{Enabled: false})
 		require.Equal(t, models, got)
 	})
 
 	t.Run("exact and wildcard entries filter by model id", func(t *testing.T) {
-		got := filterBatchImageModelsByAllowlist(models, service.GroupModelAllowlist{
+		got := filterBatchImageModelsByAllowlist(models, catalog.ModelAllowlist{
 			Enabled: true,
 			Models:  []string{"gemini-3-*", "gpt-image-1"},
 		})
@@ -236,7 +236,7 @@ func TestFilterBatchImageModelsByAllowlist(t *testing.T) {
 	})
 
 	t.Run("no match yields empty list", func(t *testing.T) {
-		got := filterBatchImageModelsByAllowlist(models, service.GroupModelAllowlist{
+		got := filterBatchImageModelsByAllowlist(models, catalog.ModelAllowlist{
 			Enabled: true,
 			Models:  []string{"claude-*"},
 		})

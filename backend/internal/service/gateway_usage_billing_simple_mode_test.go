@@ -58,9 +58,10 @@ func (s *simpleModeUsageBillingRepoStub) Apply(_ context.Context, cmd *UsageBill
 }
 
 func TestApplyUsageBillingSimpleModeDeduplicatesWithoutBalanceEffects(t *testing.T) {
+	const quote = 0.000078125
 	repo := &simpleModeUsageBillingRepoStub{}
 	p := &postUsageBillingParams{
-		Cost:                       &CostBreakdown{ActualCost: 3.25, TotalCost: 3.25},
+		Cost:                       &CostBreakdown{ActualCost: quote, TotalCost: quote},
 		User:                       &User{ID: 7, Balance: 0},
 		APIKey:                     &APIKey{ID: 13, Quota: 100, RateLimit5h: 10},
 		Account:                    &Account{ID: 9, Type: AccountTypeAPIKey},
@@ -68,23 +69,25 @@ func TestApplyUsageBillingSimpleModeDeduplicatesWithoutBalanceEffects(t *testing
 		SimpleModeKeyRateLimitOnly: true,
 	}
 
-	first, err := applyUsageBilling(context.Background(), "simple-req", nil, p, &billingDeps{deferredService: &DeferredService{}}, repo)
+	first, err := applyUsageBilling(context.Background(), "simple-req", &UsageLog{RequestID: "simple-req"}, p, &billingDeps{deferredService: &DeferredService{}}, repo)
 	require.NoError(t, err)
 	require.True(t, first)
-	second, err := applyUsageBilling(context.Background(), "simple-req", nil, p, &billingDeps{deferredService: &DeferredService{}}, repo)
+	second, err := applyUsageBilling(context.Background(), "simple-req", &UsageLog{RequestID: "simple-req"}, p, &billingDeps{deferredService: &DeferredService{}}, repo)
 	require.NoError(t, err)
 	require.False(t, second)
 	require.Len(t, repo.cmds, 2)
+	require.Equal(t, quote, p.Cost.ActualCost, "retry must retain the original quote")
+	require.Equal(t, repo.cmds[0].RequestFingerprint, repo.cmds[1].RequestFingerprint)
 	for _, cmd := range repo.cmds {
 		require.Zero(t, cmd.BalanceCost)
 		require.Zero(t, cmd.SubscriptionCost)
 		require.Zero(t, cmd.APIKeyQuotaCost)
 		require.Zero(t, cmd.AccountQuotaCost)
-		require.Equal(t, 3.25, cmd.APIKeyRateLimitCost)
+		require.Equal(t, QuantizeUsageBillingAmount(quote), cmd.APIKeyRateLimitCost)
 	}
 }
 
-func TestApplyUsageBillingSimpleModeRejectsLegacyFallback(t *testing.T) {
+func TestApplyUsageBillingSimpleModeRequiresAtomicDependencies(t *testing.T) {
 	for _, missing := range []string{"repository", "request_id", "api_key"} {
 		t.Run(missing, func(t *testing.T) {
 			p := &postUsageBillingParams{
@@ -118,27 +121,13 @@ func (c *simpleModeInvalidationCache) InvalidateAPIKeyRateLimit(_ context.Contex
 	c.invalidated = append(c.invalidated, keyID)
 	return errors.New("redis unavailable")
 }
-func TestFinalizeSimpleModePreservesLastUsedWithoutFinancialCacheWrites(t *testing.T) {
-	for _, subscription := range []bool{false, true} {
-		t.Run(strconv.FormatBool(subscription), func(t *testing.T) {
-			cache := &simpleModeInvalidationCache{}
-			writes := make(chan cacheWriteTask, 4)
-			deferred := &DeferredService{}
-			groupID := int64(5)
-			p := &postUsageBillingParams{
-				Cost: &CostBreakdown{ActualCost: 3}, User: &User{ID: 7},
-				APIKey:  &APIKey{ID: 13, GroupID: &groupID, RateLimit5h: 10},
-				Account: &Account{ID: 9}, IsSubscriptionBill: subscription,
-				SimpleModeKeyRateLimitOnly: true,
-			}
-			finalizePostUsageBilling(context.Background(), p, &billingDeps{
-				billingCacheService: &BillingCacheService{cache: cache, cacheWriteChan: writes},
-				deferredService:     deferred,
-			}, &UsageBillingApplyResult{Applied: true})
-			require.Equal(t, []int64{13}, cache.invalidated)
-			require.Empty(t, writes, "simple mode must not enqueue balance, subscription or window increments")
-			_, scheduled := deferred.lastUsedUpdates.Load(int64(9))
-			require.True(t, scheduled, "early return must preserve the account activity update")
-		})
-	}
+func TestSimpleModeBillingInvalidationOnlyEvictsKeyWindows(t *testing.T) {
+	cache := &simpleModeInvalidationCache{}
+	cmd := buildUsageBillingCommand("simple-invalidation", &UsageLog{}, &postUsageBillingParams{
+		Cost: &CostBreakdown{ActualCost: 3}, User: &User{ID: 7}, APIKey: &APIKey{ID: 13, RateLimit5h: 10},
+		Account: &Account{ID: 9}, SimpleModeKeyRateLimitOnly: true,
+	})
+	err := usageBillingCacheInvalidator(cache, nil)(context.Background(), cmd)
+	require.ErrorContains(t, err, "redis unavailable")
+	require.Equal(t, []int64{13}, cache.invalidated)
 }

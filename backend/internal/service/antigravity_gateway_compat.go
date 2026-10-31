@@ -12,6 +12,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/gin-gonic/gin"
 )
 
@@ -75,7 +76,10 @@ func (s *AntigravityGatewayService) ForwardAsChatCompletions(
 	if err != nil {
 		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
-	claudeRequest, err := apicompat.ResponsesToAnthropicRequest(responsesRequest)
+	claudeRequest, err := apicompat.ResponsesToAnthropicIntermediateRequest(responsesRequest)
+	if claudeRequest != nil {
+		recordConversionDiagnostics(c, "openai", "anthropic", claudeRequest.Model, claudeRequest.Diagnostics)
+	}
 	if err != nil {
 		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
@@ -118,7 +122,12 @@ func (s *AntigravityGatewayService) ForwardAsResponses(
 		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", "model is required")
 	}
 
-	claudeRequest, err := apicompat.ResponsesToAnthropicRequest(&request)
+	target := s.getMappedModel(account, request.Model)
+	request.TargetRejectsAssistantPrefill = strings.HasPrefix(strings.ToLower(target), "gemini-") || claude.RejectsAssistantPrefill(target)
+	claudeRequest, err := apicompat.ResponsesToAnthropicIntermediateRequest(&request)
+	if claudeRequest != nil {
+		recordConversionDiagnostics(c, "openai", "anthropic", claudeRequest.Model, claudeRequest.Diagnostics)
+	}
 	if err != nil {
 		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
@@ -171,6 +180,7 @@ func (s *AntigravityGatewayService) forwardAntigravityCompat(
 	request antigravityCompatRequest,
 ) (*ForwardResult, error) {
 	beginUpstreamResponseModelObservation(c)
+	beginGeminiImageOutputObservation(c)
 	call, err := s.prepareAntigravityCompatCall(ctx, c, account, request)
 	if err != nil {
 		return nil, err
@@ -222,6 +232,11 @@ func (s *AntigravityGatewayService) prepareAntigravityCompatCall(
 		message := fmt.Sprintf("model %s not in whitelist", request.originalModel)
 		return nil, s.writeAntigravityCompatError(c, http.StatusForbidden, "permission_error", message)
 	}
+	if !strings.HasPrefix(strings.ToLower(mappedModel), "gemini-") {
+		if err := rejectAntigravityClaudeOutputFormat(c, request.claudeBody, mappedModel); err != nil {
+			return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		}
+	}
 	thinkingEnabled := claudeRequest.Thinking != nil &&
 		(claudeRequest.Thinking.Type == "enabled" || claudeRequest.Thinking.Type == "adaptive")
 	mappedModel = applyThinkingModelSuffix(mappedModel, thinkingEnabled)
@@ -245,6 +260,7 @@ func (s *AntigravityGatewayService) prepareAntigravityCompatCall(
 		_ = s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
 	}
+	recordAntigravitySchemaConversion(c, request.claudeBody, mappedModel)
 	geminiBody, err := s.buildAntigravityCompatGeminiBody(ctx, request.claudeBody, &claudeRequest, projectID, mappedModel)
 	if err != nil {
 		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", "Invalid request")
@@ -399,8 +415,15 @@ func (s *AntigravityGatewayService) consumeAntigravityCompatResponse(
 		c.Header("x-request-id", requestID)
 	}
 	streamResult, err := s.consumeAntigravityCompatSuccess(c, call, resp)
-	if err != nil {
+	if err != nil && streamResult == nil {
 		return nil, err
+	}
+	if err != nil {
+		partial := geminiPartialForwardResult(c, resp, streamResult.usage, streamResult.firstTokenMs, call.request.startTime, call.request.originalModel, call.billingModel, call.request.clientStream, "", call.request.reasoningEffort)
+		if partial != nil {
+			partial.ClientDisconnect = streamResult.clientDisconnect
+		}
+		return partial, err
 	}
 	if streamResult.usage == nil {
 		streamResult.usage = &ClaudeUsage{}
@@ -419,7 +442,7 @@ func (s *AntigravityGatewayService) consumeAntigravityCompatResponse(
 		FirstTokenMs:                  streamResult.firstTokenMs,
 		ReasoningEffort:               call.request.reasoningEffort,
 		ClientDisconnect:              streamResult.clientDisconnect,
-	}, nil
+	}, err
 }
 
 func (s *AntigravityGatewayService) consumeAntigravityCompatSuccess(
@@ -569,13 +592,16 @@ func (s *AntigravityGatewayService) handleChatCompletionsNonStreamingFromAntigra
 ) (*antigravityStreamResult, error) {
 	claudeResponse, result, err := s.collectClaudeStreamResponse(c, resp, startTime, originalModel)
 	if err != nil {
-		return nil, s.mapAntigravityCompatCollectionError(c, err)
+		return result, s.mapAntigravityCompatCollectionError(c, err)
 	}
 	var anthropicResponse apicompat.AnthropicResponse
 	if json.Unmarshal(claudeResponse, &anthropicResponse) != nil {
 		return nil, s.writeAntigravityCompatError(c, http.StatusBadGateway, "upstream_error", "Failed to parse upstream response")
 	}
 	responsesResponse := apicompat.AnthropicToResponsesResponse(&anthropicResponse)
+	if err := apicompat.ValidateResponsesToolArguments(responsesResponse); err != nil {
+		return result, writeAPICompatConversionError(c, err, false)
+	}
 	c.JSON(http.StatusOK, apicompat.ResponsesToChatCompletions(responsesResponse, originalModel))
 	return result, nil
 }
@@ -588,13 +614,17 @@ func (s *AntigravityGatewayService) handleResponsesNonStreamingFromAntigravity(
 ) (*antigravityStreamResult, error) {
 	claudeResponse, result, err := s.collectClaudeStreamResponse(c, resp, startTime, originalModel)
 	if err != nil {
-		return nil, s.mapAntigravityCompatCollectionError(c, err)
+		return result, s.mapAntigravityCompatCollectionError(c, err)
 	}
 	var anthropicResponse apicompat.AnthropicResponse
 	if json.Unmarshal(claudeResponse, &anthropicResponse) != nil {
 		return nil, s.writeAntigravityCompatError(c, http.StatusBadGateway, "upstream_error", "Failed to parse upstream response")
 	}
-	c.JSON(http.StatusOK, apicompat.AnthropicToResponsesResponse(&anthropicResponse))
+	response := apicompat.AnthropicToResponsesResponse(&anthropicResponse)
+	if err := apicompat.ValidateResponsesToolArguments(response); err != nil {
+		return result, writeAPICompatConversionError(c, err, false)
+	}
+	c.JSON(http.StatusOK, response)
 	return result, nil
 }
 
@@ -605,9 +635,6 @@ func (s *AntigravityGatewayService) mapAntigravityCompatCollectionError(c *gin.C
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
-	}
-	if errors.Is(err, antigravity.ErrMalformedFunctionCall) {
-		return s.writeAntigravityCompatError(c, http.StatusBadGateway, "malformed_function_call", err.Error())
 	}
 	if strings.Contains(err.Error(), "stream data interval timeout") {
 		return s.writeAntigravityCompatError(c, http.StatusBadGateway, "upstream_timeout", "Upstream stream data interval timeout")

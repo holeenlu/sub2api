@@ -134,6 +134,14 @@ func (s *OpenAIGatewayService) FetchPinnedCodexModelsManifest(ctx context.Contex
 		if err := ApplyPinnedCodexModelsMapping(manifest, account, group); err != nil {
 			return nil, err
 		}
+		if s.settingService != nil {
+			body, err := s.settingService.FilterManagedManifest(ctx, PlatformOpenAI, manifest.Body)
+			if err != nil {
+				return nil, err
+			}
+			manifest.Body = body
+			manifest.ETag = codexModelsManifestBodyETag(body)
+		}
 		return manifest, nil
 	})
 	if err != nil {

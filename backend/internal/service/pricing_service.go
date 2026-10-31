@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -66,23 +67,6 @@ var (
 		CacheCreationInputTokenCostPriority: 2.5e-05,
 		CacheReadInputTokenCost:             1e-06,
 		CacheReadInputTokenCostPriority:     2e-06,
-		LongContextInputTokenThreshold:      272_000,
-		LongContextInputCostMultiplier:      2,
-		LongContextOutputCostMultiplier:     1.5,
-		SupportsServiceTier:                 true,
-		LiteLLMProvider:                     "openai",
-		Mode:                                "chat",
-		SupportsPromptCaching:               true,
-	}
-	openAIGPT61TerraFallbackPricing = &LiteLLMModelPricing{
-		InputCostPerToken:                   1e-6,
-		InputCostPerTokenPriority:           2e-6,
-		OutputCostPerToken:                  5e-6,
-		OutputCostPerTokenPriority:          10e-6,
-		CacheCreationInputTokenCost:         1.25e-6,
-		CacheCreationInputTokenCostPriority: 2.5e-6,
-		CacheReadInputTokenCost:             0.05e-6,
-		CacheReadInputTokenCostPriority:     0.1e-6,
 		LongContextInputTokenThreshold:      272_000,
 		LongContextInputCostMultiplier:      2,
 		LongContextOutputCostMultiplier:     1.5,
@@ -291,6 +275,11 @@ type LiteLLMRawEntry struct {
 
 // PricingService 动态价格服务
 type PricingService struct {
+	modelSettings   *SettingService
+	managedSnapshot *ManagedPrices
+	refreshPending  int
+	refreshIdle     chan struct{}
+
 	cfg          *config.Config
 	remoteClient PricingRemoteClient
 	mu           sync.RWMutex
@@ -301,9 +290,14 @@ type PricingService struct {
 	// 需要从本地目录缓存重建叠加层。
 	customFilesHash string
 
-	// 停止信号
-	stopCh chan struct{}
-	wg     sync.WaitGroup
+	// lifecycleMu protects lifecycle state, never pricing/network operations.
+	lifecycleMu sync.Mutex
+	started     bool
+	draining    bool
+	stopCh      chan struct{}
+	done        chan struct{}
+	workCtx     context.Context
+	workCancel  context.CancelFunc
 }
 
 // NewPricingService 创建价格服务
@@ -319,46 +313,127 @@ func NewPricingService(cfg *config.Config, remoteClient PricingRemoteClient) *Pr
 
 // Initialize 初始化价格服务
 func (s *PricingService) Initialize() error {
+	return s.runPricingRefresh(func(ctx context.Context) error { return s.initializePricing(ctx) })
+}
+
+func (s *PricingService) initializePricing(ctx context.Context) error {
 	// 确保数据目录存在
 	if err := os.MkdirAll(s.cfg.Pricing.DataDir, 0755); err != nil {
 		logger.LegacyPrintf("service.pricing", "[Pricing] Failed to create data directory: %v", err)
 	}
 
 	// 首次加载价格数据
-	if err := s.checkAndUpdatePricing(); err != nil {
+	if err := s.checkAndUpdatePricing(ctx); err != nil {
 		logger.LegacyPrintf("service.pricing", "[Pricing] Initial load failed, using fallback: %v", err)
 		if err := s.useFallbackPricing(); err != nil {
 			return fmt.Errorf("failed to load pricing data: %w", err)
 		}
 	}
 
-	// 启动定时更新
-	s.startUpdateScheduler()
-
 	logger.LegacyPrintf("service.pricing", "[Pricing] Service initialized with %d models", len(s.pricingData))
 	return nil
 }
 
-// Stop 停止价格服务
-func (s *PricingService) Stop() {
-	close(s.stopCh)
-	s.wg.Wait()
-	logger.LegacyPrintf("service.pricing", "%s", "[Pricing] Service stopped")
+// Drain stops new refresh ticks and joins the current update. Readers continue
+// to use the last valid snapshot; shutdown never empties or replaces pricing.
+func (s *PricingService) Drain(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	s.lifecycleMu.Lock()
+	if !s.draining {
+		s.draining = true
+		if s.stopCh != nil {
+			close(s.stopCh)
+		}
+	}
+	done := s.done
+	idle := s.refreshIdle
+	cancel := s.workCancel
+	s.lifecycleMu.Unlock()
+	if done != nil {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	if idle != nil {
+		select {
+		case <-idle:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	if cancel != nil {
+		cancel()
+	}
+	return nil
 }
 
-// startUpdateScheduler 启动定时调度器：每个周期先做远程目录哈希同步（配置了 remote_url 时），
-// 再比对 fallback/override 文件指纹做本地热重载（配置了任一文件时）。两者都未配置则不启动。
-func (s *PricingService) startUpdateScheduler() {
-	if s == nil || s.cfg == nil {
-		return
+// Stop cancels refresh I/O and joins the producer within the caller's deadline.
+func (s *PricingService) Stop(ctx context.Context) error {
+	if s != nil {
+		s.lifecycleMu.Lock()
+		stop := s.workCancel
+		s.lifecycleMu.Unlock()
+		if stop != nil {
+			stop()
+		}
 	}
+	return s.Drain(ctx)
+}
+
+func (s *PricingService) pricingContext(contexts []context.Context) context.Context {
+	if len(contexts) > 0 {
+		return contexts[0]
+	}
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.workCtx != nil {
+		return s.workCtx
+	}
+	return context.Background()
+}
+
+// Start 显式启动定时调度器：每个周期先做远程目录哈希同步（配置了 remote_url 时），
+// 再比对 fallback/override 文件指纹做本地热重载（配置了任一文件时）。两者都未配置则不启动。
+func (s *PricingService) Start(parent context.Context) error {
+	if s == nil || s.cfg == nil {
+		return nil
+	}
+	if err := parent.Err(); err != nil {
+		return err
+	}
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.draining {
+		return fmt.Errorf("pricing producer stopped")
+	}
+	if s.started {
+		return nil
+	}
+	if s.refreshPending != 0 {
+		return fmt.Errorf("pricing initialization is still running")
+	}
+	if s.workCancel != nil {
+		s.workCancel()
+	}
+	s.workCtx, s.workCancel = context.WithCancel(parent)
+	s.started = true
+	s.done = make(chan struct{})
+	if s.stopCh == nil {
+		s.stopCh = make(chan struct{})
+	}
+	ctx := s.workCtx
 	remoteEnabled := strings.TrimSpace(s.cfg.Pricing.RemoteURL) != ""
 	watchCustom := s.hasCustomPricingFiles()
 	if !remoteEnabled {
 		logger.LegacyPrintf("service.pricing", "%s", "[Pricing] Remote sync disabled: pricing remote URL is empty")
 	}
 	if !remoteEnabled && !watchCustom {
-		return
+		close(s.done)
+		return nil
 	}
 
 	hashInterval := time.Duration(s.cfg.Pricing.HashCheckIntervalMinutes) * time.Minute
@@ -366,23 +441,27 @@ func (s *PricingService) startUpdateScheduler() {
 		hashInterval = 10 * time.Minute
 	}
 
-	s.wg.Add(1)
 	go func() {
-		defer s.wg.Done()
+		defer close(s.done)
 		ticker := time.NewTicker(hashInterval)
 		defer ticker.Stop()
 
 		for {
 			select {
 			case <-ticker.C:
-				if remoteEnabled {
-					if err := s.syncWithRemote(); err != nil {
-						logger.LegacyPrintf("service.pricing", "[Pricing] Sync failed: %v", err)
+				_ = s.runPricingRefresh(func(refreshCtx context.Context) error {
+					if remoteEnabled {
+						if err := s.syncWithRemote(refreshCtx); err != nil {
+							logger.LegacyPrintf("service.pricing", "[Pricing] Sync failed: %v", err)
+						}
 					}
-				}
-				if watchCustom {
-					s.reloadIfCustomFilesChanged()
-				}
+					if watchCustom && refreshCtx.Err() == nil {
+						s.reloadIfCustomFilesChanged()
+					}
+					return refreshCtx.Err()
+				})
+			case <-ctx.Done():
+				return
 			case <-s.stopCh:
 				return
 			}
@@ -390,27 +469,29 @@ func (s *PricingService) startUpdateScheduler() {
 	}()
 
 	logger.LegacyPrintf("service.pricing", "[Pricing] Update scheduler started (check every %v, remote sync=%t, custom file watch=%t)", hashInterval, remoteEnabled, watchCustom)
+	return nil
 }
 
 // checkAndUpdatePricing 检查并更新价格数据
-func (s *PricingService) checkAndUpdatePricing() error {
+func (s *PricingService) checkAndUpdatePricing(contexts ...context.Context) error {
+	parent := s.pricingContext(contexts)
 	pricingFile := s.getPricingFilePath()
 
 	// 检查本地文件是否存在
 	if _, err := os.Stat(pricingFile); os.IsNotExist(err) {
 		logger.LegacyPrintf("service.pricing", "%s", "[Pricing] Local pricing file not found, downloading...")
-		return s.downloadPricingData()
+		return s.downloadPricingData(parent)
 	}
 
 	// 先加载本地文件（确保服务可用），再检查是否需要更新
 	if err := s.loadPricingData(pricingFile); err != nil {
 		logger.LegacyPrintf("service.pricing", "[Pricing] Failed to load local file, downloading: %v", err)
-		return s.downloadPricingData()
+		return s.downloadPricingData(parent)
 	}
 
 	// 如果配置了哈希URL，通过远程哈希检查是否有更新
 	if s.cfg.Pricing.HashURL != "" {
-		remoteHash, err := s.fetchRemoteHash()
+		remoteHash, err := s.fetchRemoteHash(parent)
 		if err != nil {
 			logger.LegacyPrintf("service.pricing", "[Pricing] Failed to fetch remote hash on startup: %v", err)
 			return nil // 已加载本地文件，哈希获取失败不影响启动
@@ -423,7 +504,7 @@ func (s *PricingService) checkAndUpdatePricing() error {
 		if localHash == "" || remoteHash != localHash {
 			logger.LegacyPrintf("service.pricing", "[Pricing] Remote hash differs on startup (local=%s remote=%s), downloading...",
 				localHash[:min(8, len(localHash))], remoteHash[:min(8, len(remoteHash))])
-			if err := s.downloadPricingData(); err != nil {
+			if err := s.downloadPricingData(parent); err != nil {
 				logger.LegacyPrintf("service.pricing", "[Pricing] Download failed, using existing file: %v", err)
 			}
 		}
@@ -441,7 +522,7 @@ func (s *PricingService) checkAndUpdatePricing() error {
 
 	if fileAge > maxAge {
 		logger.LegacyPrintf("service.pricing", "[Pricing] Local file is %v old, updating...", fileAge.Round(time.Hour))
-		if err := s.downloadPricingData(); err != nil {
+		if err := s.downloadPricingData(parent); err != nil {
 			logger.LegacyPrintf("service.pricing", "[Pricing] Download failed, using existing file: %v", err)
 		}
 	}
@@ -450,10 +531,11 @@ func (s *PricingService) checkAndUpdatePricing() error {
 }
 
 // syncWithRemote 与远程同步（基于哈希校验）
-func (s *PricingService) syncWithRemote() error {
+func (s *PricingService) syncWithRemote(contexts ...context.Context) error {
+	parent := s.pricingContext(contexts)
 	// 如果配置了哈希URL，从远程获取哈希进行比对
 	if s.cfg.Pricing.HashURL != "" {
-		remoteHash, err := s.fetchRemoteHash()
+		remoteHash, err := s.fetchRemoteHash(parent)
 		if err != nil {
 			logger.LegacyPrintf("service.pricing", "[Pricing] Failed to fetch remote hash: %v", err)
 			return nil // 哈希获取失败不影响正常使用
@@ -466,7 +548,7 @@ func (s *PricingService) syncWithRemote() error {
 		if localHash == "" || remoteHash != localHash {
 			logger.LegacyPrintf("service.pricing", "[Pricing] Remote hash differs (local=%s remote=%s), downloading new version...",
 				localHash[:min(8, len(localHash))], remoteHash[:min(8, len(remoteHash))])
-			return s.downloadPricingData()
+			return s.downloadPricingData(parent)
 		}
 		logger.LegacyPrintf("service.pricing", "%s", "[Pricing] Hash check passed, no update needed")
 		return nil
@@ -476,7 +558,7 @@ func (s *PricingService) syncWithRemote() error {
 	pricingFile := s.getPricingFilePath()
 	info, err := os.Stat(pricingFile)
 	if err != nil {
-		return s.downloadPricingData()
+		return s.downloadPricingData(parent)
 	}
 
 	fileAge := time.Since(info.ModTime())
@@ -484,7 +566,7 @@ func (s *PricingService) syncWithRemote() error {
 
 	if fileAge > maxAge {
 		logger.LegacyPrintf("service.pricing", "[Pricing] File is %v old, downloading...", fileAge.Round(time.Hour))
-		return s.downloadPricingData()
+		return s.downloadPricingData(parent)
 	}
 
 	return nil
@@ -592,31 +674,34 @@ func (s *PricingService) reloadCustomPricingLayers() error {
 		}
 	}
 
+	pricingViewPublicationMu.Lock()
 	s.mu.Lock()
 	warnDroppedLongContextLadders(s.pricingData, data)
 	s.pricingData = data
 	s.customFilesHash = fingerprint
 	s.mu.Unlock()
+	pricingViewPublicationMu.Unlock()
 
 	logger.LegacyPrintf("service.pricing", "[Pricing] Custom pricing files changed, reloaded %d models from %s", len(data), pricingFile)
 	return nil
 }
 
 // downloadPricingData 从远程下载价格数据
-func (s *PricingService) downloadPricingData() error {
+func (s *PricingService) downloadPricingData(contexts ...context.Context) error {
+	parent := s.pricingContext(contexts)
 	remoteURL, err := s.validatePricingURL(s.cfg.Pricing.RemoteURL)
 	if err != nil {
 		return err
 	}
 	logger.LegacyPrintf("service.pricing", "[Pricing] Downloading from %s", remoteURL)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
 
 	// 获取远程哈希（用于同步锚点，不作为完整性校验）
 	var remoteHash string
 	if strings.TrimSpace(s.cfg.Pricing.HashURL) != "" {
-		remoteHash, err = s.fetchRemoteHash()
+		remoteHash, err = s.fetchRemoteHash(parent)
 		if err != nil {
 			logger.LegacyPrintf("service.pricing", "[Pricing] Failed to fetch remote hash (continuing): %v", err)
 		}
@@ -659,6 +744,7 @@ func (s *PricingService) downloadPricingData() error {
 	}
 
 	// 更新内存数据
+	pricingViewPublicationMu.Lock()
 	s.mu.Lock()
 	warnDroppedLongContextLadders(s.pricingData, data)
 	s.pricingData = data
@@ -666,6 +752,7 @@ func (s *PricingService) downloadPricingData() error {
 	s.localHash = syncHash
 	s.customFilesHash = customFilesHash
 	s.mu.Unlock()
+	pricingViewPublicationMu.Unlock()
 
 	logger.LegacyPrintf("service.pricing", "[Pricing] Downloaded %d models successfully", len(data))
 	return nil
@@ -1087,6 +1174,7 @@ func (s *PricingService) loadPricingData(filePath string) error {
 	hash := sha256.Sum256(data)
 	hashStr := hex.EncodeToString(hash[:])
 
+	pricingViewPublicationMu.Lock()
 	s.mu.Lock()
 	warnDroppedLongContextLadders(s.pricingData, pricingData)
 	s.pricingData = pricingData
@@ -1100,6 +1188,7 @@ func (s *PricingService) loadPricingData(filePath string) error {
 		s.lastUpdated = time.Now()
 	}
 	s.mu.Unlock()
+	pricingViewPublicationMu.Unlock()
 
 	logger.LegacyPrintf("service.pricing", "[Pricing] Loaded %d models from %s", len(pricingData), filePath)
 	return nil
@@ -1189,13 +1278,14 @@ func (s *PricingService) useFallbackPricing() error {
 }
 
 // fetchRemoteHash 从远程获取哈希值
-func (s *PricingService) fetchRemoteHash() (string, error) {
+func (s *PricingService) fetchRemoteHash(contexts ...context.Context) (string, error) {
+	parent := s.pricingContext(contexts)
 	hashURL, err := s.validatePricingURL(s.cfg.Pricing.HashURL)
 	if err != nil {
 		return "", err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
 
 	hash, err := s.remoteClient.FetchHashText(ctx, hashURL)
@@ -1229,6 +1319,10 @@ func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	return detachLiteLLMPricing(s.lookupModelPricingLocked(modelName))
+}
+
+func (s *PricingService) lookupModelPricingLocked(modelName string) *LiteLLMModelPricing {
 	if modelName == "" {
 		return nil
 	}
@@ -1310,7 +1404,7 @@ func (s *PricingService) GetIdentifiedModelPricing(modelName string) *LiteLLMMod
 	if modelLower == "" {
 		return nil
 	}
-	return s.lookupIdentifiedModelPricingLocked(s.buildModelLookupCandidates(modelLower))
+	return detachLiteLLMPricing(s.lookupIdentifiedModelPricingLocked(s.buildModelLookupCandidates(modelLower)))
 }
 
 func (s *PricingService) buildModelLookupCandidates(modelLower string) []string {
@@ -1370,14 +1464,14 @@ func normalizeModelNameForPricing(model string) string {
 	}
 
 	model = strings.TrimLeft(model, "/")
-	if canonical := canonicalizeOpenAIModelAliasSpelling(model); canonical != "" {
+	if canonical := openai.CanonicalizeOpenAIModelAliasSpelling(model); canonical != "" {
 		if canonical == "gpt-6" {
 			return "gpt-6-astra"
 		}
 		if canonical == "gpt-5.6" {
 			return "gpt-5.6-sol"
 		}
-		if suffix, ok := strings.CutPrefix(canonical, "gpt-5.6-"); ok && (suffix == "max" || isKnownCodexModelSuffix(suffix)) {
+		if suffix, ok := strings.CutPrefix(canonical, "gpt-5.6-"); ok && (suffix == "max" || catalog.IsKnownCodexModelSuffix(suffix)) {
 			return "gpt-5.6-sol"
 		}
 		return canonical
@@ -1600,12 +1694,6 @@ func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
 		}
 	}
 
-	if openai.IsGPT61TerraModelSpelling(model) {
-		if pricing, ok := s.pricingData["gpt-6.1-terra"]; ok {
-			return pricing
-		}
-		return openAIGPT61TerraFallbackPricing
-	}
 	if openai.IsGPT61SolModelSpelling(model) {
 		if pricing, ok := s.pricingData["gpt-6.1-sol"]; ok {
 			return pricing
@@ -1613,7 +1701,7 @@ func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
 		return openAIGPT61SolFallbackPricing
 	}
 	if openai.IsGPT6SolOrLunaModelSpelling(model) {
-		if pricing, ok := s.pricingData[normalizeKnownOpenAICodexModel(model)]; ok {
+		if pricing, ok := s.pricingData[catalog.NormalizeKnownOpenAICodexModel(model)]; ok {
 			return pricing
 		}
 		if strings.HasPrefix(model, "gpt-6-sol") {
@@ -1695,7 +1783,7 @@ func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
 			return openAIGPTImage25FallbackPricing
 		}
 	}
-	if isOpenAIImageGenerationModel(model) {
+	if catalog.IsOpenAIImageGenerationModel(model) {
 		for _, candidate := range []string{"gpt-image-2", "gpt-image-1.5", "gpt-image-1"} {
 			if pricing, ok := s.pricingData[candidate]; ok {
 				logger.LegacyPrintf("service.pricing", "[Pricing] OpenAI image fallback matched %s -> %s", model, candidate)
@@ -1763,7 +1851,37 @@ func (s *PricingService) GetStatus() map[string]any {
 
 // ForceUpdate 强制更新
 func (s *PricingService) ForceUpdate() error {
-	return s.downloadPricingData()
+	return s.runPricingRefresh(func(ctx context.Context) error { return s.downloadPricingData(ctx) })
+}
+
+func (s *PricingService) runPricingRefresh(run func(context.Context) error) error {
+	s.lifecycleMu.Lock()
+	if s.draining {
+		s.lifecycleMu.Unlock()
+		return fmt.Errorf("pricing producer stopped")
+	}
+	if s.workCtx == nil {
+		s.workCtx, s.workCancel = context.WithCancel(context.Background())
+	}
+	if err := s.workCtx.Err(); err != nil {
+		s.lifecycleMu.Unlock()
+		return err
+	}
+	if s.refreshPending == 0 {
+		s.refreshIdle = make(chan struct{})
+	}
+	s.refreshPending++
+	ctx := s.workCtx
+	s.lifecycleMu.Unlock()
+	defer func() {
+		s.lifecycleMu.Lock()
+		defer s.lifecycleMu.Unlock()
+		s.refreshPending--
+		if s.refreshPending == 0 {
+			close(s.refreshIdle)
+		}
+	}()
+	return run(ctx)
 }
 
 // getPricingFilePath 获取价格文件路径

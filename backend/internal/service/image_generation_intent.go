@@ -1,10 +1,73 @@
 package service
 
 import (
+	"context"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/tidwall/gjson"
 )
+
+type openAIImageRequestModelKey struct{}
+
+// The hosted image model is separate from the outer Responses text model.
+// Record false/empty values too so a later WS text turn clears the image scope.
+func WithOpenAIImageGenerationRequest(ctx context.Context, model string, body []byte) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	intent := IsExplicitImageGenerationIntent(openAIResponsesEndpoint, model, body)
+	ctx = context.WithValue(ctx, ctxkey.OpenAIImageGenerationIntent, intent)
+	imageModel := ""
+	if intent {
+		imageModel = "gpt-image-2"
+		if catalog.IsOpenAIImageGenerationModel(model) {
+			imageModel = strings.TrimSpace(model)
+		} else if bodyModel := gjson.GetBytes(body, "model").String(); catalog.IsOpenAIImageGenerationModel(bodyModel) {
+			imageModel = strings.TrimSpace(bodyModel)
+		} else {
+			for _, tool := range gjson.GetBytes(body, "tools").Array() {
+				if tool.Get("type").String() == "image_generation" {
+					if explicit := strings.TrimSpace(tool.Get("model").String()); explicit != "" {
+						imageModel = explicit
+					}
+					break
+				}
+			}
+		}
+	}
+	return context.WithValue(ctx, openAIImageRequestModelKey{}, imageModel)
+}
+
+// Use the existing account allowlist and model cooldown, not a second policy.
+func OpenAIImageRequestRejection(ctx context.Context, account *Account, requestedModel string) string {
+	if account == nil || !account.IsOpenAI() {
+		return ""
+	}
+	model := ""
+	if ctx != nil {
+		model, _ = ctx.Value(openAIImageRequestModelKey{}).(string)
+	}
+	if model == "" {
+		switch {
+		case catalog.IsOpenAIImageGenerationModel(requestedModel), OpenAIImagesEndpointFromContext(ctx):
+			model = strings.TrimSpace(requestedModel)
+		case OpenAIImageGenerationIntentFromContext(ctx):
+			model = "gpt-image-2"
+		}
+	}
+	if model == "" {
+		return ""
+	}
+	if !account.IsModelSupported(model) {
+		return "image_model_not_supported"
+	}
+	if account.isModelRateLimitedWithContext(WithOpenAIImageGenerationIntent(ctx), model) {
+		return "image_model_rate_limited"
+	}
+	return ""
+}
 
 const (
 	openAIResponsesEndpoint          = "/v1/responses"
@@ -41,7 +104,7 @@ func IsImageGenerationIntent(endpoint string, requestedModel string, body []byte
 	if IsImageGenerationEndpoint(endpoint) {
 		return true
 	}
-	if isOpenAIImageGenerationModel(requestedModel) {
+	if catalog.IsOpenAIImageGenerationModel(requestedModel) {
 		return true
 	}
 	if len(body) == 0 || !gjson.ValidBytes(body) {
@@ -56,7 +119,7 @@ func IsImageGenerationIntent(endpoint string, requestedModel string, body []byte
 		case "model":
 			if !modelSeen {
 				modelSeen = true
-				imageIntent = isOpenAIImageGenerationModel(strings.TrimSpace(value.String()))
+				imageIntent = catalog.IsOpenAIImageGenerationModel(strings.TrimSpace(value.String()))
 			}
 		case "tools":
 			if !toolsSeen {
@@ -83,7 +146,7 @@ func IsImageGenerationIntent(endpoint string, requestedModel string, body []byte
 // 不检测被动的 image_gen namespace 声明。用于 capability 路由决策——被动 namespace 不应
 // 强制要求原生 Responses 能力，否则 Chat Completions-only 账号会被误过滤（#4476）。
 func IsExplicitImageGenerationIntent(endpoint string, requestedModel string, body []byte) bool {
-	if IsImageGenerationEndpoint(endpoint) || isOpenAIImageGenerationModel(requestedModel) {
+	if IsImageGenerationEndpoint(endpoint) || catalog.IsOpenAIImageGenerationModel(requestedModel) {
 		return true
 	}
 	if len(body) == 0 || !gjson.ValidBytes(body) {
@@ -96,7 +159,7 @@ func IsExplicitImageGenerationIntent(endpoint string, requestedModel string, bod
 		case "model":
 			if !modelSeen {
 				modelSeen = true
-				imageIntent = isOpenAIImageGenerationModel(strings.TrimSpace(value.String()))
+				imageIntent = catalog.IsOpenAIImageGenerationModel(strings.TrimSpace(value.String()))
 			}
 		case "tools":
 			if !toolsSeen {
@@ -130,7 +193,7 @@ func IsImageGenerationIntentForPlatform(endpoint string, requestedModel string, 
 }
 
 func isExplicitGrokImageGenerationIntent(endpoint string, requestedModel string, body []byte) bool {
-	if IsImageGenerationEndpoint(endpoint) || isOpenAIImageGenerationModel(requestedModel) {
+	if IsImageGenerationEndpoint(endpoint) || catalog.IsOpenAIImageGenerationModel(requestedModel) {
 		return true
 	}
 	if len(body) == 0 || !gjson.ValidBytes(body) {
@@ -144,7 +207,7 @@ func isExplicitGrokImageGenerationIntent(endpoint string, requestedModel string,
 		case "model":
 			if !modelSeen {
 				modelSeen = true
-				imageIntent = isOpenAIImageGenerationModel(strings.TrimSpace(value.String()))
+				imageIntent = catalog.IsOpenAIImageGenerationModel(strings.TrimSpace(value.String()))
 			}
 		case "tools":
 			if !toolsSeen {
@@ -169,13 +232,13 @@ func IsImageGenerationIntentMap(endpoint string, requestedModel string, reqBody 
 	if IsImageGenerationEndpoint(endpoint) {
 		return true
 	}
-	if isOpenAIImageGenerationModel(requestedModel) {
+	if catalog.IsOpenAIImageGenerationModel(requestedModel) {
 		return true
 	}
 	if reqBody == nil {
 		return false
 	}
-	if isOpenAIImageGenerationModel(firstNonEmptyString(reqBody["model"])) {
+	if catalog.IsOpenAIImageGenerationModel(firstNonEmptyString(reqBody["model"])) {
 		return true
 	}
 	if hasOpenAIImageGenerationTool(reqBody) {
@@ -464,14 +527,6 @@ func resolveOpenAIResponsesImageBillingConfigDetailed(reqBody map[string]any, fa
 	}, nil
 }
 
-func resolveOpenAIResponsesImageBillingConfigFromBody(body []byte, fallbackModel string) (string, string, error) {
-	cfg, err := resolveOpenAIResponsesImageBillingConfigDetailedFromBody(body, fallbackModel)
-	if err != nil {
-		return "", "", err
-	}
-	return cfg.Model, cfg.SizeTier, nil
-}
-
 func resolveOpenAIResponsesImageBillingConfigDetailedFromBody(body []byte, fallbackModel string) (OpenAIResponsesImageBillingConfig, error) {
 	imageModel := ""
 	imageSize := ""
@@ -517,7 +572,7 @@ func isOpenAIImageBillingModelAlias(model string) bool {
 	if normalized == "" {
 		return false
 	}
-	return isOpenAIImageGenerationModel(normalized) || strings.Contains(normalized, "image")
+	return catalog.IsOpenAIImageGenerationModel(normalized) || strings.Contains(normalized, "image")
 }
 
 func openAIJSONString(value gjson.Result) string {

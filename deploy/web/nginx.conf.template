@@ -1,0 +1,92 @@
+worker_processes auto;
+pid /tmp/web/nginx.pid;
+error_log /dev/stderr warn;
+events { worker_connections 1024; }
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    server_tokens off;
+    client_body_temp_path /tmp/web/client;
+    proxy_temp_path /tmp/web/proxy;
+    fastcgi_temp_path /tmp/web/fastcgi;
+    uwsgi_temp_path /tmp/web/uwsgi;
+    scgi_temp_path /tmp/web/scgi;
+    # The backend owns each route's body budget (including 256 MiB images).
+    # Stream requests without imposing the vendor portal's separate 64m limit.
+    client_max_body_size 0;
+    # BPS image URLs carry a capability token. Never put it in access logs.
+    map $uri $web_log_uri {
+        ~^/api/bps-images/ "/api/bps-images/[redacted]";
+        default $uri;
+    }
+    log_format web '$remote_addr "$request_method $web_log_uri" $status $body_bytes_sent upstream=$upstream_status connect=$upstream_connect_time response=$upstream_response_time';
+    access_log /dev/stdout web;
+    resolver ${WEB_RESOLVERS} valid=30s;
+    resolver_timeout 5s;
+    real_ip_header X-Forwarded-For;
+    real_ip_recursive on;
+    include /tmp/web/trusted-proxies.conf;
+    map $http_upgrade $connection_upgrade {
+        default upgrade;
+        '' '';
+    }
+    map "$status:$uri" $web_cache_control {
+        default "no-store";
+        ~^(200|304):/assets/ "public, max-age=31536000, immutable";
+    }
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy same-origin always;
+    add_header X-Frame-Options DENY always;
+    add_header Cache-Control $web_cache_control always;
+    server {
+        # Request errors contain raw URI/query credentials. Keep process errors
+        # above and sanitized access status/timings for request diagnostics.
+        error_log /dev/null;
+        listen 8080 default_server;
+        server_name _;
+        location = /health { access_log off; return 200 "ok\n"; }
+        location / { return 404; }
+    }
+    server {
+        # Request errors contain raw URI/query credentials. Keep process errors
+        # above and sanitized access status/timings for request diagnostics.
+        error_log /dev/null;
+        listen 8080;
+        server_name ${WEB_HOST};
+        root /usr/share/nginx/html;
+        index index.html;
+        set $backend_origin "${BACKEND_ORIGIN}";
+        location = /health { access_log off; return 200 "ok\n"; }
+        location = /web-build.json { alias /etc/nginx/ui-build.json; }
+        # Match the actual gateway.go groups and registered root aliases.
+        # Do not reserve whole /images, /chat, /messages, /alpha or /contents
+        # prefixes: their other paths can belong to the SPA. Root /models and
+        # /models/:model ARE explicitly registered outside the /v1 group.
+        location ~ ^/(?:(?:api|v1|v1beta)(?:/|$)|backend-api/codex(?:/|$)|antigravity/(?:models/?$|v1(?:/|$)|v1beta(?:/|$))|responses(?:/|$)|(?:v3/)?contents/generations/tasks(?:/[^/]+)?/?$|models(?:/[^/]+)?/?$|messages/count_tokens/?$|alpha/search/?$|chat/completions/?$|embeddings/?$|images/(?:generations(?:/async)?|edits(?:/async)?|tasks/[^/]+)/?$|videos(?:/(?:generations|edits|extensions))?(?:/[^/]+(?:/content)?)?/?$|custom-voices(?:/[^/]+(?:/audio)?)?/?$|(?:tts|stt|realtime|web_search|x_search)/?$|setup/(?:status|test-db|test-redis|install)/?$) {
+            proxy_pass $backend_origin$request_uri;
+            proxy_http_version 1.1;
+            proxy_set_header Host "${WEB_AUTHORITY}";
+            proxy_set_header X-Forwarded-Host "${WEB_AUTHORITY}";
+            proxy_set_header X-Forwarded-Proto "${WEB_SCHEME}";
+            proxy_set_header X-Forwarded-For $remote_addr;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_connect_timeout 10s;
+            proxy_read_timeout 3600s;
+            proxy_send_timeout 3600s;
+            proxy_buffering off;
+            proxy_request_buffering off;
+            proxy_cache off;
+            proxy_intercept_errors off;
+            proxy_next_upstream off;
+            proxy_redirect off;
+            proxy_ssl_server_name on;
+            proxy_ssl_name "${BACKEND_TLS_NAME}";
+            proxy_ssl_verify on;
+            proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+        }
+        location ^~ /assets/ { try_files $uri =404; }
+        location / { try_files $uri $uri/ /index.html; }
+    }
+}

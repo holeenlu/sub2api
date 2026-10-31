@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/adminaccess"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -104,7 +105,7 @@ func (h *GroupHandler) ScopedAdminKeyGroupModels(c *gin.Context) {
 		return
 	}
 	raw := fields["model_allowlist"]
-	var cfg *service.GroupModelAllowlist
+	var cfg *catalog.ModelAllowlist
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&cfg) != nil || cfg == nil {
@@ -112,7 +113,7 @@ func (h *GroupHandler) ScopedAdminKeyGroupModels(c *gin.Context) {
 		return
 	}
 	api, ok := h.adminService.(interface {
-		ScopedAdminUpdateGroupModels(context.Context, int64, service.GroupModelAllowlist) (*service.Group, error)
+		ScopedAdminUpdateGroupModels(context.Context, int64, catalog.ModelAllowlist) (*service.Group, error)
 	})
 	if !ok {
 		response.Error(c, 503, "受限分组模型服务不可用")

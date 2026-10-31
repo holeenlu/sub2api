@@ -153,6 +153,13 @@ func (s *grokMediaSlotBindings) RefreshSessionTTL(context.Context, int64, string
 	s.writes++
 	return nil
 }
+func (s *grokMediaSlotBindings) CompareAndRefreshSessionAccountID(ctx context.Context, groupID int64, key string, owner int64, ttl time.Duration, create bool) (bool, error) {
+	exists := groupID == 24 && key == s.key
+	if (exists && s.owner != owner) || (!exists && !create) {
+		return false, nil
+	}
+	return true, s.SetSessionAccountID(ctx, groupID, key, owner, ttl)
+}
 func (s *grokMediaSlotBindings) DeleteSessionAccountID(context.Context, int64, string) error {
 	s.writes++
 	return nil
@@ -227,7 +234,6 @@ func newGrokMediaSlotHandler(t *testing.T, oauth, mismatch bool, platforms ...st
 	cfg := &config.Config{RunMode: config.RunModeSimple}
 	cfg.Gateway.Scheduling.StickySessionWaitTimeout = 20 * time.Millisecond
 	cfg.Gateway.Scheduling.StickySessionMaxWaiting = 3
-	cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled = true
 	repo := grokMediaSlotRepo{openAIImagesFailoverAccountRepo: openAIImagesFailoverAccountRepo{accounts: accounts}, mismatch: mismatch}
 	provider := service.NewGrokTokenProvider(repo, nil)
 	if oauth {
@@ -239,7 +245,7 @@ func newGrokMediaSlotHandler(t *testing.T, oauth, mismatch bool, platforms ...st
 	require.NoError(t, gateway.BindGrokMediaVideoRequestAccount(context.Background(), &groupID, "task", 10, 20, 1))
 	bindings.writes = 0
 	billing := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
-	t.Cleanup(billing.Stop)
+	cleanupHandlerBillingCache(t, billing)
 	handler := NewOpenAIGatewayHandler(gateway, concurrency, billing, service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg), nil, nil, nil, nil, cfg)
 	return handler, slots, bindings, upstream
 }
@@ -266,7 +272,7 @@ func grokMediaSlotContext(ctx context.Context, generation bool) (*gin.Context, *
 }
 
 func TestGrokMediaLookupSlotLifecycle(t *testing.T) {
-	for _, scenario := range []string{"normal", "mismatch acquired", "mismatch wait", "full", "queue full", "cancel while waiting", "wait then acquired", "upstream error", "cancel", "panic"} {
+	for _, scenario := range []string{"normal", "mismatch acquired", "mismatch wait", "full", "queue full", "cancel while waiting", "wait then acquired", "upstream error", "cancel", "cancel detached", "panic"} {
 		t.Run(scenario, func(t *testing.T) {
 			h, slots, bindings, upstream := newGrokMediaSlotHandler(t, false, strings.HasPrefix(scenario, "mismatch"))
 			ctx, cancel := context.WithCancel(context.Background())
@@ -292,6 +298,14 @@ func TestGrokMediaLookupSlotLifecycle(t *testing.T) {
 				case "cancel":
 					cancel()
 					return nil, context.Canceled
+				case "cancel detached":
+					cancel()
+					require.NoError(t, req.Context().Err())
+					slots.mu.Lock()
+					accountSlots, userSlots := len(slots.accounts), len(slots.users)
+					slots.mu.Unlock()
+					require.Equal(t, 1, accountSlots)
+					require.Equal(t, 1, userSlots)
 				case "panic":
 					panic("test upstream panic")
 				}
@@ -326,7 +340,7 @@ func TestGrokMediaLookupSlotLifecycle(t *testing.T) {
 			case "normal", "wait then acquired", "upstream error", "panic":
 				require.Equal(t, 20, upstream.calls)
 				require.Equal(t, 20, slots.released)
-			case "cancel":
+			case "cancel", "cancel detached":
 				require.Equal(t, 1, upstream.calls)
 				require.Equal(t, 1, slots.released)
 			}

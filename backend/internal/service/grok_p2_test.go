@@ -59,9 +59,8 @@ func TestGrokStickyAffinitySeed_ScopesByModel(t *testing.T) {
 
 func TestExtractGrokModelIDsFromModelsBody(t *testing.T) {
 	body := []byte(`{"object":"list","data":[{"id":"grok-4.5"},{"id":"grok-4.3"},{"id":"grok-4.5"}]}`)
-	ids, err := extractGrokModelIDsFromModelsBody(body)
-	require.NoError(t, err)
-	require.Equal(t, []string{"grok-4.3", "grok-4.5"}, ids)
+	ids := extractGrokModelIDsFromModelsBody(body)
+	require.Equal(t, []string{"grok-4.5", "grok-4.3"}, ids)
 }
 
 func TestAccountGrokNeedsReauth(t *testing.T) {

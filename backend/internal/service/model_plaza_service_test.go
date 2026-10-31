@@ -7,6 +7,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
@@ -309,79 +310,6 @@ func TestListPlazaGroups_GroupImagePriceOverridesChannelPricing(t *testing.T) {
 	require.Len(t, channels[0].ModelPricing[0].Intervals, 1)
 }
 
-func TestListPlazaGroups_GroupModelImagePricingWinsOverGroupImageTiers(t *testing.T) {
-	groupImage1K, groupImage2K, groupImage4K := 0.05, 0.055, 0.06
-	model1K, model2K, model4K := 0.05, 0.075, 0.1
-	channels := []Channel{{
-		ID: 1, Name: "img-ch", Status: StatusActive, GroupIDs: []int64{10},
-		ModelPricing: []ChannelModelPricing{{
-			Platform:        "openai",
-			Models:          []string{"yeahzi-image"},
-			BillingMode:     BillingModeImage,
-			PerRequestPrice: testPtrFloat64(0.2),
-		}},
-	}}
-	groups := []Group{{
-		ID: 10, Name: "g", Platform: "openai", RateMultiplier: 1,
-		ImagePrice1K: &groupImage1K, ImagePrice2K: &groupImage2K, ImagePrice4K: &groupImage4K,
-		ModelPricing: []ChannelModelPricing{{
-			Platform:        "openai",
-			Models:          []string{"yeahzi-image"},
-			BillingMode:     BillingModeImage,
-			PerRequestPrice: testPtrFloat64(0.1),
-			Intervals: []PricingInterval{
-				{TierLabel: "1K", PerRequestPrice: &model1K},
-				{TierLabel: "2K", PerRequestPrice: &model2K},
-				{TierLabel: "4K", PerRequestPrice: &model4K},
-			},
-		}},
-	}}
-
-	out, err := newPlazaService(channels, groups, nil).ListGroups(context.Background())
-	require.NoError(t, err)
-	require.Len(t, out, 1)
-	require.Len(t, out[0].Models, 1)
-	p := out[0].Models[0].Pricing
-	require.Equal(t, BillingModeImage, p.BillingMode)
-	require.Len(t, p.Intervals, 3)
-	tierPrices := map[string]float64{}
-	for _, iv := range p.Intervals {
-		require.NotNil(t, iv.PerRequestPrice)
-		tierPrices[iv.TierLabel] = *iv.PerRequestPrice
-	}
-	require.InDelta(t, 0.05, tierPrices["1K"], 1e-9)
-	require.InDelta(t, 0.075, tierPrices["2K"], 1e-9)
-	require.InDelta(t, 0.1, tierPrices["4K"], 1e-9)
-}
-
-func TestListPlazaGroups_GroupModelFlatImagePriceWinsOverGroupImageTiers(t *testing.T) {
-	groupPrice := 0.2
-	channels := []Channel{{
-		ID: 1, Name: "img-ch", Status: StatusActive, GroupIDs: []int64{10},
-		ModelPricing: []ChannelModelPricing{{
-			Platform: "openai", Models: []string{"gemini-3.1-flash-lite-image"},
-			BillingMode: BillingModeImage, PerRequestPrice: testPtrFloat64(0.2),
-		}},
-	}}
-	groups := []Group{{
-		ID: 10, Name: "g", Platform: "openai", RateMultiplier: 1,
-		ImagePrice1K: &groupPrice,
-		ModelPricing: []ChannelModelPricing{{
-			Platform: "openai", Models: []string{"gemini-3.1-flash-lite-image"},
-			BillingMode: BillingModeImage, PerRequestPrice: testPtrFloat64(0.1),
-		}},
-	}}
-
-	out, err := newPlazaService(channels, groups, nil).ListGroups(context.Background())
-	require.NoError(t, err)
-	require.Len(t, out, 1)
-	p := out[0].Models[0].Pricing
-	require.Equal(t, BillingModeImage, p.BillingMode)
-	require.NotNil(t, p.PerRequestPrice)
-	require.InDelta(t, 0.1, *p.PerRequestPrice, 1e-9)
-	require.Empty(t, p.Intervals, "模型级固定价不应被分组图片档位覆盖")
-}
-
 func TestListPlazaGroups_GroupImagePriceIgnoredForNonImageModes(t *testing.T) {
 	// token 模式定价不受分组图片价影响。
 	imgPrice := 0.02
@@ -581,4 +509,49 @@ func TestListGroups_TimePricingPassthrough(t *testing.T) {
 	require.InDelta(t, 0.5, m.TimePricing.Periods[0].Multiplier, 1e-12)
 	// 展示单价为标准时段价
 	require.InDelta(t, 0.28e-6, *m.Pricing.InputPrice, 1e-15)
+}
+
+func TestListGroups_WhitelistControlsModelsWithoutChannelCards(t *testing.T) {
+	channels := []Channel{plazaPricedChannel(1, "ch", []int64{10}, PlatformOpenAI, "gpt-6-astra", "gpt-6-luna", "gpt-5.6-sol")}
+	group := Group{ID: 10, Platform: PlatformOpenAI, ModelAllowlist: catalog.ModelAllowlist{
+		Enabled: true, Models: []string{"gpt-6-*", "gpt-image-2.5-flare"},
+	}}
+	out, err := newPlazaService(channels, []Group{group}, nil).ListGroups(context.Background())
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	models := plazaModelsByName(out[0].Models)
+	require.Len(t, models, 3)
+	require.Contains(t, models, "gpt-6-astra")
+	require.Contains(t, models, "gpt-6-luna")
+	require.Contains(t, models, "gpt-image-2.5-flare")
+	require.NotContains(t, models, "gpt-5.6-sol")
+	require.NotContains(t, models, "gpt-6-*")
+}
+
+func TestListGroups_DefaultImagePricingMatchesNativeBilling(t *testing.T) {
+	group := Group{ID: 10, Platform: PlatformOpenAI, ImagePrice1K: testPtrFloat64(0),
+		ImagePrice2K: testPtrFloat64(0.15), ImageRateIndependent: true, ImageRateMultiplier: 0.8,
+		ModelAllowlist: catalog.ModelAllowlist{Enabled: true, Models: []string{"gpt-image-2.5-flare"}}}
+	catalog := newStubPricingServiceFromJSON(t, `{"gpt-image-2.5-flare":{"input_cost_per_token":0.00001,"output_cost_per_token":0.00004,"output_cost_per_image":0.1,"litellm_provider":"openai"}}`)
+	svc := newPlazaServiceWithBilling(nil, []Group{group}, map[int64]string{10: PlatformOpenAI}, catalog)
+	out, err := svc.ListGroups(context.Background())
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	pricing := out[0].Models[0].Pricing
+	require.Equal(t, BillingModeImage, pricing.BillingMode)
+	require.Len(t, pricing.Intervals, 3)
+	cfg := &ImagePriceConfig{Price1K: group.ImagePrice1K, Price2K: group.ImagePrice2K}
+	for _, interval := range pricing.Intervals {
+		cost := svc.billingService.CalculateImageCost("gpt-image-2.5-flare", interval.TierLabel, 1, cfg, 1)
+		require.InDelta(t, cost.TotalCost, *interval.PerRequestPrice, 1e-12)
+	}
+	require.Zero(t, *pricing.Intervals[0].PerRequestPrice, "explicit zero must stay zero")
+	require.True(t, out[0].ImageRateIndependent)
+	require.Equal(t, 0.8, out[0].ImageRateMultiplier)
+	// Explicit channel token billing must retain its configured mode.
+	ch := plazaPricedChannel(1, "ch", []int64{10}, PlatformOpenAI, "gpt-image-2.5-flare")
+	svc = newPlazaServiceWithBilling([]Channel{ch}, []Group{group}, map[int64]string{10: PlatformOpenAI}, catalog)
+	out, err = svc.ListGroups(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, BillingModeToken, out[0].Models[0].Pricing.BillingMode)
 }

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
@@ -97,7 +98,7 @@ func selectResponsesProbeModel(account *Account) string {
 	// Prefer a general text model over auxiliary entries such as
 	// codex-auto-review or image-only models, which cannot prove tool support.
 	for _, candidate := range candidates {
-		if strings.HasPrefix(candidate, "gpt-") && !isOpenAIImageGenerationModel(candidate) {
+		if strings.HasPrefix(candidate, "gpt-") && !catalog.IsOpenAIImageGenerationModel(candidate) {
 			return candidate
 		}
 	}

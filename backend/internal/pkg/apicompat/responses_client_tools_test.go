@@ -66,6 +66,25 @@ func TestAdaptResponsesClientTools_LowersDeclarationsHistoryChoiceAndNamespaces(
 	require.Equal(t, "team__send", namespaceCall["name"])
 }
 
+func TestAdaptResponsesClientTools_PreservesDeclaredToolSearchSchema(t *testing.T) {
+	schema := map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}, "limit": map[string]any{"type": "number"}}, "required": []any{"query"}, "additionalProperties": false}
+	req := map[string]any{"tools": []any{map[string]any{"type": "tool_search", "execution": "client", "description": "Search this client's enabled sources.", "parameters": schema}}}
+	mapping, _, err := AdaptResponsesClientTools(req)
+	require.NoError(t, err)
+	require.True(t, mapping.ToolSearch)
+	tool := req["tools"].([]any)[0].(map[string]any)
+	require.Equal(t, schema, tool["parameters"])
+	require.Equal(t, "Search this client's enabled sources.", tool["description"])
+	encoded, err := json.Marshal(schema)
+	require.NoError(t, err)
+	chat, err := responsesToolsToChatTools([]ResponsesTool{{Type: "tool_search", Description: "Search this client's enabled sources.", Parameters: encoded}})
+	require.NoError(t, err)
+	require.JSONEq(t, string(encoded), string(chat[0].Function.Parameters))
+	require.Equal(t, tool["description"], chat[0].Function.Description)
+	_, _, err = AdaptResponsesClientTools(map[string]any{"tools": []any{map[string]any{"type": "tool_search", "parameters": "not-a-schema"}}})
+	require.Error(t, err)
+}
+
 func TestAdaptResponsesClientTools_RemovesDeferredFlagsWhenToolSearchIsLowered(t *testing.T) {
 	req := map[string]any{
 		"tools": []any{

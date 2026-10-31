@@ -97,8 +97,8 @@ func TestOpenAIGatewayServiceRecordUsage_GPT61SolSubscriptionLongContext(t *test
 							wantTotal := (0.458*inputFactor + 0.02*outputFactor) * tierFactor
 							require.InDelta(t, wantTotal, log.TotalCost, 1e-12)
 							require.InDelta(t, wantTotal*1.1, log.ActualCost, 1e-12)
-							require.Equal(t, 1, userRepo.deductCalls)
-							require.InDelta(t, wantTotal*1.1, userRepo.lastAmount, 1e-12)
+							require.Positive(t, recordUsageBillingCommand(t, svc.usageBillingRepo).BalanceCost)
+							require.InDelta(t, wantTotal*1.1, recordUsageBillingCommand(t, svc.usageBillingRepo).BalanceCost, 1e-12)
 							if groupMode != "无分组" {
 								wantStats := 0.478 * tierFactor
 								if accountType == AccountTypeAPIKey && accountEnabled {
@@ -231,7 +231,7 @@ func TestOpenAIGatewayServiceRecordUsage_GPT61SolExemptionSurvivesRepricing(t *t
 	const standardCost = 220000*2e-6 + 80000*0.1e-6 + 2000*10e-6
 	require.InDelta(t, standardCost*2, usageRepo.lastLog.TotalCost, 1e-12)
 	require.InDelta(t, standardCost*1.1, usageRepo.lastLog.ActualCost, 1e-12)
-	require.InDelta(t, standardCost*1.1, userRepo.lastAmount, 1e-12)
+	require.InDelta(t, standardCost*1.1, recordUsageBillingCommand(t, svc.usageBillingRepo).BalanceCost, 1e-12)
 	require.False(t, usageRepo.lastLog.LongContextBillingApplied)
 	require.NotNil(t, usageRepo.lastLog.AccountStatsCost)
 	require.InDelta(t, standardCost*2, *usageRepo.lastLog.AccountStatsCost, 1e-12)

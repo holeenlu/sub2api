@@ -3,35 +3,16 @@ package service
 import (
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
-func NormalizeOpenAICompatRequestedModel(model string) string {
-	if openai.IsGPT61TerraModelSpelling(model) {
-		return "gpt-6.1-terra"
-	}
-	if openai.IsGPT61SolModelSpelling(model) {
-		return "gpt-6.1-sol"
-	}
-	trimmed := strings.TrimSpace(model)
-	if trimmed == "" {
-		return ""
-	}
-
-	normalized, _, ok := splitOpenAICompatReasoningModel(trimmed)
-	if !ok || normalized == "" {
-		return trimmed
-	}
-	return normalized
-}
-
 func applyOpenAICompatModelNormalization(req *apicompat.AnthropicRequest) {
-	if req != nil && (openai.IsGPT61SolModelSpelling(req.Model) || openai.IsGPT61TerraModelSpelling(req.Model)) {
+	if req != nil && openai.IsGPT61SolModelSpelling(req.Model) {
 		canonical := openai.CanonicalizeOpenAIModelAliasSpelling(req.Model)
-		baseModel := NormalizeOpenAICompatRequestedModel(req.Model)
-		if effort, ok := strings.CutPrefix(canonical, baseModel+"-"); ok && effort != "openai-compact" {
-			req.Model = baseModel
+		if effort, ok := strings.CutPrefix(canonical, "gpt-6.1-sol-"); ok && effort != "openai-compact" {
+			req.Model = "gpt-6.1-sol"
 			if req.OutputConfig == nil {
 				req.OutputConfig = &apicompat.AnthropicOutputConfig{}
 			}
@@ -51,7 +32,7 @@ func applyOpenAICompatModelNormalization(req *apicompat.AnthropicRequest) {
 		return
 	}
 
-	normalizedModel, derivedEffort, hasReasoningSuffix := splitOpenAICompatReasoningModel(originalModel)
+	normalizedModel, derivedEffort, hasReasoningSuffix := catalog.SplitOpenAICompatReasoningModel(originalModel)
 	if hasReasoningSuffix && normalizedModel != "" {
 		req.Model = normalizedModel
 	}
@@ -69,48 +50,6 @@ func applyOpenAICompatModelNormalization(req *apicompat.AnthropicRequest) {
 		req.OutputConfig = &apicompat.AnthropicOutputConfig{}
 	}
 	req.OutputConfig.Effort = claudeEffort
-}
-
-func splitOpenAICompatReasoningModel(model string) (normalizedModel string, reasoningEffort string, ok bool) {
-	trimmed := strings.TrimSpace(model)
-	if trimmed == "" {
-		return "", "", false
-	}
-
-	modelID := trimmed
-	if strings.Contains(modelID, "/") {
-		parts := strings.Split(modelID, "/")
-		modelID = parts[len(parts)-1]
-	}
-	modelID = strings.TrimSpace(modelID)
-	if !strings.HasPrefix(strings.ToLower(modelID), "gpt-") {
-		return trimmed, "", false
-	}
-
-	parts := strings.FieldsFunc(strings.ToLower(modelID), func(r rune) bool {
-		switch r {
-		case '-', '_', ' ':
-			return true
-		default:
-			return false
-		}
-	})
-	if len(parts) == 0 {
-		return trimmed, "", false
-	}
-
-	last := strings.NewReplacer("-", "", "_", "", " ", "").Replace(parts[len(parts)-1])
-	switch last {
-	case "none", "minimal":
-	case "low", "medium", "high":
-		reasoningEffort = last
-	case "xhigh", "extrahigh":
-		reasoningEffort = "xhigh"
-	default:
-		return trimmed, "", false
-	}
-
-	return normalizeCodexModel(modelID), reasoningEffort, true
 }
 
 func openAIReasoningEffortToClaudeOutputEffort(effort string) string {

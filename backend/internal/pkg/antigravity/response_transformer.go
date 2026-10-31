@@ -3,15 +3,12 @@ package antigravity
 import (
 	"crypto/rand"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"strings"
 	"sync/atomic"
 	"time"
 )
-
-var ErrMalformedFunctionCall = errors.New("upstream returned MALFORMED_FUNCTION_CALL")
 
 // TransformGeminiToClaude 将 Gemini 响应转换为 Claude 格式（非流式）
 func TransformGeminiToClaude(geminiResp []byte, originalModel string) ([]byte, *ClaudeUsage, error) {
@@ -26,7 +23,7 @@ func TransformGeminiToClaude(geminiResp []byte, originalModel string) ([]byte, *
 		v1Resp.Response = directResp
 		v1Resp.ResponseID = directResp.ResponseID
 		v1Resp.ModelVersion = directResp.ModelVersion
-	} else if len(v1Resp.Response.Candidates) == 0 {
+	} else if len(v1Resp.Response.Candidates) == 0 && v1Resp.Response.PromptFeedback == nil {
 		// 第一次解析成功但 candidates 为空，说明是直接的 GeminiResponse 格式
 		var directResp GeminiResponse
 		if err2 := json.Unmarshal(geminiResp, &directResp); err2 != nil {
@@ -35,10 +32,6 @@ func TransformGeminiToClaude(geminiResp []byte, originalModel string) ([]byte, *
 		v1Resp.Response = directResp
 		v1Resp.ResponseID = directResp.ResponseID
 		v1Resp.ModelVersion = directResp.ModelVersion
-	}
-
-	if len(v1Resp.Response.Candidates) > 0 && v1Resp.Response.Candidates[0].FinishReason == "MALFORMED_FUNCTION_CALL" {
-		return nil, nil, ErrMalformedFunctionCall
 	}
 
 	// 使用处理器转换
@@ -276,11 +269,16 @@ func (p *NonStreamingProcessor) buildResponse(geminiResp *GeminiResponse, respon
 		}
 	}
 
+	if feedback := geminiResp.PromptFeedback; feedback != nil && feedback.BlockReason != "" && feedback.BlockReason != "BLOCK_REASON_UNSPECIFIED" {
+		finishReason = "SAFETY"
+	}
 	stopReason := "end_turn"
 	if p.hasToolCall {
 		stopReason = "tool_use"
 	} else if finishReason == "MAX_TOKENS" {
 		stopReason = "max_tokens"
+	} else if finishReason == "SAFETY" {
+		stopReason = "refusal"
 	}
 
 	// 注意：Gemini 的 promptTokenCount 包含 cachedContentTokenCount，

@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/internal/billing/reservation"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -123,7 +123,7 @@ var (
 	`)
 )
 
-// ReserveInflightBalance 实现 service.InflightBalanceReservationCache。
+// ReserveInflightBalance 实现 reservation.BalanceCache。
 func (c *billingCache) ReserveInflightBalance(ctx context.Context, userID int64, requestID string, amount, balance float64, ttl time.Duration) (bool, float64, error) {
 	zkey, hkey := billingInflightKeys(userID)
 	now := time.Now().UnixMilli()
@@ -153,13 +153,13 @@ func (c *billingCache) ReserveInflightBalance(ctx context.Context, userID int64,
 	return allowed == 1, sum, nil
 }
 
-// ReleaseInflightBalance 实现 service.InflightBalanceReservationCache。
+// ReleaseInflightBalance 实现 reservation.BalanceCache。
 func (c *billingCache) ReleaseInflightBalance(ctx context.Context, userID int64, requestID string) error {
 	zkey, hkey := billingInflightKeys(userID)
 	return releaseInflightBalanceScript.Run(ctx, c.rdb, []string{zkey, hkey}, requestID).Err()
 }
 
-// RenewInflightBalance 实现 service.InflightBalanceReservationRenewer。
+// RenewInflightBalance 实现 reservation.BalanceRenewer。
 func (c *billingCache) RenewInflightBalance(ctx context.Context, userID int64, requestID string, ttl time.Duration) (bool, error) {
 	zkey, hkey := billingInflightKeys(userID)
 	ttlMs := ttl.Milliseconds()
@@ -174,7 +174,7 @@ func (c *billingCache) RenewInflightBalance(ctx context.Context, userID int64, r
 	return n == 1, nil
 }
 
-// ReserveInflightScope 实现 service.InflightScopeReservationCache。
+// ReserveInflightScope 实现 reservation.ScopeCache。
 func (c *billingCache) ReserveInflightScope(ctx context.Context, scope, requestID string, amount float64, ttl time.Duration) (float64, error) {
 	zkey, hkey := billingInflightScopeKeys(scope)
 	now := time.Now().UnixMilli()
@@ -195,14 +195,14 @@ func (c *billingCache) ReserveInflightScope(ctx context.Context, scope, requestI
 	return strconv.ParseFloat(res, 64)
 }
 
-// ReleaseInflightScope 实现 service.InflightScopeReservationCache。
+// ReleaseInflightScope 实现 reservation.ScopeCache。
 func (c *billingCache) ReleaseInflightScope(ctx context.Context, scope, requestID string) error {
 	zkey, hkey := billingInflightScopeKeys(scope)
 	return releaseInflightBalanceScript.Run(ctx, c.rdb, []string{zkey, hkey}, requestID).Err()
 }
 
 var (
-	_ service.InflightBalanceReservationCache   = (*billingCache)(nil)
-	_ service.InflightBalanceReservationRenewer = (*billingCache)(nil)
-	_ service.InflightScopeReservationCache     = (*billingCache)(nil)
+	_ reservation.BalanceCache   = (*billingCache)(nil)
+	_ reservation.BalanceRenewer = (*billingCache)(nil)
+	_ reservation.ScopeCache     = (*billingCache)(nil)
 )

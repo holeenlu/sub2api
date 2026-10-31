@@ -31,7 +31,7 @@ func (*scopedSubscriptionRepo) GetByID(context.Context, int64) (*service.UserSub
 func TestScopedAdminSubscriptionDoesNotExposeAssociatedUserAndPricing(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	s := service.NewSubscriptionService(nil, &scopedSubscriptionRepo{}, nil, nil, nil)
-	defer s.Stop()
+	startAdminFixtureService(t, s)
 	h := NewSubscriptionHandler(s)
 	for _, scoped := range []bool{false, true} {
 		w := httptest.NewRecorder()
@@ -80,7 +80,7 @@ func TestScopedAdminSubscriptionExtendReplayRespectsReadPermission(t *testing.T)
 	service.SetDefaultIdempotencyCoordinator(service.NewIdempotencyCoordinator(newMemoryIdempotencyRepoStub(), service.DefaultIdempotencyConfig()))
 	repo := &scopedSubscriptionRepo{}
 	svc := service.NewSubscriptionService(nil, repo, nil, nil, nil)
-	defer svc.Stop()
+	startAdminFixtureService(t, svc)
 	h := NewSubscriptionHandler(svc)
 	r := gin.New()
 	r.Use(func(c *gin.Context) {

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	gatewaysession "github.com/Wei-Shaw/sub2api/internal/gateway/session"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/stretchr/testify/require"
 )
@@ -45,6 +46,7 @@ func TestProfitControl_PreviousResponseStickyVetoKeepsBinding(t *testing.T) {
 		openaiWSStateStore: store,
 	}
 	require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_profit", expensive.ID, time.Hour))
+	require.NoError(t, store.BindResponseMode(ctx, groupID, "resp_profit", gatewaysession.ResponseModeNative, time.Hour))
 
 	selection, err := svc.SelectAccountByPreviousResponseID(ctx, &groupID, "resp_profit", "gpt-5.1", nil, false)
 	require.NoError(t, err)

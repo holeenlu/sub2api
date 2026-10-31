@@ -101,57 +101,22 @@ func TestAccountFromServiceShallow_NilCredentialsOmitsStatus(t *testing.T) {
 	require.Nil(t, got.CredentialsStatus)
 }
 
-func TestAccountFromService_RedactsGrokModelDiagnostics(t *testing.T) {
-	src := &service.Account{
-		ID: 25, Name: "grok", Platform: service.PlatformGrok, Type: service.AccountTypeOAuth,
-		Credentials: map[string]any{
-			"access_token":  "access-secret",
-			"refresh_token": "refresh-secret",
-			"api_key":       "sk-secret",
-			"base_url":      "https://cli-chat-proxy.grok.com/v1",
-			"model_mapping": map[string]any{"friendly": "grok-4.7"},
-		},
-		Extra: map[string]any{"grok_observed_models": map[string]any{"models": []any{"grok-4.7"}}},
-	}
-
-	got := AccountFromService(src)
-	require.Nil(t, got.GrokModelDiagnostics)
-	shallow := AccountFromServiceShallow(src)
-	require.Nil(t, shallow.GrokModelDiagnostics)
-
-	diagnostics := &service.GrokModelDiagnostics{
-		State:    "fresh",
-		Endpoint: "https://cli-chat-proxy.grok.com/v1/models",
-		Models:   []string{"grok-4.7"},
-		Mappings: []service.GrokModelDiagnosticItem{{Requested: "friendly", Upstream: "grok-4.7", Status: "listed"}},
-		LastAttempt: &service.GrokCatalogAttempt{
-			StartedAt: "2026-10-25T06:00:00Z", FinishedAt: "2026-10-25T06:00:01Z", Status: "failed", ErrorCode: "http_error",
-			Scope: &service.GrokCatalogScope{AccountID: 25, AccountType: service.AccountTypeOAuth, Endpoint: "https://cli-chat-proxy.grok.com/v1/models"},
-		},
-	}
-	diagRaw, err := json.Marshal(diagnostics)
+func TestAccountFromServiceShallow_HidesInternalAnthropicObservations(t *testing.T) {
+	src := &service.Account{ID: 1, Platform: service.PlatformAnthropic, Type: service.AccountTypeOAuth, Extra: map[string]any{
+		"anthropic_observation_profile.rate_limit_tier": map[string]any{"value": "old-tier", "identity": "private-hash"},
+		"anthropic_observation_seven_day.utilization":   map[string]any{"value": 40, "identity": "private-hash"},
+		"passive_usage_7d_utilization":                  0.4,
+		service.AccountTelemetryExtraKey:                map[string]any{"status": "ready", "revision": "old", "profile": map[string]any{"source": "official-cc-init", "payload_json": "old-private", "headers": map[string]any{"Authorization": "secret"}}},
+	}}
+	got := AccountFromServiceShallow(src)
+	require.Equal(t, 0.4, got.Extra["passive_usage_7d_utilization"])
+	state, ok := got.Extra[service.AccountTelemetryExtraKey].(service.AccountTelemetryState)
+	require.True(t, ok)
+	require.Equal(t, "waiting_import", state.Status)
+	raw, err := json.Marshal(got.Extra)
 	require.NoError(t, err)
-	require.NotContains(t, string(diagRaw), "access-secret")
-	require.NotContains(t, string(diagRaw), "query-secret")
-	require.NotContains(t, string(diagRaw), "s3cret")
-	require.NotContains(t, string(diagRaw), "user:")
-	require.Contains(t, string(diagRaw), `"models":["grok-4.7"]`)
-	require.NotContains(t, string(diagRaw), `"models":null`)
-	require.NotContains(t, string(diagRaw), `"mappings":null`)
-	got.GrokModelDiagnostics = diagnostics
-	raw, err := json.Marshal(got)
-	require.NoError(t, err)
-	body := string(raw)
-	require.Contains(t, body, `"grok_model_diagnostics"`)
-	require.Contains(t, body, `"mappings":[`)
-	require.NotContains(t, body, "access-secret")
-	require.NotContains(t, body, "refresh-secret")
-	require.NotContains(t, body, "sk-secret")
-	require.NotContains(t, body, "query-secret")
-	require.NotContains(t, body, "s3cret")
-
-	listRaw, err := json.Marshal(AccountListItemFromAccount(got))
-	require.NoError(t, err)
-	require.NotContains(t, string(listRaw), "grok_model_diagnostics")
-	require.NotContains(t, string(listRaw), "access-secret")
+	require.NotContains(t, string(raw), "old-private")
+	require.NotContains(t, string(raw), "Authorization")
+	require.Equal(t, got.Extra, AccountListItemFromAccount(got).Extra)
+	require.Len(t, src.Extra, 4, "projection must not delete stored data")
 }

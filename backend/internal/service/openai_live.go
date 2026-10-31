@@ -8,11 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/gateway/routing"
 	"io"
 	"net/http"
 	"net/url"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -24,7 +26,6 @@ import (
 
 const (
 	defaultLiveMaxSessionDuration = time.Hour
-	liveLeaseRefreshInterval      = 20 * time.Second
 	liveRedisOperationTimeout     = 3 * time.Second
 	liveClosedRecordTTL           = 24 * time.Hour
 	liveObserverPollInterval      = 250 * time.Millisecond
@@ -177,16 +178,10 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 
 		account := selection.Account
 		leaseID := generateRequestID()
-		acquired, acquireErr := liveCache.AcquireLiveLease(
-			ctx,
-			account.ID,
-			account.Concurrency,
-			identity.UserID,
-			userMaxConcurrency,
-			identity.APIKeyID,
-			leaseID,
-			true,
-		)
+		lease, acquired, acquireErr := routing.AcquireLiveCapacity(ctx, liveCache, routing.LiveCapacityRequest{
+			Identity:     routing.LeaseIdentity{AccountID: account.ID, UserID: identity.UserID, APIKeyID: identity.APIKeyID, Token: leaseID},
+			AccountLimit: account.Concurrency, UserLimit: userMaxConcurrency, ReplacingRegularSlots: true,
+		})
 		if acquireErr != nil || !acquired {
 			selection.ReleaseFunc()
 			if acquireErr != nil {
@@ -195,10 +190,12 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 			return nil, ErrLiveConcurrencyFull
 		}
 
-		created, createErr := s.createUpstreamLiveCall(ctx, account, request, attestation)
+		createCtx, detachLease := lease.Bind(ctx)
+		created, createErr := s.createUpstreamLiveCall(createCtx, account, request, attestation, lease, identity.GroupID)
+		detachLease()
 		selection.ReleaseFunc()
 		if createErr != nil {
-			s.releaseLiveLease(account.ID, identity.UserID, identity.APIKeyID, leaseID)
+			_ = lease.Release()
 			if !s.shouldFailoverLiveCreateError(account, createErr) {
 				return nil, createErr
 			}
@@ -213,6 +210,7 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 			model = "gpt-live"
 		}
 		record := &LiveCallRecord{
+			GroupNameSnapshot:     identity.GroupNameSnapshot,
 			CallID:                created.CallID,
 			CallHash:              hashLiveCallID(created.CallID),
 			AccountID:             account.ID,
@@ -230,12 +228,29 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 			InboundEndpoint:       identity.InboundEndpoint,
 			AttestationCiphertext: attestationCiphertext,
 		}
+		snapshot := &UsageLog{}
+		snapshot.CaptureVendorSnapshot(account, nil)
+		record.VendorIDSnapshot = snapshot.VendorIDSnapshot
+		record.AccountNameSnapshot = snapshot.AccountNameSnapshot
+		record.PlatformSnapshot = snapshot.PlatformSnapshot
 		mappingTTL := s.liveMaxSessionDuration() + 5*time.Minute
+		if record.VendorIDSnapshot != nil {
+			snapshotStore, ok := store.(LiveUsageSnapshotStore)
+			if !ok {
+				_ = lease.Release()
+				return nil, fmt.Errorf("live usage snapshot storage unavailable")
+			}
+			if err := snapshotStore.SaveLiveUsageSnapshot(ctx, record, mappingTTL); err != nil {
+				_ = lease.Release()
+				return nil, fmt.Errorf("save live usage snapshot: %w", err)
+			}
+		}
 		if saveErr := store.SaveLiveCall(ctx, record, mappingTTL); saveErr != nil {
-			s.releaseLiveLease(account.ID, identity.UserID, identity.APIKeyID, leaseID)
+			_ = lease.Release()
 			return nil, fmt.Errorf("save live call mapping: %w", saveErr)
 		}
 		created.Account = account
+		lease.Handoff()
 		go s.observeLiveCall(record)
 		return created, nil
 	}
@@ -263,6 +278,8 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 	account *Account,
 	request *LiveCallRequest,
 	attestation string,
+	lease *routing.Lease,
+	groupIDs ...*int64,
 ) (*LiveCallCreated, error) {
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
@@ -304,7 +321,10 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 	upstreamReq.Header.Set(liveAttestationHeader, attestation)
 	applyLiveUpstreamIdentityHeaders(upstreamReq.Header)
 
-	resp, err := s.doOpenAIUpstream(upstreamReq, resolveAccountProxyURL(account), account)
+	if err := lease.Validate(ctx); err != nil {
+		return nil, err
+	}
+	resp, err := s.doOpenAIUpstream(upstreamReq, resolveAccountProxyURL(account), account, groupIDs...)
 	if err != nil {
 		logLiveCreateStageFailure(ctx, account.ID, "upstream_transport", err)
 		return nil, err
@@ -438,7 +458,7 @@ func (s *OpenAIGatewayService) liveSidebandHeaders(
 	return headers, nil
 }
 
-func (s *OpenAIGatewayService) dialLiveSideband(ctx context.Context, record *LiveCallRecord) (liveFrameConn, error) {
+func (s *OpenAIGatewayService) dialLiveSideband(ctx context.Context, record *LiveCallRecord, lease *routing.Lease) (liveFrameConn, error) {
 	account, err := s.accountRepo.GetByID(ctx, record.AccountID)
 	if err != nil {
 		return nil, err
@@ -451,6 +471,9 @@ func (s *OpenAIGatewayService) dialLiveSideband(ctx context.Context, record *Liv
 		return nil, err
 	}
 	target := strings.TrimRight(chatGPTLiveSidebandBaseURL, "/") + "/" + url.PathEscape(record.CallID)
+	if err := lease.Validate(ctx); err != nil {
+		return nil, err
+	}
 	conn, status, _, err := s.getOpenAIWSPassthroughDialer().Dial(ctx, target, headers, resolveAccountProxyURL(account))
 	if err != nil {
 		return nil, fmt.Errorf("dial live sideband (status %d): %w", status, err)
@@ -488,6 +511,14 @@ func (s *OpenAIGatewayService) GetLiveCallForIdentity(
 	return record, nil
 }
 
+func (s *OpenAIGatewayService) adoptLiveCapacity(ctx context.Context, record *LiveCallRecord) (*routing.Lease, error) {
+	cache, err := s.liveConcurrencyCache()
+	if err != nil {
+		return nil, err
+	}
+	return routing.AdoptLiveLease(ctx, cache, routing.LeaseIdentity{AccountID: record.AccountID, UserID: record.UserID, APIKeyID: record.APIKeyID, Token: record.LeaseID})
+}
+
 // ProxyLiveSideband 让认证后的客户端接管控制连接；媒体始终不经过这里。
 func (s *OpenAIGatewayService) ProxyLiveSideband(
 	ctx context.Context,
@@ -510,25 +541,58 @@ func (s *OpenAIGatewayService) ProxyLiveSideband(
 		return ErrLiveControllerChanged
 	}
 
-	// observer 轮询到接管状态后会关闭旧控制连接；同一个 call 可重新加入。
-	time.Sleep(liveObserverPollInterval)
-	upstream, err := s.dialLiveSideband(ctx, record)
+	lease, err := s.adoptLiveCapacity(ctx, record)
 	if err != nil {
 		_, _ = store.ReleaseLiveController(context.Background(), record.CallHash, owner)
+		if errors.Is(err, routing.ErrCapacityLeaseLost) {
+			s.finalizeLiveCall(record)
+		} else {
+			go s.observeLiveCall(record)
+		}
+		return errors.Join(ErrLiveUnavailable, err)
+	}
+	defer lease.Handoff()
+	liveCtx, detachLease := lease.Bind(ctx)
+	defer detachLease()
+	// The separate controller token still fences sockets, not the capacity token.
+	copyRecord := *record
+	copyRecord.ControllerOwner = owner
+	record = &copyRecord
+	timer := time.NewTimer(liveObserverPollInterval)
+	select {
+	case <-liveCtx.Done():
+		timer.Stop()
+		_, _ = store.ReleaseLiveController(context.Background(), record.CallHash, owner)
+		lease.Handoff()
+		go s.observeLiveCall(record)
+		return context.Cause(liveCtx)
+	case <-timer.C:
+	}
+	upstream, err := s.dialLiveSideband(liveCtx, record, lease)
+	if err != nil {
+		_, _ = store.ReleaseLiveController(context.Background(), record.CallHash, owner)
+		lease.Handoff()
 		go s.observeLiveCall(record)
 		return err
 	}
 	defer func() { _ = upstream.Close() }()
 	downstream.SetReadLimit(openAIWSMessageReadLimitBytes)
 
-	proxyCtx, cancel := context.WithCancel(ctx)
+	proxyCtx, cancel := context.WithCancel(liveCtx)
 	defer cancel()
 	errCh := make(chan error, 2)
+	var relay sync.WaitGroup
+	relay.Add(2)
 	go func() {
+		defer relay.Done()
 		for {
 			messageType, payload, readErr := downstream.Read(proxyCtx)
 			if readErr != nil {
 				errCh <- readErr
+				return
+			}
+			if leaseErr := lease.Validate(proxyCtx); leaseErr != nil {
+				errCh <- leaseErr
 				return
 			}
 			if writeErr := upstream.WriteFrame(proxyCtx, messageType, payload); writeErr != nil {
@@ -538,6 +602,7 @@ func (s *OpenAIGatewayService) ProxyLiveSideband(
 		}
 	}()
 	go func() {
+		defer relay.Done()
 		for {
 			messageType, payload, readErr := upstream.ReadFrame(proxyCtx)
 			if readErr != nil {
@@ -560,6 +625,10 @@ func (s *OpenAIGatewayService) ProxyLiveSideband(
 
 	runErr := s.runLiveController(proxyCtx, record, upstream, errCh)
 	cancel()
+	_ = upstream.Close()
+	_ = downstream.CloseNow()
+	relay.Wait()
+	lease.Handoff()
 	_, _ = store.ReleaseLiveController(context.Background(), record.CallHash, owner)
 	if liveSessionEnded(runErr) || !time.Now().Before(record.ExpiresAt) {
 		s.finalizeLiveCall(record)
@@ -578,6 +647,7 @@ func (s *OpenAIGatewayService) ProxyLiveSideband(
 func liveSessionEnded(err error) bool {
 	return errors.Is(err, ErrLiveCallNotFound) ||
 		errors.Is(err, ErrLiveUnavailable) ||
+		errors.Is(err, routing.ErrCapacityLeaseLost) ||
 		errors.Is(err, context.DeadlineExceeded)
 }
 
@@ -587,8 +657,8 @@ func (s *OpenAIGatewayService) runLiveController(
 	upstream liveFrameConn,
 	errCh <-chan error,
 ) error {
-	refreshTicker := time.NewTicker(liveLeaseRefreshInterval)
-	defer refreshTicker.Stop()
+	controllerTicker := time.NewTicker(liveObserverPollInterval)
+	defer controllerTicker.Stop()
 	maxTimer := time.NewTimer(time.Until(record.ExpiresAt))
 	defer maxTimer.Stop()
 	for {
@@ -602,9 +672,19 @@ func (s *OpenAIGatewayService) runLiveController(
 			_ = upstream.WriteFrame(closeCtx, coderws.MessageText, []byte(`{"type":"session.close"}`))
 			cancel()
 			return context.DeadlineExceeded
-		case <-refreshTicker.C:
-			if !s.refreshLiveLease(record) {
-				return ErrLiveUnavailable
+		case <-controllerTicker.C:
+			if record.ControllerOwner != "" {
+				store, err := s.liveStore()
+				if err != nil {
+					return err
+				}
+				latest, err := store.GetLiveCall(ctx, record.CallHash)
+				if err != nil {
+					return err
+				}
+				if latest.Controller != LiveControllerProxy || latest.ControllerOwner != record.ControllerOwner {
+					return ErrLiveControllerChanged
+				}
 			}
 		}
 	}
@@ -630,9 +710,31 @@ func (s *OpenAIGatewayService) observeLiveCall(record *LiveCallRecord) {
 	if !claimed {
 		return
 	}
+	if !time.Now().Before(record.ExpiresAt) {
+		s.finalizeLiveCall(record)
+		return
+	}
+	lease, leaseErr := s.adoptLiveCapacity(context.Background(), record)
+	if leaseErr != nil {
+		if errors.Is(leaseErr, routing.ErrCapacityLeaseLost) {
+			s.finalizeLiveCall(record)
+		} else {
+			s.finalizeLiveCallAfterExpiry(record)
+		}
+		return
+	}
+	defer lease.Handoff()
+	ownerCtx, ownerCancel := context.WithDeadline(context.Background(), record.ExpiresAt)
+	defer ownerCancel()
+	liveCtx, detachLease := lease.Bind(ownerCtx)
+	defer detachLease()
 	storeErrStreak := 0
 	for {
-		latest, getErr := store.GetLiveCall(context.Background(), record.CallHash)
+		if liveCtx.Err() != nil {
+			s.finalizeLiveCall(record)
+			return
+		}
+		latest, getErr := store.GetLiveCall(liveCtx, record.CallHash)
 		if getErr != nil {
 			// 记录已被清理（closed TTL 到期）不是故障，直接退出。
 			if errors.Is(getErr, ErrLiveCallNotFound) {
@@ -650,21 +752,21 @@ func (s *OpenAIGatewayService) observeLiveCall(record *LiveCallRecord) {
 		}
 		storeErrStreak = 0
 		record = latest
-		if record.Controller != LiveControllerObserver {
+		if record.Controller != LiveControllerObserver || record.ControllerOwner != owner {
 			return
 		}
 		if !time.Now().Before(record.ExpiresAt) {
 			s.finalizeLiveCall(record)
 			return
 		}
-		upstream, dialErr := s.dialLiveSideband(context.Background(), record)
+		upstream, dialErr := s.dialLiveSideband(liveCtx, record, lease)
 		if dialErr != nil {
 			if !s.waitForLiveObserverRetry(record) {
 				return
 			}
 			continue
 		}
-		runErr := s.runLiveObserverConnection(record, upstream)
+		runErr := s.runLiveObserverConnection(liveCtx, record, upstream)
 		_ = upstream.Close()
 		if errors.Is(runErr, ErrLiveControllerChanged) {
 			return
@@ -679,12 +781,15 @@ func (s *OpenAIGatewayService) observeLiveCall(record *LiveCallRecord) {
 	}
 }
 
-func (s *OpenAIGatewayService) runLiveObserverConnection(record *LiveCallRecord, upstream liveFrameConn) error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+func (s *OpenAIGatewayService) runLiveObserverConnection(parent context.Context, record *LiveCallRecord, upstream liveFrameConn) error {
+	ctx, cancel := context.WithCancel(parent)
+	var relay sync.WaitGroup
+	defer func() { cancel(); _ = upstream.Close(); relay.Wait() }()
 	frameCh := make(chan []byte, 1)
 	errCh := make(chan error, 1)
+	relay.Add(1)
 	go func() {
+		defer relay.Done()
 		for {
 			messageType, payload, err := upstream.ReadFrame(ctx)
 			if err != nil {
@@ -703,8 +808,6 @@ func (s *OpenAIGatewayService) runLiveObserverConnection(record *LiveCallRecord,
 			}
 		}
 	}()
-	refreshTicker := time.NewTicker(liveLeaseRefreshInterval)
-	defer refreshTicker.Stop()
 	controllerTicker := time.NewTicker(liveObserverPollInterval)
 	defer controllerTicker.Stop()
 	maxTimer := time.NewTimer(time.Until(record.ExpiresAt))
@@ -712,6 +815,8 @@ func (s *OpenAIGatewayService) runLiveObserverConnection(record *LiveCallRecord,
 	store, _ := s.liveStore()
 	for {
 		select {
+		case <-ctx.Done():
+			return context.Cause(ctx)
 		case payload := <-frameCh:
 			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
 			if eventType == "session.closed" || eventType == "session.ended" {
@@ -720,16 +825,12 @@ func (s *OpenAIGatewayService) runLiveObserverConnection(record *LiveCallRecord,
 		case err := <-errCh:
 			return err
 		case <-controllerTicker.C:
-			controller, err := store.GetLiveController(context.Background(), record.CallHash)
+			latest, err := store.GetLiveCall(ctx, record.CallHash)
 			if err != nil {
 				return err
 			}
-			if controller != LiveControllerObserver {
+			if latest.Controller != LiveControllerObserver || latest.ControllerOwner != record.ControllerOwner {
 				return ErrLiveControllerChanged
-			}
-		case <-refreshTicker.C:
-			if !s.refreshLiveLease(record) {
-				return ErrLiveUnavailable
 			}
 		case <-maxTimer.C:
 			closeCtx, closeCancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -773,17 +874,6 @@ func (s *OpenAIGatewayService) finalizeLiveCallAfterExpiry(record *LiveCallRecor
 	s.finalizeLiveCall(record)
 }
 
-func (s *OpenAIGatewayService) refreshLiveLease(record *LiveCallRecord) bool {
-	cache, err := s.liveConcurrencyCache()
-	if err != nil {
-		return false
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), liveRedisOperationTimeout)
-	defer cancel()
-	refreshed, err := cache.RefreshLiveLease(ctx, record.AccountID, record.UserID, record.APIKeyID, record.LeaseID)
-	return err == nil && refreshed
-}
-
 func (s *OpenAIGatewayService) releaseLiveLease(accountID, userID, apiKeyID int64, leaseID string) {
 	cache, err := s.liveConcurrencyCache()
 	if err != nil {
@@ -803,6 +893,12 @@ func (s *OpenAIGatewayService) finalizeLiveCall(record *LiveCallRecord) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), liveRedisOperationTimeout)
+	if snapshotStore, ok := store.(LiveUsageSnapshotStore); ok && record.VendorIDSnapshot == nil {
+		if err := snapshotStore.LoadLiveUsageSnapshot(ctx, record); err != nil {
+			cancel()
+			return
+		}
+	}
 	first, err := store.MarkLiveCallClosed(ctx, record.CallHash, liveClosedRecordTTL)
 	cancel()
 	if err != nil || !first {
@@ -824,31 +920,33 @@ func (s *OpenAIGatewayService) finalizeLiveCall(record *LiveCallRecord) {
 	if record.SubscriptionID > 0 {
 		billingType = BillingTypeSubscription
 	}
-	// TODO(billing): Live 会话目前不计费：TotalCost/ActualCost 恒为 0，完全绕过
-	// recordUsageCore/applyUsageBilling，余额模式下极低余额也能反复开启最长
-	// liveMaxSessionDuration 的会话。若确认按时长计费，应在此接入计费管道；
-	// 若确认有意免费，删除本注释即可（零值行为由
-	// TestFinalizeLiveCallIsIdempotentAndWritesZeroUsage 锁定）。
-	//
+	// The upstream does not provide priced metering for Live. Preserve the existing
+	// allow-live, concurrency and duration budgets; label unknown cost explicitly.
+
 	// 这是该会话唯一一次落库机会（MarkLiveCallClosed 已标记 first），失败即永久
 	// 丢失，因此走带日志与同步兜底的 writeUsageLogBestEffort（issue #3656）。
 	writeUsageLogBestEffort(context.Background(), s.usageLogRepo, &UsageLog{
-		UserID:           record.UserID,
-		APIKeyID:         record.APIKeyID,
-		AccountID:        record.AccountID,
-		RequestID:        record.CallHash,
-		Model:            record.Model,
-		RequestedModel:   record.Model,
-		GroupID:          liveOptionalID(record.GroupID),
-		SubscriptionID:   liveOptionalID(record.SubscriptionID),
-		RateMultiplier:   1,
-		BillingType:      billingType,
-		RequestType:      RequestTypeLive,
-		DurationMs:       &duration,
-		UserAgent:        &userAgent,
-		IPAddress:        &ipAddress,
-		InboundEndpoint:  &inboundEndpoint,
-		UpstreamEndpoint: &upstreamEndpoint,
-		CreatedAt:        record.CreatedAt,
+		UserID:              record.UserID,
+		APIKeyID:            record.APIKeyID,
+		AccountID:           record.AccountID,
+		VendorIDSnapshot:    record.VendorIDSnapshot,
+		GroupNameSnapshot:   record.GroupNameSnapshot,
+		AccountNameSnapshot: record.AccountNameSnapshot,
+		PlatformSnapshot:    record.PlatformSnapshot,
+		RequestID:           record.CallHash,
+		Model:               record.Model,
+		RequestedModel:      record.Model,
+		GroupID:             liveOptionalID(record.GroupID),
+		SubscriptionID:      liveOptionalID(record.SubscriptionID),
+		RateMultiplier:      1,
+		BillingType:         billingType,
+		RequestType:         RequestTypeLive,
+		BillingStatus:       "unmetered",
+		DurationMs:          &duration,
+		UserAgent:           &userAgent,
+		IPAddress:           &ipAddress,
+		InboundEndpoint:     &inboundEndpoint,
+		UpstreamEndpoint:    &upstreamEndpoint,
+		CreatedAt:           record.CreatedAt,
 	}, "service.openai_live")
 }

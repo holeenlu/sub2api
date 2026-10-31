@@ -2,10 +2,10 @@
 package response
 
 import (
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"log"
 	"math"
 	"net/http"
-	"strconv"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/util/logredact"
@@ -32,7 +32,7 @@ type PaginatedData struct {
 
 // Success 返回成功响应
 func Success(c *gin.Context, data any) {
-	c.JSON(http.StatusOK, Response{
+	writeDTO(c, http.StatusOK, Response{
 		Code:    0,
 		Message: "success",
 		Data:    data,
@@ -41,7 +41,7 @@ func Success(c *gin.Context, data any) {
 
 // Created 返回创建成功响应
 func Created(c *gin.Context, data any) {
-	c.JSON(http.StatusCreated, Response{
+	writeDTO(c, http.StatusCreated, Response{
 		Code:    0,
 		Message: "success",
 		Data:    data,
@@ -50,11 +50,37 @@ func Created(c *gin.Context, data any) {
 
 // Accepted 返回异步接受响应 (HTTP 202)
 func Accepted(c *gin.Context, data any) {
-	c.JSON(http.StatusAccepted, Response{
+	writeDTO(c, http.StatusAccepted, Response{
 		Code:    0,
 		Message: "accepted",
 		Data:    data,
 	})
+}
+
+// All management response DTOs share one field projection; individual handlers
+// do not maintain their own cost/secret key lists. User responses keep their
+// established personal scope and mapping.
+func writeDTO(c *gin.Context, status int, value Response) {
+	if c.Request == nil {
+		c.JSON(status, value)
+		return
+	}
+	actor, ok := authz.FromContext(c.Request.Context())
+	if !ok || !actor.ManagementRequest {
+		c.JSON(status, value)
+		return
+	}
+	rule, declared := authz.RuleFor(c.Request.Method, c.FullPath())
+	if !declared {
+		Forbidden(c, "Undeclared management response")
+		return
+	}
+	data, err := authz.MarshalResponse(value, c.FullPath(), actor, rule.NewCredentials)
+	if err != nil {
+		InternalError(c, "Response cannot be safely projected")
+		return
+	}
+	c.Data(status, "application/json; charset=utf-8", data)
 }
 
 // Error 返回错误响应
@@ -167,8 +193,7 @@ func PaginatedWithResult(c *gin.Context, items any, pagination *PaginationResult
 	})
 }
 
-// ParsePagination 解析分页参数。无效或超出 int 范围的值使用默认值；
-// 有效页码按 pageSize 限制上限，返回可安全计算 offset 和 offset+pageSize 的页码。
+// ParsePagination 解析分页参数
 func ParsePagination(c *gin.Context) (page, pageSize int) {
 	page = 1
 	pageSize = 20
@@ -190,16 +215,16 @@ func ParsePagination(c *gin.Context) (page, pageSize int) {
 		}
 	}
 
-	// Clamp the page so both offset and offset+pageSize stay within int.
-	if page > math.MaxInt/pageSize {
-		page = math.MaxInt / pageSize
-	}
-
 	return page, pageSize
 }
 
 func parseInt(s string) (int, error) {
-	// Parse unsigned decimal digits within the positive range of the native int.
-	value, err := strconv.ParseUint(s, 10, strconv.IntSize-1)
-	return int(value), err
+	var result int
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0, nil
+		}
+		result = result*10 + int(c-'0')
+	}
+	return result, nil
 }

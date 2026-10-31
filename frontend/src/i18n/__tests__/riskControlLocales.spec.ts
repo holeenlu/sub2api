@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import en from '../locales/en'
-import zh from '../locales/zh'
+import { loadApplicationLocale } from '@/app/i18n'
+const assembledEnMessages = await loadApplicationLocale('en')
+const assembledZhMessages = await loadApplicationLocale('zh')
+const en = assembledEnMessages
+const zh = assembledZhMessages
+
 
 describe('risk control locale copy', () => {
   it('describes worker runtime as audit and pre-block record processing', () => {

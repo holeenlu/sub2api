@@ -28,7 +28,10 @@ func (s *GeminiMessagesCompatService) ForwardAsChatCompletions(
 	account *Account,
 	body []byte,
 ) (*ForwardResult, error) {
+	ctx = EnsureOpenAITurnBudget(ctx, s.cfg, "")
 	startTime := time.Now()
+	beginGeminiImageOutputObservation(c)
+	beginUpstreamResponseModelObservation(c)
 
 	var ccReq apicompat.ChatCompletionsRequest
 	if err := json.Unmarshal(body, &ccReq); err != nil {
@@ -56,9 +59,27 @@ func (s *GeminiMessagesCompatService) ForwardAsChatCompletions(
 		return nil, s.writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
 
-	anthropicReq, err := apicompat.ResponsesToAnthropicRequest(responsesReq)
+	reasoning := responsesReq.Reasoning
+	mappedModel := originalModel
+	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
+		mappedModel = account.GetMappedModel(originalModel)
+	}
+	_, _, _, _, knownThinkingModel := geminiThinkingCapabilities(mappedModel)
+	if knownThinkingModel {
+		responsesReq.Reasoning = nil
+	}
+	anthropicReq, err := apicompat.ResponsesToAnthropicIntermediateRequest(responsesReq)
+	if anthropicReq != nil {
+		recordConversionDiagnostics(c, "openai", "anthropic", anthropicReq.Model, anthropicReq.Diagnostics)
+	}
 	if err != nil {
 		return nil, s.writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	}
+	if knownThinkingModel && reasoning != nil && reasoning.Effort != "" {
+		if anthropicReq.OutputConfig == nil {
+			anthropicReq.OutputConfig = &apicompat.AnthropicOutputConfig{}
+		}
+		anthropicReq.OutputConfig.Effort = reasoning.Effort
 	}
 	anthropicReq.Stream = clientStream
 
@@ -67,44 +88,25 @@ func (s *GeminiMessagesCompatService) ForwardAsChatCompletions(
 		return nil, fmt.Errorf("marshal chat completions compat request: %w", err)
 	}
 
-	return s.forwardClaudeBodyAsChatCompletions(ctx, c, account, claudeBody, originalModel, clientStream, includeUsage, startTime)
-}
-
-func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
-	ctx context.Context,
-	c *gin.Context,
-	account *Account,
-	claudeBody []byte,
-	originalModel string,
-	clientStream bool,
-	includeUsage bool,
-	startTime time.Time,
-) (*ForwardResult, error) {
-	var req struct {
-		Model  string `json:"model"`
-		Stream bool   `json:"stream"`
-	}
-	if err := json.Unmarshal(claudeBody, &req); err != nil {
-		return nil, s.writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
-	}
-	if strings.TrimSpace(req.Model) == "" {
-		return nil, s.writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", "model is required")
-	}
-
-	mappedModel := req.Model
-	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
-		mappedModel = account.GetMappedModel(req.Model)
-	}
-
-	geminiReq, err := convertClaudeMessagesToGeminiGenerateContent(claudeBody)
+	// Model, stream mode and mapping are already validated above. Do not parse
+	// the just-marshaled body a second time merely to recover that metadata.
+	geminiReq, err := convertClaudeForGeminiAccount(c, account, claudeBody, mappedModel)
 	if err != nil {
 		return nil, s.writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
-	if geminiImageGenerationDenied(c, geminiReq, originalModel, req.Model, mappedModel) {
+	geminiReq, err = applyClaudeThinkingToGemini(geminiReq, claudeBody, mappedModel)
+	if err != nil {
+		return nil, s.writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	}
+	geminiReq, err = applyGeminiChatImageConfig(body, geminiReq)
+	if err != nil {
+		return nil, s.writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", "Invalid Gemini imageConfig")
+	}
+	if geminiImageGenerationDenied(c, geminiReq, originalModel, mappedModel) {
 		return nil, s.writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", ImageGenerationPermissionMessage())
 	}
 	geminiReq = ensureGeminiFunctionCallThoughtSignatures(geminiReq)
-	geminiReq = applyGeminiCompatThinkingConfig(geminiReq, claudeBody, mappedModel, clientStream)
+	geminiReq = includeGeminiCompatThoughts(geminiReq, mappedModel, clientStream)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -124,11 +126,11 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		useUpstreamStream,
 	)
 
+	var refreshedToken string
 	var resp *http.Response
 	// checkedPolicy 是循环内对当前 resp 的错误策略检查结果，未检查时为 nil。
 	var checkedPolicy *ErrorPolicyResult
-	maxAttempts := s.geminiMaxAttemptsPerAccount()
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
+	for attempt := 1; attempt <= geminiMaxRetries; attempt++ {
 		upstreamReq, idHeader, err := buildReq(ctx)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -137,13 +139,25 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 			if failoverErr := s.handleVertexServiceAccountNotFound(ctx, c, account, err); failoverErr != nil {
 				return nil, failoverErr
 			}
-			return nil, s.writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", err.Error())
+			return nil, newAccountConfigurationFailure(err)
 		}
 		requestIDHeader = idHeader
 
-		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		if refreshedToken != "" {
+			upstreamReq.Header.Set("Authorization", "Bearer "+refreshedToken)
+		}
+		resp, err = qualifiedAccountUpstream(s.accountRepo, s.httpUpstream, account, vendorDispatchGroup(c), s.managedModelSettings()).Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
 			return nil, s.handleUpstreamTransportError(ctx, c, account, err)
+		}
+
+		if resp.StatusCode == http.StatusUnauthorized && s.tokenProvider != nil && account.Type == AccountTypeOAuth {
+			rejected := strings.TrimPrefix(upstreamReq.Header.Get("Authorization"), "Bearer ")
+			if fresh, ok := refreshRejectedCredential(ctx, s.accountRepo, account, rejected, s.tokenProvider.refreshAPI, s.tokenProvider.executor); ok {
+				_ = resp.Body.Close()
+				refreshedToken = fresh
+				continue
+			}
 		}
 
 		checked, rebuilt := s.checkErrorPolicyInLoop(ctx, account, resp, mappedModel)
@@ -167,7 +181,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 			if resp.StatusCode == http.StatusTooManyRequests {
 				s.handleGeminiUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 			}
-			if attempt < maxAttempts {
+			if attempt < geminiMaxRetries {
 				upstreamReqID := resp.Header.Get(requestIDHeader)
 				if upstreamReqID == "" {
 					upstreamReqID = resp.Header.Get("x-goog-request-id")
@@ -185,8 +199,10 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 					Kind:               "retry",
 					Message:            upstreamMsg,
 				})
-				logger.LegacyPrintf("service.gemini_chat_completions", "Gemini account %d: upstream status %d, retry %d/%d", account.ID, resp.StatusCode, attempt, maxAttempts)
-				sleepGeminiBackoff(attempt)
+				logger.LegacyPrintf("service.gemini_chat_completions", "Gemini account %d: upstream status %d, retry %d/%d", account.ID, resp.StatusCode, attempt, geminiMaxRetries)
+				if waitErr := sleepGeminiBackoff(ctx, attempt); waitErr != nil {
+					return nil, waitErr
+				}
 				continue
 			}
 			resp = &http.Response{
@@ -254,33 +270,39 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 
 	var usage *ClaudeUsage
 	var firstTokenMs *int
-	clientDisconnect := false
-	streamFinished := false
+	clientDisconnected := false
 	if clientStream {
 		streamRes, err := s.handleChatCompletionsStreamingResponseFromGemini(c, resp, startTime, originalModel, account.Type == AccountTypeOAuth, includeUsage)
 		if err != nil {
-			return nil, err
+			if streamRes == nil {
+				return nil, err
+			}
+			return imageEndpointForwardResult(ctx, geminiPartialForwardResult(c, resp, streamRes.usage, streamRes.firstTokenMs, startTime, originalModel, mappedModel, clientStream, s.extractImageInputSize(claudeBody), reasoningEffort)), err
 		}
 		usage = streamRes.usage
 		firstTokenMs = streamRes.firstTokenMs
-		clientDisconnect = streamRes.clientDisconnect
-		streamFinished = streamRes.finished
+		clientDisconnected = streamRes.clientDisconnect
 	} else if useUpstreamStream {
-		collected, usageObj, err := collectGeminiSSE(resp.Body, account.Type == AccountTypeOAuth)
+		collected, usageObj, _, err := collectGeminiSSEObserved(resp.Body, account.Type == AccountTypeOAuth, func(raw []byte) {
+			upstreamResponseModelObserverFromContext(c).ObserveGemini(raw)
+			observeGeminiImageOutputs(c, raw)
+		}, c)
 		if err != nil {
-			return nil, s.writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Failed to read upstream stream")
+			partialBytes, _ := json.Marshal(collected)
+			observeGeminiImageOutputs(c, partialBytes)
+			return imageEndpointForwardResult(ctx, geminiPartialForwardResult(c, resp, usageObj, nil, startTime, originalModel, mappedModel, clientStream, s.extractImageInputSize(claudeBody), reasoningEffort)), s.writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Failed to read upstream stream")
 		}
 		collectedBytes, _ := json.Marshal(collected)
 		chatResp, usageObj2, err := geminiResponseToChatCompletions(collected, originalModel, collectedBytes, usageObj)
 		if err != nil {
-			return nil, s.writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Failed to parse upstream response")
+			return imageEndpointForwardResult(ctx, geminiPartialForwardResult(c, resp, usageObj2, nil, startTime, originalModel, mappedModel, clientStream, s.extractImageInputSize(claudeBody), reasoningEffort)), s.writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Failed to parse upstream response")
 		}
 		c.JSON(http.StatusOK, chatResp)
 		usage = usageObj2
 	} else {
 		usageResp, err := s.handleChatCompletionsNonStreamingResponseFromGemini(c, resp, originalModel, account.Type == AccountTypeOAuth)
 		if err != nil {
-			return nil, err
+			return imageEndpointForwardResult(ctx, geminiPartialForwardResult(c, resp, usageResp, nil, startTime, originalModel, mappedModel, clientStream, s.extractImageInputSize(claudeBody), reasoningEffort)), err
 		}
 		usage = usageResp
 	}
@@ -289,16 +311,10 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		usage = &ClaudeUsage{}
 	}
 
-	imageCount := 0
+	imageCount := resolveGeminiImageCount(c, originalModel, mappedModel)
 	imageInputSize := s.extractImageInputSize(claudeBody)
 	imageSize := normalizeOpenAIImageSizeTier(imageInputSize)
-	if isImageGenerationModel(originalModel) {
-		imageCount = 1
-	}
-	// 客户端在收到结束分片前断开时只计已送达的图片：Chat 流不向客户端转发图片。
-	if clientDisconnect && !streamFinished {
-		imageCount = 0
-	}
+
 
 	return &ForwardResult{
 		RequestID:        requestID,
@@ -310,11 +326,11 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		Duration:         time.Since(startTime),
 		FirstTokenMs:     firstTokenMs,
 		ReasoningEffort:  reasoningEffort,
-		ImageEndpoint:    imageCount > 0,
+		ImageEndpoint:       OpenAIImagesEndpointFromContext(ctx),
 		ImageCount:       imageCount,
 		ImageSize:        imageSize,
 		ImageInputSize:   imageInputSize,
-		ClientDisconnect: clientDisconnect,
+		ClientDisconnect: clientDisconnected,
 	}, nil
 }
 
@@ -361,11 +377,11 @@ func (s *GeminiMessagesCompatService) buildGeminiChatCompletionsUpstreamRequestF
 	case AccountTypeOAuth:
 		return func(ctx context.Context) (*http.Request, string, error) {
 			if s.tokenProvider == nil {
-				return nil, "", errors.New("gemini token provider not configured")
+				return nil, "", newCredentialPreparationFailure(errors.New("gemini token provider not configured"))
 			}
 			accessToken, err := s.tokenProvider.GetAccessToken(ctx, account)
 			if err != nil {
-				return nil, "", err
+				return nil, "", newCredentialPreparationFailure(err)
 			}
 
 			projectID := strings.TrimSpace(account.GetCredential("project_id"))
@@ -478,7 +494,7 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsNonStreamingResponseF
 
 	chatResp, usage, err := geminiResponseToChatCompletions(geminiResp, originalModel, respBody, nil)
 	if err != nil {
-		return nil, s.writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Failed to parse upstream response")
+		return usage, s.writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Failed to parse upstream response")
 	}
 
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
@@ -511,6 +527,9 @@ func geminiResponseToChatCompletions(
 		return nil, nil, err
 	}
 	responsesResp := apicompat.AnthropicToResponsesResponse(&anthropicResp)
+	if err := apicompat.ValidateResponsesToolArguments(responsesResp); err != nil {
+		return nil, usage, err
+	}
 	return apicompat.ResponsesToChatCompletions(responsesResp, originalModel), usage, nil
 }
 
@@ -521,7 +540,10 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 	originalModel string,
 	isOAuth bool,
 	includeUsage bool,
-) (*geminiStreamResult, error) {
+) (result *geminiStreamResult, retErr error) {
+	defer GuardSSEWrites(c)()
+	drain := newOpenAIHTTPUsageDrain(streamWriteContext(c), resp.Body.Close)
+	defer drain.stop()
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	}
@@ -542,31 +564,57 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 	ccState.Model = originalModel
 	ccState.IncludeUsage = includeUsage
 
-	var usage ClaudeUsage
-	var firstTokenMs *int
-	firstChunk := true
-	finishReason := ""
-	clientDisconnect := false
-	streamResult := func() *geminiStreamResult {
-		return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnect, finished: finishReason != ""}
+	writer := &geminiStreamWriter{Writer: c.Writer}
+	limit := defaultMaxLineSize
+	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
+		limit = s.cfg.Gateway.MaxLineSize
 	}
+	terminal := newGeminiTerminalReader(resp.Body, limit, c)
+	var usage ClaudeUsage
+	var conversionErr error
+	var firstTokenMs *int
+	defer func() {
+		if conversionErr != nil {
+			retErr = fmt.Errorf("upstream protocol conversion failed: %w", conversionErr)
+			if writer.err == nil {
+				retErr = writeAPICompatConversionError(c, conversionErr, false)
+			}
+		}
+		if (writer.err != nil || streamClientDisconnected(c)) && !terminal.terminal {
+			retErr = context.Canceled
+		}
+		disconnected := writer.err != nil || streamClientDisconnected(c)
+		if result != nil {
+			result.clientDisconnect = disconnected
+		}
+		if retErr != nil {
+			result = &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs, clientDisconnect: disconnected}
+			reportGeminiStreamFailure(c, retErr, "openai")
+		}
+	}()
+	firstChunk := true
 
 	writeChatChunk := func(chunk apicompat.ChatCompletionsChunk) bool {
 		sse, err := apicompat.ChatChunkToSSE(chunk)
 		if err != nil {
 			return false
 		}
-		if _, err := io.WriteString(c.Writer, sse); err != nil {
-			clientDisconnect = true
+		if _, err := io.WriteString(writer, sse); err != nil {
 			return true
 		}
 		return false
 	}
 
 	emitAnthropicEvent := func(evt *apicompat.AnthropicStreamEvent) bool {
+		if conversionErr != nil {
+			return false
+		}
 		responsesEvents := apicompat.AnthropicEventToResponsesEvents(evt, anthState)
 		for _, resEvt := range responsesEvents {
 			chunks := apicompat.ResponsesEventToChatChunks(&resEvt, ccState)
+			if conversionErr = ccState.Err(); conversionErr != nil {
+				return false
+			}
 			for _, chunk := range chunks {
 				if disconnected := writeChatChunk(chunk); disconnected {
 					return true
@@ -590,9 +638,10 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 			Usage:      apicompat.AnthropicUsage{},
 		},
 	}) {
-		return streamResult(), nil
+		return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 	}
 
+	finishReason := ""
 	sawToolUse := false
 	nextBlockIndex := 0
 	openBlockIndex := -1
@@ -623,7 +672,7 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 		return disconnected
 	}
 
-	reader := bufio.NewReader(resp.Body)
+	reader := bufio.NewReader(terminal)
 	for {
 		line, err := reader.ReadString('\n')
 		if len(line) > 0 {
@@ -638,6 +687,10 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 						}
 					}
 
+					observeGeminiImageOutputs(c, rawBytes)
+					if observer := upstreamResponseModelObserverFromContext(c); observer != nil {
+						observer.ObserveGemini(rawBytes)
+					}
 					var geminiResp map[string]any
 					if err := json.Unmarshal(rawBytes, &geminiResp); err == nil {
 						if firstChunk {
@@ -661,12 +714,12 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 								}
 								if openToolIndex >= 0 {
 									if closeOpenTool() {
-										return streamResult(), nil
+										return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 									}
 								}
 								if openBlockType != "thinking" {
 									if closeOpenBlock() {
-										return streamResult(), nil
+										return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 									}
 									idx := nextBlockIndex
 									nextBlockIndex++
@@ -677,21 +730,21 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 										Index:        &idx,
 										ContentBlock: &apicompat.AnthropicContentBlock{Type: "thinking"},
 									}) {
-										return streamResult(), nil
+										return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 									}
 								}
 								if emitAnthropicEvent(&apicompat.AnthropicStreamEvent{
 									Type:  "content_block_delta",
 									Delta: &apicompat.AnthropicDelta{Type: "thinking_delta", Thinking: delta},
 								}) {
-									return streamResult(), nil
+									return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 								}
 								continue
 							}
 							if text, ok := part["text"].(string); ok && text != "" {
 								if openToolIndex >= 0 {
 									if closeOpenTool() {
-										return streamResult(), nil
+										return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 									}
 								}
 								delta, newSeen := computeGeminiTextDelta(seenText, text)
@@ -701,7 +754,7 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 								}
 								if openBlockType != "text" {
 									if closeOpenBlock() {
-										return streamResult(), nil
+										return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 									}
 									idx := nextBlockIndex
 									nextBlockIndex++
@@ -715,7 +768,7 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 											Text: "",
 										},
 									}) {
-										return streamResult(), nil
+										return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 									}
 								}
 								if emitAnthropicEvent(&apicompat.AnthropicStreamEvent{
@@ -725,7 +778,7 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 										Text: delta,
 									},
 								}) {
-									return streamResult(), nil
+									return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 								}
 								continue
 							}
@@ -736,11 +789,11 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 									name = "tool"
 								}
 								if closeOpenBlock() {
-									return streamResult(), nil
+									return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 								}
 								if openToolIndex >= 0 && openToolName != name {
 									if closeOpenTool() {
-										return streamResult(), nil
+										return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 									}
 								}
 								if openToolIndex < 0 {
@@ -759,7 +812,7 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 											Input: json.RawMessage(`{}`),
 										},
 									}) {
-										return streamResult(), nil
+										return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 									}
 								}
 
@@ -785,7 +838,7 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 											PartialJSON: delta,
 										},
 									}) {
-										return streamResult(), nil
+										return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 									}
 								}
 							}
@@ -799,20 +852,15 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 			break
 		}
 		if err != nil {
-			if geminiStreamAbortedWithBillableOutput(c, err, &usage) {
-				logger.LegacyPrintf("service.gemini_messages_compat", "[GeminiAPI] Client disconnected during chat completions stream, billing collected usage: %v", err)
-				clientDisconnect = true
-				return streamResult(), nil
-			}
 			return nil, fmt.Errorf("stream read error: %w", err)
 		}
 	}
 
 	if closeOpenBlock() {
-		return streamResult(), nil
+		return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 	}
 	if closeOpenTool() {
-		return streamResult(), nil
+		return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 	}
 
 	stopReason := mapGeminiFinishReasonToClaudeStopReason(finishReason)
@@ -833,30 +881,40 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 			CacheReadInputTokens: usage.CacheReadInputTokens,
 		},
 	}) {
-		return streamResult(), nil
+		return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 	}
 	if emitAnthropicEvent(&apicompat.AnthropicStreamEvent{Type: "message_stop"}) {
-		return streamResult(), nil
+		return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 	}
 
+	if conversionErr != nil {
+		return nil, conversionErr
+	}
 	for _, resEvt := range apicompat.FinalizeAnthropicResponsesStream(anthState) {
 		chunks := apicompat.ResponsesEventToChatChunks(&resEvt, ccState)
+		if conversionErr = ccState.Err(); conversionErr != nil {
+			return nil, conversionErr
+		}
 		for _, chunk := range chunks {
 			if disconnected := writeChatChunk(chunk); disconnected {
-				return streamResult(), nil
+				return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 			}
 		}
 	}
-	for _, chunk := range apicompat.FinalizeResponsesChatStream(ccState) {
+	finalChunks := apicompat.FinalizeResponsesChatStream(ccState)
+	if conversionErr = ccState.Err(); conversionErr != nil {
+		return nil, conversionErr
+	}
+	for _, chunk := range finalChunks {
 		if disconnected := writeChatChunk(chunk); disconnected {
-			return streamResult(), nil
+			return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 		}
 	}
 
-	_, _ = io.WriteString(c.Writer, "data: [DONE]\n\n")
+	_, _ = io.WriteString(writer, "data: [DONE]\n\n")
 	flusher.Flush()
 
-	return streamResult(), nil
+	return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 }
 
 func (s *GeminiMessagesCompatService) writeGeminiChatCompletionsMappedError(
@@ -965,4 +1023,57 @@ func (s *GeminiMessagesCompatService) writeChatCompletionsError(c *gin.Context, 
 		},
 	})
 	return fmt.Errorf("%s", message)
+}
+
+// Gemini image options belong to the Gemini conversion, not the shared
+// Responses/Anthropic intermediate schema, which has no equivalent field.
+func applyGeminiChatImageConfig(body, gemini []byte) ([]byte, error) {
+	var options struct {
+		ImageConfig map[string]json.RawMessage `json:"imageConfig"`
+		ExtraBody   struct {
+			Google struct {
+				ImageConfig map[string]json.RawMessage `json:"image_config"`
+			} `json:"google"`
+		} `json:"extra_body"`
+	}
+	if err := json.Unmarshal(body, &options); err != nil {
+		return nil, err
+	}
+	config := options.ImageConfig
+	if len(options.ExtraBody.Google.ImageConfig) > 0 {
+		config = options.ExtraBody.Google.ImageConfig
+		for old, current := range map[string]string{"image_size": "imageSize", "aspect_ratio": "aspectRatio", "person_generation": "personGeneration"} {
+			if value, ok := config[old]; ok {
+				config[current] = value
+				delete(config, old)
+			}
+		}
+	}
+	if len(config) == 0 {
+		return gemini, nil
+	}
+	var request map[string]json.RawMessage
+	if err := json.Unmarshal(gemini, &request); err != nil {
+		return nil, err
+	}
+	generation := map[string]json.RawMessage{}
+	if value := request["generationConfig"]; len(value) > 0 {
+		if err := json.Unmarshal(value, &generation); err != nil {
+			return nil, err
+		}
+	}
+	if generation == nil {
+		generation = make(map[string]json.RawMessage)
+	}
+	raw, err := json.Marshal(config)
+	if err != nil {
+		return nil, err
+	}
+	generation["imageConfig"] = raw
+	raw, err = json.Marshal(generation)
+	if err != nil {
+		return nil, err
+	}
+	request["generationConfig"] = raw
+	return json.Marshal(request)
 }

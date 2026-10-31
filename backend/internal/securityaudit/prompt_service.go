@@ -26,11 +26,18 @@ type PromptService struct {
 	lifecycleMu  sync.Mutex
 	cancel       context.CancelFunc
 	background   context.Context
+	startDone    chan struct{}
+	startErr     error
+	closing      bool
+	shutdownDone chan struct{}
+	shutdownErr  error // published by closing shutdownDone
 	enqueueWG    sync.WaitGroup
 	enqueueSlots chan struct{}
 	probeMu      sync.RWMutex
 	probes       map[string]ProbeResult
 }
+
+var errPromptServiceStopped = errors.New("prompt audit service is stopping")
 
 func NewPromptService(
 	config ConfigStore,
@@ -53,51 +60,93 @@ func (s *PromptService) Start(ctx context.Context) error {
 	if s == nil || s.config == nil || s.runner == nil {
 		return errors.New("prompt audit service unavailable")
 	}
+	if ctx == nil {
+		return errors.New("prompt audit start context is nil")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.lifecycleMu.Lock()
-	if s.cancel != nil {
+	if s.closing {
 		s.lifecycleMu.Unlock()
-		return nil
+		return errPromptServiceStopped
+	}
+	if s.startDone != nil {
+		done := s.startDone
+		s.lifecycleMu.Unlock()
+		select {
+		case <-done:
+			return s.startErr
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 	background, cancel := context.WithCancel(ctx)
 	s.background, s.cancel = background, cancel
+	s.startDone = make(chan struct{})
 	s.lifecycleMu.Unlock()
 	configErr := s.config.Start(background)
 	workerErr := s.runner.Start(background)
-	return errors.Join(configErr, workerErr)
+	s.lifecycleMu.Lock()
+	s.startErr = errors.Join(configErr, workerErr)
+	close(s.startDone)
+	s.lifecycleMu.Unlock()
+	return s.startErr
 }
 
+// Shutdown seals enqueue admission and cancels the service immediately. One
+// retained execution joins startup, runner and accepted enqueues before closing
+// config. A caller deadline never abandons that execution or creates a new waiter.
 func (s *PromptService) Shutdown(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
+	if ctx == nil {
+		return errors.New("prompt audit shutdown context is nil")
+	}
 	s.lifecycleMu.Lock()
-	cancel := s.cancel
-	s.cancel = nil
+	if s.shutdownDone == nil {
+		s.closing = true
+		if s.cancel != nil {
+			s.cancel()
+			s.cancel = nil
+		}
+		s.shutdownDone = make(chan struct{})
+		started, done := s.startDone, s.shutdownDone
+		go func() {
+			defer close(done)
+			if started != nil {
+				<-started
+			}
+			// Cancellation already reached the actual workers. The retained
+			// owner waits for completion even after this caller's budget ends.
+			var workerErr error
+			if s.runner != nil {
+				workerErr = s.runner.Shutdown(context.Background())
+			}
+			s.enqueueWG.Wait()
+			if workerErr != nil {
+				s.shutdownErr = workerErr
+				return
+			}
+			if s.config != nil {
+				s.shutdownErr = s.config.Shutdown(context.Background())
+			}
+		}()
+	}
+	done := s.shutdownDone
 	s.lifecycleMu.Unlock()
-	if cancel != nil {
-		cancel()
-	}
-	var workerErr error
-	if s.runner != nil {
-		workerErr = s.runner.Shutdown(ctx)
-	}
-	done := make(chan struct{})
-	go func() { s.enqueueWG.Wait(); close(done) }()
 	select {
 	case <-done:
+		return s.shutdownErr
+	default:
+	}
+	select {
+	case <-done:
+		return s.shutdownErr
 	case <-ctx.Done():
-		if workerErr == nil {
-			workerErr = ctx.Err()
-		}
+		return ctx.Err()
 	}
-	var configErr error
-	if s.config != nil {
-		configErr = s.config.Shutdown(ctx)
-	}
-	if workerErr != nil {
-		return workerErr
-	}
-	return configErr
 }
 
 func (s *PromptService) EffectiveMode() Mode {
@@ -108,27 +157,36 @@ func (s *PromptService) EffectiveMode() Mode {
 }
 
 func (s *PromptService) Enqueue(_ context.Context, req Request) error {
-	if s == nil || s.enqueuer == nil || s.EffectiveMode() != ModeAsync {
+	if s == nil || s.enqueuer == nil {
 		return nil
+	}
+	s.lifecycleMu.Lock()
+	if s.closing {
+		s.lifecycleMu.Unlock()
+		return errPromptServiceStopped
+	}
+	if s.EffectiveMode() != ModeAsync {
+		s.lifecycleMu.Unlock()
+		return nil
+	}
+	background := s.background
+	if background == nil {
+		s.lifecycleMu.Unlock()
+		return errors.New("prompt audit service not started")
 	}
 	select {
 	case s.enqueueSlots <- struct{}{}:
 	default:
+		s.lifecycleMu.Unlock()
 		if s.metrics != nil {
 			s.metrics.IncDropped()
 		}
 		LogWarn(EventEnqueueDropped, map[string]any{"request_id": req.RequestID, "status": "dropped", "error_code": "local_enqueue_busy"})
 		return nil
 	}
-	s.lifecycleMu.Lock()
-	background := s.background
-	s.lifecycleMu.Unlock()
-	if background == nil {
-		<-s.enqueueSlots
-		return errors.New("prompt audit service not started")
-	}
-	requestCopy := req.Clone()
 	s.enqueueWG.Add(1)
+	s.lifecycleMu.Unlock()
+	requestCopy := req.Clone()
 	go func() {
 		defer s.enqueueWG.Done()
 		defer func() { <-s.enqueueSlots }()

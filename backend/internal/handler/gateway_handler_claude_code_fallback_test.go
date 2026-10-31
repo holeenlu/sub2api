@@ -136,7 +136,7 @@ func TestGatewayOpenAICompatibleHandlersClaudeCodeOnlyFallback(t *testing.T) {
 				)
 				cfg := &config.Config{RunMode: config.RunModeSimple}
 				billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
-				t.Cleanup(billingCacheService.Stop)
+				cleanupHandlerBillingCache(t, billingCacheService)
 				h := &GatewayHandler{
 					gatewayService:      gatewayService,
 					billingCacheService: billingCacheService,

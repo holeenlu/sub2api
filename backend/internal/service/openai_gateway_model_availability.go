@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -24,6 +25,11 @@ func (s *OpenAIGatewayService) DiagnoseModelAvailabilityForPlatform(
 	platform string,
 ) ModelAvailabilityDiagnosis {
 	if s == nil {
+		return ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: true}
+	}
+	if err := s.settingService.CheckManagedModel(ctx, platform, requestedModel); errors.Is(err, ErrManagedModelNotFound) {
+		return ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: false}
+	} else if err != nil {
 		return ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: true}
 	}
 	requestedModel = strings.TrimSpace(requestedModel)

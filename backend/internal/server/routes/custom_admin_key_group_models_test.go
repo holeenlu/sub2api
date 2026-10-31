@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	adminhandler "github.com/Wei-Shaw/sub2api/internal/handler/admin"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/adminaccess"
@@ -31,7 +32,7 @@ func (*scopedRouteGroupModels) GetGroup(_ context.Context, id int64) (*service.G
 	if id == 4 {
 		platform = "anthropic"
 	}
-	return &service.Group{ID: id, Name: "模型分组", Platform: platform, RateMultiplier: 9, Description: "不可泄露的分组备注", ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{"gpt-test"}}}, nil
+	return &service.Group{ID: id, Name: "模型分组", Platform: platform, RateMultiplier: 9, Description: "不可泄露的分组备注", ModelAllowlist: catalog.ModelAllowlist{Enabled: true, Models: []string{"gpt-test"}}}, nil
 }
 
 func (*scopedRouteGroupModels) GetGroupModelsListCandidates(context.Context, int64, string) ([]string, error) {
@@ -43,7 +44,7 @@ func (s *scopedRouteGroupModels) ScopedAdminListGroupModels(ctx context.Context,
 	return []service.Group{*g}, 1, err
 }
 
-func (s *scopedRouteGroupModels) ScopedAdminUpdateGroupModels(ctx context.Context, id int64, cfg service.GroupModelAllowlist) (*service.Group, error) {
+func (s *scopedRouteGroupModels) ScopedAdminUpdateGroupModels(ctx context.Context, id int64, cfg catalog.ModelAllowlist) (*service.Group, error) {
 	s.writes = append(s.writes, id)
 	g, err := s.GetGroup(ctx, id)
 	if err == nil {
@@ -152,14 +153,14 @@ func TestScopedAdminGroupModelsRejectUnauthorizedGroupsAndMixedFields(t *testing
 
 type scopedRouteAllowlistRepository struct {
 	service.AdminGroupRepository
-	config service.GroupModelAllowlist
+	config catalog.ModelAllowlist
 	writes int
 }
 
 func (r *scopedRouteAllowlistRepository) GetByID(_ context.Context, id int64) (*service.Group, error) {
 	return &service.Group{ID: id, Platform: service.PlatformOpenAI, ModelAllowlist: r.config}, nil
 }
-func (r *scopedRouteAllowlistRepository) ScopedAdminUpdateGroupModels(ctx context.Context, id int64, cfg service.GroupModelAllowlist) (*service.Group, error) {
+func (r *scopedRouteAllowlistRepository) ScopedAdminUpdateGroupModels(ctx context.Context, id int64, cfg catalog.ModelAllowlist) (*service.Group, error) {
 	r.config = cfg
 	r.writes++
 	return r.GetByID(ctx, id)

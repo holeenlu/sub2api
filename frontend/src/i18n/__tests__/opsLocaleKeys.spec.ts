@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import en from '@/i18n/locales/en'
-import zh from '@/i18n/locales/zh'
+import { loadApplicationLocale } from '@/app/i18n'
+const assembledEnMessages = await loadApplicationLocale('en')
+const assembledZhMessages = await loadApplicationLocale('zh')
+const en = assembledEnMessages
+const zh = assembledZhMessages
+
 
 function flattenKeys(obj: Record<string, any>, prefix = ''): string[] {
   const keys: string[] = []

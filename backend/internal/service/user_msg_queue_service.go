@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
-	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -41,8 +40,7 @@ type UserMessageQueueService struct {
 	cache    UserMsgQueueCache
 	rpmCache RPMCache
 	cfg      *config.UserMessageQueueConfig
-	stopCh   chan struct{} // graceful shutdown
-	stopOnce sync.Once     // 确保 Stop() 并发安全
+	tasks    maintenanceTaskOwner
 }
 
 // NewUserMessageQueueService 创建用户消息串行队列服务
@@ -51,7 +49,6 @@ func NewUserMessageQueueService(cache UserMsgQueueCache, rpmCache RPMCache, cfg 
 		cache:    cache,
 		rpmCache: rpmCache,
 		cfg:      cfg,
-		stopCh:   make(chan struct{}),
 	}
 }
 
@@ -244,50 +241,67 @@ func (s *UserMessageQueueService) CalculateRPMAwareDelay(ctx context.Context, ac
 	return applyJitter(baseDelay, 0.15)
 }
 
-// StartCleanupWorker 启动孤儿锁清理 worker。
-// worker 只处理锁索引中的到期候选，真正删除前由 cache 层再次校验锁 PTTL。
-func (s *UserMessageQueueService) StartCleanupWorker(interval time.Duration) {
-	if s == nil || s.cache == nil || interval <= 0 {
+// Start owns the expired-lock cleanup loop; construction starts no worker.
+func (s *UserMessageQueueService) Start(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	return s.tasks.start(ctx, func(context.Context) error {
+		if s.cache == nil || s.cfg == nil || s.cfg.CleanupIntervalSeconds <= 0 {
+			return nil
+		}
+		return s.tasks.launch(func(runCtx context.Context) {
+			ticker := time.NewTicker(time.Duration(s.cfg.CleanupIntervalSeconds) * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-runCtx.Done():
+					return
+				case <-s.tasks.stopping():
+					return
+				case <-ticker.C:
+					ctx, finish, err := s.tasks.begin()
+					if err != nil {
+						return
+					}
+					s.cleanupExpiredLocks(ctx)
+					finish()
+				}
+			}
+		})
+	})
+}
+
+func (s *UserMessageQueueService) cleanupExpiredLocks(parent context.Context) {
+	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
+	defer cancel()
+
+	// 每轮限制处理数量，避免清理任务在大量过期候选时长时间占用 Redis。
+	cleaned, err := s.cache.ReconcileExpiredLockCandidates(ctx, 1000)
+	if err != nil {
+		logger.LegacyPrintf("service.umq", "Cleanup reconcile failed: %v", err)
 		return
 	}
 
-	runCleanup := func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		// 每轮限制处理数量，避免清理任务在大量过期候选时长时间占用 Redis。
-		cleaned, err := s.cache.ReconcileExpiredLockCandidates(ctx, 1000)
-		if err != nil {
-			logger.LegacyPrintf("service.umq", "Cleanup reconcile failed: %v", err)
-			return
-		}
-
-		if cleaned > 0 {
-			logger.LegacyPrintf("service.umq", "Cleanup completed: released %d orphaned locks", cleaned)
-		}
+	if cleaned > 0 {
+		logger.LegacyPrintf("service.umq", "Cleanup completed: released %d orphaned locks", cleaned)
 	}
-
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-s.stopCh:
-				return
-			case <-ticker.C:
-				runCleanup()
-			}
-		}
-	}()
 }
 
-// Stop 停止后台 cleanup worker
-func (s *UserMessageQueueService) Stop() {
-	if s != nil && s.stopCh != nil {
-		s.stopOnce.Do(func() {
-			close(s.stopCh)
-		})
+// Drain fences new cleanup cycles and joins admitted IO within ctx.
+func (s *UserMessageQueueService) Drain(ctx context.Context) error {
+	if s == nil {
+		return nil
 	}
+	return s.tasks.drain(ctx)
+}
+
+// Stop cancels cleanup IO and retains ownership on timeout for a later join.
+func (s *UserMessageQueueService) Stop(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	return s.tasks.stop(ctx)
 }
 
 // applyJitter 对延迟值施加 ±jitterPct 的随机抖动

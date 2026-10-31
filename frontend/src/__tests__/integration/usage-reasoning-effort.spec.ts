@@ -1,9 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
-import { defineComponent } from 'vue'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { defineComponent, ref } from 'vue'
+import { usageServicesKey } from '@/features/usage/services'
+import { createUsageTestServices } from '@/features/usage/__tests__/services'
+import { createIpGeoLookup, ipGeoLookupKey } from '@/shared/lib/ipGeoLookup'
+enableAutoUnmount(afterEach)
+let testUsageServices: ReturnType<typeof createUsageTestServices>
+let testIpGeo: ReturnType<typeof createIpGeoLookup>
+const testProviders = () => ({ [usageServicesKey as symbol]: testUsageServices, [ipGeoLookupKey as symbol]: testIpGeo })
 
-import UserUsageView from '@/views/user/UsageView.vue'
-import AdminUsageView from '@/views/admin/UsageView.vue'
+import UserUsageView from '@/features/usage/pages/UserUsagePage.vue'
+import AdminUsageView from '@/features/usage/pages/AdminUsagePage.vue'
 
 const {
   userQuery,
@@ -78,48 +85,22 @@ const messages: Record<string, string> = {
   'common.reset': 'Reset',
 }
 
-vi.mock('@/api', () => ({
-  usageAPI: {
-    query: userQuery,
-    getStats: userGetStats,
-    getDashboardModels: userGetDashboardModels,
-    getDashboardSnapshotV2: userGetDashboardSnapshotV2,
-  },
-  keysAPI: {
-    list: userKeysList,
-  },
-  userGroupsAPI: {
-    getAvailable: userGroupsGetAvailable,
-  },
-}))
+vi.mock('@/features/usage/api/usage', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/usage/api/usage')>()
+  return { ...actual, usageAPI: { ...actual.usageAPI, query: userQuery, getStats: userGetStats, getDashboardModels: userGetDashboardModels, getDashboardSnapshotV2: userGetDashboardSnapshotV2 } }
+})
+vi.mock('@/features/usage/api/adminUsage', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/usage/api/adminUsage')>()
+  return { ...actual, adminUsageAPI: { ...actual.adminUsageAPI, list: adminList, getStats: adminGetStats } }
+})
 
-vi.mock('@/api/admin', () => ({
-  adminAPI: {
-    usage: {
-      list: adminList,
-      getStats: adminGetStats,
-    },
-    dashboard: {
-      getSnapshotV2: adminGetSnapshotV2,
-      getModelStats: adminGetModelStats,
-    },
-    users: {
-      getById: adminGetById,
-    },
-  },
-}))
 
-vi.mock('@/api/admin/usage', () => ({
-  adminUsageAPI: {
-    list: adminList,
-  },
-}))
 
-vi.mock('@/api/admin/ops', () => ({
-  listErrorLogs,
-}))
 
-vi.mock('@/stores/app', () => ({
+
+
+
+vi.mock('@/app/model/app', () => ({
   useAppStore: () => ({
     showError: vi.fn(),
     showWarning: vi.fn(),
@@ -182,6 +163,8 @@ const userMappedLog = {
   cache_read_tokens: 0,
   cache_creation_5m_tokens: 0,
   cache_creation_1h_tokens: 0,
+  cache_creation_30m_tokens: 0,
+  cache_creation_12h_tokens: 0,
   image_count: 0,
   billing_mode: 'token',
   request_type: 'sync',
@@ -240,15 +223,22 @@ describe('usage reasoning effort page display', () => {
     adminGetModelStats.mockReset().mockResolvedValue({ models: [] })
     adminGetById.mockReset().mockResolvedValue({ id: 7, email: 'liu.jialin@code-dance.com' })
     listErrorLogs.mockReset().mockResolvedValue({ items: [], total: 0 })
+    testUsageServices = createUsageTestServices({
+      publicSettings: ref({ allow_user_view_error_requests: false }),
+      listUserKeys: userKeysList, getUserGroups: userGroupsGetAvailable, getAdminUser: adminGetById,
+      getAdminSnapshot: adminGetSnapshotV2, getAdminModelStats: adminGetModelStats, getAdminErrors: listErrorLogs
+    })
+    testIpGeo = createIpGeoLookup({ scope: testUsageServices.scopeKey, requestJson: vi.fn(async () => { throw new Error('Unexpected geolocation request') }) })
   })
 
   afterEach(() => {
+    testIpGeo?.dispose()
     localStorage.clear()
   })
 
   it('user usage page only shows the requested reasoning effort', async () => {
     const wrapper = mount(UserUsageView, {
-      global: { stubs: sharedPageStubs },
+      global: { provide: testProviders(), stubs: sharedPageStubs },
     })
     await flushPromises()
 
@@ -261,7 +251,7 @@ describe('usage reasoning effort page display', () => {
 
   it('admin usage page shows requested and mapped effort after the column is enabled', async () => {
     const wrapper = mount(AdminUsageView, {
-      global: {
+      global: { provide: testProviders(),
         stubs: {
           ...sharedPageStubs,
           UsageFilters: adminFiltersStub,
@@ -296,7 +286,7 @@ describe('usage reasoning effort page display', () => {
     })
 
     const wrapper = mount(AdminUsageView, {
-      global: {
+      global: { provide: testProviders(),
         stubs: {
           ...sharedPageStubs,
           UsageFilters: adminFiltersStub,
@@ -320,3 +310,6 @@ describe('usage reasoning effort page display', () => {
     expect(cell).not.toContain('↳')
   })
 })
+
+// Existing behavior under the migrated full administrator role.
+vi.mock("@/features/identity", () => ({ useAuthStore: () => ({ isSuperAdmin: true, isAdmin: true, isSimpleMode: false, can: () => true }) }))

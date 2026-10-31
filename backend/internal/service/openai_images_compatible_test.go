@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -32,7 +33,7 @@ func TestCompatibleImagesGeminiModels(t *testing.T) {
 			for _, typ := range []string{AccountTypeOAuth, AccountTypeSetupToken} {
 				require.False(t, (&Account{Platform: PlatformOpenAI, Type: typ}).SupportsOpenAIImageCapability(parsed.RequiredCapability))
 			}
-			require.False(t, isOpenAIImageGenerationModel(model), "compatible image IDs must not enter native Responses normalization")
+			require.False(t, catalog.IsOpenAIImageGenerationModel(model), "compatible image IDs must not enter native Responses normalization")
 		})
 	}
 	for _, model := range []string{"gemini-2.5-pro", "gemini-2.5-flash", "gemini-3-pro-imageless", "unknown-image", "gpt-5.5"} {

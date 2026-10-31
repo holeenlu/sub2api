@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/gateway/execution"
 	"github.com/stretchr/testify/require"
 )
 
@@ -38,7 +39,7 @@ func runProfitVetoLoop(t *testing.T, fs *FailoverState, pool []int64, vetoed map
 		if picked == 0 {
 			// 选号耗尽，交给退避决策。
 			switch fs.HandleSelectionExhausted(context.Background()) {
-			case FailoverContinue:
+			case execution.RecoveryContinue:
 				res.backoffRetries++
 				continue
 			default:
@@ -47,7 +48,7 @@ func runProfitVetoLoop(t *testing.T, fs *FailoverState, pool []int64, vetoed map
 			}
 		}
 		if vetoed[picked] {
-			if fs.RecordProfitVeto(picked) == FailoverExhausted {
+			if fs.RecordProfitVeto(picked) == execution.RecoveryExhausted {
 				res.outcome = "exhausted"
 				return res
 			}
@@ -81,22 +82,17 @@ func TestProfitVetoAfter503DoesNotLivelock(t *testing.T) {
 	require.Less(t, elapsed, 10*time.Second, "不得每 2s 空转一轮")
 }
 
-// TestProfitVetoKeepsBackoffUsefulForHealthyAccount 钉死修复没有削弱既有的
-// 503 退避语义：排除列表里仍有非利润否决的账号时，退避照常清空并重试，
-// 只是被利润门否决的账号不再复活。
-func TestProfitVetoKeepsBackoffUsefulForHealthyAccount(t *testing.T) {
+// Failed owners and business vetoes remain excluded after candidate exhaustion.
+func TestProfitVetoDoesNotReopenFailedOwner(t *testing.T) {
 	fs := NewFailoverState(10, false)
 	fs.LastFailoverErr = newTestFailoverErr(503, false, false)
 	fs.SwitchCount = 1
-	// 账号 1 因真实 503 被排除；账号 2 会被利润门否决。
 	fs.FailedAccountIDs[1] = struct{}{}
-
 	res := runProfitVetoLoop(t, fs, []int64{2, 1}, map[int64]bool{2: true}, 50)
-
-	require.Equal(t, "forwarded", res.outcome)
-	require.Equal(t, int64(1), res.forwardedID, "退避清空后应重新可选账号 1")
-	require.Equal(t, 1, res.backoffRetries, "应发生且只发生一次退避重试")
-	require.Contains(t, fs.FailedAccountIDs, int64(2), "利润否决的账号在退避清空后必须被放回排除集")
+	require.Equal(t, "exhausted", res.outcome)
+	require.Zero(t, res.backoffRetries)
+	require.Contains(t, fs.FailedAccountIDs, int64(1))
+	require.Contains(t, fs.FailedAccountIDs, int64(2))
 }
 
 // TestProfitVetoAttemptsCapped 钉死没有 503 参与时，大分组整池越线也会在
@@ -113,27 +109,27 @@ func TestProfitVetoAttemptsCapped(t *testing.T) {
 	res := runProfitVetoLoop(t, fs, pool, vetoed, 200)
 
 	require.Equal(t, "exhausted", res.outcome)
-	require.Equal(t, maxProfitVetoAttempts, fs.ProfitVetoCount())
-	require.Equal(t, maxProfitVetoAttempts, res.iterations, "达到上限即终止，不应继续遍历候选池")
+	require.Equal(t, execution.MaxProfitVetoAttempts, fs.ProfitVetoCount())
+	require.Equal(t, execution.MaxProfitVetoAttempts, res.iterations, "达到上限即终止，不应继续遍历候选池")
 }
 
 // TestRecordProfitVetoExcludesAccount 钉死 RecordProfitVeto 仍然把账号加入
 // 调度排除列表（选号入参用的就是 FailedAccountIDs）。
 func TestRecordProfitVetoExcludesAccount(t *testing.T) {
 	fs := NewFailoverState(10, false)
-	require.Equal(t, FailoverContinue, fs.RecordProfitVeto(42))
+	require.Equal(t, execution.RecoveryContinue, fs.RecordProfitVeto(42))
 	require.Contains(t, fs.FailedAccountIDs, int64(42))
 	require.Equal(t, 1, fs.ProfitVetoCount())
 }
 
 // TestHandleSelectionExhaustedUnaffectedWithoutProfitVeto 钉死未启用利润控制的
-// 请求（无任何利润否决）走的仍是原有退避语义：清空排除列表并重试。
+// 请求也必须保留失败排除，不能凭上一条 503 清池重试。
 func TestHandleSelectionExhaustedUnaffectedWithoutProfitVeto(t *testing.T) {
 	fs := NewFailoverState(3, false)
 	fs.LastFailoverErr = newTestFailoverErr(503, false, false)
 	fs.SwitchCount = 1
 	fs.FailedAccountIDs[100] = struct{}{}
 
-	require.Equal(t, FailoverContinue, fs.HandleSelectionExhausted(context.Background()))
-	require.Empty(t, fs.FailedAccountIDs, "无利润否决时排除列表应被完全清空")
+	require.Equal(t, execution.RecoveryExhausted, fs.HandleSelectionExhausted(context.Background()))
+	require.Contains(t, fs.FailedAccountIDs, int64(100))
 }

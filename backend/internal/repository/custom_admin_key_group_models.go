@@ -7,13 +7,15 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/adminaccess"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
-func (r *groupRepository) ScopedAdminUpdateGroupModels(ctx context.Context, id int64, cfg service.GroupModelAllowlist) (*service.Group, error) {
+func (r *groupRepository) ScopedAdminUpdateGroupModels(ctx context.Context, id int64, cfg catalog.ModelAllowlist) (*service.Group, error) {
 	p := adminaccess.FromContext(ctx)
 	if p == nil {
 		return nil, infraerrors.Forbidden("SCOPED_GROUP_MODELS_FORBIDDEN", "缺少受限身份")
@@ -33,7 +35,7 @@ func (r *groupRepository) ScopedAdminUpdateGroupModels(ctx context.Context, id i
 		return nil, infraerrors.NotFound("SCOPED_GROUP_NOT_FOUND", "分组不存在")
 	}
 	// 只写这一个业务字段，避免完整分组 Update 覆盖并发变化或修改费率等敏感配置。
-	if _, err = tx.Client().Group.Update().Where(group.IDEQ(id), group.DeletedAtIsNil()).SetModelAllowlist(service.DomainGroupModelAllowlist(cfg)).SetUpdatedAt(time.Now()).Save(txctx); err != nil {
+	if _, err = tx.Client().Group.Update().Where(group.IDEQ(id), group.DeletedAtIsNil()).SetModelAllowlist(domain.GroupModelAllowlist(cfg)).SetUpdatedAt(time.Now()).Save(txctx); err != nil {
 		return nil, err
 	}
 	if err = enqueueSchedulerOutbox(txctx, tx.Client(), service.SchedulerOutboxEventGroupChanged, nil, &id, nil); err != nil {
@@ -92,7 +94,7 @@ func (r *groupRepository) ScopedAdminListGroupModels(ctx context.Context, params
 	}
 	result := make([]service.Group, 0, len(rows))
 	for _, row := range rows {
-		result = append(result, service.Group{ID: row.ID, Name: row.Name, Platform: row.Platform, ModelAllowlist: service.GroupModelAllowlistFromDomain(row.ModelAllowlist)})
+		result = append(result, service.Group{ID: row.ID, Name: row.Name, Platform: row.Platform, ModelAllowlist: catalog.ModelAllowlist(row.ModelAllowlist)})
 	}
 	return result, int64(total), nil
 }

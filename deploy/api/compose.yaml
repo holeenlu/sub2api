@@ -1,0 +1,114 @@
+name: ${COMPOSE_PROJECT_NAME:-sub2api}
+
+services:
+  api:
+    image: ${APP_IMAGE:-sub2api:local}
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    # Build explicitly before up; never fetch an unrelated image for this tag.
+    pull_policy: never
+    restart: unless-stopped
+    stop_grace_period: ${API_STOP_GRACE_PERIOD:-60s}
+    security_opt:
+      - no-new-privileges:true
+    ulimits:
+      nofile:
+        soft: 100000
+        hard: 100000
+    ports:
+      - "${BIND_HOST:-127.0.0.1}:${SERVER_PORT:-8080}:8080"
+    volumes:
+      - app_data:/app/data
+    environment:
+      AUTO_SETUP: "true"
+      DATA_DIR: /app/data
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: "8080"
+      SERVER_MODE: release
+      RUN_MODE: standard
+      SERVER_TRUSTED_PROXIES: ${SERVER_TRUSTED_PROXIES:-}
+      SERVER_FRONTEND_URL: ${SERVER_FRONTEND_URL:-}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      LOG_SERVICE_NAME: sub2api
+      LOG_OUTPUT_TO_STDOUT: "true"
+      LOG_OUTPUT_TO_FILE: "false"
+      DATABASE_HOST: postgres
+      DATABASE_PORT: "5432"
+      DATABASE_USER: ${POSTGRES_USER:-sub2api}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the isolated deployment environment}
+      DATABASE_DBNAME: ${POSTGRES_DB:-sub2api}
+      DATABASE_SSLMODE: disable
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in the isolated deployment environment}
+      REDIS_DB: "0"
+      REDIS_ENABLE_TLS: "false"
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?Set an explicit bootstrap ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set an explicit bootstrap ADMIN_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?Set a fixed random JWT_SECRET of at least 32 bytes}
+      JWT_EXPIRE_HOUR: ${JWT_EXPIRE_HOUR:-24}
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:?Set a fixed TOTP_ENCRYPTION_KEY using openssl rand -hex 32}
+      SETUP_MIGRATION_TIMEOUT_SECONDS: ${SETUP_MIGRATION_TIMEOUT_SECONDS:-0}
+      TZ: ${TZ:-Asia/Shanghai}
+      # Optional upstream OAuth clients; never bake credentials into an image.
+      GEMINI_OAUTH_CLIENT_ID: ${GEMINI_OAUTH_CLIENT_ID:-}
+      GEMINI_OAUTH_CLIENT_SECRET: ${GEMINI_OAUTH_CLIENT_SECRET:-}
+      GEMINI_OAUTH_SCOPES: ${GEMINI_OAUTH_SCOPES:-}
+      GEMINI_CLI_OAUTH_CLIENT_SECRET: ${GEMINI_CLI_OAUTH_CLIENT_SECRET:-}
+      ANTIGRAVITY_OAUTH_CLIENT_SECRET: ${ANTIGRAVITY_OAUTH_CLIENT_SECRET:-}
+      # Source-built API: upgrades use a newly reviewed and built API image.
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sub2api}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the isolated deployment environment}
+      POSTGRES_DB: ${POSTGRES_DB:-sub2api}
+      # Keep the existing actual data path; mount its parent to also cover
+      # postgres:18's declared VOLUME and avoid an extra anonymous volume.
+      PGDATA: /var/lib/postgresql/data
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" && psql -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" -Atqc 'SELECT 1' >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 60s
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in the isolated deployment environment}
+      TZ: ${TZ:-Asia/Shanghai}
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "yes", "--appendfsync", "everysec", "--requirepass", "${REDIS_PASSWORD:?Set REDIS_PASSWORD in the isolated deployment environment}"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "test \"$$(redis-cli ping)\" = PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+# No global names/external resources: Compose scopes all volumes and the
+# implicit default network to COMPOSE_PROJECT_NAME (or the CLI -p override).
+volumes:
+  app_data:
+  postgres_data:
+  redis_data:

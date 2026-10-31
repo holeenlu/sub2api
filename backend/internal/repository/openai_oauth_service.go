@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -113,10 +114,45 @@ func (s *openaiOAuthService) refreshTokenWithClientID(ctx context.Context, refre
 	}
 
 	if !resp.IsSuccessState() {
+		if clientID == openai.ExcelClientID {
+			// Preserve trusted refresh rejection facts at the real HTTP boundary.
+			// Never retain upstream prose, which may echo credentials.
+			return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_OAUTH_TOKEN_REFRESH_FAILED",
+				"Excel token refresh failed: status %d", resp.StatusCode).WithCause(
+				excelOAuthRefreshFailure(resp.StatusCode, resp.Bytes()))
+		}
 		return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_OAUTH_TOKEN_REFRESH_FAILED", "token refresh failed: status %d, body: %s", resp.StatusCode, resp.String())
 	}
 
 	return &tokenResp, nil
+}
+
+func excelOAuthRefreshFailure(status int, raw []byte) error {
+	if (status != http.StatusBadRequest && status != http.StatusUnauthorized) || len(raw) > 64<<10 {
+		return nil
+	}
+	var envelope struct {
+		Error json.RawMessage `json:"error"`
+	}
+	if json.Unmarshal(raw, &envelope) != nil {
+		return nil
+	}
+	var code string
+	if json.Unmarshal(envelope.Error, &code) != nil {
+		var detail struct {
+			Code string `json:"code"`
+		}
+		if json.Unmarshal(envelope.Error, &detail) != nil {
+			return nil
+		}
+		code = detail.Code
+	}
+	switch code {
+	case "invalid_grant", "token_revoked", "grant_revoked":
+		return &service.ExcelOAuthRefreshError{Status: status, Code: code}
+	default:
+		return nil
+	}
 }
 
 func createOpenAIReqClient(proxyURL string) (*req.Client, error) {

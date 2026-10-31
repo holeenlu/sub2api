@@ -5,6 +5,8 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"maps"
 	"net/http"
 	"reflect"
 	"testing"
@@ -319,6 +321,22 @@ func TestAdminServiceBulkUpdateAccounts_ResolvesIDsFromFilters(t *testing.T) {
 	require.Equal(t, []int64{7, 11}, result.SuccessIDs)
 }
 
+func TestAdminServiceBulkUpdateAccountsRejectsEmptyScope(t *testing.T) {
+	for _, parameterPatch := range []bool{false, true} {
+		repo := &accountRepoStubForBulkUpdate{}
+		svc := &adminServiceImpl{accountRepo: repo}
+		result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+			Filters:                    &BulkUpdateAccountFilters{Platform: " ", Search: " "},
+			UseSingleAccountValidation: parameterPatch,
+		})
+		require.Nil(t, result)
+		requireApplicationErrorReason(t, err, "BULK_UPDATE_SCOPE_REQUIRED")
+		require.False(t, repo.listCalled)
+		require.False(t, repo.getByIDsCalled)
+		require.Zero(t, repo.bulkUpdateCalls)
+	}
+}
+
 func TestAdminServiceBulkUpdateAccounts_NormalizesOpenAISettings(t *testing.T) {
 	repo := &accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{
 		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
@@ -594,4 +612,138 @@ func TestAdminServiceBulkUpdateAccounts_ValidatesFilterResolvedOpenAITargets(t *
 	requireApplicationErrorReason(t, err, "OPENAI_BULK_TARGET_INVALID")
 	require.Equal(t, []int64{7}, repo.getByIDsIDs)
 	require.Zero(t, repo.bulkUpdateCalls)
+}
+
+func TestAdminServiceBulkUpdateCloudChecksEveryAccountBeforeWrite(t *testing.T) {
+	good := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"chatgpt_account_id": "workspace", "chatgpt_user_id": "user"}}
+	bad := &Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"auth_mode": "pat"}}
+	for _, enabled := range []bool{true, false} {
+		repo := &accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{good, bad}}
+		svc := &adminServiceImpl{accountRepo: repo}
+		_, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{AccountIDs: []int64{1, 2}, Extra: map[string]any{OpenAICloudEnabledKey: enabled}})
+		require.True(t, repo.getByIDsCalled)
+		if enabled {
+			requireApplicationErrorReason(t, err, "OPENAI_CLOUD_ACCOUNT_SETTINGS_INVALID")
+			require.Contains(t, err.Error(), "#2")
+			require.Zero(t, repo.bulkUpdateCalls)
+		} else {
+			require.NoError(t, err)
+			require.Equal(t, 1, repo.bulkUpdateCalls)
+		}
+	}
+}
+
+type cloudSettingsAccountRepo struct {
+	*accountRepoStubForBulkUpdate
+	extraUpdates []map[string]any
+}
+
+func (r *cloudSettingsAccountRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
+	r.extraUpdates = append(r.extraUpdates, updates)
+	return nil
+}
+
+type cloudSettingsGroupRepo struct {
+	GroupRepository
+	calls int
+}
+
+func (r *cloudSettingsGroupRepo) GetByIDLite(context.Context, int64) (*Group, error) {
+	r.calls++
+	return nil, ErrGroupNotFound
+}
+
+func TestAdminCloudSwitchDoesNotValidateUnchangedBPSSettings(t *testing.T) {
+	for _, entry := range []string{"bulk", "extra", "single"} {
+		for _, enabled := range []bool{true, false} {
+			for _, scenario := range []struct {
+				name, plan         string
+				missingDestination bool
+				changeBPS          bool
+				changePlan         bool
+				noSwitch           bool
+				missingUserID      bool
+			}{
+				{name: "unchanged missing BPS destination", plan: "plus", missingDestination: true},
+				{name: "unchanged free BPS account", plan: "free"},
+				{name: "changed missing BPS destination", plan: "plus", missingDestination: true, changeBPS: true},
+				{name: "changed free BPS account", plan: "free", changeBPS: true},
+				{name: "changed paid plan", plan: "plus", changePlan: true},
+				{name: "unchanged Cloud preserves normal save checks", plan: "free", noSwitch: true},
+				{name: "missing native identity", plan: "plus", missingUserID: true},
+			} {
+				if entry == "extra" && scenario.changePlan || entry != "single" && scenario.noSwitch {
+					continue
+				}
+				t.Run(fmt.Sprintf("%s/%s/cloud=%t", entry, scenario.name, enabled), func(t *testing.T) {
+					account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+						Credentials: map[string]any{"chatgpt_account_id": "workspace", "chatgpt_user_id": "user", "plan_type": scenario.plan},
+						Extra:       map[string]any{"openai_excel_bps": true, OpenAICloudEnabledKey: !enabled}}
+					if scenario.noSwitch {
+						account.Extra[OpenAICloudEnabledKey] = enabled
+					}
+					if scenario.missingDestination {
+						account.Extra[ExcelBPSAutoMoveOn403Key] = true
+						account.Extra[ExcelBPS403TargetGroupIDKey] = int64(404)
+					}
+					if scenario.missingUserID {
+						delete(account.Credentials, "chatgpt_user_id")
+					}
+					repo := &cloudSettingsAccountRepo{accountRepoStubForBulkUpdate: &accountRepoStubForBulkUpdate{
+						getByIDsAccounts: []*Account{account}, getByIDAccounts: map[int64]*Account{account.ID: account},
+					}}
+					groups := &cloudSettingsGroupRepo{}
+					svc := &adminServiceImpl{accountRepo: repo, groupRepo: groups}
+					updates := map[string]any{OpenAICloudEnabledKey: enabled}
+					if scenario.changeBPS {
+						updates["openai_excel_bps"] = true
+						updates["openai_excel_bps_cache_creation_as_input"] = true
+					}
+					var credentials map[string]any
+					if scenario.changePlan {
+						credentials = maps.Clone(account.Credentials)
+						credentials["plan_type"] = "free"
+					}
+					var err error
+					if entry == "bulk" {
+						_, err = svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{AccountIDs: []int64{account.ID}, Extra: updates, Credentials: credentials})
+					} else if entry == "extra" {
+						err = svc.UpdateAccountExtra(context.Background(), account.ID, updates)
+					} else {
+						// The editor posts the whole extra object, including unchanged
+						// BPS fields; field presence alone is not an actual BPS edit.
+						fullExtra := maps.Clone(account.Extra)
+						maps.Copy(fullExtra, updates)
+						_, err = svc.UpdateAccount(context.Background(), account.ID, &UpdateAccountInput{Extra: fullExtra, Credentials: credentials})
+					}
+					writes := repo.bulkUpdateCalls + len(repo.extraUpdates) + len(repo.updatedAccounts)
+					if scenario.missingUserID && enabled {
+						requireApplicationErrorReason(t, err, "OPENAI_CLOUD_ACCOUNT_SETTINGS_INVALID")
+						require.Zero(t, writes)
+					} else if scenario.changeBPS || scenario.changePlan || scenario.noSwitch {
+						if scenario.missingDestination {
+							require.ErrorIs(t, err, ErrGroupNotFound)
+							require.Equal(t, 1, groups.calls)
+						} else if entry == "bulk" && scenario.changeBPS && scenario.plan == "free" {
+							// The existing bulk target guard rejects this BPS edit before
+							// per-account validation; preserve its public error contract.
+							requireApplicationErrorReason(t, err, "OPENAI_BULK_TARGET_INVALID")
+						} else {
+							requireApplicationErrorReason(t, err, "OPENAI_EXCEL_BPS_INVALID")
+						}
+						require.Zero(t, writes)
+					} else {
+						require.NoError(t, err)
+						require.Equal(t, 1, writes)
+					}
+					if !scenario.changeBPS {
+						require.Zero(t, groups.calls, "Cloud-only settings must not consult BPS group policy")
+					}
+					if entry != "single" {
+						require.Equal(t, !enabled, account.Extra[OpenAICloudEnabledKey], "partial validation must not mutate the loaded account")
+					}
+				})
+			}
+		}
+	}
 }

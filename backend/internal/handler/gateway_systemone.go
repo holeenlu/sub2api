@@ -7,12 +7,16 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/gateway/model"
+	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/typesafe"
+	provider "github.com/Wei-Shaw/sub2api/internal/providers/typesafe"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
@@ -56,11 +60,9 @@ func (h *GatewayHandler) SystemOne(c *gin.Context) {
 
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
-		if maxErr, ok := extractMaxBytesError(err); ok {
-			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
-			return
-		}
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		writeRequestBodyReadError(c, err, func(status int, errType, message string) {
+			h.errorResponse(c, status, errType, message)
+		})
 		return
 	}
 	model, err := typesafe.ValidateSystemOneRequest(body)
@@ -86,6 +88,12 @@ func (h *GatewayHandler) SystemOne(c *gin.Context) {
 	c.Request = c.Request.WithContext(pricingCtx)
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, model)
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
+	ctx, bindErr := h.gatewayService.SystemOneOperationContext(c.Request.Context())
+	if bindErr != nil {
+		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "System One execution is unavailable")
+		return
+	}
+	c.Request = c.Request.WithContext(ctx)
 
 	streamStarted := false
 	userRelease, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, false, &streamStarted)
@@ -120,168 +128,86 @@ func (h *GatewayHandler) SystemOne(c *gin.Context) {
 		return
 	}
 	defer inflightRelease()
-
-	fs := NewFailoverState(h.maxAccountSwitches, false)
-	for {
-		if failoverClientGone(c) {
-			return
-		}
-		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, "", model, fs.FailedAccountIDs, "", subject.UserID)
-		if err == nil && (selection == nil || selection.Account == nil) {
-			err = service.ErrNoAvailableAccounts
-		}
-		if err != nil {
-			if failoverClientGone(c) {
-				reqLog.Info("systemone.account_select_aborted_client_disconnected", zap.Error(err))
-				return
-			}
-			if len(fs.FailedAccountIDs) == 0 {
-				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, model, model, service.PlatformTypeSafe)
-				cls = classifySelectionFailureError(err, cls)
-				if !cls.ModelNotFound {
-					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
-				}
-				reqLog.Warn("systemone.select_account_no_available", zap.Bool("model_not_found", cls.ModelNotFound), zap.Error(err))
-				h.errorResponse(c, cls.Status, cls.ErrType, cls.Message)
-				return
-			}
-			switch fs.HandleSelectionExhausted(c.Request.Context()) {
-			case FailoverContinue:
-				continue
-			case FailoverCanceled:
-				failoverClientGone(c)
-				return
-			default:
-				if fs.LastFailoverErr != nil {
-					h.handleFailoverExhausted(c, fs.LastFailoverErr, service.PlatformTypeSafe, false)
-				} else {
-					h.handleFailoverExhaustedSimple(c, http.StatusBadGateway, false)
-				}
-				return
-			}
-		}
-		account := selection.Account
-
-		accountRelease := selection.ReleaseFunc
-		if !selection.Acquired {
-			if selection.WaitPlan == nil {
-				markOpsRoutingCapacityLimited(c)
-				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "No available accounts")
-				return
-			}
-			accountRelease, err = h.concurrencyHelper.AcquireAccountSlotWithWaitTimeout(c, account.ID, selection.WaitPlan.MaxConcurrency, selection.WaitPlan.Timeout, false, &streamStarted)
-			if err != nil {
-				reqLog.Warn("systemone.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
-				h.handleConcurrencyError(c, err, "account", false)
-				return
-			}
-		}
-		// 准入终检：与其他网关入口一致，利润控制否决的账号不得承接本次请求。
-		admissionCtx := service.ContextWithSelectionProfitGate(c.Request.Context(), selection)
-		latest, vetoed, reason := h.gatewayService.GatewayProfitControlVetoLatest(admissionCtx, account)
-		if vetoed {
-			if accountRelease != nil {
-				accountRelease()
-			}
-			reqLog.Debug("systemone.account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
-			if fs.RecordProfitVeto(account.ID) == FailoverExhausted {
-				reqLog.Warn("systemone.profit_veto_attempts_exhausted", zap.Int("profit_veto_count", fs.ProfitVetoCount()))
-				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", profitVetoExhaustedMessage)
-				return
-			}
-			continue
-		}
-		account = latest
-		accountRelease = wrapReleaseOnDone(c.Request.Context(), accountRelease)
-		setOpsSelectedAccount(c, account.ID, account.Platform)
-		service.SetOpsUpstreamModel(c, model)
-
-		forwardStart := time.Now()
-		result, forwardErr := h.gatewayService.ForwardSystemOne(c.Request.Context(), c, account, body)
-		if accountRelease != nil {
-			accountRelease()
-		}
-		service.SetOpsLatencyMs(c, service.OpsResponseLatencyMsKey, time.Since(forwardStart).Milliseconds())
-
-		if forwardErr != nil {
-			var failoverErr *service.UpstreamFailoverError
-			if errors.As(forwardErr, &failoverErr) {
-				switch fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, account.GetPoolModeRetryCount(), failoverErr) {
-				case FailoverContinue:
-					reqLog.Warn("systemone.upstream_failover_switching",
-						zap.Int64("account_id", account.ID),
-						zap.Int("upstream_status", failoverErr.StatusCode),
-						zap.Int("switch_count", fs.SwitchCount),
-					)
-					continue
-				case FailoverExhausted:
-					h.handleFailoverExhausted(c, fs.LastFailoverErr, service.PlatformTypeSafe, false)
-					return
-				case FailoverCanceled:
-					failoverClientGone(c)
-					return
-				}
-			}
-			if failoverClientGone(c) {
-				return
-			}
-			var upstreamErr *service.SystemOneUpstreamError
-			if errors.As(forwardErr, &upstreamErr) {
-				status := upstreamErr.StatusCode
-				if !service.IsSystemOneRequestErrorStatus(status) {
-					status = http.StatusBadGateway
-				}
-				h.errorResponse(c, status, "upstream_error", "TypeSafe rejected the request")
-				return
-			}
-			reqLog.Warn("systemone.forward_failed", zap.Int64("account_id", account.ID), zap.Error(forwardErr))
-			if errors.Is(forwardErr, typesafe.ErrSystemOneResponseTooLarge) {
-				h.errorResponse(c, http.StatusBadGateway, "upstream_error", "TypeSafe response exceeds the gateway size limit")
-				return
-			}
-			h.errorResponse(c, http.StatusBadGateway, "upstream_error", "TypeSafe upstream request failed")
-			return
-		}
-
-		c.Data(result.StatusCode, result.ContentType, result.Body)
-		h.recordSystemOneUsage(c, apiKey, account, subscription, channelMapping, model, body, result, subject.UserID, pricingAt)
-		return
-	}
+	h.executeSystemOneOperation(c, apiKey, subscription, channelMapping, body, pricingAt)
 }
 
-func (h *GatewayHandler) recordSystemOneUsage(c *gin.Context, apiKey *service.APIKey, account *service.Account, subscription *service.UserSubscription, mapping service.ChannelMappingResult, model string, body []byte, result *service.SystemOneForwardResult, userID int64, pricingAt time.Time) {
-	userAgent := c.GetHeader("User-Agent")
-	clientIP := ip.GetClientIP(c)
-	inboundEndpoint := GetInboundEndpoint(c)
-	upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
-	quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
-	sessionID := service.ExtractClientSessionID(c)
-	requestPayloadHash := service.HashUsageRequestPayload(body)
-
-	h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-		if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
-			Result:             &result.ForwardResult,
-			APIKey:             apiKey,
-			User:               apiKey.User,
-			Account:            account,
-			Subscription:       subscription,
-			PricingAt:          pricingAt,
-			InboundEndpoint:    inboundEndpoint,
-			UpstreamEndpoint:   upstreamEndpoint,
-			UserAgent:          userAgent,
-			IPAddress:          clientIP,
-			SessionID:          sessionID,
-			RequestPayloadHash: requestPayloadHash,
-			APIKeyService:      h.apiKeyService,
-			QuotaPlatform:      quotaPlatform,
-			ChannelUsageFields: clientRequestedUsageFields(c, mapping, model, result.UpstreamModel),
-		}); err != nil {
-			logger.L().With(
-				zap.String("component", "handler.gateway.systemone"),
-				zap.Int64("user_id", userID),
-				zap.Int64("api_key_id", apiKey.ID),
-				zap.Int64("account_id", account.ID),
-			).Error("systemone.record_usage_failed", zap.Error(err))
-		}
+func (h *GatewayHandler) executeSystemOneOperation(c *gin.Context, key *service.APIKey, subscription *service.UserSubscription, mapping service.ChannelMappingResult, body []byte, pricingAt time.Time) {
+	wire, ok := pkghttputil.RequestWireDigest(c.Request)
+	if !ok || wire == ([32]byte{}) {
+		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Original request identity is unavailable")
+		return
+	}
+	requested := typesafe.JevLatestModel
+	if public, exists := service.RequestedPublicModelFromContext(c.Request.Context()); exists {
+		requested = public
+	}
+	in := service.SystemOneExecutionInput{OperationID: uuid.NewString(), OriginalWireDigest: wire, Body: body, RequestedModel: requested, APIKey: key, KeyService: h.apiKeyService,
+		Subscription: subscription, PricingAt: pricingAt, SecurityClientIP: ip.GetSecurityClientIP(c, h.cfg.TrustForwardedIPForAPIKeyACL()), IPAddress: ip.GetClientIP(c), UserAgent: c.GetHeader("User-Agent"),
+		SessionID: service.ExtractClientSessionID(c), InboundEndpoint: GetInboundEndpoint(c), UpstreamEndpoint: typesafe.SystemOnePath, QuotaPlatform: service.QuotaPlatform(c.Request.Context(), key),
+		RequestPayloadHash: service.HashUsageRequestPayload(body), MaxAccountSwitches: h.maxAccountSwitches, ChannelUsageFields: clientRequestedUsageFields(c, mapping, typesafe.JevLatestModel, "")}
+	result, err := h.gatewayService.ExecuteSystemOne(c.Request.Context(), in, service.SystemOneIngressPorts{
+		AcquireAccount: func(ctx context.Context, selection *service.AccountSelectionResult) (func(), error) {
+			if selection.Acquired {
+				return selection.ReleaseFunc, nil
+			}
+			if selection.WaitPlan == nil {
+				return nil, service.ErrNoAvailableAccounts
+			}
+			streamStarted := false
+			return h.concurrencyHelper.AcquireAccountSlotWithWaitTimeout(c, selection.Account.ID, selection.WaitPlan.MaxConcurrency, selection.WaitPlan.Timeout, false, &streamStarted, selection.WaitPlan.RefreshLimit)
+		},
+		Selected: func(account *service.Account) {
+			setOpsSelectedAccount(c, account.ID, account.Platform)
+			service.SetOpsUpstreamModel(c, typesafe.JevLatestModel)
+		},
+		Deliver: func(ctx context.Context, response *provider.Response) (model.DeliveryReceipt, error) {
+			if err := ctx.Err(); err != nil {
+				return model.DeliveryReceipt{}, context.Cause(ctx)
+			}
+			c.Header("Content-Type", response.ContentType)
+			c.Status(response.StatusCode)
+			n, err := c.Writer.Write(response.Body)
+			return model.DeliveryReceipt{BytesWritten: int64(n), HeadersCommitted: c.Writer.Written(), BusinessCommitted: n > 0, PossiblyCommitted: err != nil}, err
+		},
 	})
+	if err == nil {
+		return
+	}
+	if c.Writer.Written() {
+		// The response may already be delivered while journal persistence or
+		// closeout failed. Preserve diagnostics without emitting a second body.
+		logger.FromContext(c.Request.Context()).Error("systemone.completion_failed",
+			zap.String("operation_id", result.OperationID),
+			zap.String("billing_disposition", string(result.Billing.Disposition)),
+			zap.Bool("billing_durable", result.Billing.Durable), zap.Error(err))
+		return
+	}
+	if failoverClientGone(c) {
+		return
+	}
+	var upstream *service.SystemOneUpstreamError
+	if errors.As(err, &upstream) {
+		status := http.StatusBadGateway
+		if service.IsSystemOneRequestErrorStatus(upstream.StatusCode) {
+			status = upstream.StatusCode
+		}
+		h.errorResponse(c, status, "upstream_error", "TypeSafe rejected the request")
+		return
+	}
+	var failover *service.UpstreamFailoverError
+	if errors.As(err, &failover) {
+		h.handleFailoverExhausted(c, failover, service.PlatformTypeSafe, false)
+		return
+	}
+	if len(result.Attempts) == 0 && errors.Is(err, service.ErrNoAvailableAccounts) {
+		cls := classifyNoAccountErrorFromGin(c, h.gatewayService, key, typesafe.JevLatestModel, typesafe.JevLatestModel, service.PlatformTypeSafe)
+		h.errorResponse(c, cls.Status, cls.ErrType, cls.Message)
+		return
+	}
+	if errors.Is(err, typesafe.ErrSystemOneResponseTooLarge) {
+		h.errorResponse(c, http.StatusBadGateway, "upstream_error", "TypeSafe response exceeds the gateway size limit")
+		return
+	}
+	logger.FromContext(c.Request.Context()).Warn("systemone.execution_failed", zap.Error(err))
+	h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "System One execution could not be completed")
 }

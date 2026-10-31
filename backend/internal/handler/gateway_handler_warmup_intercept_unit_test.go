@@ -214,7 +214,7 @@ func newTestGatewayHandlerWithSchedulerCache(t *testing.T, group *service.Group,
 	}
 
 	cleanup := func() {
-		billingCacheSvc.Stop()
+		stopHandlerBillingCache(t, billingCacheSvc)
 	}
 	return h, cleanup
 }

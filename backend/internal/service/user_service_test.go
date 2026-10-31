@@ -109,7 +109,7 @@ func (m *mockUserRepo) GetByID(ctx context.Context, _ int64) (*User, error) {
 	return &User{}, nil
 }
 func (m *mockUserRepo) GetByEmail(context.Context, string) (*User, error) { return &User{}, nil }
-func (m *mockUserRepo) GetFirstAdmin(context.Context) (*User, error)      { return &User{}, nil }
+func (m *mockUserRepo) GetFirstSuperAdmin(context.Context) (*User, error) { return &User{}, nil }
 func (m *mockUserRepo) Update(ctx context.Context, user *User, fields UserUpdateFields) error {
 	m.updateCalls++
 	m.updateFields = append(m.updateFields, fields)
@@ -315,9 +315,8 @@ type mockBillingCache struct {
 	mu                  sync.Mutex
 }
 
-func (m *mockBillingCache) GetUserBalance(context.Context, int64) (float64, error)  { return 0, nil }
-func (m *mockBillingCache) SetUserBalance(context.Context, int64, float64) error    { return nil }
-func (m *mockBillingCache) DeductUserBalance(context.Context, int64, float64) error { return nil }
+func (m *mockBillingCache) GetUserBalance(context.Context, int64) (float64, error) { return 0, nil }
+func (m *mockBillingCache) SetUserBalance(context.Context, int64, float64) error   { return nil }
 func (m *mockBillingCache) InvalidateUserBalance(_ context.Context, userID int64) error {
 	m.invalidateCallCount.Add(1)
 	m.mu.Lock()
@@ -331,9 +330,6 @@ func (m *mockBillingCache) GetSubscriptionCache(context.Context, int64, int64) (
 func (m *mockBillingCache) SetSubscriptionCache(context.Context, int64, int64, *SubscriptionCacheData) error {
 	return nil
 }
-func (m *mockBillingCache) UpdateSubscriptionUsage(context.Context, int64, int64, float64) error {
-	return nil
-}
 func (m *mockBillingCache) InvalidateSubscriptionCache(context.Context, int64, int64) error {
 	return nil
 }
@@ -341,9 +337,6 @@ func (m *mockBillingCache) GetAPIKeyRateLimit(context.Context, int64) (*APIKeyRa
 	return nil, nil
 }
 func (m *mockBillingCache) SetAPIKeyRateLimit(context.Context, int64, *APIKeyRateLimitCacheData) error {
-	return nil
-}
-func (m *mockBillingCache) UpdateAPIKeyRateLimitUsage(context.Context, int64, float64) error {
 	return nil
 }
 func (m *mockBillingCache) InvalidateAPIKeyRateLimit(context.Context, int64) error {
@@ -360,22 +353,6 @@ func (m *mockBillingCache) SetUserPlatformQuotaCache(context.Context, int64, str
 
 func (m *mockBillingCache) DeleteUserPlatformQuotaCache(context.Context, int64, string) error {
 	return nil
-}
-
-func (m *mockBillingCache) IncrUserPlatformQuotaUsageCache(context.Context, int64, string, float64, time.Duration, bool) error {
-	return nil
-}
-
-func (m *mockBillingCache) PopDirtyUserPlatformQuotaKeys(context.Context, int) ([]UserPlatformQuotaKey, error) {
-	return nil, nil
-}
-
-func (m *mockBillingCache) ReaddDirtyUserPlatformQuotaKeys(context.Context, []UserPlatformQuotaKey) error {
-	return nil
-}
-
-func (m *mockBillingCache) BatchGetUserPlatformQuotaCache(context.Context, []UserPlatformQuotaKey) ([]*UserPlatformQuotaCacheEntry, error) {
-	return nil, nil
 }
 
 // --- 测试 ---

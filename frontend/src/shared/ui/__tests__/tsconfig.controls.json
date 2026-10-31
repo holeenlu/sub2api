@@ -1,0 +1,10 @@
+{
+  "extends": "../../../../tsconfig.json",
+  "include": [
+    "Select.types.vue",
+    "Select.boundaries.spec.ts",
+    "../../lib/__tests__/useSwipeSelect.spec.ts",
+    "../../lib/__tests__/useAutoRefresh.spec.ts"
+  ],
+  "exclude": []
+}

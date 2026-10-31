@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,6 +11,15 @@ import (
 	"sync"
 	"time"
 )
+
+type rejectedOAuthGrantKey struct{}
+
+// RefreshRejected keeps the ordinary local/distributed locks and persistence
+// checks. A concurrent rotation is reused; only the rejected version is forced.
+func (api *OAuthRefreshAPI) RefreshRejected(ctx context.Context, account *Account, executor OAuthRefreshExecutor, token string) (*OAuthRefreshResult, error) {
+	ctx = context.WithValue(ctx, rejectedOAuthGrantKey{}, sha256.Sum256([]byte(token)))
+	return api.RefreshIfNeeded(ctx, account, executor, 0)
+}
 
 // OAuthRefreshExecutor 各平台实现的 OAuth 刷新执行器
 // TokenRefresher 接口的超集：增加了 CacheKey 方法用于分布式锁
@@ -32,6 +42,28 @@ type GrokOAuthRefreshSuccessRepository interface {
 		expectedProxyID *int64,
 		credentials map[string]any,
 	) (bool, error)
+}
+
+// OpenAIOAuthRefreshRepository applies refresh outcomes only to the grant that
+// produced them. Settings edits do not change that grant or discard a rotated RT.
+type OpenAIOAuthRefreshRepository interface {
+	UpdateOpenAIOAuthCredentialsIfUnchanged(context.Context, *Account, map[string]any) (bool, error)
+	SetOpenAIOAuthRefreshErrorIfUnchanged(context.Context, *Account, string) (bool, error)
+	SetOpenAIOAuthRefreshTempUnschedulableIfUnchanged(context.Context, *Account, time.Time, string) (bool, error)
+}
+
+func isNativeOpenAIOAuthRefresh(account *Account) bool {
+	return account != nil && account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth &&
+		account.VendorID == nil && account.ParentAccountID == nil && !account.IsOpenAIPersonalAccessToken() &&
+		!account.IsOpenAIAgentIdentity() && !account.IsExcelOAuth()
+}
+
+func nativeOpenAIRefreshRepository(repo AccountRepository) (OpenAIOAuthRefreshRepository, error) {
+	conditional, ok := repo.(OpenAIOAuthRefreshRepository)
+	if !ok {
+		return nil, &providerConfigurationRefreshError{err: errors.New("OpenAI OAuth conditional refresh repository is not configured")}
+	}
+	return conditional, nil
 }
 
 const (
@@ -115,6 +147,11 @@ func snapshotOAuthRefreshAccount(account *Account) *Account {
 	}
 	snapshot := *account
 	snapshot.Credentials = shallowCopyMap(account.Credentials)
+	snapshot.Extra = shallowCopyMap(account.Extra)
+	if account.Proxy != nil {
+		proxy := *account.Proxy
+		snapshot.Proxy = &proxy
+	}
 	if account.ProxyID != nil {
 		proxyID := *account.ProxyID
 		snapshot.ProxyID = &proxyID
@@ -246,19 +283,48 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 		return &OAuthRefreshResult{Account: freshAccount}, nil
 	}
 
+	if freshAccount.IsVendorArchived() {
+		return nil, ErrVendorAccountArchived
+	}
+
 	// 3. 二次检查是否仍需刷新（另一条路径可能已刷新）
-	if !executor.NeedsRefresh(freshAccount, refreshWindow) {
+	needsRefresh := executor.NeedsRefresh(freshAccount, refreshWindow)
+	if rejected, ok := ctx.Value(rejectedOAuthGrantKey{}).([32]byte); ok {
+		needsRefresh = rejected == sha256.Sum256([]byte(freshAccount.GetCredential("access_token")))
+	}
+	if !needsRefresh {
 		return &OAuthRefreshResult{
 			Account: freshAccount,
 		}, nil
 	}
 
 	// 4. 执行平台特定刷新逻辑
+	if err := validateVendorOAuthRefresh(ctx, api.accountRepo, freshAccount); err != nil {
+		return nil, err
+	}
+	var nativeRepository OpenAIOAuthRefreshRepository
+	var excelRepository AccountExcelPrimaryRefreshRepository
+	if isNativeOpenAIOAuthRefresh(freshAccount) {
+		var err error
+		nativeRepository, err = nativeOpenAIRefreshRepository(api.accountRepo)
+		if err != nil {
+			return nil, err
+		}
+	} else if freshAccount.IsExcelOAuth() && !isVendorOpenAIRefresh(freshAccount) {
+		var ok bool
+		excelRepository, ok = api.accountRepo.(AccountExcelPrimaryRefreshRepository)
+		if !ok {
+			return nil, &providerConfigurationRefreshError{err: errors.New("Excel primary OAuth conditional refresh repository is not configured")}
+		}
+	}
 	attemptedAccount := snapshotOAuthRefreshAccount(freshAccount)
 	newCredentials, refreshErr := executor.Refresh(ctx, freshAccount)
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		// A provider implementation may ignore cancellation and return late
 		// credentials. Never persist them after the attempt/cycle boundary.
+		if (nativeRepository != nil || excelRepository != nil) && refreshErr == nil && newCredentials != nil {
+			return nil, &providerCycleContainmentRefreshError{err: ctxErr}
+		}
 		return nil, ctxErr
 	}
 	if refreshErr != nil {
@@ -266,6 +332,16 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 		// 重新读取 DB，如果 refresh_token 已更新则说明是竞争，返回成功
 		if isInvalidGrantError(refreshErr) {
 			if recoveredAccount, recovered := api.tryRecoverFromRefreshRace(ctx, freshAccount); recovered {
+				if nativeRepository != nil {
+					var err error
+					recoveredAccount, err = api.loadOpenAIDurableAccountAfterRefresh(ctx, cacheKey, freshAccount.ID)
+					if err != nil {
+						return nil, err
+					}
+				}
+				if err := validateVendorOAuthRefresh(ctx, api.accountRepo, recoveredAccount); err != nil {
+					return nil, err
+				}
 				if requestPath && recoveredAccount.Platform == PlatformGrok {
 					if eligibilityErr := grokOAuthRequestAccountEligibilityError(recoveredAccount); eligibilityErr != nil {
 						return nil, withGrokCredentialFailureSnapshot(eligibilityErr, recoveredAccount)
@@ -293,7 +369,61 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 	// 5. 设置版本号 + 更新 DB
 	if newCredentials != nil {
 		newCredentials["_token_version"] = time.Now().UnixMilli()
-		if freshAccount.IsGrokOAuth() {
+		if isVendorOpenAIRefresh(freshAccount) {
+			var excelBefore *Account
+			if attemptedAccount.IsExcelOAuth() {
+				excelBefore = snapshotOAuthRefreshAccount(attemptedAccount)
+			}
+			if err := persistVendorOAuthRefresh(ctx, api.accountRepo, attemptedAccount, newCredentials); err != nil {
+				return nil, err
+			}
+			freshAccount = attemptedAccount
+			if excelBefore != nil {
+				// Retain the vendor owner's existing mode/credential CAS. Only
+				// its confirmed durable result may update a BPS sender snapshot.
+				current, err := api.loadOpenAIDurableAccountAfterRefresh(ctx, cacheKey, freshAccount.ID)
+				if err != nil {
+					return nil, err
+				}
+				if !excelPrimaryRefreshCredentialsEqual(current.Credentials, newCredentials) {
+					return &OAuthRefreshResult{Account: current}, nil
+				}
+				RecordExcelPrimaryRefresh(ctx, excelBefore, current)
+				freshAccount, newCredentials = current, current.Credentials
+			}
+		} else if isNativeOpenAIOAuthRefresh(freshAccount) {
+			applied, err := nativeRepository.UpdateOpenAIOAuthCredentialsIfUnchanged(ctx, attemptedAccount, newCredentials)
+			if err != nil {
+				// The exchange may already have consumed the old RT. Never retry
+				// it after an ambiguous database/identity/outbox failure.
+				return nil, &providerCycleContainmentRefreshError{err: fmt.Errorf("OpenAI OAuth rotation persistence failed: %w", err)}
+			}
+			current, err := api.loadOpenAIDurableAccountAfterRefresh(ctx, cacheKey, freshAccount.ID)
+			if err != nil {
+				return nil, err
+			}
+			if !applied {
+				return &OAuthRefreshResult{Account: current}, nil
+			}
+			freshAccount = current
+			newCredentials = current.Credentials
+		} else if excelRepository != nil {
+			applied, err := excelRepository.UpdateExcelPrimaryCredentialsIfUnchanged(ctx, attemptedAccount, newCredentials)
+			if err != nil {
+				return nil, &providerCycleContainmentRefreshError{err: fmt.Errorf("Excel primary OAuth rotation persistence failed: %w", err)}
+			}
+			current, err := api.loadOpenAIDurableAccountAfterRefresh(ctx, cacheKey, freshAccount.ID)
+			if err != nil {
+				return nil, err
+			}
+			// A competing reauthorization can win either the CAS or the gap
+			// before this read. Neither is a receipt for this refresh attempt.
+			if !applied || !excelPrimaryRefreshCredentialsEqual(current.Credentials, newCredentials) {
+				return &OAuthRefreshResult{Account: current}, nil
+			}
+			RecordExcelPrimaryRefresh(ctx, attemptedAccount, current)
+			freshAccount, newCredentials = current, current.Credentials
+		} else if freshAccount.IsGrokOAuth() {
 			conditionalRepo, ok := api.accountRepo.(GrokOAuthRefreshSuccessRepository)
 			if !ok {
 				return nil, &providerConfigurationRefreshError{
@@ -370,6 +500,26 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 		NewCredentials: newCredentials,
 		Account:        freshAccount,
 	}, nil
+}
+
+func (api *OAuthRefreshAPI) loadOpenAIDurableAccountAfterRefresh(parent context.Context, cacheKey string, accountID int64) (*Account, error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), defaultRefreshPostPersistCleanupTimeout)
+	defer cancel()
+	// Both a committed rotation and a lost CAS require the current durable
+	// grant. Invalidating an account cache never publishes the losing token.
+	if api.tokenCache != nil {
+		if err := api.tokenCache.DeleteAccessToken(ctx, cacheKey); err != nil {
+			return nil, &providerCycleContainmentRefreshError{err: fmt.Errorf("OpenAI OAuth post-refresh cache invalidation failed: %w", err)}
+		}
+	}
+	current, err := api.accountRepo.GetByID(ctx, accountID)
+	if err != nil || current == nil {
+		if err == nil {
+			err = ErrAccountNotFound
+		}
+		return nil, &providerCycleContainmentRefreshError{err: fmt.Errorf("OpenAI OAuth post-refresh state unavailable: %w", err)}
+	}
+	return current, nil
 }
 
 func (api *OAuthRefreshAPI) releaseRefreshLock(parent context.Context, cacheKey string) {

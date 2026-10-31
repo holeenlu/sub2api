@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/billing/reservation"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -55,9 +56,6 @@ type cacheWriteKind int
 const (
 	cacheWriteSetBalance cacheWriteKind = iota
 	cacheWriteSetSubscription
-	cacheWriteUpdateSubscriptionUsage
-	cacheWriteDeductBalance
-	cacheWriteUpdateRateLimitUsage
 )
 
 // 异步缓存写入工作池配置
@@ -71,7 +69,7 @@ const (
 // 新实现使用固定大小的工作池：
 // 1. 预创建 10 个 worker goroutine，避免频繁创建销毁
 // 2. 使用带缓冲的 channel（1000）作为任务队列，平滑写入峰值
-// 3. 非阻塞写入，队列满时关键任务同步回退，非关键任务丢弃并告警
+// 3. 非阻塞回填，队列满时丢弃并告警；结算后失效由持久账务执行
 // 4. 统一超时控制，避免慢操作阻塞工作池
 const (
 	cacheWriteWorkerCount     = 10              // 工作协程数量
@@ -86,9 +84,7 @@ type cacheWriteTask struct {
 	kind             cacheWriteKind
 	userID           int64
 	groupID          int64
-	apiKeyID         int64
 	balance          float64
-	amount           float64
 	subscriptionData *subscriptionCacheData
 }
 
@@ -99,7 +95,7 @@ type apiKeyRateLimitLoader interface {
 
 type subscriptionCacheInvalidationPubSub interface {
 	PublishSubscriptionCacheInvalidation(ctx context.Context, cacheKey string) error
-	SubscribeSubscriptionCacheInvalidation(ctx context.Context, handler func(cacheKey string)) error
+	SubscribeSubscriptionCacheInvalidation(ctx context.Context, handler func(context.Context, string)) (SubscriptionCacheSubscription, error)
 }
 
 // BillingCacheService 计费缓存服务
@@ -115,13 +111,16 @@ type BillingCacheService struct {
 	circuitBreaker        *billingCircuitBreaker
 	userPlatformQuotaRepo UserPlatformQuotaRepository
 
-	cacheWriteChan     chan cacheWriteTask
-	cacheWriteWg       sync.WaitGroup
-	cacheWriteStopOnce sync.Once
-	cacheWriteMu       sync.RWMutex
-	stopped            atomic.Bool
-	balanceLoadSF      singleflight.Group
-	quotaLoadSF        singleflight.Group
+	cacheWriteChan   chan cacheWriteTask
+	cacheWriteWg     sync.WaitGroup
+	cacheWriteClosed bool
+	cacheWriteCtx    context.Context
+	cacheWriteCancel context.CancelFunc
+	cacheWriteDone   chan struct{}
+	cacheWriteMu     sync.RWMutex
+	stopped          atomic.Bool
+	balanceLoadSF    singleflight.Group
+	quotaLoadSF      singleflight.Group
 	// 丢弃日志节流计数器（减少高负载下日志噪音）
 	cacheWriteDropFullCount     uint64
 	cacheWriteDropFullLastLog   int64
@@ -151,41 +150,100 @@ func NewBillingCacheService(
 		userPlatformQuotaRepo: userPlatformQuotaRepo,
 	}
 	svc.circuitBreaker = newBillingCircuitBreaker(cfg.Billing.CircuitBreaker)
-	svc.startCacheWriteWorkers()
 	return svc
 }
 
-// Stop 关闭缓存写入工作池
-func (s *BillingCacheService) Stop() {
-	s.cacheWriteStopOnce.Do(func() {
-		s.stopped.Store(true)
-
-		s.cacheWriteMu.Lock()
-		ch := s.cacheWriteChan
-		if ch != nil {
-			close(ch)
+// Start explicitly owns the cache-fill workers. Construction does not start
+// work. Start is idempotent while running; Drain/Stop are terminal. The caller
+// keeps ctx alive through Usage drain and the final cache invalidations.
+func (s *BillingCacheService) Start(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.cacheWriteMu.Lock()
+	defer s.cacheWriteMu.Unlock()
+	if s.stopped.Load() {
+		return fmt.Errorf("billing cache workers stopped")
+	}
+	if s.cacheWriteChan != nil {
+		if s.cacheWriteCtx != nil {
+			return s.cacheWriteCtx.Err()
 		}
-		s.cacheWriteMu.Unlock()
-
-		if ch == nil {
-			return
-		}
-		s.cacheWriteWg.Wait()
-
-		s.cacheWriteMu.Lock()
-		if s.cacheWriteChan == ch {
-			s.cacheWriteChan = nil
-		}
-		s.cacheWriteMu.Unlock()
-	})
-}
-
-func (s *BillingCacheService) startCacheWriteWorkers() {
+		return nil
+	}
+	runCtx, cancel := context.WithCancel(ctx)
 	ch := make(chan cacheWriteTask, cacheWriteBufferSize)
-	s.cacheWriteChan = ch
+	done := make(chan struct{})
+	s.cacheWriteChan, s.cacheWriteCancel, s.cacheWriteDone = ch, cancel, done
+	s.cacheWriteCtx = runCtx
 	for i := 0; i < cacheWriteWorkerCount; i++ {
 		s.cacheWriteWg.Add(1)
-		go s.cacheWriteWorker(ch)
+		go s.cacheWriteWorker(runCtx, ch)
+	}
+	go func() { s.cacheWriteWg.Wait(); close(done) }()
+	return nil
+}
+
+// Drain stops accepting cache fills and waits for all admitted fills. It does
+// not stop synchronous invalidation or publishing: Usage must finish those
+// before the host stops the cache and closes Redis. A timeout retains ownership
+// so Stop with a fresh bounded context can cancel and join outstanding work.
+func (s *BillingCacheService) Drain(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	done, _ := s.stopCacheIntake()
+	return waitCacheWriters(ctx, done)
+}
+
+// Stop cancels fills and joins every worker within ctx. Subscription handles
+// belong to SubscriptionService: Close and Wait them before releasing its L1.
+// This method neither closes the shared Redis client nor drops usage evidence.
+func (s *BillingCacheService) Stop(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	done, cancel := s.stopCacheIntake()
+	if cancel != nil {
+		cancel()
+	}
+	if err := waitCacheWriters(ctx, done); err != nil {
+		return err
+	}
+	s.cacheWriteMu.Lock()
+	s.cacheWriteChan = nil
+	s.cacheWriteMu.Unlock()
+	return nil
+}
+
+func (s *BillingCacheService) stopCacheIntake() (<-chan struct{}, context.CancelFunc) {
+	s.cacheWriteMu.Lock()
+	defer s.cacheWriteMu.Unlock()
+	s.stopped.Store(true)
+	if s.cacheWriteChan != nil && !s.cacheWriteClosed {
+		close(s.cacheWriteChan)
+		s.cacheWriteClosed = true
+	}
+	return s.cacheWriteDone, s.cacheWriteCancel
+}
+
+func waitCacheWriters(ctx context.Context, done <-chan struct{}) error {
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	default:
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -199,7 +257,7 @@ func (s *BillingCacheService) enqueueCacheWrite(task cacheWriteTask) (enqueued b
 	s.cacheWriteMu.RLock()
 	defer s.cacheWriteMu.RUnlock()
 
-	if s.cacheWriteChan == nil {
+	if s.stopped.Load() || s.cacheWriteChan == nil || (s.cacheWriteCtx != nil && s.cacheWriteCtx.Err() != nil) {
 		s.logCacheWriteDrop(task, "closed")
 		return false
 	}
@@ -214,35 +272,28 @@ func (s *BillingCacheService) enqueueCacheWrite(task cacheWriteTask) (enqueued b
 	}
 }
 
-func (s *BillingCacheService) cacheWriteWorker(ch <-chan cacheWriteTask) {
+func (s *BillingCacheService) cacheWriteWorker(runCtx context.Context, ch <-chan cacheWriteTask) {
 	defer s.cacheWriteWg.Done()
-	for task := range ch {
-		ctx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
-		switch task.kind {
-		case cacheWriteSetBalance:
-			s.setBalanceCache(ctx, task.userID, task.balance)
-		case cacheWriteSetSubscription:
-			s.setSubscriptionCache(ctx, task.userID, task.groupID, task.subscriptionData)
-		case cacheWriteUpdateSubscriptionUsage:
-			if s.cache != nil {
-				if err := s.cache.UpdateSubscriptionUsage(ctx, task.userID, task.groupID, task.amount); err != nil {
-					logger.LegacyPrintf("service.billing_cache", "Warning: update subscription cache failed for user %d group %d: %v", task.userID, task.groupID, err)
-				}
+	for {
+		select {
+		case <-runCtx.Done():
+			return
+		case task, ok := <-ch:
+			if !ok {
+				return
 			}
-		case cacheWriteDeductBalance:
-			if s.cache != nil {
-				if err := s.cache.DeductUserBalance(ctx, task.userID, task.amount); err != nil {
-					logger.LegacyPrintf("service.billing_cache", "Warning: deduct balance cache failed for user %d: %v", task.userID, err)
-				}
+			if runCtx.Err() != nil {
+				return
 			}
-		case cacheWriteUpdateRateLimitUsage:
-			if s.cache != nil {
-				if err := s.cache.UpdateAPIKeyRateLimitUsage(ctx, task.apiKeyID, task.amount); err != nil {
-					logger.LegacyPrintf("service.billing_cache", "Warning: update rate limit usage cache failed for api key %d: %v", task.apiKeyID, err)
-				}
+			ctx, cancel := context.WithTimeout(runCtx, cacheWriteTimeout)
+			switch task.kind {
+			case cacheWriteSetBalance:
+				s.setBalanceCache(ctx, task.userID, task.balance)
+			case cacheWriteSetSubscription:
+				s.setSubscriptionCache(ctx, task.userID, task.groupID, task.subscriptionData)
 			}
+			cancel()
 		}
-		cancel()
 	}
 }
 
@@ -253,12 +304,6 @@ func cacheWriteKindName(kind cacheWriteKind) string {
 		return "set_balance"
 	case cacheWriteSetSubscription:
 		return "set_subscription"
-	case cacheWriteUpdateSubscriptionUsage:
-		return "update_subscription_usage"
-	case cacheWriteDeductBalance:
-		return "deduct_balance"
-	case cacheWriteUpdateRateLimitUsage:
-		return "update_rate_limit_usage"
 	default:
 		return "unknown"
 	}
@@ -368,34 +413,6 @@ func (s *BillingCacheService) setBalanceCache(ctx context.Context, userID int64,
 	}
 }
 
-// DeductBalanceCache 扣减余额缓存（同步调用）
-func (s *BillingCacheService) DeductBalanceCache(ctx context.Context, userID int64, amount float64) error {
-	if s.cache == nil {
-		return nil
-	}
-	return s.cache.DeductUserBalance(ctx, userID, amount)
-}
-
-// QueueDeductBalance 异步扣减余额缓存
-func (s *BillingCacheService) QueueDeductBalance(userID int64, amount float64) {
-	if s.cache == nil {
-		return
-	}
-	// 队列满时同步回退，避免关键扣减被静默丢弃。
-	if s.enqueueCacheWrite(cacheWriteTask{
-		kind:   cacheWriteDeductBalance,
-		userID: userID,
-		amount: amount,
-	}) {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
-	defer cancel()
-	if err := s.DeductBalanceCache(ctx, userID, amount); err != nil {
-		logger.LegacyPrintf("service.billing_cache", "Warning: deduct balance cache fallback failed for user %d: %v", userID, err)
-	}
-}
-
 // InvalidateUserBalance 失效用户余额缓存
 func (s *BillingCacheService) InvalidateUserBalance(ctx context.Context, userID int64) error {
 	if s.cache == nil {
@@ -490,35 +507,6 @@ func (s *BillingCacheService) setSubscriptionCache(ctx context.Context, userID, 
 	}
 }
 
-// UpdateSubscriptionUsage 更新订阅用量缓存（同步调用）
-func (s *BillingCacheService) UpdateSubscriptionUsage(ctx context.Context, userID, groupID int64, costUSD float64) error {
-	if s.cache == nil {
-		return nil
-	}
-	return s.cache.UpdateSubscriptionUsage(ctx, userID, groupID, costUSD)
-}
-
-// QueueUpdateSubscriptionUsage 异步更新订阅用量缓存
-func (s *BillingCacheService) QueueUpdateSubscriptionUsage(userID, groupID int64, costUSD float64) {
-	if s.cache == nil {
-		return
-	}
-	// 队列满时同步回退，确保订阅用量及时更新。
-	if s.enqueueCacheWrite(cacheWriteTask{
-		kind:    cacheWriteUpdateSubscriptionUsage,
-		userID:  userID,
-		groupID: groupID,
-		amount:  costUSD,
-	}) {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
-	defer cancel()
-	if err := s.UpdateSubscriptionUsage(ctx, userID, groupID, costUSD); err != nil {
-		logger.LegacyPrintf("service.billing_cache", "Warning: update subscription cache fallback failed for user %d group %d: %v", userID, groupID, err)
-	}
-}
-
 // InvalidateSubscription 失效指定订阅缓存
 func (s *BillingCacheService) InvalidateSubscription(ctx context.Context, userID, groupID int64) error {
 	if s.cache == nil {
@@ -542,13 +530,15 @@ func (s *BillingCacheService) PublishSubscriptionCacheInvalidation(ctx context.C
 	return pubsub.PublishSubscriptionCacheInvalidation(ctx, cacheKey)
 }
 
-func (s *BillingCacheService) SubscribeSubscriptionCacheInvalidation(ctx context.Context, handler func(cacheKey string)) error {
+// SubscribeSubscriptionCacheInvalidation transfers a real subscription handle
+// to its caller. Nil means no transport is configured; never a live goroutine.
+func (s *BillingCacheService) SubscribeSubscriptionCacheInvalidation(ctx context.Context, handler func(context.Context, string)) (SubscriptionCacheSubscription, error) {
 	if s.cache == nil {
-		return nil
+		return nil, nil
 	}
 	pubsub, ok := s.cache.(subscriptionCacheInvalidationPubSub)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	return pubsub.SubscribeSubscriptionCacheInvalidation(ctx, handler)
 }
@@ -696,43 +686,6 @@ func (s *BillingCacheService) evaluateRateLimits(ctx context.Context, apiKey *AP
 	return nil
 }
 
-// QueueUpdateAPIKeyRateLimitUsage asynchronously updates rate limit usage in the cache.
-func (s *BillingCacheService) QueueUpdateAPIKeyRateLimitUsage(apiKeyID int64, cost float64) {
-	if s.cache == nil {
-		return
-	}
-	s.enqueueCacheWrite(cacheWriteTask{
-		kind:     cacheWriteUpdateRateLimitUsage,
-		apiKeyID: apiKeyID,
-		amount:   cost,
-	})
-}
-
-// IncrementUserPlatformQuotaUsage 同步累加 user × platform usage 到 Redis 缓存。
-//
-// 设计：同步写入而非异步入队。同步写确保下次 preflight 立即看到最新 usage，
-// 把 TOCTOU 超支窗口限制在并发 in-flight 请求数量内（而非随时间无限累积）。
-// 写延迟通常 < 1ms（本地 Redis），换取 quota 视图实时性的取舍合理。
-//
-// Redis 写失败用 ALERT 级 log；DB 持久化由 caller 单独 goroutine 兜底（gateway_service.go）。
-func (s *BillingCacheService) IncrementUserPlatformQuotaUsage(userID int64, platform string, cost float64) {
-	if s.cache == nil {
-		return
-	}
-	if platform == "" || cost <= 0 {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
-	defer cancel()
-	ttl := time.Duration(s.cfg.Billing.UserPlatformQuotaCacheTTLSeconds) * time.Second
-	markDirty := s.cfg.Database.UserPlatformQuotaFlusherEnabled
-	if err := s.cache.IncrUserPlatformQuotaUsageCache(ctx, userID, platform, cost, ttl, markDirty); err != nil {
-		logger.LegacyPrintf("service.billing_cache",
-			"ALERT: incr user platform quota cache failed user=%d platform=%s cost=%f: %v",
-			userID, platform, cost, err)
-	}
-}
-
 // ============================================
 // 统一检查方法
 // ============================================
@@ -762,7 +715,7 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 		if err := s.checkSubscriptionEligibility(ctx, user.ID, group, subscription); err != nil {
 			return err
 		}
-	} else {
+	} else if !user.IsSuperAdmin() {
 		if err := s.checkBalanceEligibility(ctx, user.ID); err != nil {
 			return err
 		}
@@ -797,7 +750,7 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 // 在途预留：先登记本次预留再读用量，并发的两笔费用中后读用量的一方必然看到另一方（预留或已落库的扣费）。
 // 返回的句柄可能为 nil（未登记任何预留）；调用方须在 handler 结束时调用 HandlerDone，预留在计费任务落库后释放。
 // 须在 CheckBillingEligibility 通过后调用；简易模式不校验。
-func (s *BillingCacheService) ReserveFixedCharge(ctx context.Context, user *User, apiKey *APIKey, group *Group, subscription *UserSubscription, amount float64) (*InflightReservation, error) {
+func (s *BillingCacheService) ReserveFixedCharge(ctx context.Context, user *User, apiKey *APIKey, group *Group, subscription *UserSubscription, amount float64) (*reservation.Handle, error) {
 	if user == nil || amount <= 0 || math.IsNaN(amount) || math.IsInf(amount, 0) {
 		return nil, nil
 	}
@@ -805,7 +758,7 @@ func (s *BillingCacheService) ReserveFixedCharge(ctx context.Context, user *User
 		return nil, nil
 	}
 	subscriptionBill := group != nil && group.IsSubscriptionType() && subscription != nil
-	if !subscriptionBill {
+	if !subscriptionBill && !user.IsSuperAdmin() {
 		balance, err := s.GetUserBalance(ctx, user.ID)
 		if err != nil {
 			return nil, ErrBillingServiceUnavailable.WithCause(err)
@@ -1497,21 +1450,4 @@ func monthlyQuotaWindowExpired(start *time.Time, now time.Time) bool {
 		return true
 	}
 	return now.Sub(*start) >= 30*24*time.Hour
-}
-
-// HasUserPlatformQuotaLimit 判断该 user×platform 是否设了任一非 nil limit。
-// 写入点守卫:无 limit 直接跳过 Redis 写 + 脏集标记,消除无谓写入。
-// fail-safe:任何不确定(simple 模式除外)都返回 true 维持写入。
-func (s *BillingCacheService) HasUserPlatformQuotaLimit(ctx context.Context, userID int64, platform string) bool {
-	if s.cfg.RunMode == config.RunModeSimple {
-		return false
-	}
-	if s.cache == nil {
-		return true
-	}
-	entry, ok, err := s.cache.GetUserPlatformQuotaCache(ctx, userID, platform)
-	if err != nil || !ok || entry == nil {
-		return true
-	}
-	return entry.DailyLimitUSD != nil || entry.WeeklyLimitUSD != nil || entry.MonthlyLimitUSD != nil
 }

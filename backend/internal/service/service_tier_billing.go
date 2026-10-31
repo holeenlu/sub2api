@@ -66,7 +66,13 @@ func serviceTierCostRank(tier string) (rank int, known bool) {
 // reports default for effective Fast turns, so OAuth-like credentials retain
 // the final outbound tier while still exposing the observed value.
 func ResolveOpenAIServiceTierBilling(account *Account, requested, observed string) ServiceTierBillingResolution {
-	if account != nil && account.IsOpenAIOAuthLike() && codexOAuthResponseTierIsNonAuthoritative(observed) {
+	return resolveOpenAIServiceTierBillingPolicy(account != nil && account.IsOpenAIOAuthLike(), requested, observed)
+}
+
+// Recovery consumes the actual credential policy captured before send; it must
+// not hydrate an account or infer OAuth from the selected shadow's type.
+func resolveOpenAIServiceTierBillingPolicy(oauthLike bool, requested, observed string) ServiceTierBillingResolution {
+	if oauthLike && codexOAuthResponseTierIsNonAuthoritative(observed) {
 		return ServiceTierBillingResolution{
 			Requested: normalizeBillingServiceTier(requested),
 			Observed:  normalizeBillingServiceTier(observed),

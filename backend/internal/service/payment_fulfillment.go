@@ -178,16 +178,13 @@ func expectedNotificationProviderKey(registry *payment.Registry, orderPaymentTyp
 func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, tradeNo string, paid float64, pk string) error {
 	previousStatus := o.Status
 	now := time.Now()
-	grace := now.Add(-paymentGraceMinutes * time.Minute)
 	c, err := s.entClient.PaymentOrder.Update().Where(
 		paymentorder.IDEQ(o.ID),
 		paymentorder.Or(
 			paymentorder.StatusEQ(OrderStatusPending),
 			paymentorder.StatusEQ(OrderStatusCancelled),
-			paymentorder.And(
-				paymentorder.StatusEQ(OrderStatusExpired),
-				paymentorder.UpdatedAtGTE(grace),
-			),
+			paymentorder.StatusEQ(OrderStatusExpired),
+			paymentorder.And(paymentorder.StatusEQ(OrderStatusFailed), paymentorder.PaidAtIsNil()),
 		),
 	).SetStatus(OrderStatusPaid).SetPayAmount(paid).SetPaymentTradeNo(tradeNo).SetPaidAt(now).ClearFailedAt().ClearFailedReason().Save(ctx)
 	if err != nil {
@@ -315,49 +312,82 @@ func (s *PaymentService) acquirePaymentFulfillmentLease(ctx context.Context, o *
 	if o == nil {
 		return nil, infraerrors.BadRequest("INVALID_STATUS", "nil payment order")
 	}
-
-	now := time.Now().UTC().Truncate(time.Microsecond)
-	staleBefore := now.Add(-paymentFulfillmentLeaseDuration)
-	updated, err := s.entClient.PaymentOrder.Update().
-		Where(
-			paymentorder.IDEQ(o.ID),
-			paymentorder.Or(
-				paymentorder.StatusIn(OrderStatusPaid, OrderStatusFailed),
-				paymentorder.And(
-					paymentorder.StatusEQ(OrderStatusRecharging),
-					paymentorder.UpdatedAtLTE(staleBefore),
-				),
-			),
-		).
-		SetStatus(OrderStatusRecharging).
-		SetUpdatedAt(now).
-		ClearFailedAt().
-		ClearFailedReason().
-		Save(ctx)
+	limit, err := s.fulfillmentDailyLimit(ctx, o)
 	if err != nil {
-		return nil, fmt.Errorf("acquire fulfillment lease: %w", err)
+		return nil, err
 	}
-	if updated == 0 {
-		current, getErr := s.entClient.PaymentOrder.Get(ctx, o.ID)
-		if getErr != nil {
-			return nil, fmt.Errorf("reload fulfillment lease: %w", getErr)
+	tx, err := s.entClient.Tx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	// Same user-first lock order as checkout creation. The provider payment has
+	// already been persisted; quota failure must never roll that payment back.
+	if _, err := tx.User.UpdateOneID(o.UserID).AddBalance(0).Save(ctx); err != nil {
+		return nil, err
+	}
+	current, err := tx.PaymentOrder.Get(ctx, o.ID)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	if current.Status == OrderStatusCompleted {
+		return nil, nil
+	}
+	if current.Status == OrderStatusRecharging && current.UpdatedAt.After(now.Add(-paymentFulfillmentLeaseDuration)) {
+		return nil, infraerrors.Conflict("CONFLICT", "order is being processed")
+	}
+	if current.Status != OrderStatusPaid && current.Status != OrderStatusFailed && current.Status != OrderStatusRecharging {
+		return nil, infraerrors.Conflict("CONFLICT", "order status changed")
+	}
+	// The user lock serializes lease claimers; the status predicate also
+	// prevents an old worker completing/failing after our read from being overwritten.
+	// Avoid timestamp round-trip equality on initial claims (SQLite text precision).
+	snapshot := current.ProviderSnapshot
+	if snapshot == nil {
+		snapshot = map[string]any{}
+	}
+	state, _ := snapshot[paymentAllowanceStateKey].(string)
+	if state != "admitted" {
+		amount := paymentAllowanceAmount(current)
+		if !isValidProviderAmount(amount) {
+			return nil, fmt.Errorf("invalid order allowance")
 		}
-		if current.Status == OrderStatusCompleted {
+		if err := s.checkDailyAllowance(ctx, tx, current.UserID, current.ID, amount, limit, now); err != nil {
+			if infraerrors.Reason(err) != "DAILY_LIMIT_EXCEEDED" {
+				return nil, err
+			}
+			snapshot[paymentAllowanceStateKey] = "deferred"
+			updated, err := tx.PaymentOrder.Update().Where(paymentorder.IDEQ(current.ID), paymentorder.StatusEQ(current.Status)).
+				SetStatus(OrderStatusPaid).SetProviderSnapshot(snapshot).SetUpdatedAt(now).SetFailedReason("DAILY_ALLOWANCE_DEFERRED").Save(ctx)
+			if err != nil {
+				return nil, err
+			}
+			if updated != 1 {
+				return nil, infraerrors.Conflict("CONFLICT", "order changed during allowance admission")
+			}
+			if err := tx.Commit(); err != nil {
+				return nil, err
+			}
 			return nil, nil
 		}
-		if current.Status == OrderStatusRecharging {
-			return nil, infraerrors.Conflict("CONFLICT", "order is being processed")
-		}
-		return nil, infraerrors.Conflict("CONFLICT", "order status changed while acquiring fulfillment lease")
+		snapshot[paymentAllowanceStateKey] = "admitted"
+		snapshot[paymentAllowanceDayKey] = psStartOfDayUTC(now).Format("2006-01-02")
 	}
-
-	// Reload the persisted timestamp instead of trusting application clock precision.
-	claimed, err := s.entClient.PaymentOrder.Get(ctx, o.ID)
+	updated, err := tx.PaymentOrder.Update().Where(paymentorder.IDEQ(current.ID), paymentorder.StatusEQ(current.Status)).
+		SetStatus(OrderStatusRecharging).SetProviderSnapshot(snapshot).SetUpdatedAt(now).ClearFailedAt().ClearFailedReason().Save(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("reload acquired fulfillment lease: %w", err)
+		return nil, err
 	}
-	if claimed.Status != OrderStatusRecharging {
-		return nil, infraerrors.Conflict("CONFLICT", "fulfillment lease was lost")
+	if updated != 1 {
+		return nil, infraerrors.Conflict("CONFLICT", "fulfillment lease changed")
+	}
+	claimed, err := tx.PaymentOrder.Get(ctx, current.ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 	return &paymentFulfillmentLease{version: claimed.UpdatedAt}, nil
 }
@@ -435,9 +465,7 @@ func (s *PaymentService) doBalance(ctx context.Context, o *dbent.PaymentOrder, l
 
 	switch action {
 	case redeemActionSkipCompleted:
-		if err := s.applyAffiliateRebateForOrder(ctx, o); err != nil {
-			return err
-		}
+
 		// Code already created and redeemed — just mark completed
 		return s.markCompleted(ctx, o, lease, "RECHARGE_SUCCESS")
 	case redeemActionCreate:
@@ -451,9 +479,7 @@ func (s *PaymentService) doBalance(ctx context.Context, o *dbent.PaymentOrder, l
 	if _, err := s.redeemService.redeemForPaymentFulfillment(ctx, o.UserID, o.RechargeCode); err != nil {
 		return fmt.Errorf("redeem balance: %w", err)
 	}
-	if err := s.applyAffiliateRebateForOrder(ctx, o); err != nil {
-		return err
-	}
+
 	return s.markCompleted(ctx, o, lease, "RECHARGE_SUCCESS")
 }
 
@@ -492,22 +518,40 @@ func (s *PaymentService) dispatchPaymentFulfillmentNotification(o *dbent.Payment
 	if s == nil || s.notificationEmailService == nil || o == nil {
 		return
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), emailSendTimeout)
+	if auditAction != "RECHARGE_SUCCESS" && auditAction != "SUBSCRIPTION_SUCCESS" {
+		return
+	}
+	// Retain only the committed facts used by the notification. The caller's
+	// Ent entity and its optional values may be reused after this handoff.
+	snapshot := dbent.PaymentOrder{
+		ID: o.ID, UserID: o.UserID, UserEmail: o.UserEmail, UserName: o.UserName,
+		Amount: o.Amount, PayAmount: o.PayAmount,
+	}
+	if o.SubscriptionDays != nil {
+		days := *o.SubscriptionDays
+		snapshot.SubscriptionDays = &days
+	}
+	if o.SubscriptionGroupID != nil {
+		groupID := *o.SubscriptionGroupID
+		snapshot.SubscriptionGroupID = &groupID
+	}
+	if err := s.notificationTasks.launch(func(owner context.Context) {
+		ctx, cancel := context.WithTimeout(owner, emailSendTimeout)
 		defer cancel()
 		var err error
 		switch auditAction {
 		case "RECHARGE_SUCCESS":
-			err = s.sendBalanceRechargeSuccessNotification(ctx, o)
+			err = s.sendBalanceRechargeSuccessNotification(ctx, &snapshot)
 		case "SUBSCRIPTION_SUCCESS":
-			err = s.sendSubscriptionPurchaseSuccessNotification(ctx, o)
-		default:
-			return
+			err = s.sendSubscriptionPurchaseSuccessNotification(ctx, &snapshot)
 		}
 		if err != nil {
-			slog.Warn("payment fulfillment notification email failed", "order_id", o.ID, "action", auditAction, "err", err.Error())
+			slog.Warn("payment fulfillment notification email failed", "order_id", snapshot.ID, "action", auditAction, "err", err.Error())
 		}
-	}()
+	}); err != nil {
+		// Notification failure does not undo or replay the completed fulfillment.
+		slog.Warn("payment fulfillment notification not admitted", "order_id", snapshot.ID, "action", auditAction, "err", err.Error())
+	}
 }
 
 func (s *PaymentService) sendBalanceRechargeSuccessNotification(ctx context.Context, o *dbent.PaymentOrder) error {
@@ -570,6 +614,9 @@ func (s *PaymentService) ExecuteSubscriptionFulfillment(ctx context.Context, oid
 	if err != nil {
 		return infraerrors.NotFound("NOT_FOUND", "order not found")
 	}
+	if o.OrderType != payment.OrderTypeSubscription {
+		return infraerrors.BadRequest("INVALID_ORDER_TYPE", "order type does not match fulfillment")
+	}
 	if o.Status == OrderStatusCompleted {
 		return nil
 	}
@@ -606,9 +653,7 @@ func (s *PaymentService) doSub(ctx context.Context, o *dbent.PaymentOrder, lease
 	if err := s.ensurePaymentSubscriptionAssigned(ctx, o, gid, days); err != nil {
 		return err
 	}
-	if err := s.applyAffiliateRebateForOrder(ctx, o); err != nil {
-		return err
-	}
+
 	return s.markCompleted(ctx, o, lease, "SUBSCRIPTION_SUCCESS")
 }
 
@@ -718,154 +763,6 @@ func (s *PaymentService) hasAuditLog(ctx context.Context, orderID int64, action 
 	return c > 0
 }
 
-func (s *PaymentService) applyAffiliateRebateForOrder(ctx context.Context, o *dbent.PaymentOrder) error {
-	baseAmount := affiliateRebateBaseAmount(o)
-	if o == nil || baseAmount <= 0 {
-		return nil
-	}
-	if s.affiliateService == nil {
-		return nil
-	}
-
-	tx, err := s.entClient.Tx(ctx)
-	if err != nil {
-		s.writeAuditLog(ctx, o.ID, "AFFILIATE_REBATE_FAILED", "system", map[string]any{
-			"error": fmt.Sprintf("begin affiliate rebate tx: %v", err),
-		})
-		return fmt.Errorf("begin affiliate rebate tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	txCtx := dbent.NewTxContext(ctx, tx)
-	claimed, err := s.tryClaimAffiliateRebateAudit(txCtx, tx.Client(), o.ID, baseAmount)
-	if err != nil {
-		s.writeAuditLog(ctx, o.ID, "AFFILIATE_REBATE_FAILED", "system", map[string]any{
-			"error": err.Error(),
-		})
-		return fmt.Errorf("claim affiliate rebate audit: %w", err)
-	}
-	if !claimed {
-		return nil
-	}
-
-	sourceOrderID := o.ID
-	rebateAmount, err := s.affiliateService.AccrueInviteRebateForOrder(txCtx, o.UserID, baseAmount, &sourceOrderID)
-	if err != nil {
-		s.writeAuditLog(ctx, o.ID, "AFFILIATE_REBATE_FAILED", "system", map[string]any{
-			"error": err.Error(),
-		})
-		return fmt.Errorf("accrue affiliate rebate: %w", err)
-	}
-
-	if rebateAmount <= 0 {
-		if err := s.updateClaimedAffiliateRebateAudit(txCtx, tx.Client(), o.ID, "AFFILIATE_REBATE_SKIPPED", map[string]any{
-			"baseAmount": baseAmount,
-			"reason":     "no inviter bound or rebate amount <= 0",
-		}); err != nil {
-			s.writeAuditLog(ctx, o.ID, "AFFILIATE_REBATE_FAILED", "system", map[string]any{
-				"error": err.Error(),
-			})
-			return fmt.Errorf("update affiliate rebate skipped audit: %w", err)
-		}
-		if err := tx.Commit(); err != nil {
-			s.writeAuditLog(ctx, o.ID, "AFFILIATE_REBATE_FAILED", "system", map[string]any{
-				"error": fmt.Sprintf("commit affiliate rebate tx: %v", err),
-			})
-			return fmt.Errorf("commit affiliate rebate tx: %w", err)
-		}
-		return nil
-	}
-
-	if err := s.updateClaimedAffiliateRebateAudit(txCtx, tx.Client(), o.ID, "AFFILIATE_REBATE_APPLIED", map[string]any{
-		"baseAmount":   baseAmount,
-		"rebateAmount": rebateAmount,
-	}); err != nil {
-		s.writeAuditLog(ctx, o.ID, "AFFILIATE_REBATE_FAILED", "system", map[string]any{
-			"error": err.Error(),
-		})
-		return fmt.Errorf("update affiliate rebate applied audit: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		s.writeAuditLog(ctx, o.ID, "AFFILIATE_REBATE_FAILED", "system", map[string]any{
-			"error": fmt.Sprintf("commit affiliate rebate tx: %v", err),
-		})
-		return fmt.Errorf("commit affiliate rebate tx: %w", err)
-	}
-	return nil
-}
-
-func affiliateRebateBaseAmount(o *dbent.PaymentOrder) float64 {
-	if o == nil {
-		return 0
-	}
-	switch o.OrderType {
-	case payment.OrderTypeBalance:
-		// 返利只按实充部分计算，赠送额度不参与
-		return paymentOrderAmountWithoutBonus(o)
-	case payment.OrderTypeSubscription:
-		return o.Amount
-	default:
-		return 0
-	}
-}
-
-func (s *PaymentService) tryClaimAffiliateRebateAudit(ctx context.Context, client *dbent.Client, orderID int64, baseAmount float64) (bool, error) {
-	if client == nil {
-		return false, errors.New("nil payment client")
-	}
-	oid := strconv.FormatInt(orderID, 10)
-	detail, _ := json.Marshal(map[string]any{
-		"baseAmount": baseAmount,
-		"status":     "reserved",
-	})
-	query, args := buildAffiliateRebateAuditClaimQuery(client, oid, string(detail))
-	rows, err := client.QueryContext(ctx, query, args...)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = rows.Close() }()
-	if !rows.Next() {
-		if err := rows.Err(); err != nil {
-			return false, err
-		}
-		return false, nil
-	}
-	var claimID int64
-	if err := rows.Scan(&claimID); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-func buildAffiliateRebateAuditClaimQuery(client *dbent.Client, orderID, detail string) (string, []any) {
-	nowExpr := paymentAuditCurrentTimestampExpr(client)
-	if paymentAuditDialect(client) == dialect.Postgres {
-		return fmt.Sprintf(`
-INSERT INTO payment_audit_logs (order_id, action, detail, operator, created_at)
-SELECT $1::text, 'AFFILIATE_REBATE_APPLIED', $2::text, 'system', %s
-WHERE NOT EXISTS (
-	SELECT 1
-	FROM payment_audit_logs
-	WHERE order_id = $1::text
-	  AND action IN ('AFFILIATE_REBATE_APPLIED', 'AFFILIATE_REBATE_SKIPPED')
-)
-ON CONFLICT (order_id, action) DO NOTHING
-RETURNING id`, nowExpr), []any{orderID, detail}
-	}
-	return fmt.Sprintf(`
-INSERT INTO payment_audit_logs (order_id, action, detail, operator, created_at)
-SELECT ?, 'AFFILIATE_REBATE_APPLIED', ?, 'system', %s
-WHERE NOT EXISTS (
-	SELECT 1
-	FROM payment_audit_logs
-	WHERE order_id = ?
-	  AND action IN ('AFFILIATE_REBATE_APPLIED', 'AFFILIATE_REBATE_SKIPPED')
-)
-ON CONFLICT (order_id, action) DO NOTHING
-RETURNING id`, nowExpr), []any{orderID, detail, orderID}
-}
-
 func paymentAuditCurrentTimestampExpr(client *dbent.Client) string {
 	if paymentAuditDialect(client) == dialect.Postgres {
 		return "NOW()"
@@ -878,30 +775,6 @@ func paymentAuditDialect(client *dbent.Client) string {
 		return ""
 	}
 	return client.Driver().Dialect()
-}
-
-func (s *PaymentService) updateClaimedAffiliateRebateAudit(ctx context.Context, client *dbent.Client, orderID int64, action string, detail map[string]any) error {
-	if client == nil {
-		return errors.New("nil payment client")
-	}
-	oid := strconv.FormatInt(orderID, 10)
-	detailJSON, _ := json.Marshal(detail)
-	updated, err := client.PaymentAuditLog.Update().
-		Where(
-			paymentauditlog.OrderIDEQ(oid),
-			paymentauditlog.ActionEQ("AFFILIATE_REBATE_APPLIED"),
-		).
-		SetAction(action).
-		SetDetail(string(detailJSON)).
-		SetOperator("system").
-		Save(ctx)
-	if err != nil {
-		return err
-	}
-	if updated == 0 {
-		return errors.New("affiliate rebate claim log not found")
-	}
-	return nil
 }
 
 func (s *PaymentService) markFailed(ctx context.Context, oid int64, lease *paymentFulfillmentLease, cause error) {

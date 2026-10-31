@@ -686,8 +686,12 @@ func TestOllama429RealProbeLinkage_SnapshotPersistThenWriteBack(t *testing.T) {
 	require.NoError(t, noopErr)
 	require.Nil(t, noop, "auto_refresh-disabled refresh is a nil,nil no-op")
 
-	usageSvc.Start()
-	t.Cleanup(usageSvc.Stop)
+	usageSvc.Start(context.Background())
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		require.NoError(t, usageSvc.Stop(ctx))
+	})
 
 	blocker := &ollama429BlockerStub{}
 	rlSvc := NewRateLimitService(repo, nil, nil, nil, nil)

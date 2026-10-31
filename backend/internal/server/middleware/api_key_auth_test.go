@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -48,6 +49,201 @@ func TestAPIKeyAuthRejectsOversizedCredentialsBeforeLookup(t *testing.T) {
 		require.Equal(t, http.StatusUnauthorized, w.Code)
 	}
 	require.Zero(t, calls.Load())
+}
+
+func TestValidateAPIKeyContinuationRechecksAccess(t *testing.T) {
+	for _, scenario := range []string{"active", "disabled", "expired", "user disabled", "group disabled", "quota exhausted"} {
+		t.Run(scenario, func(t *testing.T) {
+			group := &service.Group{ID: 1, Status: service.StatusActive, Hydrated: true}
+			key := &service.APIKey{ID: 1, Status: service.StatusActive, GroupID: &group.ID, Group: group, User: &service.User{ID: 1, Status: service.StatusActive}}
+			switch scenario {
+			case "disabled":
+				key.Status = service.StatusDisabled
+			case "expired":
+				expired := time.Now().Add(-time.Hour)
+				key.ExpiresAt = &expired
+			case "user disabled":
+				key.User.Status = service.StatusDisabled
+			case "group disabled":
+				group.Status = service.StatusDisabled
+			case "quota exhausted":
+				key.Quota = 1
+				key.QuotaUsed = 1
+			}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+			err := ValidateAPIKeyContinuation(c, key, &config.Config{})
+			if scenario == "active" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+		})
+	}
+}
+
+func TestAPIKeyGroupAuthorizationBoundaries(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name       string
+		change     func(*service.APIKey)
+		wantCode   string
+		wantText   string
+		wantReject IngressRejectReason
+	}{
+		{name: "public"},
+		{name: "nil GroupID ignores deleted exclusive edge", change: func(key *service.APIKey) {
+			key.GroupID = nil
+			key.Group.Status = "deleted"
+			key.Group.IsExclusive = true
+		}},
+		{name: "explicit zero missing edge", change: func(key *service.APIKey) {
+			zero := int64(0)
+			key.GroupID, key.Group = &zero, nil
+		}, wantCode: "GROUP_DELETED", wantText: "API Key 所属分组已删除", wantReject: IngressRejectGroupDeleted},
+		{name: "missing edge", change: func(key *service.APIKey) {
+			key.Group = nil
+		}, wantCode: "GROUP_DELETED", wantText: "API Key 所属分组已删除", wantReject: IngressRejectGroupDeleted},
+		{name: "mixed case deleted", change: func(key *service.APIKey) {
+			key.Group.Status = "DeLeTeD"
+		}, wantCode: "GROUP_DELETED", wantText: "API Key 所属分组已删除", wantReject: IngressRejectGroupDeleted},
+		{name: "inactive subscription is still denied", change: func(key *service.APIKey) {
+			key.Group.Status = service.StatusDisabled
+			key.Group.SubscriptionType = service.SubscriptionTypeSubscription
+		}, wantCode: "GROUP_DISABLED", wantText: "API Key 所属分组已停用", wantReject: IngressRejectGroupDisabled},
+		{name: "active status is exact", change: func(key *service.APIKey) {
+			key.Group.Status = "ACTIVE"
+		}, wantCode: "GROUP_DISABLED", wantText: "API Key 所属分组已停用", wantReject: IngressRejectGroupDisabled},
+		{name: "exclusive revoked", change: func(key *service.APIKey) {
+			key.Group.IsExclusive = true
+		}, wantCode: "GROUP_NOT_ALLOWED", wantText: "API Key 所属专属分组不再允许当前用户使用", wantReject: IngressRejectGroupNotAllowed},
+		{name: "restricted public revoked", change: func(key *service.APIKey) {
+			key.User.RestrictPublicGroups = true
+		}, wantCode: "GROUP_NOT_ALLOWED", wantText: "API Key 所属专属分组不再允许当前用户使用", wantReject: IngressRejectGroupNotAllowed},
+		{name: "restricted public granted", change: func(key *service.APIKey) {
+			key.User.RestrictPublicGroups = true
+			key.User.AllowedGroups = []int64{key.Group.ID}
+		}},
+		{name: "exclusive granted", change: func(key *service.APIKey) {
+			key.Group.IsExclusive = true
+			key.User.AllowedGroups = []int64{key.Group.ID}
+		}},
+		{name: "zero bound reference uses loaded edge grant", change: func(key *service.APIKey) {
+			zero := int64(0)
+			key.GroupID = &zero
+			key.Group.IsExclusive = true
+			key.User.AllowedGroups = []int64{key.Group.ID}
+		}},
+		{name: "explicit zero group grant", change: func(key *service.APIKey) {
+			key.Group.ID = 0
+			key.Group.IsExclusive = true
+			key.User.AllowedGroups = []int64{0}
+		}},
+		{name: "subscription defers group grants", change: func(key *service.APIKey) {
+			key.Group.IsExclusive = true
+			key.Group.SubscriptionType = service.SubscriptionTypeSubscription
+			key.User.RestrictPublicGroups = true
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, boundary := range []string{"http", "google", "continuation"} {
+				t.Run(boundary, func(t *testing.T) {
+					group := &service.Group{ID: 20, Status: service.StatusActive, Hydrated: true}
+					key := &service.APIKey{
+						ID: 100, Key: "group-boundary-test", Status: service.StatusActive,
+						UserID: 7, User: &service.User{ID: 7, Role: service.RoleUser, Status: service.StatusActive},
+						GroupID: &group.ID, Group: group,
+					}
+					if tc.change != nil {
+						tc.change(key)
+					}
+					cfg := &config.Config{RunMode: config.RunModeSimple}
+					w := httptest.NewRecorder()
+					if boundary == "continuation" {
+						c, _ := gin.CreateTestContext(w)
+						c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+						// Commit 101 to model the boundary after a successful upgrade.
+						c.Status(http.StatusSwitchingProtocols)
+						c.Writer.WriteHeaderNow()
+						err := ValidateAPIKeyContinuation(c, key, cfg)
+						switch tc.wantCode {
+						case "":
+							require.NoError(t, err)
+						case "GROUP_NOT_ALLOWED":
+							require.EqualError(t, err, "API key group is no longer allowed")
+						default:
+							require.EqualError(t, err, tc.wantText)
+						}
+						require.Equal(t, http.StatusSwitchingProtocols, w.Code)
+						require.Empty(t, w.Body.String())
+						require.Empty(t, w.Header())
+						require.False(t, c.IsAborted())
+						return
+					}
+					repo := &stubApiKeyRepo{getByKey: func(context.Context, string) (*service.APIKey, error) {
+						return key, nil
+					}}
+					svc := service.NewAPIKeyService(repo, nil, nil, nil, nil, nil, cfg)
+					router := gin.New()
+					var rejected, businessLimited, reached bool
+					var reason IngressRejectReason
+					router.Use(func(c *gin.Context) {
+						c.Next()
+						reason, rejected = GetIngressRejectReason(c)
+						businessLimited = service.HasOpsClientBusinessLimited(c)
+					})
+					if boundary == "google" {
+						router.Use(APIKeyAuthGoogle(svc, cfg))
+					} else {
+						router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(svc, nil, cfg)))
+					}
+					router.GET("/v1beta/models", func(c *gin.Context) {
+						reached = true
+						c.Status(http.StatusOK)
+					})
+					req := httptest.NewRequest(http.MethodGet, "/v1beta/models", nil)
+					req.Header.Set("Authorization", "Bearer "+key.Key)
+					router.ServeHTTP(w, req)
+					require.Equal(t, tc.wantCode == "", reached)
+					require.Equal(t, tc.wantCode != "", rejected)
+					require.Equal(t, tc.wantCode != "", businessLimited)
+					require.Equal(t, tc.wantReject, reason)
+					if tc.wantCode == "" {
+						require.Equal(t, http.StatusOK, w.Code)
+						return
+					}
+					require.Equal(t, http.StatusForbidden, w.Code)
+					if boundary == "google" {
+						require.JSONEq(t, fmt.Sprintf("{\"error\":{\"code\":403,\"message\":%q,\"status\":\"PERMISSION_DENIED\"}}", tc.wantText), w.Body.String())
+					} else {
+						require.JSONEq(t, fmt.Sprintf("{\"code\":%q,\"message\":%q}", tc.wantCode, tc.wantText), w.Body.String())
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestAPIKeyGroupAdaptersDoNotReplaceIdentityChecks(t *testing.T) {
+	require.True(t, validateAPIKeyGroupAllowed(nil))
+	code, message, ok := validateAPIKeyGroupAvailable(nil)
+	require.True(t, ok)
+	require.Empty(t, code)
+	require.Empty(t, message)
+	group := &service.Group{ID: 20, IsExclusive: true, Status: service.StatusActive}
+	key := &service.APIKey{Status: service.StatusActive, GroupID: &group.ID, Group: group}
+	require.True(t, validateAPIKeyGroupAllowed(key))
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	require.EqualError(t, ValidateAPIKeyContinuation(c, nil, nil), "API key authorization is no longer valid")
+	require.EqualError(t, ValidateAPIKeyContinuation(c, key, nil), "API key authorization is no longer valid")
+	for _, role := range []string{service.RoleVendorLevel1, service.RoleVendorLevel2} {
+		t.Run(role, func(t *testing.T) {
+			key.User = &service.User{Role: role, Status: service.StatusActive, AllowedGroups: []int64{group.ID}}
+			require.False(t, validateAPIKeyGroupAllowed(key))
+			require.EqualError(t, ValidateAPIKeyContinuation(c, key, nil), "API key group is no longer allowed")
+		})
+	}
 }
 
 func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
@@ -136,7 +332,11 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 			},
 		}
 		subscriptionService := service.NewSubscriptionService(nil, subscriptionRepo, nil, nil, cfg)
-		t.Cleanup(subscriptionService.Stop)
+		t.Cleanup(func() {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			require.NoError(t, subscriptionService.Stop(cleanupCtx))
+		})
 
 		router := newAuthTestRouter(apiKeyService, subscriptionService, cfg)
 
@@ -1270,7 +1470,11 @@ func TestAPIKeyAuthBillingInfoSkipsBillingAndSideEffects(t *testing.T) {
 	cfg := &config.Config{RunMode: config.RunModeStandard}
 	apiKeyService := service.NewAPIKeyService(apiKeyRepo, nil, nil, nil, nil, nil, cfg)
 	subscriptionService := service.NewSubscriptionService(nil, subscriptionRepo, nil, nil, cfg)
-	t.Cleanup(subscriptionService.Stop)
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		require.NoError(t, subscriptionService.Stop(cleanupCtx))
+	})
 	router := newAuthTestRouter(apiKeyService, subscriptionService, cfg)
 
 	w := httptest.NewRecorder()
@@ -1791,4 +1995,51 @@ func (r *stubUserSubscriptionRepo) IncrementUsage(ctx context.Context, id int64,
 
 func (r *stubUserSubscriptionRepo) BatchUpdateExpiredStatus(ctx context.Context) (int64, error) {
 	return 0, errors.New("not implemented")
+}
+
+func TestSuperAdminAPIKeyBalanceExemptionPreservesKeyGuards(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, google := range []bool{false, true} {
+		for _, tc := range []struct {
+			name, role, status string
+			quota, used        float64
+			expired, allowed   bool
+		}{
+			{"super without balance", service.RoleSuperAdmin, service.StatusActive, 10, 1, false, true},
+			{"ordinary admin still pays", service.RoleAdmin, service.StatusActive, 10, 1, false, false},
+			{"user still pays", service.RoleUser, service.StatusActive, 10, 1, false, false},
+			{"super exhausted total", service.RoleSuperAdmin, service.StatusActive, 10, 10, false, false},
+			{"super exhausted status", service.RoleSuperAdmin, service.StatusAPIKeyQuotaExhausted, 10, 1, false, false},
+			{"super expired", service.RoleSuperAdmin, service.StatusActive, 10, 1, true, false},
+			{"super disabled key", service.RoleSuperAdmin, service.StatusDisabled, 10, 1, false, false},
+		} {
+			t.Run(fmt.Sprintf("%t/%s", google, tc.name), func(t *testing.T) {
+				user := &service.User{ID: 10, Role: tc.role, Status: service.StatusActive, Balance: -1}
+				key := &service.APIKey{ID: 11, UserID: 10, Key: "super-admin-budget-test", Status: tc.status, User: user, Quota: tc.quota, QuotaUsed: tc.used}
+				if tc.expired {
+					at := time.Now().Add(-time.Hour)
+					key.ExpiresAt = &at
+				}
+				repo := &stubApiKeyRepo{getByKey: func(context.Context, string) (*service.APIKey, error) { return key, nil }}
+				cfg := &config.Config{RunMode: config.RunModeStandard}
+				svc := service.NewAPIKeyService(repo, nil, nil, nil, nil, nil, cfg)
+				r := gin.New()
+				if google {
+					r.Use(APIKeyAuthWithSubscriptionGoogle(svc, nil, cfg))
+				} else {
+					r.Use(apiKeyAuthWithSubscription(svc, nil, cfg))
+				}
+				r.GET("/t", func(c *gin.Context) { c.Status(http.StatusOK) })
+				req := httptest.NewRequest(http.MethodGet, "/t", nil)
+				if google {
+					req.Header.Set("x-goog-api-key", key.Key)
+				} else {
+					req.Header.Set("x-api-key", key.Key)
+				}
+				w := httptest.NewRecorder()
+				r.ServeHTTP(w, req)
+				require.Equal(t, tc.allowed, w.Code == http.StatusOK, "%s", w.Body.String())
+			})
+		}
+	}
 }

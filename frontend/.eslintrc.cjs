@@ -30,6 +30,17 @@ module.exports = {
     "@typescript-eslint/ban-types": "off",
     "@typescript-eslint/ban-ts-comment": "off",
     "@typescript-eslint/no-explicit-any": "off",
+    "no-restricted-syntax": [
+      "error",
+      {
+        selector: "CatchClause > *[typeAnnotation.typeAnnotation.type='TSAnyKeyword']",
+        message: "Catch errors as unknown and narrow their fields; preserve the original error for cancellation and rethrow.",
+      },
+      {
+        selector: "CallExpression[callee.name='defineEmits'] > ArrayExpression.arguments",
+        message: "Declare explicit event payload types instead of an untyped event-name array.",
+      },
+    ],
     "vue/multi-word-component-names": "off",
     "vue/no-use-v-if-with-v-for": "off",
   },

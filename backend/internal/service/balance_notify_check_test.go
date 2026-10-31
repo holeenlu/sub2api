@@ -13,25 +13,29 @@ import (
 // in-memory settings repo and a non-nil emailService so that the guard-clause
 // nil-checks pass. The emailService is intentionally minimal — tests must
 // avoid crossing scenarios that would actually dispatch emails.
-func newBalanceNotifyServiceForTest() (*BalanceNotifyService, *mockSettingRepo) {
+func newBalanceNotifyServiceForTest(t *testing.T) (*BalanceNotifyService, *mockSettingRepo) {
 	repo := newMockSettingRepo()
 	// EmailService is a concrete type; construct with the same repo so that
 	// any accidental fallback reads still succeed. Tests should not trigger a
 	// crossing that reaches SendEmail.
 	email := NewEmailService(repo, nil)
-	return NewBalanceNotifyService(email, repo, nil), repo
+	svc := NewBalanceNotifyService(email, repo, nil)
+	svc.emailService = localBalanceNotificationSender{}
+	require.NoError(t, svc.Start(t.Context()))
+	t.Cleanup(func() { stopMaintenanceForTest(t, svc) })
+	return svc, repo
 }
 
 // ---------- guard clauses ----------
 
 func TestCheckBalanceAfterDeduction_NilUser(t *testing.T) {
-	s, _ := newBalanceNotifyServiceForTest()
+	s, _ := newBalanceNotifyServiceForTest(t)
 	// Should not panic.
 	s.CheckBalanceAfterDeduction(context.Background(), nil, 100, 50)
 }
 
 func TestCheckBalanceAfterDeduction_UserNotifyDisabled(t *testing.T) {
-	s, repo := newBalanceNotifyServiceForTest()
+	s, repo := newBalanceNotifyServiceForTest(t)
 	repo.data[SettingKeyBalanceLowNotifyEnabled] = "true"
 	repo.data[SettingKeyBalanceLowNotifyThreshold] = "10"
 	u := &User{ID: 1, BalanceNotifyEnabled: false}
@@ -40,14 +44,14 @@ func TestCheckBalanceAfterDeduction_UserNotifyDisabled(t *testing.T) {
 }
 
 func TestCheckBalanceAfterDeduction_GlobalDisabled(t *testing.T) {
-	s, repo := newBalanceNotifyServiceForTest()
+	s, repo := newBalanceNotifyServiceForTest(t)
 	repo.data[SettingKeyBalanceLowNotifyEnabled] = "false"
 	u := &User{ID: 1, BalanceNotifyEnabled: true}
 	s.CheckBalanceAfterDeduction(context.Background(), u, 20, 15)
 }
 
 func TestCheckBalanceAfterDeduction_ThresholdZero(t *testing.T) {
-	s, repo := newBalanceNotifyServiceForTest()
+	s, repo := newBalanceNotifyServiceForTest(t)
 	repo.data[SettingKeyBalanceLowNotifyEnabled] = "true"
 	repo.data[SettingKeyBalanceLowNotifyThreshold] = "0"
 	u := &User{ID: 1, BalanceNotifyEnabled: true}
@@ -55,7 +59,7 @@ func TestCheckBalanceAfterDeduction_ThresholdZero(t *testing.T) {
 }
 
 func TestCheckBalanceAfterDeduction_UserThresholdOverride(t *testing.T) {
-	s, repo := newBalanceNotifyServiceForTest()
+	s, repo := newBalanceNotifyServiceForTest(t)
 	repo.data[SettingKeyBalanceLowNotifyEnabled] = "true"
 	repo.data[SettingKeyBalanceLowNotifyThreshold] = "100" // global default
 	customThreshold := 5.0
@@ -70,7 +74,7 @@ func TestCheckBalanceAfterDeduction_UserThresholdOverride(t *testing.T) {
 }
 
 func TestCheckBalanceAfterDeduction_NoCrossingNotFired(t *testing.T) {
-	s, repo := newBalanceNotifyServiceForTest()
+	s, repo := newBalanceNotifyServiceForTest(t)
 	repo.data[SettingKeyBalanceLowNotifyEnabled] = "true"
 	repo.data[SettingKeyBalanceLowNotifyThreshold] = "10"
 	u := &User{ID: 1, BalanceNotifyEnabled: true}
@@ -85,25 +89,25 @@ func TestCheckBalanceAfterDeduction_NoCrossingNotFired(t *testing.T) {
 // ---------- nil-service guards on CheckAccountQuotaAfterIncrement ----------
 
 func TestCheckAccountQuotaAfterIncrement_NilAccount(t *testing.T) {
-	s, _ := newBalanceNotifyServiceForTest()
+	s, _ := newBalanceNotifyServiceForTest(t)
 	// Should not panic.
 	s.CheckAccountQuotaAfterIncrement(context.Background(), nil, 10, nil)
 }
 
 func TestCheckAccountQuotaAfterIncrement_ZeroCost(t *testing.T) {
-	s, _ := newBalanceNotifyServiceForTest()
+	s, _ := newBalanceNotifyServiceForTest(t)
 	a := &Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
 	s.CheckAccountQuotaAfterIncrement(context.Background(), a, 0, nil)
 }
 
 func TestCheckAccountQuotaAfterIncrement_NegativeCost(t *testing.T) {
-	s, _ := newBalanceNotifyServiceForTest()
+	s, _ := newBalanceNotifyServiceForTest(t)
 	a := &Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
 	s.CheckAccountQuotaAfterIncrement(context.Background(), a, -5, nil)
 }
 
 func TestCheckAccountQuotaAfterIncrement_GlobalDisabled(t *testing.T) {
-	s, repo := newBalanceNotifyServiceForTest()
+	s, repo := newBalanceNotifyServiceForTest(t)
 	repo.data[SettingKeyAccountQuotaNotifyEnabled] = "false"
 	a := &Account{
 		ID:       1,
@@ -123,7 +127,7 @@ func TestCheckAccountQuotaAfterIncrement_GlobalDisabled(t *testing.T) {
 // ---------- sanity: internal helpers still work ----------
 
 func TestGetBalanceNotifyConfig_AllFields(t *testing.T) {
-	s, repo := newBalanceNotifyServiceForTest()
+	s, repo := newBalanceNotifyServiceForTest(t)
 	repo.data[SettingKeyBalanceLowNotifyEnabled] = "true"
 	repo.data[SettingKeyBalanceLowNotifyThreshold] = "12.5"
 	repo.data[SettingKeyBalanceLowNotifyRechargeURL] = "https://example.com/pay"
@@ -135,7 +139,7 @@ func TestGetBalanceNotifyConfig_AllFields(t *testing.T) {
 }
 
 func TestGetBalanceNotifyConfig_Disabled(t *testing.T) {
-	s, repo := newBalanceNotifyServiceForTest()
+	s, repo := newBalanceNotifyServiceForTest(t)
 	repo.data[SettingKeyBalanceLowNotifyEnabled] = "false"
 
 	enabled, _, _ := s.getBalanceNotifyConfig(context.Background())
@@ -143,7 +147,7 @@ func TestGetBalanceNotifyConfig_Disabled(t *testing.T) {
 }
 
 func TestGetBalanceNotifyConfig_InvalidThreshold(t *testing.T) {
-	s, repo := newBalanceNotifyServiceForTest()
+	s, repo := newBalanceNotifyServiceForTest(t)
 	repo.data[SettingKeyBalanceLowNotifyEnabled] = "true"
 	repo.data[SettingKeyBalanceLowNotifyThreshold] = "not-a-number"
 
@@ -153,7 +157,7 @@ func TestGetBalanceNotifyConfig_InvalidThreshold(t *testing.T) {
 }
 
 func TestIsAccountQuotaNotifyEnabled(t *testing.T) {
-	s, repo := newBalanceNotifyServiceForTest()
+	s, repo := newBalanceNotifyServiceForTest(t)
 
 	// Missing key → false
 	require.False(t, s.isAccountQuotaNotifyEnabled(context.Background()))
@@ -168,13 +172,13 @@ func TestIsAccountQuotaNotifyEnabled(t *testing.T) {
 }
 
 func TestGetSiteName_FallsBackToDefault(t *testing.T) {
-	s, _ := newBalanceNotifyServiceForTest()
+	s, _ := newBalanceNotifyServiceForTest(t)
 	name := s.getSiteName(context.Background())
 	require.Equal(t, defaultSiteName, name)
 }
 
 func TestGetSiteName_Configured(t *testing.T) {
-	s, repo := newBalanceNotifyServiceForTest()
+	s, repo := newBalanceNotifyServiceForTest(t)
 	repo.data[SettingKeySiteName] = "My Site"
 	require.Equal(t, "My Site", s.getSiteName(context.Background()))
 }
@@ -237,15 +241,15 @@ func TestCrossedDownward_SmallDecrement_NoCrossing(t *testing.T) {
 // ---------- checkQuotaDimCrossings ----------
 
 func TestCheckQuotaDimCrossings_NoDimensions(t *testing.T) {
-	s, _ := newBalanceNotifyServiceForTest()
+	s, _ := newBalanceNotifyServiceForTest(t)
 	account := &Account{ID: 1, Name: "test", Platform: PlatformAnthropic}
 	// Empty dims → no crossing, no panic.
-	s.checkQuotaDimCrossings(account, nil, 10, []string{"admin@example.com"}, "TestSite")
-	s.checkQuotaDimCrossings(account, []quotaDim{}, 10, []string{"admin@example.com"}, "TestSite")
+	s.checkQuotaDimCrossings(context.Background(), account, nil, 10, []string{"admin@example.com"}, "TestSite")
+	s.checkQuotaDimCrossings(context.Background(), account, []quotaDim{}, 10, []string{"admin@example.com"}, "TestSite")
 }
 
 func TestCheckQuotaDimCrossings_DisabledDimension(t *testing.T) {
-	s, _ := newBalanceNotifyServiceForTest()
+	s, _ := newBalanceNotifyServiceForTest(t)
 	account := &Account{ID: 1, Name: "test", Platform: PlatformAnthropic}
 	dims := []quotaDim{
 		{
@@ -258,11 +262,11 @@ func TestCheckQuotaDimCrossings_DisabledDimension(t *testing.T) {
 		},
 	}
 	// Disabled dimension should be skipped even if crossing would occur.
-	s.checkQuotaDimCrossings(account, dims, 50, []string{"admin@example.com"}, "TestSite")
+	s.checkQuotaDimCrossings(context.Background(), account, dims, 50, []string{"admin@example.com"}, "TestSite")
 }
 
 func TestCheckQuotaDimCrossings_ZeroThresholdSkipped(t *testing.T) {
-	s, _ := newBalanceNotifyServiceForTest()
+	s, _ := newBalanceNotifyServiceForTest(t)
 	account := &Account{ID: 1, Name: "test", Platform: PlatformAnthropic}
 	dims := []quotaDim{
 		{
@@ -275,11 +279,11 @@ func TestCheckQuotaDimCrossings_ZeroThresholdSkipped(t *testing.T) {
 		},
 	}
 	// Zero threshold → skipped.
-	s.checkQuotaDimCrossings(account, dims, 50, []string{"admin@example.com"}, "TestSite")
+	s.checkQuotaDimCrossings(context.Background(), account, dims, 50, []string{"admin@example.com"}, "TestSite")
 }
 
 func TestCheckQuotaDimCrossings_NoCrossing_BothBelowThreshold(t *testing.T) {
-	s, _ := newBalanceNotifyServiceForTest()
+	s, _ := newBalanceNotifyServiceForTest(t)
 	account := &Account{ID: 1, Name: "test", Platform: PlatformAnthropic}
 	// threshold=400 remaining, limit=1000 → effectiveThreshold = 600 (usage trigger)
 	// currentUsed=300 (after), oldUsed=300-50=250 (before). Both < 600, no crossing.
@@ -293,11 +297,11 @@ func TestCheckQuotaDimCrossings_NoCrossing_BothBelowThreshold(t *testing.T) {
 			limit:         1000,
 		},
 	}
-	s.checkQuotaDimCrossings(account, dims, 50, []string{"admin@example.com"}, "TestSite")
+	s.checkQuotaDimCrossings(context.Background(), account, dims, 50, []string{"admin@example.com"}, "TestSite")
 }
 
 func TestCheckQuotaDimCrossings_NoCrossing_BothAboveThreshold(t *testing.T) {
-	s, _ := newBalanceNotifyServiceForTest()
+	s, _ := newBalanceNotifyServiceForTest(t)
 	account := &Account{ID: 1, Name: "test", Platform: PlatformAnthropic}
 	// threshold=400 remaining, limit=1000 → effectiveThreshold = 600 (usage trigger)
 	// currentUsed=800 (after), oldUsed=800-50=750 (before). Both >= 600, no crossing.
@@ -311,11 +315,11 @@ func TestCheckQuotaDimCrossings_NoCrossing_BothAboveThreshold(t *testing.T) {
 			limit:         1000,
 		},
 	}
-	s.checkQuotaDimCrossings(account, dims, 50, []string{"admin@example.com"}, "TestSite")
+	s.checkQuotaDimCrossings(context.Background(), account, dims, 50, []string{"admin@example.com"}, "TestSite")
 }
 
 func TestCheckQuotaDimCrossings_NegativeResolvedThreshold_Skipped(t *testing.T) {
-	s, _ := newBalanceNotifyServiceForTest()
+	s, _ := newBalanceNotifyServiceForTest(t)
 	account := &Account{ID: 1, Name: "test", Platform: PlatformAnthropic}
 	// threshold=1200 remaining, limit=1000 → effectiveThreshold = 1000-1200 = -200
 	// Negative resolved threshold → skipped.
@@ -329,11 +333,11 @@ func TestCheckQuotaDimCrossings_NegativeResolvedThreshold_Skipped(t *testing.T) 
 			limit:         1000,
 		},
 	}
-	s.checkQuotaDimCrossings(account, dims, 50, []string{"admin@example.com"}, "TestSite")
+	s.checkQuotaDimCrossings(context.Background(), account, dims, 50, []string{"admin@example.com"}, "TestSite")
 }
 
 func TestCheckQuotaDimCrossings_PercentageThreshold_NoCrossing(t *testing.T) {
-	s, _ := newBalanceNotifyServiceForTest()
+	s, _ := newBalanceNotifyServiceForTest(t)
 	account := &Account{ID: 1, Name: "test", Platform: PlatformAnthropic}
 	// threshold=30%, limit=1000 → effectiveThreshold = 1000 * (1 - 0.30) = 700
 	// currentUsed=500, oldUsed=500-50=450. Both < 700, no crossing.
@@ -347,11 +351,11 @@ func TestCheckQuotaDimCrossings_PercentageThreshold_NoCrossing(t *testing.T) {
 			limit:         1000,
 		},
 	}
-	s.checkQuotaDimCrossings(account, dims, 50, []string{"admin@example.com"}, "TestSite")
+	s.checkQuotaDimCrossings(context.Background(), account, dims, 50, []string{"admin@example.com"}, "TestSite")
 }
 
 func TestCheckQuotaDimCrossings_ZeroLimit_Skipped(t *testing.T) {
-	s, _ := newBalanceNotifyServiceForTest()
+	s, _ := newBalanceNotifyServiceForTest(t)
 	account := &Account{ID: 1, Name: "test", Platform: PlatformAnthropic}
 	// limit=0 → resolvedThreshold returns 0 → skipped.
 	dims := []quotaDim{
@@ -364,11 +368,11 @@ func TestCheckQuotaDimCrossings_ZeroLimit_Skipped(t *testing.T) {
 			limit:         0,
 		},
 	}
-	s.checkQuotaDimCrossings(account, dims, 50, []string{"admin@example.com"}, "TestSite")
+	s.checkQuotaDimCrossings(context.Background(), account, dims, 50, []string{"admin@example.com"}, "TestSite")
 }
 
 func TestCheckQuotaDimCrossings_MultipleDims_MixedResults(t *testing.T) {
-	s, _ := newBalanceNotifyServiceForTest()
+	s, _ := newBalanceNotifyServiceForTest(t)
 	account := &Account{ID: 1, Name: "test", Platform: PlatformAnthropic}
 	// dim1: no crossing (both below effective threshold)
 	// dim2: disabled (skipped)
@@ -400,5 +404,5 @@ func TestCheckQuotaDimCrossings_MultipleDims_MixedResults(t *testing.T) {
 		},
 	}
 	// None should trigger. No panic expected.
-	s.checkQuotaDimCrossings(account, dims, 50, []string{"admin@example.com"}, "TestSite")
+	s.checkQuotaDimCrossings(context.Background(), account, dims, 50, []string{"admin@example.com"}, "TestSite")
 }

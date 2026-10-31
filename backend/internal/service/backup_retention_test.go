@@ -35,7 +35,7 @@ func TestBackupRetention_ValidationAndRoundTrip(t *testing.T) {
 		require.Error(t, validateBackupRetention(&cfg))
 	}
 	repo := newMockSettingRepo()
-	svc := newTestBackupService(repo, &mockDumper{}, newMockObjectStore())
+	svc := newTestBackupService(t, repo, &mockDumper{}, newMockObjectStore())
 	cfg := archiveSchedule(15, 1, 15)
 	cfg.RetainDays, cfg.RetainCount = 0, 0
 	cfg.MonthlyArchive.IncludeMonthEnd = true
@@ -65,7 +65,7 @@ func TestBackupRetention_MonthEndAndLeapYears(t *testing.T) {
 
 func TestBackupRetention_SuccessOnlyFallbackAndMultipleDates(t *testing.T) {
 	repo := newMockSettingRepo()
-	svc := newTestBackupService(repo, &mockDumper{}, newMockObjectStore())
+	svc := newTestBackupService(t, repo, &mockDumper{}, newMockObjectStore())
 	cfg := archiveSchedule(1, 15)
 	ctx := context.Background()
 	failed := archiveRecord("failed", "2026-09-01T04:00:00Z")
@@ -94,7 +94,7 @@ func TestBackupRetention_SuccessOnlyFallbackAndMultipleDates(t *testing.T) {
 
 func TestBackupRetention_ScheduleTimezoneAndStartDate(t *testing.T) {
 	repo := newMockSettingRepo()
-	svc := newTestBackupService(repo, &mockDumper{}, newMockObjectStore())
+	svc := newTestBackupService(t, repo, &mockDumper{}, newMockObjectStore())
 	cfg := archiveSchedule(1, 31)
 	cfg.CronExpr = "CRON_TZ=Asia/Tokyo 0 4 * * *"
 	first := archiveRecord("tokyo", "2026-08-31T16:00:00Z")
@@ -110,14 +110,14 @@ func TestBackupRetention_CheckpointSurvivesRecordRemovalAndRestart(t *testing.T)
 	repo := newMockSettingRepo()
 	seedS3Config(t, repo)
 	store := newMockObjectStore()
-	svc := newTestBackupService(repo, &mockDumper{}, store)
+	svc := newTestBackupService(t, repo, &mockDumper{}, store)
 	cfg := archiveSchedule(1, 15)
 	ctx := context.Background()
 	record := archiveRecord("archive", "2026-09-16T04:00:00Z")
 	require.NoError(t, svc.saveRecordWithArchive(ctx, record, cfg))
 	require.ErrorIs(t, svc.DeleteBackup(ctx, record.ID), ErrBackupArchiveProtected)
 	require.NoError(t, svc.DeleteArchivedBackup(ctx, record.ID))
-	svc = newTestBackupService(repo, &mockDumper{}, store)
+	svc = newTestBackupService(t, repo, &mockDumper{}, store)
 	retry := archiveRecord("retry", "2026-09-17T04:00:00Z")
 	require.NoError(t, svc.saveRecordWithArchive(ctx, retry, cfg))
 	require.Nil(t, retry.MonthlyArchive)
@@ -127,7 +127,7 @@ func TestBackupRetention_CleanupSeparatePoolsAndPermanentProtection(t *testing.T
 	repo := newMockSettingRepo()
 	seedS3Config(t, repo)
 	store := newMockObjectStore()
-	svc := newTestBackupService(repo, &mockDumper{}, store)
+	svc := newTestBackupService(t, repo, &mockDumper{}, store)
 	ctx := context.Background()
 	now := time.Now().UTC()
 	for i, id := range []string{"running", "failed", "ordinary-new", "archive-new", "permanent", "ordinary-old", "archive-old", "restoring"} {
@@ -171,7 +171,7 @@ func TestBackupRetention_DisabledRuleKeepsPersistedArchivePolicy(t *testing.T) {
 	repo := newMockSettingRepo()
 	seedS3Config(t, repo)
 	store := newMockObjectStore()
-	svc := newTestBackupService(repo, &mockDumper{}, store)
+	svc := newTestBackupService(t, repo, &mockDumper{}, store)
 	ctx := context.Background()
 	for id, started := range map[string]string{"newest": "2026-09-16T04:00:00Z", "middle": "2026-08-16T04:00:00Z", "oldest": "2026-07-16T04:00:00Z"} {
 		record := archiveRecord(id, started)
@@ -207,7 +207,7 @@ func TestBackupRetention_DisabledRuleKeepsPersistedArchivePolicy(t *testing.T) {
 
 func TestBackupRetention_Over100ArchivesRemainDiscoverable(t *testing.T) {
 	repo := newMockSettingRepo()
-	svc := newTestBackupService(repo, &mockDumper{}, newMockObjectStore())
+	svc := newTestBackupService(t, repo, &mockDumper{}, newMockObjectStore())
 	ctx := context.Background()
 	for i := range 105 {
 		record := archiveRecord(fmt.Sprint(i), "2020-01-01T00:00:00Z")
@@ -234,7 +234,7 @@ func (r *failingArchiveRepo) SetMultiple(ctx context.Context, values map[string]
 
 func TestBackupRetention_PersistenceFailuresFailClosed(t *testing.T) {
 	repo := newMockSettingRepo()
-	svc := newTestBackupService(repo, &mockDumper{}, newMockObjectStore())
+	svc := newTestBackupService(t, repo, &mockDumper{}, newMockObjectStore())
 	ctx := context.Background()
 	failing := &failingArchiveRepo{mockSettingRepo: repo, fail: true}
 	svc.settingRepo = failing
@@ -265,7 +265,7 @@ func TestBackupRetention_PersistenceFailuresFailClosed(t *testing.T) {
 func TestBackupRetention_ScheduledExecutionAndZeroDays(t *testing.T) {
 	repo := newMockSettingRepo()
 	seedS3Config(t, repo)
-	svc := newTestBackupService(repo, &mockDumper{dumpData: []byte("backup")}, newMockObjectStore())
+	svc := newTestBackupService(t, repo, &mockDumper{dumpData: []byte("backup")}, newMockObjectStore())
 	cfg := archiveSchedule(time.Now().UTC().Day())
 	cfg.RetainDays = 0
 	raw, err := json.Marshal(cfg)
@@ -291,8 +291,8 @@ func TestBackupRetention_CrossInstanceRecordUpdates(t *testing.T) {
 	repo := newMockSettingRepo()
 	cache := &fakeLeaderLockCache{}
 	services := []*BackupService{
-		newTestBackupService(repo, &mockDumper{}, newMockObjectStore()),
-		newTestBackupService(repo, &mockDumper{}, newMockObjectStore()),
+		newTestBackupService(t, repo, &mockDumper{}, newMockObjectStore()),
+		newTestBackupService(t, repo, &mockDumper{}, newMockObjectStore()),
 	}
 	for _, svc := range services {
 		svc.SetLeaderLock(cache, nil)
@@ -322,7 +322,7 @@ func TestBackupRetention_RecordLockWithSingleConnectionPool(t *testing.T) {
 	defer db.Close()
 	db.SetMaxOpenConns(1)
 	repo := newMockSettingRepo()
-	svc := newTestBackupService(repo, &mockDumper{}, newMockObjectStore())
+	svc := newTestBackupService(t, repo, &mockDumper{}, newMockObjectStore())
 	svc.SetLeaderLock(&fakeLeaderLockCache{}, db)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()

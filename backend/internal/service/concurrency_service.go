@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/gateway/routing"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
@@ -61,130 +62,13 @@ type APIKeyConcurrencyCache interface {
 	GetAPIKeyConcurrencyBatch(ctx context.Context, apiKeyIDs []int64) (map[int64]int, error)
 }
 
-// OpenAIWSIngressLeaseCache owns the short-lived distributed lease used to
-// bound live client WebSocket sessions. It is deliberately independent of the
-// request-slot namespace: idle ingress connections do not occupy turn slots.
-type OpenAIWSIngressLeaseCache interface {
-	AcquireOpenAIWSIngressLease(ctx context.Context, apiKeyID int64, maxConnections int, leaseID string) (bool, error)
-	RefreshOpenAIWSIngressLease(ctx context.Context, apiKeyID int64, leaseID string) (bool, error)
-	ReleaseOpenAIWSIngressLease(ctx context.Context, apiKeyID int64, leaseID string) error
-}
+// OpenAIWSIngressLease preserves the return type used by the existing ingress
+// helper during its owner-managed migration. State and renewal live only in
+// routing; delete this alias when handler/gateway_helper accepts routing directly.
+type OpenAIWSIngressLease = routing.IngressLease
 
-const (
-	openAIWSIngressLeaseTTL             = 60 * time.Second
-	openAIWSIngressLeaseRefreshInterval = 20 * time.Second
-	openAIWSIngressLeaseOperationTO     = 2 * time.Second
-)
-
-var ErrOpenAIWSIngressLeaseLost = errors.New("openai websocket ingress lease lost")
-
-// OpenAIWSIngressLease keeps a Redis-backed ingress lease alive and cancels
-// its context if Redis cannot confirm ownership for a full lease lifetime.
-// Call Release on every handler exit to reclaim capacity immediately.
-type OpenAIWSIngressLease struct {
-	ctx      context.Context
-	cancel   context.CancelCauseFunc
-	cache    OpenAIWSIngressLeaseCache
-	apiKeyID int64
-	leaseID  string
-
-	stopOnce    sync.Once
-	stopCh      chan struct{}
-	refreshDone chan struct{}
-}
-
-func (l *OpenAIWSIngressLease) Context() context.Context {
-	if l == nil || l.ctx == nil {
-		return context.Background()
-	}
-	return l.ctx
-}
-
-func (l *OpenAIWSIngressLease) Release() {
-	if l == nil {
-		return
-	}
-	l.stopOnce.Do(func() {
-		if l.stopCh != nil {
-			close(l.stopCh)
-		}
-		if l.cancel != nil {
-			l.cancel(nil)
-		}
-		if l.refreshDone != nil {
-			<-l.refreshDone
-		}
-		if l.cache == nil || l.apiKeyID <= 0 || l.leaseID == "" {
-			return
-		}
-		releaseCtx, releaseCancel := context.WithTimeout(context.Background(), openAIWSIngressLeaseOperationTO)
-		defer releaseCancel()
-		if err := l.cache.ReleaseOpenAIWSIngressLease(releaseCtx, l.apiKeyID, l.leaseID); err != nil {
-			logger.L().Warn("openai_ws_ingress_lease_release_failed",
-				zap.Int64("api_key_id", l.apiKeyID),
-				zap.Error(err),
-			)
-		}
-	})
-}
-
-func (l *OpenAIWSIngressLease) refreshLoop() {
-	defer func() {
-		if l != nil && l.refreshDone != nil {
-			close(l.refreshDone)
-		}
-	}()
-	if l == nil || l.cache == nil {
-		return
-	}
-	ticker := time.NewTicker(openAIWSIngressLeaseRefreshInterval)
-	defer ticker.Stop()
-	lastConfirmedAt := time.Now()
-	for {
-		select {
-		case <-l.ctx.Done():
-			return
-		case <-l.stopCh:
-			return
-		case <-ticker.C:
-			var lost bool
-			lastConfirmedAt, lost = l.refresh(lastConfirmedAt)
-			if lost {
-				l.cancel(ErrOpenAIWSIngressLeaseLost)
-				return
-			}
-		}
-	}
-}
-
-// refresh confirms the lease is still owned. A missing member is an immediate
-// lease loss; transient Redis errors are tolerated only for one full lease TTL.
-func (l *OpenAIWSIngressLease) refresh(lastConfirmedAt time.Time) (time.Time, bool) {
-	refreshCtx, refreshCancel := context.WithTimeout(context.Background(), openAIWSIngressLeaseOperationTO)
-	owned, err := l.cache.RefreshOpenAIWSIngressLease(refreshCtx, l.apiKeyID, l.leaseID)
-	refreshCancel()
-	if err == nil && owned {
-		return time.Now(), false
-	}
-	if err == nil {
-		err = ErrOpenAIWSIngressLeaseLost
-	}
-	elapsed := time.Since(lastConfirmedAt)
-	logger.L().Warn("openai_ws_ingress_lease_refresh_failed",
-		zap.Int64("api_key_id", l.apiKeyID),
-		zap.Duration("unconfirmed_for", elapsed),
-		zap.Error(err),
-	)
-	if errors.Is(err, ErrOpenAIWSIngressLeaseLost) || elapsed >= openAIWSIngressLeaseTTL {
-		logger.L().Error("openai_ws_ingress_lease_lost",
-			zap.Int64("api_key_id", l.apiKeyID),
-			zap.Duration("unconfirmed_for", elapsed),
-			zap.Error(err),
-		)
-		return lastConfirmedAt, true
-	}
-	return lastConfirmedAt, false
-}
+// Keep the protocol boundary's existing error identity during ingress migration.
+var ErrOpenAIWSIngressLeaseLost = routing.ErrIngressLeaseLost
 
 var (
 	requestIDPrefix  = initRequestIDPrefix()
@@ -222,23 +106,25 @@ const (
 
 	defaultAccountLoadBatchCacheTTL = 200 * time.Millisecond
 	accountLoadBatchFetchTimeout    = 3 * time.Second
-	maxAccountLoadBatchCacheEntries = 256
+	maxAccountLoadCacheEntries      = 32768
 	apiKeyConcurrencyFetchTimeout   = 3 * time.Second
 	apiKeySlotTrackTimeout          = 2 * time.Second
 )
 
 // ConcurrencyService 管理账号和用户的并发限制。
 type ConcurrencyService struct {
-	cache ConcurrencyCache
+	cache         ConcurrencyCache
+	cleanupMu     sync.Mutex
+	cleanupWorker *SlotCleanupWorker
 
 	accountLoadCacheTTL atomic.Int64
 	accountLoadCacheMu  sync.RWMutex
-	accountLoadCache    map[string]cachedAccountLoadBatch
+	accountLoadCache    map[int64]cachedAccountLoad
 	accountLoadGroup    singleflight.Group
 }
 
-type cachedAccountLoadBatch struct {
-	loadMap   map[int64]*AccountLoadInfo
+type cachedAccountLoad struct {
+	load      AccountLoadInfo
 	expiresAt time.Time
 }
 
@@ -246,7 +132,7 @@ type cachedAccountLoadBatch struct {
 func NewConcurrencyService(cache ConcurrencyCache) *ConcurrencyService {
 	svc := &ConcurrencyService{
 		cache:            cache,
-		accountLoadCache: make(map[string]cachedAccountLoadBatch),
+		accountLoadCache: make(map[int64]cachedAccountLoad),
 	}
 	svc.SetAccountLoadBatchCacheTTL(defaultAccountLoadBatchCacheTTL)
 	return svc
@@ -261,36 +147,17 @@ func (s *ConcurrencyService) AcquireOpenAIWSIngressLease(ctx context.Context, ap
 	if s == nil || s.cache == nil || apiKeyID <= 0 {
 		return nil, false, errors.New("openai websocket ingress lease cache is unavailable")
 	}
-	cache, ok := s.cache.(OpenAIWSIngressLeaseCache)
+	cache, ok := s.cache.(routing.IngressLeaseStore)
 	if !ok {
 		return nil, false, errors.New("openai websocket ingress lease cache is unsupported")
 	}
-	leaseID := generateRequestID()
-	baseCtx := context.Background()
-	if ctx != nil {
-		baseCtx = context.WithoutCancel(ctx)
-	}
-	acquireCtx, acquireCancel := context.WithTimeout(baseCtx, openAIWSIngressLeaseOperationTO)
-	acquired, err := cache.AcquireOpenAIWSIngressLease(acquireCtx, apiKeyID, maxConnections, leaseID)
-	acquireCancel()
-	if err != nil || !acquired {
-		return nil, acquired, err
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	leaseCtx, leaseCancel := context.WithCancelCause(ctx)
-	lease := &OpenAIWSIngressLease{
-		ctx:         leaseCtx,
-		cancel:      leaseCancel,
-		cache:       cache,
-		apiKeyID:    apiKeyID,
-		leaseID:     leaseID,
-		stopCh:      make(chan struct{}),
-		refreshDone: make(chan struct{}),
-	}
-	go lease.refreshLoop()
-	return lease, true, nil
+	return routing.AcquireIngressLease(ctx, cache, apiKeyID, maxConnections, generateRequestID(), func(err error, lost bool) {
+		if lost {
+			logger.L().Error("openai_ws_ingress_lease_lost", zap.Int64("api_key_id", apiKeyID), zap.Error(err))
+		} else {
+			logger.L().Warn("openai_ws_ingress_lease_unconfirmed", zap.Int64("api_key_id", apiKeyID), zap.Error(err))
+		}
+	})
 }
 
 // SetAccountLoadBatchCacheTTL 设置账号负载批量读取的极短 TTL 缓存；非正数表示禁用缓存。
@@ -301,16 +168,14 @@ func (s *ConcurrencyService) SetAccountLoadBatchCacheTTL(ttl time.Duration) {
 	s.accountLoadCacheTTL.Store(int64(ttl))
 	if ttl <= 0 {
 		s.accountLoadCacheMu.Lock()
-		s.accountLoadCache = make(map[string]cachedAccountLoadBatch)
+		s.accountLoadCache = make(map[int64]cachedAccountLoad)
 		s.accountLoadCacheMu.Unlock()
 	}
 }
 
-// AcquireResult represents the result of acquiring a concurrency slot
-type AcquireResult struct {
-	Acquired    bool
-	ReleaseFunc func() // Must be called when done (typically via defer)
-}
+// AcquireResult is shared with existing ingress consumers while their imports
+// migrate. routing owns acquisition and idempotent release; no parallel state.
+type AcquireResult = routing.AcquireResult
 
 type AccountWithConcurrency struct {
 	ID             int64
@@ -337,81 +202,42 @@ type UserLoadInfo struct {
 }
 
 // AcquireAccountSlot attempts to acquire a concurrency slot for an account.
-// If the account is at max concurrency, it waits until a slot is available or timeout.
+// It does not wait; the ingress owns polling and its existing deadline.
 // Returns a release function that MUST be called when the request completes.
 func (s *ConcurrencyService) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int) (*AcquireResult, error) {
-	// If maxConcurrency is 0 or negative, no limit
-	if maxConcurrency <= 0 {
-		return &AcquireResult{
-			Acquired:    true,
-			ReleaseFunc: func() {}, // no-op
-		}, nil
-	}
-
-	// Generate unique request ID for this slot
 	requestID := generateRequestID()
-
-	acquired, err := s.cache.AcquireAccountSlot(ctx, accountID, maxConcurrency, requestID)
-	if err != nil {
-		return nil, err
+	result, err := routing.AcquireCapacity(ctx, s.cache, routing.CapacityRequest{ID: accountID, Token: requestID, Limit: maxConcurrency}, func(err error) {
+		logger.LegacyPrintf("service.concurrency", "Warning: failed to release account slot for %d (req=%s): %v", accountID, requestID, err)
+	})
+	if err == nil && result.Acquired && maxConcurrency > 0 {
+		s.observeWaitAdmission(ctx, "account", accountID)
 	}
-
-	if acquired {
-		return &AcquireResult{
-			Acquired: true,
-			ReleaseFunc: func() {
-				bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				if err := s.cache.ReleaseAccountSlot(bgCtx, accountID, requestID); err != nil {
-					logger.LegacyPrintf("service.concurrency", "Warning: failed to release account slot for %d (req=%s): %v", accountID, requestID, err)
-				}
-			},
-		}, nil
+	if err == nil && result.Acquired && ctx.Err() != nil {
+		// Diagnostics run after routing transferred the lease. Cancellation
+		// during that Redis call must return ownership instead of a stale success.
+		result.ReleaseFunc()
+		return nil, context.Cause(ctx)
 	}
-
-	return &AcquireResult{
-		Acquired:    false,
-		ReleaseFunc: nil,
-	}, nil
+	return result, err
 }
 
-// AcquireUserSlot attempts to acquire a concurrency slot for a user.
-// If the user is at max concurrency, it waits until a slot is available or timeout.
-// Returns a release function that MUST be called when the request completes.
+// AcquireUserSlot uses the same token owner, with the independent user namespace.
 func (s *ConcurrencyService) AcquireUserSlot(ctx context.Context, userID int64, maxConcurrency int) (*AcquireResult, error) {
-	// If maxConcurrency is 0 or negative, no limit
-	if maxConcurrency <= 0 {
-		return &AcquireResult{
-			Acquired:    true,
-			ReleaseFunc: func() {}, // no-op
-		}, nil
-	}
-
-	// Generate unique request ID for this slot
 	requestID := generateRequestID()
-
-	acquired, err := s.cache.AcquireUserSlot(ctx, userID, maxConcurrency, requestID)
-	if err != nil {
-		return nil, err
+	result, err := routing.AcquireCapacity(ctx, s.cache, routing.CapacityRequest{ID: userID, Token: requestID, Limit: maxConcurrency, User: true}, func(err error) {
+		logger.LegacyPrintf("service.concurrency", "Warning: failed to release user slot for %d (req=%s): %v", userID, requestID, err)
+	})
+	if err == nil && result.Acquired {
+		if maxConcurrency > 0 {
+			s.observeWaitAdmission(ctx, "user", userID)
+		}
+		if ctx.Err() != nil {
+			result.ReleaseFunc()
+			return nil, context.Cause(ctx)
+		}
+		openAIRequestTimingFromContext(ctx).mark("user_slot", time.Now())
 	}
-
-	if acquired {
-		return &AcquireResult{
-			Acquired: true,
-			ReleaseFunc: func() {
-				bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				if err := s.cache.ReleaseUserSlot(bgCtx, userID, requestID); err != nil {
-					logger.LegacyPrintf("service.concurrency", "Warning: failed to release user slot for %d (req=%s): %v", userID, requestID, err)
-				}
-			},
-		}, nil
-	}
-
-	return &AcquireResult{
-		Acquired:    false,
-		ReleaseFunc: nil,
-	}, nil
+	return result, err
 }
 
 // TrackAPIKeySlot records one active request slot for an API key without
@@ -591,32 +417,43 @@ func (s *ConcurrencyService) getAccountsLoadBatch(ctx context.Context, accounts 
 		return s.fetchAccountsLoadBatch(ctx, accounts)
 	}
 
-	key := accountLoadBatchCacheKey(accounts)
-	if cached, ok := s.getCachedAccountLoadBatch(key, time.Now()); ok {
+	cached, missing := s.getCachedAccountLoads(accounts, time.Now())
+	if len(missing) == 0 {
 		return cached, nil
 	}
-
-	value, err, _ := s.accountLoadGroup.Do(key, func() (any, error) {
+	pending := s.accountLoadGroup.DoChan(accountLoadBatchCacheKey(missing), func() (any, error) {
 		now := time.Now()
-		if cached, ok := s.getCachedAccountLoadBatch(key, now); ok {
-			return cached, nil
+		result, unread := s.getCachedAccountLoads(missing, now)
+		if len(unread) == 0 {
+			return result, nil
 		}
-		loadMap, fetchErr := s.fetchAccountsLoadBatch(ctx, accounts)
-		if fetchErr != nil {
-			return nil, fetchErr
+		loads, err := s.fetchAccountsLoadBatch(ctx, unread)
+		if err != nil {
+			return nil, err
 		}
-		cached := cloneAccountLoadMap(loadMap)
-		s.storeCachedAccountLoadBatch(key, cached, now.Add(ttl))
-		return cached, nil
+		s.storeCachedAccountLoads(loads, now.Add(ttl))
+		for id, load := range loads {
+			result[id] = load
+		}
+		return result, nil
 	})
-	if err != nil {
-		return nil, err
+	var result singleflight.Result
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case result = <-pending:
 	}
-	loadMap, _ := value.(map[int64]*AccountLoadInfo)
-	if loadMap == nil {
-		return map[int64]*AccountLoadInfo{}, nil
+	if result.Err != nil {
+		return nil, result.Err
 	}
-	return loadMap, nil
+	loads, _ := result.Val.(map[int64]*AccountLoadInfo)
+	for id, load := range loads {
+		if load != nil {
+			copy := *load
+			cached[id] = &copy
+		}
+	}
+	return cached, nil
 }
 
 func (s *ConcurrencyService) fetchAccountsLoadBatch(ctx context.Context, accounts []AccountWithConcurrency) (map[int64]*AccountLoadInfo, error) {
@@ -625,55 +462,63 @@ func (s *ConcurrencyService) fetchAccountsLoadBatch(ctx context.Context, account
 	}
 	baseCtx := context.Background()
 	if ctx != nil {
-		baseCtx = context.WithoutCancel(ctx)
+		baseCtx = ctx
 	}
 	redisCtx, cancel := context.WithTimeout(baseCtx, accountLoadBatchFetchTimeout)
 	defer cancel()
+	RecordSchedulingDecision(ctx, SchedulingDecision{Stage: "load", Action: "batch_read", Candidates: len(accounts)})
 	return s.cache.GetAccountsLoadBatch(redisCtx, accounts)
 }
 
-func (s *ConcurrencyService) getCachedAccountLoadBatch(key string, now time.Time) (map[int64]*AccountLoadInfo, bool) {
+// Cache observations by account, not by sampled batch membership. Otherwise
+// random batches defeat the shared short TTL and duplicate the same account in
+// hundreds of cache entries. Capacity is request-owned and applied on read.
+func (s *ConcurrencyService) getCachedAccountLoads(accounts []AccountWithConcurrency, now time.Time) (map[int64]*AccountLoadInfo, []AccountWithConcurrency) {
+	result := make(map[int64]*AccountLoadInfo, len(accounts))
+	missing := make([]AccountWithConcurrency, 0, len(accounts))
 	s.accountLoadCacheMu.RLock()
-	cached, ok := s.accountLoadCache[key]
-	s.accountLoadCacheMu.RUnlock()
-	if !ok {
-		return nil, false
-	}
-	if !now.Before(cached.expiresAt) {
-		s.accountLoadCacheMu.Lock()
-		if current, exists := s.accountLoadCache[key]; exists && !now.Before(current.expiresAt) {
-			delete(s.accountLoadCache, key)
+	defer s.accountLoadCacheMu.RUnlock()
+	for _, account := range accounts {
+		cached, ok := s.accountLoadCache[account.ID]
+		if !ok || !now.Before(cached.expiresAt) {
+			missing = append(missing, account)
+			continue
 		}
-		s.accountLoadCacheMu.Unlock()
-		return nil, false
+		copy := cached.load
+		copy.LoadRate = 0
+		if account.MaxConcurrency > 0 {
+			copy.LoadRate = (copy.CurrentConcurrency + copy.WaitingCount) * 100 / account.MaxConcurrency
+		}
+		result[account.ID] = &copy
 	}
-	return cached.loadMap, true
+	return result, missing
 }
-
-func (s *ConcurrencyService) storeCachedAccountLoadBatch(key string, loadMap map[int64]*AccountLoadInfo, expiresAt time.Time) {
+func (s *ConcurrencyService) storeCachedAccountLoads(loads map[int64]*AccountLoadInfo, expiresAt time.Time) {
 	s.accountLoadCacheMu.Lock()
+	defer s.accountLoadCacheMu.Unlock()
 	if s.accountLoadCache == nil {
-		s.accountLoadCache = make(map[string]cachedAccountLoadBatch)
+		s.accountLoadCache = make(map[int64]cachedAccountLoad)
 	}
-	if len(s.accountLoadCache) >= maxAccountLoadBatchCacheEntries {
+	if len(s.accountLoadCache)+len(loads) > maxAccountLoadCacheEntries {
 		now := time.Now()
-		for cacheKey, cached := range s.accountLoadCache {
+		for id, cached := range s.accountLoadCache {
 			if !now.Before(cached.expiresAt) {
-				delete(s.accountLoadCache, cacheKey)
+				delete(s.accountLoadCache, id)
 			}
 		}
-		for len(s.accountLoadCache) >= maxAccountLoadBatchCacheEntries {
-			for cacheKey := range s.accountLoadCache {
-				delete(s.accountLoadCache, cacheKey)
+	}
+	for id, load := range loads {
+		if load == nil {
+			continue
+		}
+		if _, exists := s.accountLoadCache[id]; !exists && len(s.accountLoadCache) >= maxAccountLoadCacheEntries {
+			for evict := range s.accountLoadCache {
+				delete(s.accountLoadCache, evict)
 				break
 			}
 		}
+		s.accountLoadCache[id] = cachedAccountLoad{load: *load, expiresAt: expiresAt}
 	}
-	s.accountLoadCache[key] = cachedAccountLoadBatch{
-		loadMap:   loadMap,
-		expiresAt: expiresAt,
-	}
-	s.accountLoadCacheMu.Unlock()
 }
 
 func accountLoadBatchCacheKey(accounts []AccountWithConcurrency) string {
@@ -686,22 +531,6 @@ func accountLoadBatchCacheKey(accounts []AccountWithConcurrency) string {
 	}
 	sum := hash.Sum(nil)
 	return strconv.Itoa(len(accounts)) + ":" + hex.EncodeToString(sum)
-}
-
-func cloneAccountLoadMap(loadMap map[int64]*AccountLoadInfo) map[int64]*AccountLoadInfo {
-	if len(loadMap) == 0 {
-		return map[int64]*AccountLoadInfo{}
-	}
-	clone := make(map[int64]*AccountLoadInfo, len(loadMap))
-	for accountID, loadInfo := range loadMap {
-		if loadInfo == nil {
-			clone[accountID] = nil
-			continue
-		}
-		copied := *loadInfo
-		clone[accountID] = &copied
-	}
-	return clone
 }
 
 // GetUsersLoadBatch returns load info for multiple users.
@@ -720,31 +549,78 @@ func (s *ConcurrencyService) CleanupExpiredAccountSlots(ctx context.Context, acc
 	return s.cache.CleanupExpiredAccountSlots(ctx, accountID)
 }
 
-// StartSlotCleanupWorker starts a background cleanup worker for expired account slots.
-func (s *ConcurrencyService) StartSlotCleanupWorker(_ AccountRepository, interval time.Duration) {
+// SlotCleanupWorker is an explicitly stoppable/joinable worker handle.
+// Stop is safe concurrently and waits for the in-flight bounded cleanup call.
+type SlotCleanupWorker struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+func (w *SlotCleanupWorker) Stop() {
+	if w == nil {
+		return
+	}
+	w.cancel()
+	<-w.done
+}
+
+// StartSlotCleanupWorker retains the current Wire constructor signature. Wire
+// must register StopSlotCleanupWorker (or the returned handle's Stop) at shutdown.
+// AccountRepository is retained only until MAIN updates that existing caller.
+func (s *ConcurrencyService) StartSlotCleanupWorker(_ AccountRepository, interval time.Duration) *SlotCleanupWorker {
+	if s == nil || s.cache == nil || interval <= 0 {
+		return nil
+	}
+	s.cleanupMu.Lock()
+	defer s.cleanupMu.Unlock()
+	if s.cleanupWorker != nil {
+		select {
+		case <-s.cleanupWorker.done:
+		default:
+			return s.cleanupWorker
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	worker := &SlotCleanupWorker{cancel: cancel, done: make(chan struct{})}
+	s.cleanupWorker = worker
+	go func() { defer close(worker.done); s.RunSlotCleanup(ctx, interval) }()
+	return worker
+}
+
+func (s *ConcurrencyService) StopSlotCleanupWorker() {
+	if s == nil {
+		return
+	}
+	s.cleanupMu.Lock()
+	worker := s.cleanupWorker
+	s.cleanupMu.Unlock()
+	worker.Stop()
+}
+
+// RunSlotCleanup lets host own the worker context directly. It creates no
+// goroutines and returns only after the active cleanup has respected cancellation.
+func (s *ConcurrencyService) RunSlotCleanup(ctx context.Context, interval time.Duration) {
 	if s == nil || s.cache == nil || interval <= 0 {
 		return
 	}
-
-	runCleanup := func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		err := s.cache.CleanupExpiredAccountSlotKeys(cleanupCtx)
-		cancel()
-		if err != nil {
-			logger.LegacyPrintf("service.concurrency", "Warning: cleanup expired account slots failed: %v", err)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		if ctx.Err() != nil {
 			return
 		}
-	}
-
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-
-		runCleanup()
-		for range ticker.C {
-			runCleanup()
+		cleanup, cancel := context.WithTimeout(ctx, 5*time.Second)
+		err := s.cache.CleanupExpiredAccountSlotKeys(cleanup)
+		cancel()
+		if err != nil && ctx.Err() == nil {
+			logger.LegacyPrintf("service.concurrency", "Warning: cleanup expired account slots failed: %v", err)
 		}
-	}()
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 // GetAccountConcurrencyBatch gets current concurrency counts for multiple accounts.

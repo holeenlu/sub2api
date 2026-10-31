@@ -11,7 +11,7 @@ func SanitizeStoredCredentials(platform string, creds map[string]any) map[string
 	if creds == nil {
 		return nil
 	}
-	_ = platform
+	NormalizeAccountModelReferences(platform, creds)
 	for _, key := range []string{
 		"password", "sso_token", "sso", "sso-rw", "clearTextPassword", "cookie",
 	} {

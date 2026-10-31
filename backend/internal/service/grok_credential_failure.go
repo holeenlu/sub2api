@@ -92,7 +92,21 @@ type grokCredentialConditionalStateRepository interface {
 
 // GetRequestCredential applies the request-path credential and failover contract
 // before any upstream transport is opened.
-func (s *OpenAIGatewayService) GetRequestCredential(ctx context.Context, c *gin.Context, account *Account) (string, string, error) {
+func (s *OpenAIGatewayService) GetRequestCredential(ctx context.Context, c *gin.Context, account *Account, models ...string) (token string, kind string, credentialErr error) {
+	defer func() {
+		if credentialErr != nil && account != nil && !account.IsGrokOAuth() && infraerrors.Reason(credentialErr) != "OPENAI_EXCEL_AUTH_ROUTE" {
+			credentialErr = newCredentialPreparationFailure(credentialErr)
+		}
+	}()
+
+	if len(models) > 0 && s.excelBPSGloballyEnabled(ctx) && account.IsExcelBPSEnabledForModel(models[0]) {
+		token, err := s.getExcelBPSAccessToken(ctx, account)
+		failure := newExcelBPSCredentialFailure(c, account, err)
+		return token, "oauth", failure
+	}
+	if account.IsExcelOAuth() {
+		return "", "oauth", infraerrors.BadRequest("OPENAI_EXCEL_AUTH_ROUTE", "Excel-only authorization requires BPS enabled for this model")
+	}
 	return s.getRequestCredential(ctx, c, account)
 }
 

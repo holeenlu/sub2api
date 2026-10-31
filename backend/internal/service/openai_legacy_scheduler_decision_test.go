@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	gatewaysession "github.com/Wei-Shaw/sub2api/internal/gateway/session"
 	"github.com/stretchr/testify/require"
 )
 
@@ -98,6 +99,7 @@ func TestLegacySchedulerDecision_PreviousResponseRouting(t *testing.T) {
 	t.Run("routes to the account owning the response", func(t *testing.T) {
 		svc := newLegacySchedulerDecisionTestService(newLegacySchedulerDecisionTestAccounts(groupID, true), true, schedulerTestConcurrencyCache{})
 		require.NoError(t, svc.getOpenAIWSStateStore().BindResponseAccount(ctx, groupID, responseID, 38102, time.Hour))
+		require.NoError(t, svc.getOpenAIWSStateStore().BindResponseMode(ctx, groupID, responseID, gatewaysession.ResponseModeNative, time.Hour))
 
 		selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
 			ctx, &groupID, responseID, "legacy-prev-session", "gpt-5.1", nil,
@@ -234,7 +236,7 @@ func TestLegacySchedulerDecision_PreviousResponseRouting(t *testing.T) {
 		require.Contains(t, released, int64(38102), "the owning account's slot must be released after the proxy quarantine check fails")
 	})
 
-	t.Run("all proxies quarantined fails open to the owner", func(t *testing.T) {
+	t.Run("quarantine also protects the previous response owner", func(t *testing.T) {
 		proxy := int64(38115)
 		accounts := newLegacySchedulerDecisionTestAccounts(groupID, true)
 		accounts[0].ProxyID = &proxy
@@ -250,16 +252,11 @@ func TestLegacySchedulerDecision_PreviousResponseRouting(t *testing.T) {
 		require.True(t, tripped)
 		require.NoError(t, svc.getOpenAIWSStateStore().BindResponseAccount(ctx, groupID, responseID, 38102, time.Hour))
 
-		selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
+		selection, _, err := svc.SelectAccountWithSchedulerForCapability(
 			ctx, &groupID, responseID, "", "gpt-5.1", nil,
 			OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, true, true,
 		)
-		require.NoError(t, err, "quarantine must fail open instead of returning no available accounts")
-		require.NotNil(t, selection)
-		require.NotNil(t, selection.Account)
-		releaseLegacySchedulerDecisionSelection(selection)
-		require.Equal(t, int64(38102), selection.Account.ID)
-		require.Equal(t, openAIAccountScheduleLayerPreviousResponse, decision.Layer)
-		require.True(t, decision.StickyPreviousHit)
+		require.ErrorIs(t, err, ErrNoAvailableAccounts)
+		require.Nil(t, selection)
 	})
 }

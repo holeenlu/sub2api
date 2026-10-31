@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,19 +15,20 @@ import (
 
 type rateLimitClearRepoStub struct {
 	mockAccountRepoForGemini
-	getByIDAccount            *Account
-	getByIDErr                error
-	getByIDCalls              int
-	clearErrorCalls           int
-	clearRateLimitCalls       int
-	clearAntigravityCalls     int
-	clearModelRateLimitCalls  int
-	clearTempUnschedCalls     int
-	clearErrorErr             error
-	clearRateLimitErr         error
-	clearAntigravityErr       error
-	clearModelRateLimitErr    error
-	clearTempUnschedulableErr error
+	getByIDAccount                *Account
+	getByIDErr                    error
+	getByIDCalls                  int
+	clearErrorCalls               int
+	clearRateLimitCalls           int
+	clearAntigravityCalls         int
+	clearModelRateLimitCalls      int
+	clearModelsPreservingBPSCalls int
+	clearTempUnschedCalls         int
+	clearErrorErr                 error
+	clearRateLimitErr             error
+	clearAntigravityErr           error
+	clearModelRateLimitErr        error
+	clearTempUnschedulableErr     error
 }
 
 func (r *rateLimitClearRepoStub) GetByID(ctx context.Context, id int64) (*Account, error) {
@@ -54,7 +56,34 @@ func (r *rateLimitClearRepoStub) ClearAntigravityQuotaScopes(ctx context.Context
 
 func (r *rateLimitClearRepoStub) ClearModelRateLimits(ctx context.Context, id int64) error {
 	r.clearModelRateLimitCalls++
-	return r.clearModelRateLimitErr
+	if r.clearModelRateLimitErr != nil {
+		return r.clearModelRateLimitErr
+	}
+	if r.getByIDAccount != nil {
+		delete(r.getByIDAccount.Extra, modelRateLimitsKey)
+	}
+	return nil
+}
+
+func (r *rateLimitClearRepoStub) ClearModelRateLimitsPreservingBPS(ctx context.Context, id int64) error {
+	r.clearModelsPreservingBPSCalls++
+	if r.clearModelRateLimitErr != nil {
+		return r.clearModelRateLimitErr
+	}
+	if r.getByIDAccount != nil {
+		limits, _ := r.getByIDAccount.Extra[modelRateLimitsKey].(map[string]any)
+		kept := make(map[string]any)
+		for scope, value := range limits {
+			if strings.HasPrefix(scope, ExcelBPSCooldownScopePrefix) {
+				kept[scope] = value
+			}
+		}
+		delete(r.getByIDAccount.Extra, modelRateLimitsKey)
+		if len(kept) > 0 {
+			r.getByIDAccount.Extra[modelRateLimitsKey] = kept
+		}
+	}
+	return nil
 }
 
 func (r *rateLimitClearRepoStub) ClearTempUnschedulable(ctx context.Context, id int64) error {
@@ -233,7 +262,9 @@ func TestRateLimitService_RecoverAccountAfterSuccessfulTest_ClearsErrorAndRateLi
 	require.Equal(t, 1, repo.clearErrorCalls)
 	require.Equal(t, 1, repo.clearRateLimitCalls)
 	require.Equal(t, 1, repo.clearAntigravityCalls)
-	require.Equal(t, 1, repo.clearModelRateLimitCalls)
+	require.Zero(t, repo.clearModelRateLimitCalls)
+	require.Equal(t, 1, repo.clearModelsPreservingBPSCalls)
+	require.NotContains(t, repo.getByIDAccount.Extra, modelRateLimitsKey)
 	require.Equal(t, 1, repo.clearTempUnschedCalls)
 	require.Equal(t, []int64{42}, cache.deletedIDs)
 	require.Equal(t, []int64{42}, blocker.clearedIDs)
@@ -306,4 +337,97 @@ func TestRateLimitService_RecoverAccountState_InvalidatesOAuthTokenOnErrorRecove
 	require.Equal(t, 1, repo.clearErrorCalls)
 	require.Len(t, invalidator.accounts, 1)
 	require.Equal(t, int64(21), invalidator.accounts[0].ID)
+}
+
+func TestRateLimitService_SuccessfulModelBPreservesBPSModelAAndEndpointCooldowns(t *testing.T) {
+	until := time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339Nano)
+	modelA := (excelBPSRateLimitScope{model: "gpt-6-astra"}).key()
+	endpoint := (excelBPSRateLimitScope{endpoint: "/basispoints/api/attachments"}).key()
+	permission := excelBPSModelPermissionScope("gpt-6-astra")
+	kept := map[string]any{
+		modelA:     map[string]any{"rate_limit_reset_at": until},
+		endpoint:   map[string]any{"rate_limit_reset_at": until},
+		permission: map[string]any{"rate_limit_reset_at": until},
+	}
+	limits := map[string]any{"gpt-5.6-sol": map[string]any{"rate_limit_reset_at": until}}
+	for scope, entry := range kept {
+		limits[scope] = entry
+	}
+	repo := &rateLimitClearRepoStub{getByIDAccount: &Account{
+		ID: 42, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive,
+		Extra: map[string]any{"openai_excel_bps": true, modelRateLimitsKey: limits},
+	}}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	// This is the actual boundary used after model B succeeds. The API has no
+	// verified BPS scope, so it cannot infer that A or the upload endpoint recovered.
+	result, err := svc.RecoverAccountAfterSuccessfulTest(t.Context(), 42)
+	require.NoError(t, err)
+	require.True(t, result.ClearedRateLimit, "ordinary native limits still clear")
+	require.Equal(t, kept, repo.getByIDAccount.Extra[modelRateLimitsKey])
+	require.Equal(t, true, repo.getByIDAccount.Extra["openai_excel_bps"])
+	require.Zero(t, repo.clearModelRateLimitCalls)
+	require.Equal(t, 1, repo.clearModelsPreservingBPSCalls)
+}
+
+func TestRateLimitService_SuccessfulTestWithOnlyBPSCooldownIsNoop(t *testing.T) {
+	limits := map[string]any{
+		excelBPSAccountCooldownScope: map[string]any{"rate_limit_reset_at": time.Now().Add(time.Hour).Format(time.RFC3339Nano)},
+	}
+	repo := &rateLimitClearRepoStub{getByIDAccount: &Account{ID: 42, Status: StatusActive, Extra: map[string]any{modelRateLimitsKey: limits}}}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	result, err := svc.RecoverAccountAfterSuccessfulTest(t.Context(), 42)
+	require.NoError(t, err)
+	require.False(t, result.ClearedRateLimit, "preserved BPS state must not be reported as cleared")
+	require.Equal(t, limits, repo.getByIDAccount.Extra[modelRateLimitsKey])
+	require.Zero(t, repo.clearRateLimitCalls)
+	require.Zero(t, repo.clearModelRateLimitCalls)
+	require.Zero(t, repo.clearModelsPreservingBPSCalls)
+}
+
+func TestRateLimitService_SuccessfulTestCleanupErrorNeverFallsBackToFullClear(t *testing.T) {
+	writeErr := errors.New("BPS-preserving cleanup unavailable")
+	now := time.Now()
+	repo := &rateLimitClearRepoStub{getByIDAccount: &Account{ID: 42, RateLimitedAt: &now}, clearModelRateLimitErr: writeErr}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	result, err := svc.RecoverAccountAfterSuccessfulTest(t.Context(), 42)
+	require.ErrorIs(t, err, writeErr)
+	require.Nil(t, result)
+	require.Equal(t, 1, repo.clearModelsPreservingBPSCalls)
+	require.Zero(t, repo.clearModelRateLimitCalls)
+	require.Zero(t, repo.clearTempUnschedCalls)
+}
+
+func TestRateLimitService_SuccessfulTestRequiresPreservingCleanupPort(t *testing.T) {
+	now := time.Now()
+	repo := &rateLimitClearRepoStub{getByIDAccount: &Account{ID: 42, RateLimitedAt: &now}}
+	// Expose only the legacy port: a missing capability must not silently select
+	// the destructive full-clear method, even if the observed snapshot has no BPS.
+	legacy := struct{ AccountRepository }{AccountRepository: repo}
+	svc := NewRateLimitService(legacy, nil, &config.Config{}, nil, nil)
+	result, err := svc.RecoverAccountAfterSuccessfulTest(t.Context(), 42)
+	require.ErrorContains(t, err, "BPS-preserving model cleanup")
+	require.Nil(t, result)
+	require.Zero(t, repo.clearRateLimitCalls)
+	require.Zero(t, repo.clearModelRateLimitCalls)
+}
+
+func TestRateLimitService_ExplicitCleanupStillClearsBPSCooldowns(t *testing.T) {
+	for _, entry := range []string{"clear_rate_limit", "recover_state"} {
+		t.Run(entry, func(t *testing.T) {
+			repo := &rateLimitClearRepoStub{getByIDAccount: &Account{ID: 42, Extra: map[string]any{
+				modelRateLimitsKey: map[string]any{excelBPSAccountCooldownScope: map[string]any{"rate_limit_reset_at": time.Now().Add(time.Hour).Format(time.RFC3339Nano)}},
+			}}}
+			svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			if entry == "clear_rate_limit" {
+				require.NoError(t, svc.ClearRateLimit(t.Context(), 42))
+			} else {
+				result, err := svc.RecoverAccountState(t.Context(), 42, AccountRecoveryOptions{})
+				require.NoError(t, err)
+				require.True(t, result.ClearedRateLimit)
+			}
+			require.Equal(t, 1, repo.clearModelRateLimitCalls)
+			require.Zero(t, repo.clearModelsPreservingBPSCalls)
+			require.NotContains(t, repo.getByIDAccount.Extra, modelRateLimitsKey)
+		})
+	}
 }

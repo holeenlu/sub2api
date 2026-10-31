@@ -4,9 +4,13 @@ import (
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/Wei-Shaw/sub2api/internal/access"
 )
 
 type User struct {
+	CreatedBy      *int64 // Immutable creator identity; also scopes delegated user management.
+	CreatedByName  string // Current creator username, admin-only display metadata.
 	ID             int64
 	Email          string
 	Username       string
@@ -27,6 +31,7 @@ type User struct {
 	// ones listed in AllowedGroups. False keeps the default, where every public
 	// group is bindable.
 	RestrictPublicGroups bool
+	SessionGeneration    int64 // Durable security lifecycle generation; zero preserves legacy tokens.
 	TokenVersion         int64 // Incremented on password change to invalidate existing tokens
 	// TokenVersionResolved indicates TokenVersion already contains the fingerprint-derived
 	// value expected in JWT claims and refresh-token state.
@@ -68,32 +73,29 @@ type User struct {
 	Subscriptions []UserSubscription
 }
 
-func (u *User) IsAdmin() bool {
-	return u.Role == RoleAdmin
+func (u *User) IsStaff() bool {
+	return u != nil && (u.Role == RoleAdmin || u.Role == RoleSuperAdmin)
 }
+
+func (u *User) IsVendor() bool {
+	return u != nil && (u.Role == RoleVendorLevel1 || u.Role == RoleVendorLevel2)
+}
+
+func (u *User) IsSuperAdmin() bool { return u != nil && u.Role == RoleSuperAdmin }
 
 func (u *User) IsActive() bool {
 	return u.Status == StatusActive
 }
 
-// CanBindGroup checks whether a user can bind to a given group.
-// For standard groups:
-//   - Public groups (non-exclusive): bindable by every user, unless the user has
-//     RestrictPublicGroups set, in which case the group must be in AllowedGroups
-//   - Exclusive groups: only users with the group in AllowedGroups can bind
+// CanBindGroup converts the user entity for API-key creation, update, and group
+// listing. Policy belongs to access. Remove this adapter when those consumers
+// receive GroupBinding values directly.
 func (u *User) CanBindGroup(groupID int64, isExclusive bool) bool {
-	// 公开分组（非专属）：默认所有用户都可以绑定；仅当该用户开启了公开分组
-	// 限制时，才需要落在 AllowedGroups 中。
-	if !isExclusive && !u.RestrictPublicGroups {
-		return true
-	}
-	// 专属分组，以及受限用户的公开分组：需要在 AllowedGroups 中
-	for _, id := range u.AllowedGroups {
-		if id == groupID {
-			return true
-		}
-	}
-	return false
+	return access.CanBindGroup(access.GroupBinding{
+		Vendor:               u.IsVendor(),
+		RestrictPublicGroups: u.RestrictPublicGroups,
+		AllowedGroups:        u.AllowedGroups,
+	}, groupID, isExclusive)
 }
 
 func (u *User) SetPassword(password string) error {

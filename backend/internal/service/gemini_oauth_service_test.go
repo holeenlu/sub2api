@@ -102,6 +102,7 @@ func TestGeminiOAuthService_GenerateAuthURL_RedirectURIStrategy(t *testing.T) {
 			t.Parallel()
 
 			svc := NewGeminiOAuthService(nil, nil, nil, nil, tt.cfg)
+			startSessionOwnerTest(t, svc)
 			got, err := svc.GenerateAuthURL(context.Background(), nil, "https://example.com/auth/callback", tt.projectID, tt.oauthType, "")
 			if tt.wantErrSubstr != "" {
 				if err == nil {
@@ -488,7 +489,7 @@ func TestGeminiOAuthService_BuildAccountCredentials(t *testing.T) {
 	t.Parallel()
 
 	svc := NewGeminiOAuthService(nil, nil, nil, nil, &config.Config{})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	t.Run("完整字段", func(t *testing.T) {
 		t.Parallel()
@@ -688,7 +689,7 @@ func TestGeminiOAuthService_GetOAuthConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			svc := NewGeminiOAuthService(nil, nil, nil, nil, tt.cfg)
-			defer svc.Stop()
+			startSessionOwnerTest(t, svc)
 
 			result := svc.GetOAuthConfig()
 			if result.AIStudioOAuthEnabled != tt.wantEnabled {
@@ -710,11 +711,12 @@ func TestGeminiOAuthService_Stop_NoPanic(t *testing.T) {
 	t.Parallel()
 
 	svc := NewGeminiOAuthService(nil, nil, nil, nil, &config.Config{})
+	startSessionOwnerTest(t, svc)
 
 	// 调用 Stop 不应 panic
-	svc.Stop()
+	stopSessionOwnerTest(t, svc)
 	// 多次调用也不应 panic
-	svc.Stop()
+	stopSessionOwnerTest(t, svc)
 }
 
 // =====================
@@ -850,7 +852,7 @@ func TestGeminiOAuthService_RefreshToken_Success(t *testing.T) {
 	}
 
 	svc := NewGeminiOAuthService(nil, client, nil, nil, &config.Config{})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	info, err := svc.RefreshToken(context.Background(), "code_assist", "old-refresh", "")
 	if err != nil {
@@ -877,7 +879,7 @@ func TestGeminiOAuthService_RefreshToken_NonRetryableError(t *testing.T) {
 	}
 
 	svc := NewGeminiOAuthService(nil, client, nil, nil, &config.Config{})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	_, err := svc.RefreshToken(context.Background(), "code_assist", "revoked-token", "")
 	if err == nil {
@@ -906,7 +908,7 @@ func TestGeminiOAuthService_RefreshToken_RetryableError(t *testing.T) {
 	}
 
 	svc := NewGeminiOAuthService(nil, client, nil, nil, &config.Config{})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	info, err := svc.RefreshToken(context.Background(), "code_assist", "rt", "")
 	if err != nil {
@@ -928,7 +930,7 @@ func TestGeminiOAuthService_RefreshAccountToken_NotGeminiOAuth(t *testing.T) {
 	t.Parallel()
 
 	svc := NewGeminiOAuthService(nil, nil, nil, nil, &config.Config{})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	account := &Account{
 		Platform: PlatformAnthropic,
@@ -948,7 +950,7 @@ func TestGeminiOAuthService_RefreshAccountToken_NoRefreshToken(t *testing.T) {
 	t.Parallel()
 
 	svc := NewGeminiOAuthService(nil, nil, nil, nil, &config.Config{})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	account := &Account{
 		Platform: PlatformGemini,
@@ -983,7 +985,7 @@ func TestGeminiOAuthService_RefreshAccountToken_AIStudio(t *testing.T) {
 	}
 
 	svc := NewGeminiOAuthService(&mockGeminiProxyRepo{}, client, nil, nil, &config.Config{})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	account := &Account{
 		Platform: PlatformGemini,
@@ -1022,7 +1024,7 @@ func TestGeminiOAuthService_RefreshAccountToken_CodeAssist_WithProjectID(t *test
 	}
 
 	svc := NewGeminiOAuthService(&mockGeminiProxyRepo{}, client, nil, nil, &config.Config{})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	account := &Account{
 		Platform: PlatformGemini,
@@ -1067,7 +1069,7 @@ func TestGeminiOAuthService_RefreshAccountToken_DefaultOAuthType(t *testing.T) {
 	}
 
 	svc := NewGeminiOAuthService(&mockGeminiProxyRepo{}, client, nil, nil, &config.Config{})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	// 无 oauth_type 凭据的旧账号
 	account := &Account{
@@ -1115,7 +1117,7 @@ func TestGeminiOAuthService_RefreshAccountToken_WithProxy(t *testing.T) {
 	}
 
 	svc := NewGeminiOAuthService(proxyRepo, client, nil, nil, &config.Config{})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	proxyID := int64(5)
 	account := &Account{
@@ -1157,7 +1159,7 @@ func TestGeminiOAuthService_RefreshAccountToken_CodeAssist_NoProjectID_AutoDetec
 	}
 
 	svc := NewGeminiOAuthService(&mockGeminiProxyRepo{}, client, codeAssist, nil, &config.Config{})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	account := &Account{
 		Platform: PlatformGemini,
@@ -1206,7 +1208,7 @@ func TestGeminiOAuthService_RefreshAccountToken_CodeAssist_NoProjectID_FailsEmpt
 	}
 
 	svc := NewGeminiOAuthService(&mockGeminiProxyRepo{}, client, codeAssist, nil, &config.Config{})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	account := &Account{
 		Platform: PlatformGemini,
@@ -1239,7 +1241,7 @@ func TestGeminiOAuthService_RefreshAccountToken_GoogleOne_FreshCache(t *testing.
 	}
 
 	svc := NewGeminiOAuthService(&mockGeminiProxyRepo{}, client, nil, nil, &config.Config{})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	account := &Account{
 		Platform: PlatformGemini,
@@ -1279,7 +1281,7 @@ func TestGeminiOAuthService_RefreshAccountToken_GoogleOne_NoTierID_DefaultsFree(
 	}
 
 	svc := NewGeminiOAuthService(&mockGeminiProxyRepo{}, client, nil, &mockDriveClient{}, &config.Config{})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	account := &Account{
 		Platform: PlatformGemini,
@@ -1333,7 +1335,7 @@ func TestGeminiOAuthService_RefreshAccountToken_UnauthorizedClient_Fallback(t *t
 	}
 
 	svc := NewGeminiOAuthService(&mockGeminiProxyRepo{}, client, nil, nil, cfg)
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	account := &Account{
 		Platform: PlatformGemini,
@@ -1366,7 +1368,7 @@ func TestGeminiOAuthService_RefreshAccountToken_UnauthorizedClient_NoFallback(t 
 
 	// 无自定义 OAuth 客户端，无法 fallback
 	svc := NewGeminiOAuthService(&mockGeminiProxyRepo{}, client, nil, nil, &config.Config{})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	account := &Account{
 		Platform: PlatformGemini,
@@ -1395,7 +1397,7 @@ func TestGeminiOAuthService_ExchangeCode_SessionNotFound(t *testing.T) {
 	t.Parallel()
 
 	svc := NewGeminiOAuthService(nil, nil, nil, nil, &config.Config{})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	_, err := svc.ExchangeCode(context.Background(), &GeminiExchangeCodeInput{
 		SessionID: "nonexistent",
@@ -1414,7 +1416,7 @@ func TestGeminiOAuthService_ExchangeCode_InvalidState(t *testing.T) {
 	t.Parallel()
 
 	svc := NewGeminiOAuthService(nil, nil, nil, nil, &config.Config{})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	// 手动创建 session（必须设置 CreatedAt，否则会因 TTL 过期被拒绝）
 	svc.sessionStore.Set("test-session", &geminicli.OAuthSession{
@@ -1441,7 +1443,7 @@ func TestGeminiOAuthService_ExchangeCode_EmptyState(t *testing.T) {
 	t.Parallel()
 
 	svc := NewGeminiOAuthService(nil, nil, nil, nil, &config.Config{})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	svc.sessionStore.Set("test-session", &geminicli.OAuthSession{
 		State:        "correct-state",

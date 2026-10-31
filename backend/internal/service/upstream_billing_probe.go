@@ -243,6 +243,8 @@ type UpstreamBillingProbeService struct {
 	accountTestService *AccountTestService
 	settingService     *SettingService
 
+	drainCh      chan struct{}
+	done         chan struct{}
 	parentCtx    context.Context
 	parentCancel context.CancelFunc
 	wg           sync.WaitGroup
@@ -271,13 +273,11 @@ func NewUpstreamBillingProbeService(
 	accountTestService *AccountTestService,
 	settingService *SettingService,
 ) *UpstreamBillingProbeService {
-	ctx, cancel := context.WithCancel(context.Background())
 	return &UpstreamBillingProbeService{
 		accountRepo:        accountRepo,
 		accountTestService: accountTestService,
 		settingService:     settingService,
-		parentCtx:          ctx,
-		parentCancel:       cancel,
+		drainCh:            make(chan struct{}),
 		probeSlots:         make(chan struct{}, upstreamBillingProbeConcurrency),
 		now:                time.Now,
 		instanceID:         uuid.NewString(),
@@ -292,7 +292,7 @@ func (s *UpstreamBillingProbeService) SetLeaderLock(lockCache LeaderLockCache, d
 	s.db = db
 }
 
-// ProvideUpstreamBillingProbeService starts the process-wide periodic runner.
+// ProvideUpstreamBillingProbeService constructs the periodic runner; root owns Start.
 func ProvideUpstreamBillingProbeService(
 	accountRepo AccountRepository,
 	accountTestService *AccountTestService,
@@ -302,47 +302,100 @@ func ProvideUpstreamBillingProbeService(
 ) *UpstreamBillingProbeService {
 	svc := NewUpstreamBillingProbeService(accountRepo, accountTestService, settingService)
 	svc.SetLeaderLock(lockCache, db)
-	svc.Start()
 	return svc
 }
 
-func (s *UpstreamBillingProbeService) Start() {
+func (s *UpstreamBillingProbeService) Start(ctx context.Context) error {
 	if s == nil {
-		return
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	s.mu.Lock()
-	if s.started || s.stopped {
-		s.mu.Unlock()
-		return
+	defer s.mu.Unlock()
+	if s.stopped {
+		return ErrUpstreamBillingProbeUnavailable
 	}
+	if s.started {
+		return s.parentCtx.Err()
+	}
+	s.parentCtx, s.parentCancel = context.WithCancel(ctx)
 	s.started = true
 	s.wg.Add(1)
-	s.mu.Unlock()
 	go s.runLoop()
+	return nil
 }
 
-func (s *UpstreamBillingProbeService) Stop() {
+// Drain stops periodic/queued admission and joins accepted background work.
+// The same completion handle survives a caller deadline; no early owner reset.
+func (s *UpstreamBillingProbeService) Drain(ctx context.Context) error {
+	return s.stopRunner(ctx, false)
+}
+func (s *UpstreamBillingProbeService) Stop(ctx context.Context) error { return s.stopRunner(ctx, true) }
+func (s *UpstreamBillingProbeService) stopRunner(ctx context.Context, force bool) error {
 	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	if !s.stopped {
+		s.stopped = true
+		close(s.drainCh)
+		s.done = make(chan struct{})
+		done := s.done
+		go func() { s.wg.Wait(); close(done) }()
+	}
+	done, cancel := s.done, s.parentCancel
+	s.mu.Unlock()
+	if force && cancel != nil {
+		cancel()
+	}
+	select {
+	case <-done:
+		return nil
+	default:
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// Cadence locks retain their original release deadline while running. Drain
+// wakes and joins the release callbacks before Redis/PG can be closed.
+func (s *UpstreamBillingProbeService) releaseCadenceLock(release func(), releaseAt time.Time) {
+	if time.Until(releaseAt) <= 0 {
+		release()
 		return
 	}
 	s.mu.Lock()
 	if s.stopped {
 		s.mu.Unlock()
+		release()
 		return
 	}
-	s.stopped = true
-	s.parentCancel()
+	s.wg.Add(1)
+	drain := s.drainCh
 	s.mu.Unlock()
-	s.wg.Wait()
+	go func() { defer s.wg.Done(); releaseUpstreamBillingProbeLeaderLock(drain, release, releaseAt) }()
 }
 
 func (s *UpstreamBillingProbeService) runLoop() {
 	defer s.wg.Done()
+	select {
+	case <-s.drainCh:
+		return
+	default:
+	}
 	_ = s.RunDue(s.parentCtx)
 	ticker := time.NewTicker(upstreamBillingProbeCycleInterval)
 	defer ticker.Stop()
 	for {
 		select {
+		case <-s.drainCh:
+			return
 		case <-s.parentCtx.Done():
 			return
 		case <-ticker.C:
@@ -355,6 +408,14 @@ func (s *UpstreamBillingProbeService) runLoop() {
 
 // RunDue executes at most one bounded batch of due accounts.
 func (s *UpstreamBillingProbeService) RunDue(ctx context.Context) error {
+	if s != nil {
+		s.mu.Lock()
+		stopped := s.stopped
+		s.mu.Unlock()
+		if stopped {
+			return ErrUpstreamBillingProbeUnavailable
+		}
+	}
 	if s == nil || s.accountRepo == nil {
 		return nil
 	}
@@ -385,7 +446,7 @@ func (s *UpstreamBillingProbeService) RunDue(ctx context.Context) error {
 	if !acquired {
 		return nil
 	}
-	defer releaseUpstreamBillingProbeLeaderLock(cadenceRelease, lockNow.Truncate(upstreamBillingProbeCycleInterval).Add(upstreamBillingProbeCycleInterval))
+	defer s.releaseCadenceLock(cadenceRelease, lockNow.Truncate(upstreamBillingProbeCycleInterval).Add(upstreamBillingProbeCycleInterval))
 
 	now := s.currentTime()
 	accounts, err := s.listDueAccounts(ctx, now)
@@ -588,13 +649,14 @@ func (s *UpstreamBillingProbeService) tryAcquireLeaderLock(ctx context.Context, 
 	return func() {}, true, nil
 }
 
-func releaseUpstreamBillingProbeLeaderLock(release func(), releaseAt time.Time) {
-	delay := time.Until(releaseAt)
-	if delay <= 0 {
-		release()
-		return
+func releaseUpstreamBillingProbeLeaderLock(drain <-chan struct{}, release func(), releaseAt time.Time) {
+	timer := time.NewTimer(time.Until(releaseAt))
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-drain:
 	}
-	time.AfterFunc(delay, release)
+	release()
 }
 
 func (s *UpstreamBillingProbeService) SetAccountEnabled(ctx context.Context, accountID int64, enabled bool) error {

@@ -1,0 +1,263 @@
+import { peakRatePresentation } from '@/features/pricing'
+import { ref } from 'vue'
+import { GroupBadge, GroupOptionItem } from '@/features/access-policy/presentation'
+import { subscriptionPresentationKey } from '../ports'
+import { subscriptionScopeKey, subscriptionCanManageKey, subscriptionNotificationsKey, subscriptionDirectoryKey, subscriptionNavigationKey } from '../ports'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import { defineComponent } from 'vue'
+
+import SubscriptionsView from '../pages/AdminSubscriptionsPage.vue'
+
+const { listSubscriptions, assignSubscription, getAllGroups, listUsers, searchUsageUsers, showError } = vi.hoisted(() => ({
+  listSubscriptions: vi.fn(),
+  assignSubscription: vi.fn(),
+  showError: vi.fn(),
+  getAllGroups: vi.fn(),
+  listUsers: vi.fn(),
+  searchUsageUsers: vi.fn()
+}))
+
+vi.mock('../api/admin', () => ({ subscriptionsAPI: { list: listSubscriptions, assign: assignSubscription } }))
+const bindings = () => ({
+ [subscriptionPresentationKey as symbol]: { peakRate: peakRatePresentation, groupPlatformOptions: ref([]), components: { GroupBadge, GroupOptionItem }, serverUtcOffset: ref(undefined), platformLabel: (platform: string) => platform },
+ [subscriptionScopeKey as symbol]: ref('admin:777'), [subscriptionCanManageKey as symbol]: ref(true),
+ [subscriptionNotificationsKey as symbol]: { showError, showSuccess: vi.fn() },
+ [subscriptionDirectoryKey as symbol]: { listGroups: getAllGroups, searchAssignableUsers: async (keyword: string) => (await listUsers(1, 30, { search: keyword, sort_by: 'email', sort_order: 'asc' })).items, searchHistoryUsers: searchUsageUsers },
+ [subscriptionNavigationKey as symbol]: { usageTarget: (id: number) => ({ path: '/admin/usage', query: { user_id: id } }), groupsTarget: '/admin/groups' }
+})
+vi.mock('vue-i18n', async () => {
+  const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
+  return {
+    ...actual,
+    useI18n: () => ({
+      t: (key: string, params?: { id?: number }) =>
+        key === 'admin.users.userPrefix' ? `User #${params?.id}` : key
+    })
+  }
+})
+
+const DataTableStub = {
+  props: ['data'],
+  template: `
+    <div>
+      <div v-for="row in data" :key="row.id">
+        <slot name="cell-user" :row="row" />
+      </div>
+    </div>
+  `
+}
+
+const RouterLinkStub = defineComponent({
+  name: 'RouterLink',
+  props: { to: { type: Object, required: true } },
+  template: '<a :href="`${to.path}?user_id=${to.query.user_id}`"><slot /></a>'
+})
+
+describe('admin subscription users', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    listSubscriptions.mockResolvedValue({
+      items: [{
+        id: 9,
+        user_id: 42,
+        group_id: 3,
+        status: 'active',
+        starts_at: '2026-01-01T00:00:00Z',
+        expires_at: null,
+        daily_usage_usd: 0,
+        weekly_usage_usd: 0,
+        monthly_usage_usd: 0,
+        daily_window_start: null,
+        weekly_window_start: null,
+        monthly_window_start: null,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+        user: { email: 'reader@example.com', username: 'Reader' }
+      }],
+      total: 1,
+      pages: 1
+    })
+    assignSubscription.mockResolvedValue({})
+    getAllGroups.mockResolvedValue([])
+    listUsers.mockResolvedValue({
+      items: [{ id: 42, email: 'reader@example.com' }],
+      total: 1,
+      pages: 1
+    })
+    searchUsageUsers.mockResolvedValue([
+      { id: 14, email: 'deleted@example.com', deleted: true }
+    ])
+  })
+
+  const mountView = () => mount(SubscriptionsView, {
+    global: {
+      provide: bindings(),
+      stubs: {
+        AppLayout: { template: '<div><slot /></div>' },
+        TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+        DataTable: DataTableStub,
+        RouterLink: RouterLinkStub,
+        Pagination: true,
+        BaseDialog: {
+          props: ['show'],
+          template: '<div v-if="show"><slot /><slot name="footer" /></div>'
+        },
+        ConfirmDialog: true,
+        EmptyState: true,
+        Select: true,
+        GroupBadge: true,
+        GroupOptionItem: true,
+        Icon: true,
+        Teleport: true
+      }
+    }
+  })
+
+  it('searches current users when assigning a subscription', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const wrapper = mountView()
+    try {
+      await flushPromises()
+      await wrapper.findAll('button')
+        .find((button) => button.text() === 'admin.subscriptions.assignSubscription')!
+        .trigger('click')
+      const search = wrapper.get('[data-assign-user-search] input')
+      await search.trigger('focus')
+      await search.setValue('  example.com  ')
+      await vi.advanceTimersByTimeAsync(300)
+      await flushPromises()
+
+      expect(listUsers).toHaveBeenCalledWith(1, 30, {
+        search: 'example.com', sort_by: 'email', sort_order: 'asc'
+      })
+      expect(searchUsageUsers).not.toHaveBeenCalled()
+      const picker = wrapper.get('[data-assign-user-search]')
+      expect(picker.text()).toContain('reader@example.com')
+      expect(picker.text()).not.toContain('deleted@example.com')
+      await picker.get('button').trigger('click')
+      expect((search.element as HTMLInputElement).value).toBe('reader@example.com')
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it.each(['another', ''])('clears the assignment user immediately when input changes to %j', async (keyword) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const wrapper = mountView()
+    try {
+      await flushPromises()
+      await wrapper.findAll('button')
+        .find((button) => button.text() === 'admin.subscriptions.assignSubscription')!
+        .trigger('click')
+      const form = wrapper.get('#assign-subscription-form')
+      form.getComponent({ name: 'Select' }).vm.$emit('update:modelValue', 3)
+      const search = wrapper.get('[data-assign-user-search] input')
+      await search.trigger('focus')
+      await search.setValue('reader')
+      await vi.advanceTimersByTimeAsync(300)
+      await flushPromises()
+      await wrapper.get('[data-assign-user-search] button').trigger('click')
+
+      await search.setValue(keyword)
+      await form.trigger('submit')
+      await flushPromises()
+
+      expect(assignSubscription).not.toHaveBeenCalled()
+      expect(showError).toHaveBeenCalledWith('admin.subscriptions.pleaseSelectUser')
+      expect(listUsers).toHaveBeenCalledTimes(1)
+
+      listUsers.mockResolvedValue({ items: [{ id: 84, email: 'another@example.com' }] })
+      await search.trigger('focus')
+      await search.setValue('another')
+      await vi.advanceTimersByTimeAsync(300)
+      await flushPromises()
+      await wrapper.get('[data-assign-user-search] button').trigger('click')
+      await form.trigger('submit')
+      await flushPromises()
+
+      expect(assignSubscription).toHaveBeenCalledTimes(1)
+      expect(assignSubscription).toHaveBeenCalledWith({
+        user_id: 84, group_id: 3, validity_days: 30
+      })
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps deleted users available when filtering subscription history', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const wrapper = mountView()
+    try {
+      await flushPromises()
+      const search = wrapper.get('[data-filter-user-search] input')
+      await search.trigger('focus')
+      await search.setValue('deleted')
+      await vi.advanceTimersByTimeAsync(300)
+      await flushPromises()
+
+      expect(searchUsageUsers).toHaveBeenCalledWith('deleted', expect.any(AbortSignal))
+      expect(listUsers).not.toHaveBeenCalled()
+      const picker = wrapper.get('[data-filter-user-search]')
+      expect(picker.text()).toContain('deleted@example.com')
+      await picker.get('button').trigger('click')
+      expect(listSubscriptions).toHaveBeenLastCalledWith(
+        1, expect.any(Number), expect.objectContaining({ user_id: 14 }), expect.any(Object)
+      )
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it('renders the user email as a link to that user filtered usage records', async () => {
+    const wrapper = mountView()
+
+    await flushPromises()
+
+    const link = wrapper.getComponent(RouterLinkStub)
+    expect(link.text()).toBe('reader@example.com')
+    expect(link.props('to')).toEqual({ path: '/admin/usage', query: { user_id: 42 } })
+  })
+
+  it('uses the user ID label for the usage link when username mode has no username', async () => {
+    localStorage.setItem('subscription-user-column-mode', 'username')
+    listSubscriptions.mockResolvedValue({
+      items: [{
+        id: 9,
+        user_id: 42,
+        group_id: 3,
+        status: 'active',
+        starts_at: '2026-01-01T00:00:00Z',
+        expires_at: null,
+        daily_usage_usd: 0,
+        weekly_usage_usd: 0,
+        monthly_usage_usd: 0,
+        daily_window_start: null,
+        weekly_window_start: null,
+        monthly_window_start: null,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+        user: { email: 'reader@example.com' }
+      }],
+      total: 1,
+      pages: 1
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    const link = wrapper.getComponent(RouterLinkStub)
+    expect(link.text()).toBe('User #42')
+    expect(link.props('to')).toEqual({ path: '/admin/usage', query: { user_id: 42 } })
+  })
+})
+
+// These legacy functional cases exercise the migrated full administrator.
+vi.mock("@/features/identity", () => ({ useAuthStore: () => ({ isSuperAdmin: true, isAdmin: true, isSimpleMode: false, can: () => true }) }))
+
+vi.mock('@/shared/styles/platformColors', () => ({ platformTextClass: () => '', platformBadgeLightClass: () => '', platformLabel: (platform: string) => platform, platformBorderStrongClass: () => '', platformAccentColor: () => '', platformBadgeClass: () => '', platformBorderClass: () => '', platformButtonClass: () => '' }))
+

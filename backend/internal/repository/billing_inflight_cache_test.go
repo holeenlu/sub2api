@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/billing/reservation"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/alicebob/miniredis/v2"
@@ -28,7 +29,12 @@ func newInflightTestEnv(t *testing.T, enabled bool, ttlSeconds int) (*miniredis.
 		DefaultMaxTokens: 8192,
 	}
 	svc := service.NewBillingCacheService(cache, nil, nil, nil, nil, nil, cfg, nil)
-	t.Cleanup(svc.Stop)
+	require.NoError(t, svc.Start(t.Context()))
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		require.NoError(t, svc.Stop(ctx))
+	})
 	return mr, cache, svc
 }
 
@@ -189,7 +195,12 @@ func TestInflightReservation_RedisDownFailsOpen(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Billing.InflightReservation = config.InflightReservationConfig{Enabled: true, TTLSeconds: 60}
 	svc := service.NewBillingCacheService(&downReserveCache{BillingCache: up, down: &billingCache{rdb: downRDB}}, nil, nil, nil, nil, nil, cfg, nil)
-	t.Cleanup(svc.Stop)
+	require.NoError(t, svc.Start(t.Context()))
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		require.NoError(t, svc.Stop(ctx))
+	})
 
 	user := &service.User{ID: 5}
 	for i := 0; i < 3; i++ {
@@ -212,7 +223,7 @@ func TestInflightReservation_ScriptErrorSurfaces(t *testing.T) {
 
 // 回归：原实现在 handler 返回时即释放预留，而计费（RecordUsage → 余额缓存扣减）是异步的，
 // 窗口内的顺序请求看到「在途=0 且余额未扣」全部放行（余额 $1、5×$0.9 → -4.40）。
-// 现在预留由计费任务在余额缓存扣减之后才释放。
+// 现在预留由计费任务在持久账务完成缓存失效之后才释放。
 func TestInflightReservation_SequentialInBillingWindowAdmitsOnlyWhatBalanceCovers(t *testing.T) {
 	_, cache, svc := newInflightTestEnv(t, true, 60)
 	ctx := context.Background()
@@ -232,7 +243,7 @@ func TestInflightReservation_SequentialInBillingWindowAdmitsOnlyWhatBalanceCover
 		taskDone := res.Acquire() // handler submits the async billing task
 		res.HandlerDone()         // handler returns before billing lands
 		pendingBilling = append(pendingBilling, func() {
-			require.NoError(t, cache.DeductUserBalance(ctx, user.ID, cost))
+			require.NoError(t, cache.InvalidateUserBalance(ctx, user.ID))
 			taskDone()
 		})
 	}
@@ -241,9 +252,8 @@ func TestInflightReservation_SequentialInBillingWindowAdmitsOnlyWhatBalanceCover
 	for _, bill := range pendingBilling {
 		bill()
 	}
-	bal, err := cache.GetUserBalance(ctx, user.ID)
-	require.NoError(t, err)
-	require.InDelta(t, 0.1, bal, 1e-9)
+	_, err := cache.GetUserBalance(ctx, user.ID)
+	require.ErrorIs(t, err, redis.Nil, "released reservations must not expose the pre-debit cached balance")
 	require.Equal(t, int64(0), inflightCount(t, cache, user.ID))
 }
 
@@ -321,7 +331,7 @@ func TestReserveFixedCharge_ConcurrentChargesAdmitOnlyWhatAPIKeyQuotaCovers(t *t
 
 	const n = 20
 	var admitted atomic.Int32
-	reservations := make(chan *service.InflightReservation, n)
+	reservations := make(chan *reservation.Handle, n)
 	var wg sync.WaitGroup
 	start := make(chan struct{})
 	for i := 0; i < n; i++ {

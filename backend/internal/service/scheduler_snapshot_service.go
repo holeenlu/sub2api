@@ -6,22 +6,198 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sort"
 	"strconv"
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/access"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
+	"github.com/gin-gonic/gin"
 )
 
 var (
+	// Preserve the error identity consumed by existing repository and gateway code.
+	ErrVendorSupplyUnavailable          = access.ErrVendorSupplyUnavailable
 	ErrSchedulerCacheNotReady           = errors.New("scheduler cache not ready")
 	ErrSchedulerFallbackLimited         = errors.New("scheduler db fallback limited")
 	ErrSchedulerGroupLifecycleLeaseBusy = errors.New("scheduler group lifecycle lease busy")
 	ErrSchedulerBucketRebuildBusy       = errors.New("scheduler bucket rebuild busy")
 )
+
+// Bind the existing authoritative repository to access without exporting a
+// service entity or repeating its ownership/mode SQL. Nil and zero group IDs
+// pass through unchanged. Optional fake capabilities stay absent.
+func vendorDispatchChecks(repo AccountRepository, account *Account, groupID *int64) access.DispatchChecks {
+	var checks access.DispatchChecks
+	if validator, ok := repo.(interface {
+		ValidateVendorSupply(context.Context, *Account, *int64) error
+	}); ok {
+		checks.Supply = func(ctx context.Context) error {
+			return validator.ValidateVendorSupply(ctx, account, groupID)
+		}
+	}
+	if validator, ok := repo.(interface {
+		ValidateVendorAuthorizationMode(context.Context, *Account, *int64, string) error
+	}); ok {
+		checks.Mode = func(ctx context.Context, mode string) error {
+			return validator.ValidateVendorAuthorizationMode(ctx, account, groupID, mode)
+		}
+	}
+	return checks
+}
+
+func validateVendorModeDispatch(ctx context.Context, repo AccountRepository, account *Account, groupID *int64, mode string) error {
+	if account == nil {
+		return ErrAccountNotFound
+	}
+	return access.RevalidateMode(ctx, access.DispatchSubject{VendorOwned: account.VendorID != nil, Platform: account.Platform}, mode, vendorDispatchChecks(repo, account, groupID))
+}
+
+func validateVendorNativeDispatch(ctx context.Context, repo AccountRepository, account *Account, groupID *int64) error {
+	return validateVendorModeDispatch(ctx, repo, account, groupID, VendorOpenAIModeNative)
+}
+
+func validateVendorDispatch(ctx context.Context, repo AccountRepository, account *Account, groupID *int64) error {
+	if account == nil {
+		return ErrAccountNotFound
+	}
+	return access.RevalidateSupply(ctx, access.DispatchSubject{VendorOwned: account.VendorID != nil, Platform: account.Platform}, vendorDispatchChecks(repo, account, groupID))
+}
+
+type vendorProbeGroupKey struct{}
+type vendorAdminProbeKey struct{}
+
+func vendorDispatchGroup(c *gin.Context) *int64 {
+	if c != nil && c.Request != nil {
+		if id, ok := c.Request.Context().Value(vendorProbeGroupKey{}).(int64); ok && id > 0 {
+			return &id
+		}
+		if allowed, _ := c.Request.Context().Value(vendorAdminProbeKey{}).(bool); allowed {
+			return nil
+		}
+	}
+	id := getOpenAIGroupIDFromContext(c)
+	return &id // No group is not an authorization to use supplier capacity.
+}
+
+type qualifiedAccountHTTPUpstream struct {
+	settings *SettingService
+	HTTPUpstream
+	repo    AccountRepository
+	account *Account
+	groupID *int64
+	mode    string // Bound by the transport; request context cannot select it.
+}
+
+func qualifiedAccountUpstream(repo AccountRepository, upstream HTTPUpstream, account *Account, groupID *int64, settings ...*SettingService) HTTPUpstream {
+	if account == nil {
+		return upstream
+	}
+	var models *SettingService
+	if len(settings) > 0 {
+		models = settings[0]
+	}
+	return &qualifiedAccountHTTPUpstream{HTTPUpstream: upstream, repo: repo, account: account, groupID: groupID, mode: VendorOpenAIModeNative, settings: models}
+}
+
+func (u *qualifiedAccountHTTPUpstream) Do(req *http.Request, proxy string, id int64, concurrency int) (*http.Response, error) {
+	if err := u.validate(req, proxy, id); err != nil {
+		return nil, vendorDispatchFailure(err)
+	}
+	req, err := takeHTTPAccountTurnAttempt(req, u.account, proxy, "http")
+	if err != nil {
+		return nil, turnAttemptFailure(err)
+	}
+	cleanup := func() {}
+	if !u.account.IsExcelBPSEnabled() {
+		req, cleanup = guardTurnFirstOutput(req)
+	}
+	evidence := &excelBPSWriteEvidence{}
+	req = evidence.request(req)
+	resp, err := u.HTTPUpstream.Do(req, proxy, id, concurrency)
+	if err != nil {
+		cause := context.Cause(req.Context())
+		cleanup()
+		if IsTurnBudgetError(cause) {
+			return resp, cause
+		}
+		return resp, &OpenAITransportAttemptError{Cause: err, SendState: evidence.sendState()}
+	}
+	if resp != nil && resp.Body != nil {
+		resp.Body = &openAIRequestContextReadCloser{ReadCloser: resp.Body, ctx: req.Context(), cleanup: cleanup}
+	} else {
+		cleanup()
+	}
+	return resp, nil
+}
+
+func (u *qualifiedAccountHTTPUpstream) DoWithTLS(req *http.Request, proxy string, id int64, concurrency int, profile *tlsfingerprint.Profile) (*http.Response, error) {
+	if err := u.validate(req, proxy, id); err != nil {
+		return nil, vendorDispatchFailure(err)
+	}
+	req, err := takeHTTPAccountTurnAttempt(req, u.account, proxy, "http")
+	if err != nil {
+		return nil, turnAttemptFailure(err)
+	}
+	cleanup := func() {}
+	if !u.account.IsExcelBPSEnabled() {
+		req, cleanup = guardTurnFirstOutput(req)
+	}
+	evidence := &excelBPSWriteEvidence{}
+	req = evidence.request(req)
+	resp, err := u.HTTPUpstream.DoWithTLS(req, proxy, id, concurrency, profile)
+	if err != nil {
+		cause := context.Cause(req.Context())
+		cleanup()
+		if IsTurnBudgetError(cause) {
+			return resp, cause
+		}
+		return resp, &OpenAITransportAttemptError{Cause: err, SendState: evidence.sendState()}
+	}
+	if resp != nil && resp.Body != nil {
+		resp.Body = &openAIRequestContextReadCloser{ReadCloser: resp.Body, ctx: req.Context(), cleanup: cleanup}
+	} else {
+		cleanup()
+	}
+	return resp, nil
+}
+
+func (u *qualifiedAccountHTTPUpstream) validate(req *http.Request, proxy string, id int64) error {
+	if req == nil || id != u.account.ID || (u.account.VendorID != nil && proxy != resolveAccountProxyURL(u.account)) {
+		return ErrVendorSupplyUnavailable
+	}
+	if err := validateVendorModeDispatch(req.Context(), u.repo, u.account, u.groupID, u.mode); err != nil {
+		return err
+	}
+	return u.settings.validateManagedUpstreamRequest(req, u.repo, u.account)
+}
+
+func (s *SchedulerSnapshotService) filterVendorSupply(ctx context.Context, accounts []Account, groupID *int64) []Account {
+	if batch, ok := s.accountRepo.(interface {
+		FilterVendorSupply(context.Context, []Account, *int64) ([]Account, error)
+	}); ok {
+		filtered, err := batch.FilterVendorSupply(ctx, accounts, groupID)
+		if err != nil {
+			return nil
+		}
+		return filtered
+	}
+
+	filtered := make([]Account, 0, len(accounts))
+	for _, account := range accounts {
+		if err := validateVendorDispatch(ctx, s.accountRepo, &account, groupID); err != nil {
+			continue
+		}
+		account.VendorSupplyBlocked = false
+		filtered = append(filtered, account)
+	}
+	return filtered
+}
 
 const (
 	outboxEventTimeout                    = 2 * time.Minute
@@ -226,7 +402,7 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 		if err != nil {
 			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] cache read failed: bucket=%s err=%v", bucket.String(), err)
 		} else if hit {
-			return derefAccounts(cached), useMixed, nil
+			return s.filterVendorSupply(ctx, derefAccounts(cached), groupID), useMixed, nil
 		}
 		token, err := s.cache.CaptureBucketWriteToken(ctx, bucket)
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -269,7 +445,7 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 		}
 	}
 
-	return accounts, useMixed, nil
+	return s.filterVendorSupply(ctx, accounts, groupID), useMixed, nil
 }
 
 func (s *SchedulerSnapshotService) GetAccount(ctx context.Context, accountID int64) (*Account, error) {
@@ -287,6 +463,9 @@ func (s *SchedulerSnapshotService) GetAccount(ctx context.Context, accountID int
 		if err != nil {
 			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] account cache read failed: id=%d err=%v", accountID, err)
 		} else if account != nil {
+			if err := validateVendorDispatch(ctx, s.accountRepo, account, nil); err != nil {
+				return nil, err
+			}
 			return account, nil
 		}
 	}
@@ -296,7 +475,14 @@ func (s *SchedulerSnapshotService) GetAccount(ctx context.Context, accountID int
 	}
 	fallbackCtx, cancel := s.withFallbackTimeout(ctx)
 	defer cancel()
-	return s.accountRepo.GetByID(fallbackCtx, accountID)
+	account, err := s.accountRepo.GetByID(fallbackCtx, accountID)
+	if err != nil || account == nil {
+		return account, err
+	}
+	if err := validateVendorDispatch(fallbackCtx, s.accountRepo, account, nil); err != nil {
+		return nil, err
+	}
+	return account, nil
 }
 
 // GetGroupByID 获取分组信息（供调度器使用）

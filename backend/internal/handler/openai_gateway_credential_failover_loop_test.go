@@ -438,7 +438,7 @@ func TestResponsesCredentialFailoverLoop(t *testing.T) {
 		require.Empty(t, repo.errorIDs())
 		require.Empty(t, upstream.accountHits())
 		require.Equal(t, 1, repo.selectorCalls())
-		require.Zero(t, h.gatewayService.SnapshotOpenAIAccountSchedulerMetrics().RuntimeStatsAccountCount,
+		require.Zero(t, h.gatewayService.SnapshotOpenAIAccountSchedulerMetrics().RuntimeStatsEntryCount,
 			"provider-scoped auth failure must not penalize the selected account")
 	})
 
@@ -489,7 +489,7 @@ func TestResponsesCredentialFailoverLoop(t *testing.T) {
 		require.Equal(t, []int64{801}, upstream.accountHits())
 		require.Empty(t, repo.errorIDs())
 		require.Equal(t, 1, repo.selectorCalls())
-		require.Zero(t, h.gatewayService.SnapshotOpenAIAccountSchedulerMetrics().RuntimeStatsAccountCount)
+		require.Zero(t, h.gatewayService.SnapshotOpenAIAccountSchedulerMetrics().RuntimeStatsEntryCount)
 	})
 
 	t.Run("pre-cancelled request never invokes an account selector", func(t *testing.T) {
@@ -623,7 +623,7 @@ func TestResponsesGrok402FailoverCooldown(t *testing.T) {
 func TestResponsesGrok429FailoverHandlesMixedStatuses(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	t.Run("429 then 500 stops after the bounded followup", func(t *testing.T) {
+	t.Run("429 then ineligible followup preserves the storm bound", func(t *testing.T) {
 		_, _, upstream, router, cleanup := newGrokCredentialFailoverHandler(t, "mixed_429_500")
 		defer cleanup()
 		recorder := httptest.NewRecorder()
@@ -634,7 +634,7 @@ func TestResponsesGrok429FailoverHandlesMixedStatuses(t *testing.T) {
 
 		require.Equal(t, http.StatusBadGateway, recorder.Code, recorder.Body.String())
 		require.Equal(t, []int64{801, 802}, upstream.accountHits())
-		require.NotContains(t, recorder.Body.String(), "upstream unavailable")
+		require.Contains(t, recorder.Body.String(), "upstream")
 	})
 
 	t.Run("500 then 429 permits one healthy followup", func(t *testing.T) {
@@ -650,7 +650,7 @@ func TestResponsesGrok429FailoverHandlesMixedStatuses(t *testing.T) {
 		require.Equal(t, []int64{801, 802, 803}, upstream.accountHits())
 	})
 
-	t.Run("OAuth 429 then API-key failure cannot bypass the bound", func(t *testing.T) {
+	t.Run("OAuth 429 then ineligible API-key followup preserves the storm bound", func(t *testing.T) {
 		_, _, upstream, router, cleanup := newGrokCredentialFailoverHandler(t, "oauth_429_apikey_500")
 		defer cleanup()
 		recorder := httptest.NewRecorder()
@@ -805,11 +805,10 @@ func TestResponsesWebSocketCredentialFailoverLoop(t *testing.T) {
 		writeFirst(t, conn)
 
 		readCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		_, _, err := conn.Read(readCtx)
+		_, event, err := conn.Read(readCtx)
 		cancel()
-		var closeErr coderws.CloseError
-		require.ErrorAs(t, err, &closeErr)
-		require.Contains(t, closeErr.Reason, service.GrokCredentialUnavailableClientMessage)
+		require.NoError(t, err)
+		require.Contains(t, string(event), service.GrokCredentialUnavailableClientMessage)
 		require.Equal(t, 1, repo.selectorCalls())
 		require.Empty(t, upstream.accountHits())
 	})
@@ -954,7 +953,7 @@ func newGrokCredentialFailoverHandler(t *testing.T, mode string) (*OpenAIGateway
 	handlerRefresherStarted.Store(router, refresher.started)
 	cleanup := func() {
 		handlerRefresherStarted.Delete(router)
-		billingCache.Stop()
+		stopHandlerBillingCache(t, billingCache)
 	}
 	return h, repo, upstream, router, cleanup
 }

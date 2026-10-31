@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
@@ -32,6 +33,17 @@ type codexModelsHTTPUpstreamStub struct {
 type codexModelsVisibilityAccountRepo struct {
 	AccountRepository
 	byGroup map[int64][]Account
+	byID    map[int64]*Account
+}
+
+func (r codexModelsVisibilityAccountRepo) GetByID(ctx context.Context, id int64) (*Account, error) {
+	if account := r.byID[id]; account != nil {
+		return account, nil
+	}
+	if r.AccountRepository != nil {
+		return r.AccountRepository.GetByID(ctx, id)
+	}
+	return nil, ErrAccountNotFound
 }
 
 func (r codexModelsVisibilityAccountRepo) ListSchedulableByGroupID(_ context.Context, groupID int64) ([]Account, error) {
@@ -56,6 +68,21 @@ type countingCodexModelsAccountRepo struct {
 	platforms       []string
 	includeGrouped  bool
 	calls           atomic.Int32
+}
+
+func (r *countingCodexModelsAccountRepo) GetByID(ctx context.Context, id int64) (*Account, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	for _, account := range r.accounts {
+		if account.ID == id {
+			return &account, nil
+		}
+	}
+	if r.AccountRepository != nil {
+		return r.AccountRepository.GetByID(ctx, id)
+	}
+	return nil, ErrAccountNotFound
 }
 
 func (r *countingCodexModelsAccountRepo) ListSchedulableByGroupID(_ context.Context, _ int64) ([]Account, error) {
@@ -84,6 +111,22 @@ type splitCodexModelsAccountRepo struct {
 	schedulable map[int64][]Account
 	catalog     map[int64][]Account
 	all         map[int64][]Account
+}
+
+func (r splitCodexModelsAccountRepo) GetByID(ctx context.Context, id int64) (*Account, error) {
+	for _, groups := range []map[int64][]Account{r.all, r.catalog, r.schedulable} {
+		for _, accounts := range groups {
+			for _, account := range accounts {
+				if account.ID == id {
+					return &account, nil
+				}
+			}
+		}
+	}
+	if r.AccountRepository != nil {
+		return r.AccountRepository.GetByID(ctx, id)
+	}
+	return nil, ErrAccountNotFound
 }
 
 func (r splitCodexModelsAccountRepo) ListSchedulableByGroupID(_ context.Context, groupID int64) ([]Account, error) {
@@ -1308,7 +1351,7 @@ func TestBuildGroupConfiguredCodexModelsManifestExpandsSelectedModelCoveredByWil
 	group := &Group{
 		ID:       groupID,
 		Platform: PlatformOpenAI,
-		ModelAllowlist: GroupModelAllowlist{
+		ModelAllowlist: catalog.ModelAllowlist{
 			Enabled: true,
 			Models:  []string{"gpt-5.6"},
 		},
@@ -1500,7 +1543,7 @@ func TestMergeGroupConfiguredCodexModelsKeepsExplicitAutoReviewSelection(t *test
 	group := &Group{
 		ID:       groupID,
 		Platform: PlatformOpenAI,
-		ModelAllowlist: GroupModelAllowlist{
+		ModelAllowlist: catalog.ModelAllowlist{
 			Enabled: true,
 			Models:  []string{openai.CodexUsageProbeModel},
 		},
@@ -1508,6 +1551,62 @@ func TestMergeGroupConfiguredCodexModelsKeepsExplicitAutoReviewSelection(t *test
 
 	require.NoError(t, svc.MergeGroupConfiguredCodexModels(context.Background(), group, manifest, ""))
 	require.Equal(t, []string{"codex-auto-review"}, codexManifestModelSlugs(t, manifest.Body))
+}
+
+func TestCodexCatalogsFollowGroupSelectionOrder(t *testing.T) {
+	for _, mode := range []string{"local", "scheduler", "pinned"} {
+		t.Run(mode, func(t *testing.T) {
+			svc := &OpenAIGatewayService{accountRepo: codexModelsVisibilityAccountRepo{
+				byGroup: map[int64][]Account{74: {{Platform: PlatformOpenAI, Credentials: map[string]any{
+					"model_mapping": map[string]any{"model-a": "model-a", "model-b": "model-b", "model-z": "model-z"},
+				}}}},
+			}}
+			group := &Group{ID: 74, Platform: PlatformOpenAI,
+				ModelAllowlist: catalog.ModelAllowlist{Enabled: true, Models: []string{"model-z", "model-b", "model-a"}},
+			}
+			group.CodexModelsManifestConfig.Enabled = mode == "pinned"
+			source := []byte(`{"version":"upstream","models":[{"slug":"model-a"},{"slug":"model-z","input_modalities":["text","image"],"unknown_capability":{"keep":true}},{"slug":"model-b"}]}`)
+			build := func(etag string) *OpenAIModelsResponse {
+				if mode == "local" {
+					manifest, configured, err := svc.BuildGroupConfiguredCodexModelsManifest(context.Background(), group, etag)
+					require.NoError(t, err)
+					require.True(t, configured)
+					return manifest
+				}
+				manifest := &OpenAIModelsResponse{Body: bytes.Clone(source), ETag: codexModelsManifestBodyETag(source)}
+				require.NoError(t, svc.MergeGroupConfiguredCodexModels(context.Background(), group, manifest, etag))
+				return manifest
+			}
+			first := build("")
+			require.Equal(t, group.ModelAllowlist.Models, codexManifestModelSlugs(t, first.Body))
+			if mode != "local" {
+				model, err := json.Marshal(decodeCodexManifestModels(t, first.Body)[0])
+				require.NoError(t, err)
+				require.JSONEq(t, `{"slug":"model-z","input_modalities":["text","image"],"unknown_capability":{"keep":true}}`, string(model))
+				require.Contains(t, string(first.Body), `"version":"upstream"`)
+			}
+			require.True(t, build(first.ETag).NotModified)
+			group.ModelAllowlist.Models = []string{"model-b", "model-a", "model-z"}
+			reordered := build(first.ETag)
+			require.False(t, reordered.NotModified)
+			require.NotEqual(t, first.ETag, reordered.ETag)
+			require.Equal(t, group.ModelAllowlist.Models, codexManifestModelSlugs(t, reordered.Body))
+		})
+	}
+
+	// A wildcard expands available concrete models in source order, once, at its position.
+	source := []byte(`{"models":[{"slug":"model-b"},{"slug":"model-z"},{"slug":"model-a"},{"slug":"hidden"}]}`)
+	body, changed, err := mergeConfiguredCodexModelsManifest(source, nil, []string{"model-z", "model-*", "model-a"}, true)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, []string{"model-z", "model-b", "model-a"}, codexManifestModelSlugs(t, body))
+	body, _, err = mergeConfiguredCodexModelsManifest(source, nil, []string{"MODEL-Z", "model-b"}, true)
+	require.NoError(t, err)
+	require.Equal(t, []string{"model-z", "model-b"}, codexManifestModelSlugs(t, body))
+	unchanged, changed, err := mergeConfiguredCodexModelsManifest(source, nil, nil, false)
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Equal(t, source, unchanged)
 }
 
 func TestMergeGroupConfiguredCodexModelsHonorsCustomListAndFinalETag(t *testing.T) {
@@ -1532,7 +1631,7 @@ func TestMergeGroupConfiguredCodexModelsHonorsCustomListAndFinalETag(t *testing.
 	group := &Group{
 		ID:       groupID,
 		Platform: PlatformOpenAI,
-		ModelAllowlist: GroupModelAllowlist{
+		ModelAllowlist: catalog.ModelAllowlist{
 			Enabled: true,
 			Models:  []string{"deepseek-4-pro"},
 		},
@@ -2060,8 +2159,8 @@ func TestFetchCodexModelsManifestAPIKeyCompleteBodyWithoutUpstreamETagUsesFinalB
 		}, nil
 	}}
 	svc := newCodexModelsAPIKeyTestService(upstream)
-	svc.accountRepo = codexModelsVisibilityAccountRepo{}
 	account := newCodexModelsAPIKeyTestAccount("https://upstream.example/v1")
+	svc.accountRepo = codexModelsVisibilityAccountRepo{byID: map[int64]*Account{account.ID: account}}
 	group := &Group{ID: 82, Platform: PlatformOpenAI}
 
 	first, err := svc.FetchCodexModelsManifest(context.Background(), account, "0.150.0", "")
@@ -2453,9 +2552,14 @@ func TestConvertOpenAIModelListToCodexManifestLeavesUnsupportedBodiesUnchanged(t
 			want: `{"models":[{"slug":"m-1"}]}`,
 		},
 		{
-			name: "empty data unchanged",
+			name: "empty data withdraws models",
 			body: `{"object":"list","data":[]}`,
-			want: `{"object":"list","data":[]}`,
+			want: `{"models":[]}`,
+		},
+		{
+			name: "null data unchanged",
+			body: `{"object":"list","data":null}`,
+			want: `{"object":"list","data":null}`,
 		},
 		{
 			name: "data not an array unchanged",
@@ -2538,7 +2642,7 @@ func TestFetchCodexModelsManifestRejectsInvalidEnvelope(t *testing.T) {
 		name string
 		body string
 	}{
-		{name: "OpenAI models list", body: `{"object":"list","data":[]}`},
+		{name: "null OpenAI models list", body: `{"object":"list","data":null}`},
 		{name: "invalid JSON", body: `{"models":`},
 		{name: "non-object", body: `[]`},
 		{name: "null object", body: `null`},
@@ -2585,7 +2689,7 @@ func TestValidateCodexModelsManifestEnvelopeRequiresExactModelsKey(t *testing.T)
 func TestFetchCodexModelsManifestAPIKeyDoesNotCacheInvalidEnvelope(t *testing.T) {
 	var calls atomic.Int32
 	upstream := &codexModelsHTTPUpstreamStub{do: func(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
-		body := `{"object":"list","data":[]}`
+		body := `{"object":"list","data":null}`
 		if calls.Add(1) > 1 {
 			body = `{"models":[{"slug":"gpt-5.6"}]}`
 		}
@@ -2790,8 +2894,8 @@ func TestFetchCodexModelsManifestAPIKeyCacheSurvivesClientMutation(t *testing.T)
 		}, nil
 	}}
 	s := newCodexModelsAPIKeyTestService(upstream)
-	s.accountRepo = codexModelsVisibilityAccountRepo{}
 	account := newCodexModelsAPIKeyTestAccount("https://upstream.example")
+	s.accountRepo = codexModelsVisibilityAccountRepo{byID: map[int64]*Account{account.ID: account}}
 
 	first, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", "")
 	require.NoError(t, err)
@@ -2804,7 +2908,7 @@ func TestFetchCodexModelsManifestAPIKeyCacheSurvivesClientMutation(t *testing.T)
 		&Group{
 			ID:       81,
 			Platform: PlatformOpenAI,
-			ModelAllowlist: GroupModelAllowlist{
+			ModelAllowlist: catalog.ModelAllowlist{
 				Enabled: true,
 				Models:  []string{"model-a"},
 			},
@@ -2831,7 +2935,7 @@ func TestFetchCodexModelsManifestAPIKeyCacheSurvivesClientMutation(t *testing.T)
 				&Group{
 					ID:       82,
 					Platform: PlatformOpenAI,
-					ModelAllowlist: GroupModelAllowlist{
+					ModelAllowlist: catalog.ModelAllowlist{
 						Enabled: true,
 						Models:  []string{"model-b"},
 					},
@@ -3662,17 +3766,18 @@ func TestFetchCodexModelsManifestOAuthSharedAcrossGroupsWithIndependentFiltering
 	chatgptCodexModelsURL = server.URL
 	t.Cleanup(func() { chatgptCodexModelsURL = original })
 
+	account := newCodexModelsTestAccount()
 	s := &OpenAIGatewayService{
 		accountRepo: codexModelsVisibilityAccountRepo{
+			byID: map[int64]*Account{account.ID: account},
 			byGroup: map[int64][]Account{
 				91: {},
 				92: {},
 			},
 		},
 	}
-	account := newCodexModelsTestAccount()
-	groupA := &Group{ID: 91, Platform: PlatformOpenAI, ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"model-a"}}}
-	groupB := &Group{ID: 92, Platform: PlatformOpenAI, ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"model-b"}}}
+	groupA := &Group{ID: 91, Platform: PlatformOpenAI, ModelAllowlist: catalog.ModelAllowlist{Enabled: true, Models: []string{"model-a"}}}
+	groupB := &Group{ID: 92, Platform: PlatformOpenAI, ModelAllowlist: catalog.ModelAllowlist{Enabled: true, Models: []string{"model-b"}}}
 
 	begin := make(chan struct{})
 	type result struct {
@@ -3880,4 +3985,15 @@ func TestGPT61SolAPIKeyCatalogContextWindow(t *testing.T) {
 			require.EqualValues(t, tc.want, models[0]["context_window"])
 		})
 	}
+}
+
+// Test-only adapters and reference algorithms; production uses the current entrypoints.
+// convertOpenAIModelListToCodexManifest rewrites a standard OpenAI
+// GET /v1/models response ({"object":"list","data":[{"id":...},...]}) into the
+// same complete Codex manifest used by locally generated custom-provider
+// catalogs. Bodies that already carry a top-level models field, are not the
+// standard list shape, or yield no usable model IDs are returned unchanged so
+// envelope validation reports the original payload.
+func convertOpenAIModelListToCodexManifest(body []byte) []byte {
+	return convertOpenAIModelListToCodexManifestForAccount(body, nil)
 }

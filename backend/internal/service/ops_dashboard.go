@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"log"
 	"time"
@@ -43,20 +42,13 @@ func (s *OpsService) GetDashboardOverview(ctx context.Context, filter *OpsDashbo
 	}
 
 	// Best-effort system health + jobs; dashboard metrics should still render if these are missing.
-	if metrics, err := s.opsRepo.GetLatestSystemMetrics(ctx, 1); err == nil {
-		// Attach config-derived limits so the UI can show "current / max" for connection pools.
-		// These are best-effort and should never block the dashboard rendering.
-		if s != nil && s.cfg != nil {
-			if s.cfg.Database.MaxOpenConns > 0 {
-				metrics.DBMaxOpenConns = intPtr(s.cfg.Database.MaxOpenConns)
-			}
-			if s.cfg.Redis.PoolSize > 0 {
-				metrics.RedisPoolSize = intPtr(s.cfg.Redis.PoolSize)
-			}
-		}
-		overview.SystemMetrics = metrics
-	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		log.Printf("[Ops] GetLatestSystemMetrics failed: %v", err)
+	// Resources and pool capacities come from the same per-node sample.
+	overview.SystemMetricsUnavailable = true
+	if s.nodeMetrics != nil {
+		nodes, err := s.nodeMetrics.ListNodeMetrics(ctx)
+		overview.SystemMetricsNodes = nodes
+		overview.SystemMetrics = summarizeOpsNodes(nodes)
+		overview.SystemMetricsUnavailable = opsNodesUnavailable(nodes, err)
 	}
 
 	if heartbeats, err := s.opsRepo.ListJobHeartbeats(ctx); err == nil {
@@ -65,7 +57,17 @@ func (s *OpsService) GetDashboardOverview(ctx context.Context, filter *OpsDashbo
 		log.Printf("[Ops] ListJobHeartbeats failed: %v", err)
 	}
 
-	overview.HealthScore = computeDashboardHealthScore(time.Now().UTC(), overview)
+	now := time.Now().UTC()
+	for _, hb := range overview.JobHeartbeats {
+		if hb != nil {
+			hb.HealthStatus = opsJobHealthStatus(now, hb)
+		}
+	}
+	thresholds, err := s.GetMetricThresholds(ctx)
+	if err != nil {
+		log.Printf("[Ops] GetMetricThresholds failed: %v", err)
+	}
+	overview.HealthScore = computeDashboardHealthScore(now, overview, thresholds)
 
 	return overview, nil
 }

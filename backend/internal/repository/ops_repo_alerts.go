@@ -357,7 +357,7 @@ FROM ops_alert_events
 ORDER BY fired_at DESC, id DESC
 LIMIT ` + limitArg
 
-	rows, err := r.db.QueryContext(ctx, q, args...)
+	rows, err := r.queryOpsRows(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -439,7 +439,7 @@ SELECT
 FROM ops_alert_events
 WHERE id = $1`
 
-	row := r.db.QueryRowContext(ctx, q, eventID)
+	row := r.queryOpsRow(ctx, q, eventID)
 	ev, err := scanOpsAlertEvent(row)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -478,7 +478,7 @@ WHERE rule_id = $1 AND status = $2
 ORDER BY fired_at DESC
 LIMIT 1`
 
-	row := r.db.QueryRowContext(ctx, q, ruleID, service.OpsAlertStatusFiring)
+	row := r.queryOpsRow(ctx, q, ruleID, service.OpsAlertStatusFiring)
 	ev, err := scanOpsAlertEvent(row)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -517,7 +517,7 @@ WHERE rule_id = $1
 ORDER BY fired_at DESC
 LIMIT 1`
 
-	row := r.db.QueryRowContext(ctx, q, ruleID)
+	row := r.queryOpsRow(ctx, q, ruleID)
 	ev, err := scanOpsAlertEvent(row)
 	if err != nil {
 		if err == sql.ErrNoRows {

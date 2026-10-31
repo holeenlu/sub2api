@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -271,7 +272,7 @@ func (m *mockObjectStore) HeadBucket(_ context.Context) error {
 	return nil
 }
 
-func newTestBackupService(repo *mockSettingRepo, dumper DBDumper, store *mockObjectStore) *BackupService {
+func newTestBackupService(t *testing.T, repo *mockSettingRepo, dumper DBDumper, store *mockObjectStore) *BackupService {
 	cfg := &config.Config{
 		Database: config.DatabaseConfig{
 			Host:   "localhost",
@@ -286,12 +287,15 @@ func newTestBackupService(repo *mockSettingRepo, dumper DBDumper, store *mockObj
 	factory := func(_ context.Context, _ *BackupS3Config) (BackupObjectStore, error) {
 		return store, nil
 	}
-	return NewBackupService(repo, cfg, &plainEncryptor{}, factory, dumper)
+	svc := NewBackupService(repo, cfg, &plainEncryptor{}, factory, dumper)
+	require.NoError(t, svc.tasks.start(t.Context(), nil))
+	t.Cleanup(func() { stopMaintenanceForTest(t, svc) })
+	return svc
 }
 
 // newTestBackupServiceEphemeralKey mirrors a deployment that never set
 // TOTP_ENCRYPTION_KEY, so the secret encryption key is auto-generated.
-func newTestBackupServiceEphemeralKey(repo *mockSettingRepo) *BackupService {
+func newTestBackupServiceEphemeralKey(t *testing.T, repo *mockSettingRepo) *BackupService {
 	cfg := &config.Config{
 		Database: config.DatabaseConfig{Host: "localhost", Port: 5432, User: "test", DBName: "testdb"},
 		Totp:     config.TotpConfig{EncryptionKeyConfigured: false},
@@ -299,7 +303,10 @@ func newTestBackupServiceEphemeralKey(repo *mockSettingRepo) *BackupService {
 	factory := func(_ context.Context, _ *BackupS3Config) (BackupObjectStore, error) {
 		return newMockObjectStore(), nil
 	}
-	return NewBackupService(repo, cfg, &plainEncryptor{}, factory, &mockDumper{})
+	svc := NewBackupService(repo, cfg, &plainEncryptor{}, factory, &mockDumper{})
+	require.NoError(t, svc.tasks.start(t.Context(), nil))
+	t.Cleanup(func() { stopMaintenanceForTest(t, svc) })
+	return svc
 }
 
 func seedS3Config(t *testing.T, repo *mockSettingRepo) {
@@ -318,7 +325,7 @@ func seedS3Config(t *testing.T, repo *mockSettingRepo) {
 
 func TestBackupService_S3ConfigEncryption(t *testing.T) {
 	repo := newMockSettingRepo()
-	svc := newTestBackupService(repo, &mockDumper{}, newMockObjectStore())
+	svc := newTestBackupService(t, repo, &mockDumper{}, newMockObjectStore())
 
 	// 保存配置 -> SecretAccessKey 应被加密
 	_, err := svc.UpdateS3Config(context.Background(), BackupS3Config{
@@ -349,7 +356,7 @@ func TestBackupService_S3ConfigEncryption(t *testing.T) {
 
 func TestBackupService_S3ConfigKeepExistingSecret(t *testing.T) {
 	repo := newMockSettingRepo()
-	svc := newTestBackupService(repo, &mockDumper{}, newMockObjectStore())
+	svc := newTestBackupService(t, repo, &mockDumper{}, newMockObjectStore())
 
 	// 先保存一个有 secret 的配置
 	_, err := svc.UpdateS3Config(context.Background(), BackupS3Config{
@@ -377,7 +384,7 @@ func TestBackupService_S3ConfigKeepExistingSecret(t *testing.T) {
 // 数据”的回退会把它掩盖成一条日志，功能照常，密钥却是明文落库的。
 func TestBackupService_S3ConfigStaysEncryptedAfterSecondSave(t *testing.T) {
 	repo := newMockSettingRepo()
-	svc := newTestBackupService(repo, &mockDumper{}, newMockObjectStore())
+	svc := newTestBackupService(t, repo, &mockDumper{}, newMockObjectStore())
 
 	_, err := svc.UpdateS3Config(context.Background(), BackupS3Config{
 		Bucket:          "my-bucket",
@@ -421,7 +428,7 @@ func TestBackupService_S3ConfigStaysEncryptedAfterSecondSave(t *testing.T) {
 
 func TestBackupService_UpdateS3Config_RejectsEphemeralKey(t *testing.T) {
 	repo := newMockSettingRepo()
-	svc := newTestBackupServiceEphemeralKey(repo)
+	svc := newTestBackupServiceEphemeralKey(t, repo)
 
 	// 提供新 secret 但密钥为自动生成 -> 必须拒绝，避免重启后无法解密（#4524）。
 	_, err := svc.UpdateS3Config(context.Background(), BackupS3Config{
@@ -439,7 +446,7 @@ func TestBackupService_UpdateS3Config_RejectsEphemeralKey(t *testing.T) {
 
 func TestBackupService_UpdateS3Config_NoSecretAllowedWithEphemeralKey(t *testing.T) {
 	repo := newMockSettingRepo()
-	svc := newTestBackupServiceEphemeralKey(repo)
+	svc := newTestBackupServiceEphemeralKey(t, repo)
 
 	// 不含 secret 的更新（如只改 bucket）不触碰加密路径，应放行。
 	_, err := svc.UpdateS3Config(context.Background(), BackupS3Config{
@@ -451,13 +458,13 @@ func TestBackupService_UpdateS3Config_NoSecretAllowedWithEphemeralKey(t *testing
 
 func TestBackupService_EncryptionKeyConfigured(t *testing.T) {
 	repo := newMockSettingRepo()
-	require.True(t, newTestBackupService(repo, &mockDumper{}, newMockObjectStore()).EncryptionKeyConfigured())
-	require.False(t, newTestBackupServiceEphemeralKey(repo).EncryptionKeyConfigured())
+	require.True(t, newTestBackupService(t, repo, &mockDumper{}, newMockObjectStore()).EncryptionKeyConfigured())
+	require.False(t, newTestBackupServiceEphemeralKey(t, repo).EncryptionKeyConfigured())
 }
 
 func TestBackupService_SaveRecordConcurrency(t *testing.T) {
 	repo := newMockSettingRepo()
-	svc := newTestBackupService(repo, &mockDumper{}, newMockObjectStore())
+	svc := newTestBackupService(t, repo, &mockDumper{}, newMockObjectStore())
 
 	var wg sync.WaitGroup
 	n := 20
@@ -482,7 +489,7 @@ func TestBackupService_SaveRecordConcurrency(t *testing.T) {
 
 func TestBackupService_LoadRecords_Empty(t *testing.T) {
 	repo := newMockSettingRepo()
-	svc := newTestBackupService(repo, &mockDumper{}, newMockObjectStore())
+	svc := newTestBackupService(t, repo, &mockDumper{}, newMockObjectStore())
 
 	records, err := svc.loadRecords(context.Background())
 	require.NoError(t, err)
@@ -492,7 +499,7 @@ func TestBackupService_LoadRecords_Empty(t *testing.T) {
 func TestBackupService_LoadRecords_Corrupted(t *testing.T) {
 	repo := newMockSettingRepo()
 	_ = repo.Set(context.Background(), settingKeyBackupRecords, "not valid json{{{")
-	svc := newTestBackupService(repo, &mockDumper{}, newMockObjectStore())
+	svc := newTestBackupService(t, repo, &mockDumper{}, newMockObjectStore())
 
 	records, err := svc.loadRecords(context.Background())
 	require.Error(t, err) // 损坏数据应返回错误
@@ -506,7 +513,7 @@ func TestBackupService_CreateBackup_Streaming(t *testing.T) {
 	dumpContent := "-- PostgreSQL dump\nCREATE TABLE test (id int);\n"
 	dumper := &mockDumper{dumpData: []byte(dumpContent)}
 	store := newMockObjectStore()
-	svc := newTestBackupService(repo, dumper, store)
+	svc := newTestBackupService(t, repo, dumper, store)
 
 	record, err := svc.CreateBackup(context.Background(), "manual", 14)
 	require.NoError(t, err)
@@ -526,7 +533,7 @@ func TestBackupService_CreateBackup_SplitsCompressedArchive(t *testing.T) {
 	dumpContent := entropyBackupFixture(512)
 	dumper := &mockDumper{dumpData: dumpContent}
 	store := newMockObjectStore()
-	svc := newTestBackupService(repo, dumper, store)
+	svc := newTestBackupService(t, repo, dumper, store)
 	svc.partSizeBytes = 32
 
 	record, err := svc.CreateBackup(context.Background(), "manual", 14)
@@ -557,12 +564,12 @@ func TestBackupService_StartBackup_SplitsCompressedArchive(t *testing.T) {
 	repo := newMockSettingRepo()
 	seedS3Config(t, repo)
 	store := newMockObjectStore()
-	svc := newTestBackupService(repo, &mockDumper{dumpData: entropyBackupFixture(512)}, store)
+	svc := newTestBackupService(t, repo, &mockDumper{dumpData: entropyBackupFixture(512)}, store)
 	svc.partSizeBytes = 32
 
 	record, err := svc.StartBackup(context.Background(), "manual", 14)
 	require.NoError(t, err)
-	svc.wg.Wait()
+	waitBackupTasks(t, svc)
 
 	final, err := svc.GetBackupRecord(context.Background(), record.ID)
 	require.NoError(t, err)
@@ -576,12 +583,12 @@ func TestBackupService_StartBackup_UploadFailureCleansUploadedParts(t *testing.T
 	seedS3Config(t, repo)
 	store := newMockObjectStore()
 	store.failUploadFileAt = 2
-	svc := newTestBackupService(repo, &mockDumper{dumpData: entropyBackupFixture(512)}, store)
+	svc := newTestBackupService(t, repo, &mockDumper{dumpData: entropyBackupFixture(512)}, store)
 	svc.partSizeBytes = 32
 
 	record, err := svc.StartBackup(context.Background(), "manual", 14)
 	require.NoError(t, err)
-	svc.wg.Wait()
+	waitBackupTasks(t, svc)
 
 	final, err := svc.GetBackupRecord(context.Background(), record.ID)
 	require.NoError(t, err)
@@ -598,7 +605,7 @@ func TestBackupService_StartBackup_UploadFailureCleansUploadedParts(t *testing.T
 func TestBackupService_UploadFailureCleanupUsesDetachedContext(t *testing.T) {
 	repo := newMockSettingRepo()
 	seedS3Config(t, repo)
-	svc := newTestBackupService(repo, &mockDumper{}, newMockObjectStore())
+	svc := newTestBackupService(t, repo, &mockDumper{}, newMockObjectStore())
 	svc.partSizeBytes = 4
 
 	archive, err := os.CreateTemp("", "backup-upload-context-*.gz")
@@ -642,7 +649,7 @@ func TestBackupService_CreateBackup_DumpFailure(t *testing.T) {
 
 	dumper := &mockDumper{dumpErr: fmt.Errorf("pg_dump failed")}
 	store := newMockObjectStore()
-	svc := newTestBackupService(repo, dumper, store)
+	svc := newTestBackupService(t, repo, dumper, store)
 
 	record, err := svc.CreateBackup(context.Background(), "manual", 14)
 	require.Error(t, err)
@@ -652,7 +659,7 @@ func TestBackupService_CreateBackup_DumpFailure(t *testing.T) {
 
 func TestBackupService_CreateBackup_NoS3Config(t *testing.T) {
 	repo := newMockSettingRepo()
-	svc := newTestBackupService(repo, &mockDumper{}, newMockObjectStore())
+	svc := newTestBackupService(t, repo, &mockDumper{}, newMockObjectStore())
 
 	_, err := svc.CreateBackup(context.Background(), "manual", 14)
 	require.ErrorIs(t, err, ErrBackupS3NotConfigured)
@@ -665,7 +672,7 @@ func TestBackupService_CreateBackup_ConcurrentBlocked(t *testing.T) {
 	// 使用一个慢速 dumper 来模拟正在进行的备份
 	dumper := &mockDumper{dumpData: []byte("data")}
 	store := newMockObjectStore()
-	svc := newTestBackupService(repo, dumper, store)
+	svc := newTestBackupService(t, repo, dumper, store)
 
 	// 手动设置 backingUp 标志
 	svc.opMu.Lock()
@@ -687,7 +694,7 @@ func TestBackupService_RunScheduledBackup_LeaderElection(t *testing.T) {
 		repo := newMockSettingRepo()
 		seedS3Config(t, repo)
 		store := newMockObjectStore()
-		svc := newTestBackupService(repo, &mockDumper{dumpData: []byte("data")}, store)
+		svc := newTestBackupService(t, repo, &mockDumper{dumpData: []byte("data")}, store)
 
 		// A peer already owns the lock, so this instance is not the leader.
 		cache := &fakeLeaderLockCache{}
@@ -712,7 +719,7 @@ func TestBackupService_RunScheduledBackup_LeaderElection(t *testing.T) {
 		repo := newMockSettingRepo()
 		seedS3Config(t, repo)
 		store := newMockObjectStore()
-		svc := newTestBackupService(repo, &mockDumper{dumpData: []byte("-- dump\n")}, store)
+		svc := newTestBackupService(t, repo, &mockDumper{dumpData: []byte("-- dump\n")}, store)
 
 		cache := &fakeLeaderLockCache{}
 		svc.SetLeaderLock(cache, nil)
@@ -733,7 +740,7 @@ func TestBackupService_RestoreBackup_Streaming(t *testing.T) {
 	dumpContent := "-- PostgreSQL dump\nCREATE TABLE test (id int);\n"
 	dumper := &mockDumper{dumpData: []byte(dumpContent)}
 	store := newMockObjectStore()
-	svc := newTestBackupService(repo, dumper, store)
+	svc := newTestBackupService(t, repo, dumper, store)
 
 	// 先创建一个备份
 	record, err := svc.CreateBackup(context.Background(), "manual", 14)
@@ -744,7 +751,8 @@ func TestBackupService_RestoreBackup_Streaming(t *testing.T) {
 	require.NoError(t, err)
 
 	// 验证 psql 收到的数据是否与原始 dump 内容一致
-	require.Equal(t, dumpContent, string(dumper.restored))
+	require.True(t, strings.HasPrefix(string(dumper.restored), dumpContent))
+	require.Contains(t, string(dumper.restored), "UPDATE users SET session_generation =")
 }
 
 func TestBackupService_RestoreBackup_SplitParts(t *testing.T) {
@@ -753,7 +761,7 @@ func TestBackupService_RestoreBackup_SplitParts(t *testing.T) {
 	dumpContent := entropyBackupFixture(512)
 	dumper := &mockDumper{}
 	store := newMockObjectStore()
-	svc := newTestBackupService(repo, dumper, store)
+	svc := newTestBackupService(t, repo, dumper, store)
 
 	compressed := gzipBackupBytes(t, dumpContent)
 	parts := splitBackupBytes(compressed, 11)
@@ -777,7 +785,8 @@ func TestBackupService_RestoreBackup_SplitParts(t *testing.T) {
 	require.NoError(t, svc.saveRecord(context.Background(), record))
 
 	require.NoError(t, svc.RestoreBackup(context.Background(), record.ID))
-	require.Equal(t, dumpContent, dumper.restored)
+	require.True(t, bytes.HasPrefix(dumper.restored, dumpContent))
+	require.Contains(t, string(dumper.restored), "UPDATE users SET session_generation =")
 }
 
 func TestBackupService_RestoreBackup_SplitPartsMissingPartDoesNotRestore(t *testing.T) {
@@ -786,7 +795,7 @@ func TestBackupService_RestoreBackup_SplitPartsMissingPartDoesNotRestore(t *test
 	dumpContent := entropyBackupFixture(256)
 	dumper := &mockDumper{}
 	store := newMockObjectStore()
-	svc := newTestBackupService(repo, dumper, store)
+	svc := newTestBackupService(t, repo, dumper, store)
 
 	compressed := gzipBackupBytes(t, dumpContent)
 	parts := splitBackupBytes(compressed, 11)
@@ -833,7 +842,7 @@ func TestBackupService_DownloadBackupPartsRejectsMismatchedMetadata(t *testing.T
 			seedS3Config(t, repo)
 			store := newMockObjectStore()
 			store.objects[tt.part.S3Key] = []byte("abc")
-			svc := newTestBackupService(repo, &mockDumper{}, store)
+			svc := newTestBackupService(t, repo, &mockDumper{}, store)
 
 			_, err := svc.downloadBackupParts(context.Background(), store, []BackupPart{tt.part})
 			require.ErrorContains(t, err, tt.want)
@@ -867,7 +876,7 @@ func splitBackupBytes(data []byte, partSize int) [][]byte {
 func TestBackupService_RestoreBackup_NotCompleted(t *testing.T) {
 	repo := newMockSettingRepo()
 	seedS3Config(t, repo)
-	svc := newTestBackupService(repo, &mockDumper{}, newMockObjectStore())
+	svc := newTestBackupService(t, repo, &mockDumper{}, newMockObjectStore())
 
 	// 手动插入一条 failed 记录
 	_ = svc.saveRecord(context.Background(), &BackupRecord{
@@ -886,7 +895,7 @@ func TestBackupService_DeleteBackup(t *testing.T) {
 	dumpContent := "data"
 	dumper := &mockDumper{dumpData: []byte(dumpContent)}
 	store := newMockObjectStore()
-	svc := newTestBackupService(repo, dumper, store)
+	svc := newTestBackupService(t, repo, dumper, store)
 
 	record, err := svc.CreateBackup(context.Background(), "manual", 14)
 	require.NoError(t, err)
@@ -914,7 +923,7 @@ func TestBackupService_DeleteBackup_RunningKeepsUploadObjects(t *testing.T) {
 	repo := newMockSettingRepo()
 	seedS3Config(t, repo)
 	store := newMockObjectStore()
-	svc := newTestBackupService(repo, &mockDumper{}, store)
+	svc := newTestBackupService(t, repo, &mockDumper{}, store)
 	parts := []BackupPart{
 		{Index: 1, S3Key: "backups/running/payload.part-000001", SizeBytes: 3},
 		{Index: 2, S3Key: "backups/running/payload.part-000002", SizeBytes: 3},
@@ -944,7 +953,7 @@ func TestBackupService_GetDownloadURL(t *testing.T) {
 
 	dumper := &mockDumper{dumpData: []byte("data")}
 	store := newMockObjectStore()
-	svc := newTestBackupService(repo, dumper, store)
+	svc := newTestBackupService(t, repo, dumper, store)
 
 	record, err := svc.CreateBackup(context.Background(), "manual", 14)
 	require.NoError(t, err)
@@ -958,7 +967,7 @@ func TestBackupService_DeleteBackup_SplitPartsFailureKeepsRecord(t *testing.T) {
 	repo := newMockSettingRepo()
 	seedS3Config(t, repo)
 	store := newMockObjectStore()
-	svc := newTestBackupService(repo, &mockDumper{}, store)
+	svc := newTestBackupService(t, repo, &mockDumper{}, store)
 
 	parts := []BackupPart{
 		{Index: 1, S3Key: "backups/split/payload.part-000001", SizeBytes: 3},
@@ -993,7 +1002,7 @@ func TestBackupService_GetDownloadURL_SplitParts(t *testing.T) {
 	repo := newMockSettingRepo()
 	seedS3Config(t, repo)
 	store := newMockObjectStore()
-	svc := newTestBackupService(repo, &mockDumper{}, store)
+	svc := newTestBackupService(t, repo, &mockDumper{}, store)
 
 	parts := []BackupPart{
 		{Index: 2, S3Key: "backups/split/payload.part-000002", SizeBytes: 7},
@@ -1016,7 +1025,7 @@ func TestBackupService_CleanupOldBackups_SplitParts(t *testing.T) {
 	repo := newMockSettingRepo()
 	seedS3Config(t, repo)
 	store := newMockObjectStore()
-	svc := newTestBackupService(repo, &mockDumper{}, store)
+	svc := newTestBackupService(t, repo, &mockDumper{}, store)
 	now := time.Now()
 	parts := []BackupPart{
 		{Index: 1, S3Key: "backups/old/payload.part-000001", SizeBytes: 3},
@@ -1050,7 +1059,7 @@ func TestBackupService_CleanupOldBackups_SplitParts(t *testing.T) {
 
 func TestBackupService_ListBackups_Sorted(t *testing.T) {
 	repo := newMockSettingRepo()
-	svc := newTestBackupService(repo, &mockDumper{}, newMockObjectStore())
+	svc := newTestBackupService(t, repo, &mockDumper{}, newMockObjectStore())
 
 	now := time.Now()
 	for i := 0; i < 3; i++ {
@@ -1072,7 +1081,7 @@ func TestBackupService_ListBackups_Sorted(t *testing.T) {
 func TestBackupService_TestS3Connection(t *testing.T) {
 	repo := newMockSettingRepo()
 	store := newMockObjectStore()
-	svc := newTestBackupService(repo, &mockDumper{}, store)
+	svc := newTestBackupService(t, repo, &mockDumper{}, store)
 
 	err := svc.TestS3Connection(context.Background(), BackupS3Config{
 		Bucket:          "test",
@@ -1084,7 +1093,7 @@ func TestBackupService_TestS3Connection(t *testing.T) {
 
 func TestBackupService_TestS3Connection_Incomplete(t *testing.T) {
 	repo := newMockSettingRepo()
-	svc := newTestBackupService(repo, &mockDumper{}, newMockObjectStore())
+	svc := newTestBackupService(t, repo, &mockDumper{}, newMockObjectStore())
 
 	err := svc.TestS3Connection(context.Background(), BackupS3Config{
 		Bucket: "test",
@@ -1095,7 +1104,7 @@ func TestBackupService_TestS3Connection_Incomplete(t *testing.T) {
 
 func TestBackupService_Schedule_CronValidation(t *testing.T) {
 	repo := newMockSettingRepo()
-	svc := newTestBackupService(repo, &mockDumper{}, newMockObjectStore())
+	svc := newTestBackupService(t, repo, &mockDumper{}, newMockObjectStore())
 	svc.cronSched = nil // 未初始化 cron
 
 	// 启用但 cron 为空
@@ -1116,7 +1125,7 @@ func TestBackupService_Schedule_CronValidation(t *testing.T) {
 func TestBackupService_LoadS3Config_Corrupted(t *testing.T) {
 	repo := newMockSettingRepo()
 	_ = repo.Set(context.Background(), settingKeyBackupS3Config, "not json!!!!")
-	svc := newTestBackupService(repo, &mockDumper{}, newMockObjectStore())
+	svc := newTestBackupService(t, repo, &mockDumper{}, newMockObjectStore())
 
 	cfg, err := svc.loadS3Config(context.Background())
 	require.Error(t, err)
@@ -1131,7 +1140,7 @@ func TestStartBackup_ReturnsImmediately(t *testing.T) {
 
 	dumper := &blockingDumper{blockCh: make(chan struct{}), data: []byte("data")}
 	store := newMockObjectStore()
-	svc := newTestBackupService(repo, dumper, store)
+	svc := newTestBackupService(t, repo, dumper, store)
 
 	record, err := svc.StartBackup(context.Background(), "manual", 14)
 	require.NoError(t, err)
@@ -1140,7 +1149,7 @@ func TestStartBackup_ReturnsImmediately(t *testing.T) {
 
 	// 释放 dumper 让后台完成
 	close(dumper.blockCh)
-	svc.wg.Wait()
+	waitBackupTasks(t, svc)
 
 	// 验证最终状态
 	final, err := svc.GetBackupRecord(context.Background(), record.ID)
@@ -1155,7 +1164,7 @@ func TestStartBackup_ConcurrentBlocked(t *testing.T) {
 
 	dumper := &blockingDumper{blockCh: make(chan struct{}), data: []byte("data")}
 	store := newMockObjectStore()
-	svc := newTestBackupService(repo, dumper, store)
+	svc := newTestBackupService(t, repo, dumper, store)
 
 	// 第一次启动
 	_, err := svc.StartBackup(context.Background(), "manual", 14)
@@ -1166,15 +1175,15 @@ func TestStartBackup_ConcurrentBlocked(t *testing.T) {
 	require.ErrorIs(t, err, ErrBackupInProgress)
 
 	close(dumper.blockCh)
-	svc.wg.Wait()
+	waitBackupTasks(t, svc)
 }
 
 func TestStartBackup_ShuttingDown(t *testing.T) {
 	repo := newMockSettingRepo()
 	seedS3Config(t, repo)
-	svc := newTestBackupService(repo, &mockDumper{dumpData: []byte("data")}, newMockObjectStore())
+	svc := newTestBackupService(t, repo, &mockDumper{dumpData: []byte("data")}, newMockObjectStore())
 
-	svc.shuttingDown.Store(true)
+	svc.tasks.seal(false)
 
 	_, err := svc.StartBackup(context.Background(), "manual", 14)
 	require.Error(t, err)
@@ -1183,7 +1192,7 @@ func TestStartBackup_ShuttingDown(t *testing.T) {
 
 func TestRecoverStaleRecords(t *testing.T) {
 	repo := newMockSettingRepo()
-	svc := newTestBackupService(repo, &mockDumper{}, newMockObjectStore())
+	svc := newTestBackupService(t, repo, &mockDumper{}, newMockObjectStore())
 
 	// 模拟一条孤立的 running 记录
 	_ = svc.saveRecord(context.Background(), &BackupRecord{
@@ -1200,7 +1209,7 @@ func TestRecoverStaleRecords(t *testing.T) {
 		StartedAt:        time.Now().Add(-1 * time.Hour).Format(time.RFC3339),
 	})
 
-	svc.recoverStaleRecords()
+	svc.recoverStaleRecords(context.Background())
 
 	r1, _ := svc.GetBackupRecord(context.Background(), "stale-1")
 	require.Equal(t, "failed", r1.Status)
@@ -1215,7 +1224,7 @@ func TestBackupService_RecoverStaleRecords_CleansBackupObjects(t *testing.T) {
 	repo := newMockSettingRepo()
 	seedS3Config(t, repo)
 	store := newMockObjectStore()
-	svc := newTestBackupService(repo, &mockDumper{}, store)
+	svc := newTestBackupService(t, repo, &mockDumper{}, store)
 	parts := []BackupPart{
 		{Index: 1, S3Key: "backups/stale/payload.part-000001", SizeBytes: 3},
 		{Index: 2, S3Key: "backups/stale/payload.part-000002", SizeBytes: 3},
@@ -1230,7 +1239,7 @@ func TestBackupService_RecoverStaleRecords_CleansBackupObjects(t *testing.T) {
 		StartedAt: time.Now().Add(-time.Hour).Format(time.RFC3339),
 	}))
 
-	svc.recoverStaleRecords()
+	svc.recoverStaleRecords(context.Background())
 
 	record, err := svc.GetBackupRecord(context.Background(), "stale-parts")
 	require.NoError(t, err)
@@ -1247,7 +1256,7 @@ func TestBackupService_RecoverStaleRecords_PreservesKeysWhenCleanupFails(t *test
 	repo := newMockSettingRepo()
 	seedS3Config(t, repo)
 	store := newMockObjectStore()
-	svc := newTestBackupService(repo, &mockDumper{}, store)
+	svc := newTestBackupService(t, repo, &mockDumper{}, store)
 	part := BackupPart{Index: 1, S3Key: "backups/stale-failed/payload.part-000001", SizeBytes: 3}
 	store.objects[part.S3Key] = []byte("abc")
 	store.failDeleteKeys[part.S3Key] = fmt.Errorf("delete failed")
@@ -1258,7 +1267,7 @@ func TestBackupService_RecoverStaleRecords_PreservesKeysWhenCleanupFails(t *test
 		StartedAt: time.Now().Add(-time.Hour).Format(time.RFC3339),
 	}))
 
-	svc.recoverStaleRecords()
+	svc.recoverStaleRecords(context.Background())
 
 	record, err := svc.GetBackupRecord(context.Background(), "stale-cleanup-failed")
 	require.NoError(t, err)
@@ -1270,13 +1279,13 @@ func TestBackupService_RecoverStaleRecords_PreservesKeysWhenCleanupFails(t *test
 	require.Contains(t, store.objects, part.S3Key)
 }
 
-func TestGracefulShutdown(t *testing.T) {
+func TestBackupDrainWaitsForAdmittedBackup(t *testing.T) {
 	repo := newMockSettingRepo()
 	seedS3Config(t, repo)
 
 	dumper := &blockingDumper{blockCh: make(chan struct{}), data: []byte("data")}
 	store := newMockObjectStore()
-	svc := newTestBackupService(repo, dumper, store)
+	svc := newTestBackupService(t, repo, dumper, store)
 
 	_, err := svc.StartBackup(context.Background(), "manual", 14)
 	require.NoError(t, err)
@@ -1284,7 +1293,11 @@ func TestGracefulShutdown(t *testing.T) {
 	// Stop 应该等待备份完成
 	done := make(chan struct{})
 	go func() {
-		svc.Stop()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := svc.Drain(ctx); err != nil {
+			t.Errorf("drain: %v", err)
+		}
 		close(done)
 	}()
 
@@ -1315,7 +1328,7 @@ func TestStartRestore_Async(t *testing.T) {
 	dumpContent := "-- PostgreSQL dump\nCREATE TABLE test (id int);\n"
 	dumper := &mockDumper{dumpData: []byte(dumpContent)}
 	store := newMockObjectStore()
-	svc := newTestBackupService(repo, dumper, store)
+	svc := newTestBackupService(t, repo, dumper, store)
 
 	// 先创建一个备份（同步方式）
 	record, err := svc.CreateBackup(context.Background(), "manual", 14)
@@ -1326,7 +1339,7 @@ func TestStartRestore_Async(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "running", restored.RestoreStatus)
 
-	svc.wg.Wait()
+	waitBackupTasks(t, svc)
 
 	// 验证最终状态
 	final, err := svc.GetBackupRecord(context.Background(), record.ID)
@@ -1340,7 +1353,7 @@ func TestBackupService_StartRestore_SplitParts(t *testing.T) {
 	dumpContent := entropyBackupFixture(384)
 	dumper := &mockDumper{}
 	store := newMockObjectStore()
-	svc := newTestBackupService(repo, dumper, store)
+	svc := newTestBackupService(t, repo, dumper, store)
 
 	compressed := gzipBackupBytes(t, dumpContent)
 	parts := splitBackupBytes(compressed, 13)
@@ -1361,10 +1374,24 @@ func TestBackupService_StartRestore_SplitParts(t *testing.T) {
 	started, err := svc.StartRestore(context.Background(), record.ID)
 	require.NoError(t, err)
 	require.Equal(t, "running", started.RestoreStatus)
-	svc.wg.Wait()
+	waitBackupTasks(t, svc)
 
 	final, err := svc.GetBackupRecord(context.Background(), record.ID)
 	require.NoError(t, err)
 	require.Equal(t, "completed", final.RestoreStatus)
-	require.Equal(t, dumpContent, dumper.restored)
+	require.True(t, bytes.HasPrefix(dumper.restored, dumpContent))
+	require.Contains(t, string(dumper.restored), "UPDATE users SET session_generation =")
+}
+
+func TestBackupRestoreUsesFreshGenerationForEveryRestore(t *testing.T) {
+	dumper := &mockDumper{}
+	svc := &BackupService{dumper: dumper}
+	require.NoError(t, svc.restoreWithSessionInvalidation(context.Background(), strings.NewReader("-- original dump\n")))
+	first := string(dumper.restored)
+	require.True(t, strings.HasPrefix(first, "-- original dump\n"))
+	require.Contains(t, first, "UPDATE pending_auth_sessions SET consumed_at = NOW()")
+	require.NoError(t, svc.restoreWithSessionInvalidation(context.Background(), strings.NewReader("-- original dump\n")))
+	require.NotEqual(t, first, string(dumper.restored), "restoring the same backup must not revive an earlier login generation")
+	dumper.restErr = errors.New("restore transaction rolled back")
+	require.Error(t, svc.restoreWithSessionInvalidation(context.Background(), strings.NewReader("-- original dump\n")))
 }

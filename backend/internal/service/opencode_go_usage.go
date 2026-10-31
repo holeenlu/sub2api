@@ -347,6 +347,8 @@ type OpenCodeGoUsageService struct {
 	httpUpstream   HTTPUpstream
 	settingService *SettingService
 
+	drainCh      chan struct{}
+	done         chan struct{}
 	parentCtx    context.Context
 	parentCancel context.CancelFunc
 	wg           sync.WaitGroup
@@ -367,13 +369,11 @@ func NewOpenCodeGoUsageService(
 	httpUpstream HTTPUpstream,
 	settingService *SettingService,
 ) *OpenCodeGoUsageService {
-	ctx, cancel := context.WithCancel(context.Background())
 	return &OpenCodeGoUsageService{
 		accountRepo:    accountRepo,
 		httpUpstream:   httpUpstream,
 		settingService: settingService,
-		parentCtx:      ctx,
-		parentCancel:   cancel,
+		drainCh:        make(chan struct{}),
 		refreshSlots:   make(chan struct{}, opencodeGoUsageConcurrency),
 		now:            time.Now,
 		instanceID:     uuid.NewString(),
@@ -390,47 +390,79 @@ func ProvideOpenCodeGoUsageService(
 	svc := NewOpenCodeGoUsageService(accountRepo, httpUpstream, settingService)
 	svc.lockCache = lockCache
 	svc.db = db
-	svc.Start()
 	return svc
 }
 
-func (s *OpenCodeGoUsageService) Start() {
+func (s *OpenCodeGoUsageService) Start(ctx context.Context) error {
 	if s == nil {
-		return
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	s.mu.Lock()
-	if s.started || s.stopped {
-		s.mu.Unlock()
-		return
+	defer s.mu.Unlock()
+	if s.stopped {
+		return ErrOpenCodeGoUsageUnavailable
 	}
+	if s.started {
+		return s.parentCtx.Err()
+	}
+	s.parentCtx, s.parentCancel = context.WithCancel(ctx)
 	s.started = true
 	s.wg.Add(1)
-	s.mu.Unlock()
 	go s.runLoop()
+	return nil
 }
 
-func (s *OpenCodeGoUsageService) Stop() {
+// Drain stops periodic/queued admission and joins accepted background work.
+// The same completion handle survives a caller deadline; no early owner reset.
+func (s *OpenCodeGoUsageService) Drain(ctx context.Context) error { return s.stopRunner(ctx, false) }
+func (s *OpenCodeGoUsageService) Stop(ctx context.Context) error  { return s.stopRunner(ctx, true) }
+func (s *OpenCodeGoUsageService) stopRunner(ctx context.Context, force bool) error {
 	if s == nil {
-		return
+		return nil
 	}
 	s.mu.Lock()
-	if s.stopped {
-		s.mu.Unlock()
-		return
+	if !s.stopped {
+		s.stopped = true
+		close(s.drainCh)
+		s.done = make(chan struct{})
+		done := s.done
+		go func() { s.wg.Wait(); close(done) }()
 	}
-	s.stopped = true
-	s.parentCancel()
+	done, cancel := s.done, s.parentCancel
 	s.mu.Unlock()
-	s.wg.Wait()
+	if force && cancel != nil {
+		cancel()
+	}
+	select {
+	case <-done:
+		return nil
+	default:
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (s *OpenCodeGoUsageService) runLoop() {
 	defer s.wg.Done()
+	select {
+	case <-s.drainCh:
+		return
+	default:
+	}
 	_ = s.RunDue(s.parentCtx)
 	ticker := time.NewTicker(opencodeGoUsageCycleInterval)
 	defer ticker.Stop()
 	for {
 		select {
+		case <-s.drainCh:
+			return
 		case <-s.parentCtx.Done():
 			return
 		case <-ticker.C:
@@ -589,6 +621,14 @@ func (s *OpenCodeGoUsageService) Refresh(ctx context.Context, accountID int64) (
 }
 
 func (s *OpenCodeGoUsageService) RunDue(ctx context.Context) error {
+	if s != nil {
+		s.mu.Lock()
+		stopped := s.stopped
+		s.mu.Unlock()
+		if stopped {
+			return ErrOpenCodeGoUsageUnavailable
+		}
+	}
 	if s == nil || s.accountRepo == nil {
 		return nil
 	}

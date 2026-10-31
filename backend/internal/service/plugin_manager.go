@@ -41,6 +41,8 @@ type pluginRoute struct {
 
 // PluginManager 管理插件安装、配置、进程生命周期和 OpenAI OAuth 能力绑定。
 type PluginManager struct {
+	lifetimeCtx context.Context
+
 	repo      PluginRepository
 	encryptor SecretEncryptor
 	cfg       *config.Config
@@ -52,14 +54,19 @@ type PluginManager struct {
 	// 通过 SetAccountDirectory 在启动装配阶段注入，为 nil 时插件拿不到该能力。
 	accountDirectory PluginAccountDirectory
 
-	operationMu        sync.Mutex
-	mu                 sync.Mutex
-	runtimes           map[int64]*pluginRuntime
-	localInstallations map[int64]*PluginInstallation
-	started            bool
-	reconcileCancel    context.CancelFunc
-	reconcileDone      chan struct{}
-	route              atomic.Pointer[pluginRoute]
+	operationMu           sync.Mutex
+	mu                    sync.Mutex
+	runtimes              map[int64]*pluginRuntime
+	localInstallations    map[int64]*PluginInstallation
+	started               bool
+	draining              bool
+	shutdownDone          chan struct{}
+	forceStop             chan struct{}
+	forceStopped          bool
+	activeOperationCancel context.CancelFunc
+	reconcileCancel       context.CancelFunc
+	reconcileDone         chan struct{}
+	route                 atomic.Pointer[pluginRoute]
 }
 
 func NewPluginManager(repo PluginRepository, encryptor SecretEncryptor, cfg *config.Config, hostInfo PluginHostInfo, kvStore PluginKVStore) *PluginManager {
@@ -82,60 +89,176 @@ func (m *PluginManager) MaxUploadBytes() int64 {
 	return m.cfg.Plugins.MaxUploadBytes
 }
 
+// beginOperation makes management/reconcile admission cancellable and fences
+// new process-producing operations once drain begins. The current operation has
+// one cancel owner; shutdown never spawns an unowned goroutine to wait for a lock.
+func (m *PluginManager) beginOperation(ctx context.Context) (context.Context, func(), error) {
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		m.mu.Lock()
+		draining := m.draining || (m.lifetimeCtx != nil && m.lifetimeCtx.Err() != nil)
+		m.mu.Unlock()
+		if draining {
+			return nil, nil, errors.New("plugin manager is draining")
+		}
+		if m.operationMu.TryLock() {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		case <-ticker.C:
+		}
+	}
+	m.mu.Lock()
+	if m.draining {
+		m.mu.Unlock()
+		m.operationMu.Unlock()
+		return nil, nil, errors.New("plugin manager is draining")
+	}
+	opCtx, cancel := context.WithCancel(ctx)
+	m.activeOperationCancel = cancel
+	m.mu.Unlock()
+	return opCtx, func() { cancel(); m.mu.Lock(); m.activeOperationCancel = nil; m.mu.Unlock(); m.operationMu.Unlock() }, nil
+}
+
 func (m *PluginManager) Start(ctx context.Context) error {
-	m.operationMu.Lock()
+	_, release, err := m.beginOperation(ctx)
+	if err != nil {
+		return err
+	}
 	m.mu.Lock()
 	if m.started {
 		m.mu.Unlock()
-		m.operationMu.Unlock()
+		release()
 		return nil
 	}
+	m.mu.Unlock()
 	if err := os.MkdirAll(filepath.Join(m.installer.RootDir(), "runtime"), 0o700); err != nil {
-		m.mu.Unlock()
-		m.operationMu.Unlock()
+		release()
 		return fmt.Errorf("创建插件运行目录: %w", err)
 	}
-	reconcileCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	reconcileCtx, cancel := context.WithCancel(ctx)
+	m.mu.Lock()
+	if m.draining {
+		m.mu.Unlock()
+		cancel()
+		release()
+		return errors.New("plugin manager is draining")
+	}
 	m.started = true
+	m.lifetimeCtx = reconcileCtx
 	m.reconcileCancel = cancel
 	m.reconcileDone = make(chan struct{})
 	done := m.reconcileDone
 	m.mu.Unlock()
-	m.operationMu.Unlock()
-
 	go m.reconcileLoop(reconcileCtx, done)
+	release()
 	if err := m.reconcileOnce(reconcileCtx); err != nil {
 		slog.Warn("plugin_initial_reconcile_failed", "error", err)
 	}
 	return nil
 }
 
-func (m *PluginManager) Stop() {
+func (m *PluginManager) beginDrain() <-chan struct{} {
 	m.mu.Lock()
-	cancel := m.reconcileCancel
-	done := m.reconcileDone
-	m.reconcileCancel = nil
-	m.reconcileDone = nil
-	m.mu.Unlock()
+	defer m.mu.Unlock()
+	if m.draining {
+		return m.shutdownDone
+	}
+	m.draining = true
+	m.shutdownDone = make(chan struct{})
+	m.forceStop = make(chan struct{})
+	if current := m.route.Load(); current != nil {
+		m.route.Store(&pluginRoute{pluginID: current.pluginID, rolloutPercent: current.rolloutPercent, unavailable: "插件正在停止"})
+	}
+	for _, runtime := range m.runtimes {
+		runtime.draining.Store(true)
+		if runtime.inFlight.Load() == 0 {
+			runtime.doneOnce.Do(func() { close(runtime.done) })
+		}
+	}
+	cancel, producerDone, done, force := m.reconcileCancel, m.reconcileDone, m.shutdownDone, m.forceStop
 	if cancel != nil {
 		cancel()
 	}
-	if done != nil {
-		<-done
+	go func() {
+		defer close(done)
+		if producerDone != nil {
+			<-producerDone
+		}
+		// Existing operations retain their ownership until they finish; Stop can
+		// cancel the current operation but cannot fake a join for uncooperative I/O.
+		m.operationMu.Lock()
+		m.mu.Lock()
+		runtimes := make([]*pluginRuntime, 0, len(m.runtimes))
+		for _, runtime := range m.runtimes {
+			runtimes = append(runtimes, runtime)
+			runtime.draining.Store(true)
+			if runtime.inFlight.Load() == 0 {
+				runtime.doneOnce.Do(func() { close(runtime.done) })
+			}
+		}
+		m.mu.Unlock()
+		m.operationMu.Unlock()
+		for _, runtime := range runtimes {
+			select {
+			case <-runtime.done:
+			case <-force:
+			}
+			runtime.kill()
+			// Kill closes transport; the established lease owner must still release it.
+			<-runtime.done
+		}
+		m.mu.Lock()
+		m.runtimes = make(map[int64]*pluginRuntime)
+		m.started = false
+		m.mu.Unlock()
+	}()
+	return done
+}
+
+// Drain stops admission/reconciliation and waits for accepted plugin requests
+// and processes. It retains the same shutdown handle after a caller timeout.
+func (m *PluginManager) Drain(ctx context.Context) error {
+	if m == nil {
+		return nil
 	}
-	m.operationMu.Lock()
+	done := m.beginDrain()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// Stop cancels the active management operation, forces transport termination and
+// waits within the supplied budget; no background/default timeout replaces it.
+func (m *PluginManager) Stop(ctx context.Context) error {
+	if m == nil {
+		return nil
+	}
+	done := m.beginDrain()
 	m.mu.Lock()
-	runtimes := make([]*pluginRuntime, 0, len(m.runtimes))
-	for _, runtime := range m.runtimes {
-		runtimes = append(runtimes, runtime)
+	active := m.activeOperationCancel
+	if !m.forceStopped {
+		m.forceStopped = true
+		close(m.forceStop)
 	}
-	m.runtimes = make(map[int64]*pluginRuntime)
-	m.route.Store(nil)
-	m.started = false
 	m.mu.Unlock()
-	m.operationMu.Unlock()
-	for _, runtime := range runtimes {
-		runtime.drain(10 * time.Second)
+	if active != nil {
+		active()
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -181,8 +304,11 @@ func (m *PluginManager) Get(ctx context.Context, id int64) (*PluginInstallation,
 }
 
 func (m *PluginManager) Install(ctx context.Context, reader io.Reader, installedBy *int64) (*PluginInstallation, error) {
-	m.operationMu.Lock()
-	defer m.operationMu.Unlock()
+	ctx, release, err := m.beginOperation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	packageInfo, err := m.installer.Install(ctx, reader, installedBy)
 	if err != nil {
 		return nil, err
@@ -265,8 +391,11 @@ func (m *PluginManager) reconcileLoop(ctx context.Context, done chan struct{}) {
 
 // reconcileOnce 以数据库中的绑定为权威状态，让每个实例独立恢复并启动同一插件。
 func (m *PluginManager) reconcileOnce(ctx context.Context) error {
-	m.operationMu.Lock()
-	defer m.operationMu.Unlock()
+	ctx, release, err := m.beginOperation(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	installations, err := m.repo.List(ctx)
 	if err != nil {
@@ -368,6 +497,11 @@ func (m *PluginManager) reconcileOnce(ctx context.Context) error {
 	}
 
 	m.mu.Lock()
+	if m.draining {
+		m.mu.Unlock()
+		runtime.kill()
+		return context.Canceled
+	}
 	stale := make([]*pluginRuntime, 0, len(m.runtimes))
 	for id, candidate := range m.runtimes {
 		if candidate != runtime {
@@ -555,8 +689,11 @@ func verifyLocalPluginBinary(installation *PluginInstallation, root string) erro
 }
 
 func (m *PluginManager) Enable(ctx context.Context, id int64, acceptUntested bool, rolloutPercent int) (*PluginInstallation, error) {
-	m.operationMu.Lock()
-	defer m.operationMu.Unlock()
+	ctx, release, err := m.beginOperation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if rolloutPercent < 1 || rolloutPercent > 100 {
 		return nil, errors.New("灰度比例必须在 1 到 100 之间")
 	}
@@ -619,8 +756,11 @@ func (m *PluginManager) Enable(ctx context.Context, id int64, acceptUntested boo
 		return nil, errors.Join(err, stateErr)
 	}
 	m.mu.Lock()
-	m.publishRuntimeLocked(installation, runtime)
+	retired := m.publishRuntimeLocked(installation, runtime)
 	m.mu.Unlock()
+	if retired != nil {
+		retired.kill()
+	}
 	result, err := m.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -632,8 +772,11 @@ func (m *PluginManager) Enable(ctx context.Context, id int64, acceptUntested boo
 }
 
 func (m *PluginManager) Disable(ctx context.Context, id int64) (*PluginInstallation, error) {
-	m.operationMu.Lock()
-	defer m.operationMu.Unlock()
+	ctx, release, err := m.beginOperation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	m.mu.Lock()
 	installation, err := m.repo.GetByID(ctx, id)
 	if err != nil {
@@ -656,8 +799,11 @@ func (m *PluginManager) Disable(ctx context.Context, id int64) (*PluginInstallat
 }
 
 func (m *PluginManager) Delete(ctx context.Context, id int64) error {
-	m.operationMu.Lock()
-	defer m.operationMu.Unlock()
+	ctx, release, err := m.beginOperation(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	m.mu.Lock()
 	installation, err := m.repo.GetByID(ctx, id)
 	if err != nil {
@@ -695,8 +841,11 @@ func (m *PluginManager) GetConfig(ctx context.Context, id int64) (json.RawMessag
 }
 
 func (m *PluginManager) SaveConfig(ctx context.Context, id int64, raw json.RawMessage) (json.RawMessage, error) {
-	m.operationMu.Lock()
-	defer m.operationMu.Unlock()
+	ctx, release, err := m.beginOperation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if len(raw) == 0 || len(raw) > pluginConfigMaxBytes || !json.Valid(raw) {
 		return nil, errors.New("插件配置必须是有效且大小受限的 JSON")
 	}
@@ -783,8 +932,11 @@ func (m *PluginManager) restoreRuntimeConfig(id int64, runtime *pluginRuntime, p
 }
 
 func (m *PluginManager) Test(ctx context.Context, id int64) (*pluginv1.TestConfigResponse, error) {
-	m.operationMu.Lock()
-	defer m.operationMu.Unlock()
+	ctx, release, err := m.beginOperation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	installation, err := m.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -902,8 +1054,11 @@ func (m *PluginManager) ResolveUIAssetToken(token string) (int64, error) {
 }
 
 func (m *PluginManager) ReadUIAsset(ctx context.Context, id int64, relative string) ([]byte, string, error) {
-	m.operationMu.Lock()
-	defer m.operationMu.Unlock()
+	ctx, release, err := m.beginOperation(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	defer release()
 	installation, err := m.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, "", err
@@ -995,15 +1150,19 @@ func (m *PluginManager) markRuntimeUnavailable(failedRoute *pluginRoute, message
 		m.mu.Unlock()
 		return nil
 	}
-	if failedRoute.runtime != nil {
-		failedRoute.runtime.kill()
-	}
-	delete(m.runtimes, failedRoute.pluginID)
 	m.route.Store(&pluginRoute{
 		pluginID:       failedRoute.pluginID,
 		rolloutPercent: failedRoute.rolloutPercent,
 		unavailable:    message,
 	})
+	m.mu.Unlock()
+	if failedRoute.runtime != nil {
+		failedRoute.runtime.kill()
+	}
+	m.mu.Lock()
+	if m.runtimes[failedRoute.pluginID] == failedRoute.runtime {
+		delete(m.runtimes, failedRoute.pluginID)
+	}
 	m.mu.Unlock()
 	return nil
 }
@@ -1026,16 +1185,23 @@ func (m *PluginManager) prepareRuntime(ctx context.Context, installation *Plugin
 	return runtime, nil
 }
 
-func (m *PluginManager) publishRuntimeLocked(installation *PluginInstallation, runtime *pluginRuntime) {
-	if old := m.runtimes[installation.ID]; old != nil {
-		old.kill()
-	}
+func (m *PluginManager) publishRuntimeLocked(installation *PluginInstallation, runtime *pluginRuntime) *pluginRuntime {
+	old := m.runtimes[installation.ID]
 	m.runtimes[installation.ID] = runtime
+	if m.draining {
+		runtime.draining.Store(true)
+		if runtime.inFlight.Load() == 0 {
+			runtime.doneOnce.Do(func() { close(runtime.done) })
+		}
+		m.route.Store(&pluginRoute{pluginID: installation.ID, rolloutPercent: bindingRollout(installation.Bindings), unavailable: "插件正在停止"})
+		return old
+	}
 	m.route.Store(&pluginRoute{
 		pluginID:       installation.ID,
 		runtime:        runtime,
 		rolloutPercent: bindingRollout(installation.Bindings),
 	})
+	return old
 }
 
 func (m *PluginManager) newRuntime(ctx context.Context, installation *PluginInstallation) (*pluginRuntime, error) {

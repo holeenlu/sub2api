@@ -19,39 +19,32 @@ const fingerprintSalt = "59cf53e54c78"
 // computeClaudeCodeFingerprint 复刻真实 Claude Code CLI 的 cc_version 指纹算法：
 //
 //  1. 取 messages 中第一条 role=user 的纯文本（首块 text）
-//  2. 按 JavaScript UTF-16 码元取零基下标 4、7、20（不足以 '0' 补齐）
-//  3. 拼接采样码元后按 JavaScript UTF-8 语义编码，再对 SALT + chars + cc_version
-//     计算 SHA256，取 hex 前 3 字符
+//  2. 取该文本的第 4、7、20 字符（不足以 '0' 补齐）
+//  3. SHA256(SALT + chars + cc_version) 取 hex 前 3 字符
 //
-// 算法来自 Parrot src/transform/cc_mimicry.py:compute_fingerprint，与官方 CLI 字节对齐。
-// 任何偏差都会导致 cc_version=X.Y.Z.{fp} 在上游侧与真实 CLI 不一致。
+// 盐值和采样下标已核对官方 2.1.301 可执行文件；JS 字符串按 UTF-16 code unit 采样。
+// CLI 在内部提醒合并前计算此值；版本不变时应保留客户端原后缀。
 func computeClaudeCodeFingerprint(body []byte, version string) string {
-	firstText := extractFirstUserText(body)
-	indices := [...]int{4, 7, 20}
-	// Only the prefix through index 20 is needed, even for very long prompts.
-	textUnits := make([]uint16, 0, 22)
-	for _, r := range firstText {
-		textUnits = utf16.AppendRune(textUnits, r)
-		if len(textUnits) > indices[len(indices)-1] {
-			break
-		}
-	}
-	chars := make([]uint16, 0, len(indices))
+	return computeClaudeCodeFingerprintFromText(extractFirstUserText(body), version)
+}
+
+func computeClaudeCodeFingerprintFromText(text, version string) string {
+	// JavaScript indexes strings by UTF-16 code unit, not UTF-8 byte.
+	firstText := utf16.Encode([]rune(text))
+	indices := []int{4, 7, 20}
+	chars := make([]uint16, 0, 3)
 	for _, i := range indices {
-		if i < len(textUnits) {
-			chars = append(chars, textUnits[i])
+		if i < len(firstText) {
+			chars = append(chars, firstText[i])
 		} else {
 			chars = append(chars, '0')
 		}
 	}
-	// Decode after joining: sampled halves can form a new surrogate pair.
-	// Unpaired halves become U+FFFD, matching JS UTF-8 encoding for the hash.
-	sample := string(utf16.Decode(chars))
-	sum := sha256.Sum256([]byte(fingerprintSalt + sample + version))
+	sum := sha256.Sum256([]byte(fingerprintSalt + string(utf16.Decode(chars)) + version))
 	return hex.EncodeToString(sum[:])[:3]
 }
 
-// extractFirstUserText 提取 messages 中第一条 user 消息的首段 text 内容。
+// extractFirstUserText 提取 messages 中第一条非 meta user 消息的首段 text 内容。
 // 兼容 string 和 []block 两种 content 格式。
 func extractFirstUserText(body []byte) string {
 	messages := gjson.GetBytes(body, "messages")
@@ -60,7 +53,9 @@ func extractFirstUserText(body []byte) string {
 	}
 	first := ""
 	messages.ForEach(func(_, msg gjson.Result) bool {
-		if msg.Get("role").String() != "user" {
+		// Adapted from sub4api a3eaf63afc672ffedf7844e6cfc5cb6750d52a3e:
+		// internal meta messages do not contribute to the CLI billing fingerprint.
+		if msg.Get("role").String() != "user" || msg.Get("isMeta").Bool() || msg.Get("is_meta").Bool() {
 			return true
 		}
 		content := msg.Get("content")
@@ -89,10 +84,9 @@ func extractFirstUserText(body []byte) string {
 //
 //	x-anthropic-billing-header: cc_version=2.1.161.{fp}; cc_entrypoint=cli;
 //
-// 注意：新版 Claude Code CLI 已不再发送 cch=... 签名字段（见 issue #3358）。我们
-// 随之去掉了 cch 段——继续注入它反而会让伪装请求偏离真实 CLI 流量。cc_version +
-// cc_entrypoint=cli 仍保留：它们是客户端识别（claude_code_validator）与 Anthropic
-// 第一方判定都依赖的稳定信号。
+// CLI 2.1.301 omits cch for custom endpoints but still sends it to Anthropic.
+// finalizeClaudeCCH adds the verified version-specific checksum only after all
+// request body rewrites and official endpoint selection are complete.
 //
 // 此 block 不带 cache_control（与真实 CLI 一致；cache breakpoint 由后续的
 // Claude Code prompt block 承担）。

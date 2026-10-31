@@ -17,7 +17,7 @@ import (
 func newGatewayRecordUsageServiceForTest(usageRepo UsageLogRepository, userRepo UserRepository, subRepo UserSubscriptionRepository) *GatewayService {
 	cfg := &config.Config{}
 	cfg.Default.RateMultiplier = 1.1
-	return NewGatewayService(
+	svc := NewGatewayService(
 		nil,
 		nil,
 		usageRepo,
@@ -47,12 +47,55 @@ func newGatewayRecordUsageServiceForTest(usageRepo UsageLogRepository, userRepo 
 		nil,
 		nil, // userPlatformQuotaRepo
 	)
+	svc.usageBillingRepo = &openAIRecordUsageBillingRepoStub{}
+	return svc
 }
 
 func newGatewayRecordUsageServiceWithBillingRepoForTest(usageRepo UsageLogRepository, billingRepo UsageBillingRepository, userRepo UserRepository, subRepo UserSubscriptionRepository) *GatewayService {
 	svc := newGatewayRecordUsageServiceForTest(usageRepo, userRepo, subRepo)
 	svc.usageBillingRepo = billingRepo
 	return svc
+}
+
+func TestRecordUsagePreservesVersionedLatencyWithoutChangingLegacyTiming(t *testing.T) {
+	firstEvent, firstContent, firstText, legacyFirst := 110, 220, 330, 15
+	for _, platform := range []string{PlatformAnthropic, PlatformOpenAI} {
+		for _, tc := range []struct {
+			name    string
+			stream  bool
+			metrics *UsageLatencyMetrics
+		}{
+			{name: "legacy", stream: true},
+			{name: "stream", stream: true, metrics: &UsageLatencyMetrics{Version: 1, FirstEventMs: &firstEvent, FirstContentMs: &firstContent, FirstTextMs: &firstText, DurationMs: 500}},
+			{name: "buffered", metrics: &UsageLatencyMetrics{Version: 1, DurationMs: 500}},
+		} {
+			t.Run(platform+"/"+tc.name, func(t *testing.T) {
+				repo := &openAIRecordUsageLogRepoStub{}
+				userRepo, subRepo := &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}
+				apiKey, user := &APIKey{ID: 1}, &User{ID: 2}
+				account := &Account{ID: 3, Platform: platform, Type: AccountTypeAPIKey}
+				var err error
+				if platform == PlatformAnthropic {
+					svc := newGatewayRecordUsageServiceForTest(repo, userRepo, subRepo)
+					err = svc.RecordUsage(context.Background(), &RecordUsageInput{
+						Result: &ForwardResult{RequestID: "latency-contract", Model: "claude-sonnet-4", Stream: tc.stream, Duration: 100 * time.Millisecond, FirstTokenMs: &legacyFirst, LatencyMetrics: tc.metrics},
+						APIKey: apiKey, User: user, Account: account,
+					})
+				} else {
+					svc := newOpenAIRecordUsageServiceForTest(repo, userRepo, subRepo, nil)
+					err = svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+						Result: &OpenAIForwardResult{RequestID: "latency-contract", Model: "gpt-5.1", Stream: tc.stream, Duration: 100 * time.Millisecond, FirstTokenMs: &legacyFirst, LatencyMetrics: tc.metrics},
+						APIKey: apiKey, User: user, Account: account,
+					})
+				}
+				require.NoError(t, err)
+				require.NotNil(t, repo.lastLog)
+				require.Equal(t, tc.metrics, repo.lastLog.LatencyMetrics)
+				require.Equal(t, legacyFirst, *repo.lastLog.FirstTokenMs)
+				require.EqualValues(t, 100, *repo.lastLog.DurationMs)
+			})
+		}
+	}
 }
 
 type openAIRecordUsageBestEffortLogRepoStub struct {
@@ -111,10 +154,10 @@ func TestGatewayServiceRecordUsage_BillingUsesDetachedContext(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, 1, usageRepo.calls)
-	require.Equal(t, 1, userRepo.deductCalls)
-	require.NoError(t, userRepo.lastCtxErr)
-	require.Equal(t, 1, quotaSvc.quotaCalls)
-	require.NoError(t, quotaSvc.lastQuotaCtxErr)
+	require.Positive(t, recordUsageBillingCommand(t, svc.usageBillingRepo).BalanceCost)
+	require.NoError(t, recordUsageBillingStub(t, svc.usageBillingRepo).lastCtxErr)
+	require.Positive(t, recordUsageBillingCommand(t, svc.usageBillingRepo).APIKeyQuotaCost)
+	require.NoError(t, recordUsageBillingStub(t, svc.usageBillingRepo).lastCtxErr)
 }
 
 func TestGatewayServiceRecordUsage_BillingFingerprintIncludesRequestPayloadHash(t *testing.T) {
@@ -224,8 +267,8 @@ func TestGatewayServiceRecordUsage_GeminiFlashThinkingTierUsesCatalogPrice(t *te
 			require.NotNil(t, usageRepo.lastLog)
 			require.Equal(t, model, usageRepo.lastLog.Model)
 			require.InDelta(t, 0.02007585, usageRepo.lastLog.TotalCost, 1e-12)
-			require.InDelta(t, 0.0030113775, usageRepo.lastLog.ActualCost, 1e-12)
-			require.InDelta(t, 0.0030113775, userRepo.lastAmount, 1e-12)
+			require.Equal(t, 0.00301138, usageRepo.lastLog.ActualCost)
+			require.Equal(t, usageRepo.lastLog.ActualCost, recordUsageBillingCommand(t, svc.usageBillingRepo).BalanceCost)
 		})
 	}
 }
@@ -378,7 +421,7 @@ func TestGatewayServiceRecordUsage_PeakRateAffectsTokenModeImageOutputTokens(t *
 	require.InDelta(t, textInput+textOutput+imageOutput, usageRepo.lastLog.TotalCost, 1e-12)
 	require.InDelta(t, imageOutput, usageRepo.lastLog.ImageOutputCost, 1e-12)
 	require.InDelta(t, expectedActual, usageRepo.lastLog.ActualCost, 1e-12)
-	require.InDelta(t, expectedActual, userRepo.lastAmount, 1e-12)
+	require.InDelta(t, expectedActual, recordUsageBillingCommand(t, svc.usageBillingRepo).BalanceCost, 1e-12)
 }
 
 func TestGatewayServiceRecordUsage_TimePricingUsesPricingAt(t *testing.T) {
@@ -513,8 +556,8 @@ func TestGatewayServiceRecordUsage_DeepSeekAccountStatsUsesRequestPricingAtAndUp
 				customerTotal := 1000*inputPrice + 500*outputPrice + 1000*cachePrice
 				require.InDelta(t, customerTotal, log.TotalCost, 1e-12)
 				require.InDelta(t, customerTotal*0.8, log.ActualCost, 1e-12)
-				require.Equal(t, 1, userRepo.deductCalls)
-				require.InDelta(t, customerTotal*0.8, userRepo.lastAmount, 1e-12)
+				require.Positive(t, recordUsageBillingCommand(t, svc.usageBillingRepo).BalanceCost)
+				require.InDelta(t, customerTotal*0.8, recordUsageBillingCommand(t, svc.usageBillingRepo).BalanceCost, 1e-12)
 				require.NotNil(t, log.AccountStatsCost)
 				require.InDelta(t, model.offPeakCost*slot.multiplier, *log.AccountStatsCost, 1e-12,
 					"account cost must use the upstream model and historical PricingAt")
@@ -551,8 +594,8 @@ func TestGatewayServiceRecordUsage_UsageLogWriteErrorDoesNotSkipBilling(t *testi
 
 	require.NoError(t, err)
 	require.Equal(t, 1, usageRepo.calls)
-	require.Equal(t, 1, userRepo.deductCalls)
-	require.Equal(t, 1, quotaSvc.quotaCalls)
+	require.Positive(t, recordUsageBillingCommand(t, svc.usageBillingRepo).BalanceCost)
+	require.Positive(t, recordUsageBillingCommand(t, svc.usageBillingRepo).APIKeyQuotaCost)
 }
 
 func TestGatewayServiceRecordUsage_UsesFallbackRequestIDForUsageLog(t *testing.T) {
@@ -824,4 +867,39 @@ func TestGatewayServiceRecordUsage_FastSpeedHonouredKeepsPremium(t *testing.T) {
 	fastCost, err := svc.billingService.CalculateCostWithServiceTier("claude-opus-5", UsageTokens{InputTokens: 100, OutputTokens: 50}, 1.0, "fast")
 	require.NoError(t, err)
 	require.InDelta(t, fastCost.TotalCost, usageRepo.lastLog.TotalCost, 1e-10)
+}
+
+func TestGatewayServiceRecordUsage_PreservesRawUsageWithBillingOverrides(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		streamDelta    bool
+		usage          ClaudeUsage
+		target         string
+		want5m, want1h int
+	}{
+		{name: "complete detail to 5m", usage: ClaudeUsage{CacheCreationInputTokens: 20, CacheCreation1hTokens: 20}, target: "5m", want5m: 20},
+		{name: "delta total above stale start detail to 1h", streamDelta: true, target: "1h", want1h: 14890},
+		{name: "contradictory details capped at aggregate", usage: ClaudeUsage{CacheCreationInputTokens: 100, CacheCreation5mTokens: 90, CacheCreation1hTokens: 60}, target: "1h", want1h: 100},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+			svc := newGatewayRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
+			observed := tc.usage
+			if tc.streamDelta {
+				parseSSEUsagePassthrough(`{"type":"message_start","message":{"usage":{"cache_creation_input_tokens":119,"cache_creation":{"ephemeral_1h_input_tokens":119}}}}`, &observed)
+				parseSSEUsagePassthrough(`{"type":"message_delta","usage":{"cache_creation_input_tokens":14890}}`, &observed)
+				require.Equal(t, 119, observed.CacheCreation1hTokens, "delta does not resend the start breakdown")
+			}
+			observed.InputTokens, observed.OutputTokens, observed.CacheReadInputTokens = 100, 5, 10
+			result := &ForwardResult{RequestID: "raw-usage-contract", Usage: observed, Model: "claude-sonnet-4"}
+			err := svc.RecordUsage(context.Background(), &RecordUsageInput{Result: result, APIKey: &APIKey{ID: 1}, User: &User{ID: 2}, Account: &Account{ID: 3, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Extra: map[string]any{"cache_ttl_override_enabled": true, "cache_ttl_override_target": tc.target}}, ForceCacheBilling: true})
+			require.NoError(t, err)
+			require.Equal(t, observed, result.Usage, "billing must not overwrite upstream evidence")
+			require.Zero(t, usageRepo.lastLog.InputTokens)
+			require.Equal(t, 110, usageRepo.lastLog.CacheReadTokens)
+			require.Equal(t, tc.want5m, usageRepo.lastLog.CacheCreation5mTokens)
+			require.Equal(t, tc.want1h, usageRepo.lastLog.CacheCreation1hTokens)
+			require.True(t, usageRepo.lastLog.CacheTTLOverridden)
+		})
+	}
 }

@@ -14,7 +14,14 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 25 // v25: group image_count_billing switch (per-image billing on image endpoints)
+const apiKeyAuthSnapshotVersion = 32 // includes image-count policy; retains the v31 dedicated supplier identity boundary
+
+// Epochs expire local grants after a Pub/Sub recovery checkpoint without clearing
+// a cache that has concurrent readers or queued writes.
+type apiKeyAuthL1Entry struct {
+	entry *APIKeyAuthCacheEntry
+	epoch uint64
+}
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -111,6 +118,7 @@ func (s *APIKeyService) StartAuthCacheInvalidationSubscriber(ctx context.Context
 	s.authInvalidationStart.Do(func() {
 		subscriberCtx, cancel := context.WithCancel(ctx)
 		subscriberCtx = withAuthCacheSubscriptionReady(subscriberCtx, func() {
+			s.authCacheL1Epoch.Add(1)
 			s.authInvalidationConnected.Store(true)
 		})
 		s.authInvalidationCancel = cancel
@@ -197,17 +205,18 @@ func (s *APIKeyService) authCacheKey(key string) string {
 }
 
 func (s *APIKeyService) getAuthCacheEntry(ctx context.Context, cacheKey string) (*APIKeyAuthCacheEntry, bool) {
+	epoch := s.authCacheL1Epoch.Load()
 	if s.authCacheL1 != nil {
 		if val, ok := s.authCacheL1.Get(cacheKey); ok {
-			if entry, ok := val.(*APIKeyAuthCacheEntry); ok {
-				return entry, true
+			if local, ok := val.(apiKeyAuthL1Entry); ok && local.epoch == epoch && epoch == s.authCacheL1Epoch.Load() {
+				return local.entry, true
 			}
 		}
 	}
 	if s.authNegativeCacheL1 != nil {
 		if val, ok := s.authNegativeCacheL1.Get(cacheKey); ok {
-			if entry, ok := val.(*APIKeyAuthCacheEntry); ok && entry.NotFound {
-				return entry, true
+			if local, ok := val.(apiKeyAuthL1Entry); ok && local.epoch == epoch && epoch == s.authCacheL1Epoch.Load() && local.entry.NotFound {
+				return local.entry, true
 			}
 		}
 	}
@@ -215,20 +224,20 @@ func (s *APIKeyService) getAuthCacheEntry(ctx context.Context, cacheKey string) 
 		return nil, false
 	}
 	entry, err := s.cache.GetAuthCache(ctx, cacheKey)
-	if err != nil {
+	if err != nil || epoch != s.authCacheL1Epoch.Load() {
 		return nil, false
 	}
-	s.setAuthCacheL1(cacheKey, entry)
+	s.setAuthCacheL1(cacheKey, entry, epoch)
 	return entry, true
 }
 
-func (s *APIKeyService) setAuthCacheL1(cacheKey string, entry *APIKeyAuthCacheEntry) {
-	if entry == nil {
+func (s *APIKeyService) setAuthCacheL1(cacheKey string, entry *APIKeyAuthCacheEntry, epoch uint64) {
+	if entry == nil || epoch != s.authCacheL1Epoch.Load() {
 		return
 	}
 	if entry.NotFound {
 		if s.authNegativeCacheL1 != nil && s.authCfg.negativeTTL > 0 {
-			_ = s.authNegativeCacheL1.SetWithTTL(cacheKey, entry, 1, s.authCfg.jitterTTL(s.authCfg.negativeTTL))
+			_ = s.authNegativeCacheL1.SetWithTTL(cacheKey, apiKeyAuthL1Entry{entry: entry, epoch: epoch}, 1, s.authCfg.jitterTTL(s.authCfg.negativeTTL))
 		}
 		return
 	}
@@ -237,14 +246,14 @@ func (s *APIKeyService) setAuthCacheL1(cacheKey string, entry *APIKeyAuthCacheEn
 	}
 	ttl := s.authCfg.l1TTL
 	ttl = s.authCfg.jitterTTL(ttl)
-	_ = s.authCacheL1.SetWithTTL(cacheKey, entry, 1, ttl)
+	_ = s.authCacheL1.SetWithTTL(cacheKey, apiKeyAuthL1Entry{entry: entry, epoch: epoch}, 1, ttl)
 }
 
-func (s *APIKeyService) setAuthCacheEntry(ctx context.Context, cacheKey string, entry *APIKeyAuthCacheEntry, ttl time.Duration) {
-	if entry == nil {
+func (s *APIKeyService) setAuthCacheEntry(ctx context.Context, cacheKey string, entry *APIKeyAuthCacheEntry, ttl time.Duration, epoch uint64) {
+	if entry == nil || epoch != s.authCacheL1Epoch.Load() {
 		return
 	}
-	s.setAuthCacheL1(cacheKey, entry)
+	s.setAuthCacheL1(cacheKey, entry, epoch)
 	if s.cache == nil || !s.authCfg.l2Enabled() {
 		return
 	}
@@ -267,6 +276,7 @@ func (s *APIKeyService) deleteAuthCache(ctx context.Context, cacheKey string) {
 }
 
 func (s *APIKeyService) loadAuthCacheEntry(ctx context.Context, key, cacheKey string) (*APIKeyAuthCacheEntry, error) {
+	epoch := s.authCacheL1Epoch.Load()
 	apiKey, err := s.lookupAPIKeyForAuth(ctx, key)
 	if err != nil {
 		if errors.Is(err, ErrAPIKeyNotFound) {
@@ -275,7 +285,7 @@ func (s *APIKeyService) loadAuthCacheEntry(ctx context.Context, key, cacheKey st
 				// Invalid keys are attacker-controlled and high-cardinality. Keep their
 				// negative entries in the bounded process-local cache; do not amplify
 				// random-key scans into Redis writes on every instance.
-				s.setAuthCacheL1(cacheKey, entry)
+				s.setAuthCacheL1(cacheKey, entry, epoch)
 			}
 			return entry, nil
 		}
@@ -287,7 +297,7 @@ func (s *APIKeyService) loadAuthCacheEntry(ctx context.Context, key, cacheKey st
 		return nil, fmt.Errorf("get api key: %w", ErrAPIKeyNotFound)
 	}
 	entry := &APIKeyAuthCacheEntry{Snapshot: snapshot}
-	s.setAuthCacheEntry(ctx, cacheKey, entry, s.authCfg.l2TTL)
+	s.setAuthCacheEntry(ctx, cacheKey, entry, s.authCfg.l2TTL, epoch)
 	return entry, nil
 }
 

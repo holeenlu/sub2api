@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
@@ -22,13 +23,26 @@ import (
 
 type compatStreamUsageUpstream struct {
 	service.HTTPUpstream
-	response *http.Response
-	calls    int
+	responses  []*http.Response
+	calls      int
+	accountIDs []int64
 }
 
-func (u *compatStreamUsageUpstream) DoWithTLS(*http.Request, string, int64, int, *tlsfingerprint.Profile) (*http.Response, error) {
+func (u *compatStreamUsageUpstream) DoWithTLS(_ *http.Request, _ string, accountID int64, _ int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	response := u.responses[u.calls]
 	u.calls++
-	return u.response, nil
+	u.accountIDs = append(u.accountIDs, accountID)
+	return response, nil
+}
+
+type compatStreamUsageAccountRepo struct {
+	service.AccountRepository
+	overloaded []int64
+}
+
+func (r *compatStreamUsageAccountRepo) SetOverloaded(_ context.Context, id int64, _ time.Time) error {
+	r.overloaded = append(r.overloaded, id)
+	return nil
 }
 
 type compatStreamUsageBillingRepo struct {
@@ -63,11 +77,12 @@ type compatStreamUsageRun struct {
 	upstream    *compatStreamUsageUpstream
 	usageRepo   *openAIWSUsageHandlerUsageLogRepoStub
 	billingRepo *compatStreamUsageBillingRepo
+	accountRepo *compatStreamUsageAccountRepo
 }
 
 // runCompatStreamUsageHandler 经 GatewayHandler 转发一次流式请求；上游写完 upstreamStream 后，
 // closeUpstream 为 false 时保持连接不再发送数据。
-func runCompatStreamUsageHandler(t *testing.T, endpoint, upstreamStream string, closeUpstream bool) compatStreamUsageRun {
+func runCompatStreamUsageHandler(t *testing.T, endpoint, upstreamStream string, closeUpstream bool, retryStream ...string) compatStreamUsageRun {
 	t.Helper()
 	cfg := &config.Config{Gateway: config.GatewayConfig{StreamDataIntervalTimeout: 1}}
 	groupID := int64(9300)
@@ -78,14 +93,21 @@ func runCompatStreamUsageHandler(t *testing.T, endpoint, upstreamStream string, 
 		Credentials:   map[string]any{"api_key": "test-key"},
 		AccountGroups: []service.AccountGroup{{AccountID: 9301, GroupID: groupID}},
 	}
-	snapshot := service.NewSchedulerSnapshotService(&fakeSchedulerCache{accounts: []*service.Account{account}}, nil, nil, nil, nil)
+	accounts := []*service.Account{account}
+	if len(retryStream) > 0 {
+		second := *account
+		second.ID = 9304
+		accounts = append(accounts, &second)
+	}
+	snapshot := service.NewSchedulerSnapshotService(&fakeSchedulerCache{accounts: accounts}, nil, nil, nil, nil)
 	run := compatStreamUsageRun{
 		rec:         httptest.NewRecorder(),
 		usageRepo:   &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 2)},
 		billingRepo: &compatStreamUsageBillingRepo{},
+		accountRepo: &compatStreamUsageAccountRepo{},
 	}
 	billingCache := service.NewBillingCacheService(newHandlerInflightCache(100), nil, nil, nil, nil, nil, cfg, nil)
-	t.Cleanup(billingCache.Stop)
+	cleanupHandlerBillingCache(t, billingCache)
 
 	pr, pw := io.Pipe()
 	t.Cleanup(func() { _ = pr.Close(); _ = pw.Close() })
@@ -95,13 +117,20 @@ func runCompatStreamUsageHandler(t *testing.T, endpoint, upstreamStream string, 
 			_ = pw.Close()
 		}
 	}()
-	run.upstream = &compatStreamUsageUpstream{response: &http.Response{
+	run.upstream = &compatStreamUsageUpstream{responses: []*http.Response{{
 		StatusCode: http.StatusOK, Body: pr,
 		Header: http.Header{"X-Request-Id": []string{"compat-stream-usage"}},
-	}}
+	}}}
+	for _, stream := range retryStream {
+		run.upstream.responses = append(run.upstream.responses, &http.Response{
+			StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(stream)),
+			Header: http.Header{"X-Request-Id": []string{"compat-stream-retry"}},
+		})
+	}
+	limiter := service.NewRateLimitService(run.accountRepo, nil, cfg, nil, nil)
 	gw := service.NewGatewayService(
 		nil, &fakeGroupRepo{group: group}, run.usageRepo, run.billingRepo, nil, nil, nil, nil, cfg,
-		snapshot, nil, service.NewBillingService(cfg, nil), nil, nil, nil, run.upstream,
+		snapshot, nil, service.NewBillingService(cfg, nil), limiter, nil, nil, run.upstream,
 		&service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
 	)
 	h := &GatewayHandler{
@@ -203,7 +232,7 @@ func TestGatewayCompatibilityHandlers_IdleBeforeAnyEventWritesStreamError(t *tes
 	}
 }
 
-func TestGatewayCompatibilityHandlers_UpstreamErrorEventAfterOutputIsNotBilled(t *testing.T) {
+func TestGatewayCompatibilityHandlers_UpstreamErrorEventPreservesObservedUsage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	upstreamError := "event: error\n" + `data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}` + "\n\n"
 	for _, endpoint := range []string{"chat/completions", "responses"} {
@@ -222,8 +251,32 @@ func TestGatewayCompatibilityHandlers_UpstreamErrorEventAfterOutputIsNotBilled(t
 
 			run.billingRepo.mu.Lock()
 			defer run.billingRepo.mu.Unlock()
-			require.Empty(t, run.billingRepo.commands, "an upstream error event is not billed while the client is online")
-			require.Empty(t, run.usageRepo.created)
+			require.Len(t, run.billingRepo.commands, 1, "retain observed usage without replaying the failed stream")
+			require.Equal(t, 12, run.billingRepo.commands[0].InputTokens)
+			require.Equal(t, 1, run.billingRepo.commands[0].OutputTokens)
+			require.Len(t, run.usageRepo.created, 1)
+		})
+	}
+}
+
+func TestGatewayCompatibilityHandlers_EarlyOverloadSwitchesAccountAndBillsOnce(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstreamError := "event: error\ndata: " + `{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}` + "\n\n"
+	for _, endpoint := range []string{"chat/completions", "responses"} {
+		t.Run(endpoint, func(t *testing.T) {
+			run := runCompatStreamUsageHandler(t, endpoint, upstreamError, true, compatStreamUsagePartialStream+compatStreamUsageCompletion)
+			require.Equal(t, 2, run.upstream.calls)
+			require.NotEqual(t, run.upstream.accountIDs[0], run.upstream.accountIDs[1])
+			require.Equal(t, []int64{run.upstream.accountIDs[0]}, run.accountRepo.overloaded)
+			success, failure := compatStreamUsageMarkers(endpoint)
+			require.Contains(t, run.rec.Body.String(), success)
+			require.NotContains(t, run.rec.Body.String(), failure)
+			require.NotContains(t, run.rec.Body.String(), "Overloaded")
+			run.billingRepo.mu.Lock()
+			defer run.billingRepo.mu.Unlock()
+			require.Len(t, run.billingRepo.commands, 1)
+			require.Equal(t, run.upstream.accountIDs[1], run.billingRepo.commands[0].AccountID)
+			require.Equal(t, 7, run.billingRepo.commands[0].OutputTokens)
 		})
 	}
 }

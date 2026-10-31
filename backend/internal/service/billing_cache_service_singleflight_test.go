@@ -27,10 +27,6 @@ func (s *billingCacheMissStub) SetUserBalance(ctx context.Context, userID int64,
 	return nil
 }
 
-func (s *billingCacheMissStub) DeductUserBalance(ctx context.Context, userID int64, amount float64) error {
-	return nil
-}
-
 func (s *billingCacheMissStub) InvalidateUserBalance(ctx context.Context, userID int64) error {
 	return nil
 }
@@ -43,10 +39,6 @@ func (s *billingCacheMissStub) SetSubscriptionCache(ctx context.Context, userID,
 	return nil
 }
 
-func (s *billingCacheMissStub) UpdateSubscriptionUsage(ctx context.Context, userID, groupID int64, cost float64) error {
-	return nil
-}
-
 func (s *billingCacheMissStub) InvalidateSubscriptionCache(ctx context.Context, userID, groupID int64) error {
 	return nil
 }
@@ -56,10 +48,6 @@ func (s *billingCacheMissStub) GetAPIKeyRateLimit(ctx context.Context, keyID int
 }
 
 func (s *billingCacheMissStub) SetAPIKeyRateLimit(ctx context.Context, keyID int64, data *APIKeyRateLimitCacheData) error {
-	return nil
-}
-
-func (s *billingCacheMissStub) UpdateAPIKeyRateLimitUsage(ctx context.Context, keyID int64, cost float64) error {
 	return nil
 }
 
@@ -77,22 +65,6 @@ func (s *billingCacheMissStub) SetUserPlatformQuotaCache(ctx context.Context, us
 
 func (s *billingCacheMissStub) DeleteUserPlatformQuotaCache(ctx context.Context, userID int64, platform string) error {
 	return nil
-}
-
-func (s *billingCacheMissStub) IncrUserPlatformQuotaUsageCache(ctx context.Context, userID int64, platform string, cost float64, ttl time.Duration, markDirty bool) error {
-	return nil
-}
-
-func (s *billingCacheMissStub) PopDirtyUserPlatformQuotaKeys(ctx context.Context, n int) ([]UserPlatformQuotaKey, error) {
-	return nil, nil
-}
-
-func (s *billingCacheMissStub) ReaddDirtyUserPlatformQuotaKeys(ctx context.Context, keys []UserPlatformQuotaKey) error {
-	return nil
-}
-
-func (s *billingCacheMissStub) BatchGetUserPlatformQuotaCache(ctx context.Context, keys []UserPlatformQuotaKey) ([]*UserPlatformQuotaCacheEntry, error) {
-	return nil, nil
 }
 
 type balanceLoadUserRepoStub struct {
@@ -129,7 +101,7 @@ func TestBillingCacheServiceGetUserBalance_Singleflight(t *testing.T) {
 		balance: 12.34,
 	}
 	svc := NewBillingCacheService(cache, userRepo, nil, nil, nil, nil, &config.Config{}, nil)
-	t.Cleanup(svc.Stop)
+	startBillingCacheForTest(t, svc)
 
 	const goroutines = 16
 	start := make(chan struct{})

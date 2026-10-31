@@ -3,7 +3,6 @@ package securityaudit
 import (
 	"context"
 	"errors"
-	"math"
 	"strconv"
 	"strings"
 
@@ -90,10 +89,6 @@ func (h *PromptAdminHandler) ListEvents(c *gin.Context) {
 	pageSize, err := positiveIntQuery(c, "page_size", 20, 100)
 	if err != nil {
 		response.ErrorFrom(c, err)
-		return
-	}
-	if page > math.MaxInt/pageSize {
-		response.ErrorFrom(c, infraerrors.BadRequest("prompt_audit_invalid_pagination", "分页参数无效"))
 		return
 	}
 	filter, err := eventFilterFromQuery(c)

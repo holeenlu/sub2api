@@ -68,7 +68,7 @@ func (r *ollamaCloudUsageHandlerTestRepo) ListDueOllamaCloudUsageAccounts(contex
 func newOllamaCloudUsageHandlerTestService(t *testing.T) *service.OllamaCloudUsageService {
 	t.Helper()
 	svc := service.NewOllamaCloudUsageService(nil, nil, nil, nil, false)
-	t.Cleanup(svc.Stop)
+	startAdminFixtureService(t, svc)
 	return svc
 }
 
@@ -134,7 +134,7 @@ func TestOllamaCloudUsageEncryptionKeyStateConsistentAcrossAccountResponses(t *t
 			usageService := service.NewOllamaCloudUsageService(
 				&ollamaCloudUsageHandlerTestRepo{account: account}, nil, nil, nil, configured,
 			)
-			t.Cleanup(usageService.Stop)
+			startAdminFixtureService(t, usageService)
 
 			handler := NewAccountHandler(adminService, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 			handler.SetOllamaCloudUsageService(usageService)
@@ -211,7 +211,7 @@ func TestOllamaCloudUsageSharedStateMatchesListDetailAndSpecialEndpointWithoutLi
 	adminService.accounts = []service.Account{*source, *sibling}
 	adminService.getAccountResult = sibling
 	usageService := service.NewOllamaCloudUsageService(repo, nil, nil, nil, true)
-	t.Cleanup(usageService.Stop)
+	startAdminFixtureService(t, usageService)
 	handler := NewAccountHandler(adminService, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	handler.SetOllamaCloudUsageService(usageService)
 	router := gin.New()

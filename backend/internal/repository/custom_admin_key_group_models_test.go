@@ -13,10 +13,10 @@ import (
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/adminaccess"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
-	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -75,7 +75,7 @@ func TestScopedAdminGroupModelsPostgresScopeAndAtomicWrite(t *testing.T) {
 	require.Empty(t, rows, "只写权限不能读取列表")
 	_, _, err = repo.ScopedAdminListGroupModels(context.Background(), params, true, "", "", "")
 	require.Equal(t, 403, infraerrors.Code(err))
-	cfg := service.GroupModelAllowlist{Enabled: true, Models: []string{"custom-model", "other-model"}}
+	cfg := catalog.ModelAllowlist{Enabled: true, Models: []string{"custom-model", "other-model"}}
 	for _, id := range []int64{3, 4, 5, 99} {
 		_, err = repo.ScopedAdminUpdateGroupModels(ctx, id, cfg)
 		require.Equal(t, 404, infraerrors.Code(err))
@@ -97,7 +97,7 @@ func TestScopedAdminGroupModelsPostgresScopeAndAtomicWrite(t *testing.T) {
 	// outbox 写入失败必须一起回滚模型配置。
 	_, err = db.Exec(`DROP TABLE scheduler_outbox`)
 	require.NoError(t, err)
-	_, err = repo.ScopedAdminUpdateGroupModels(ctx, 2, service.GroupModelAllowlist{Models: []string{"must-rollback"}})
+	_, err = repo.ScopedAdminUpdateGroupModels(ctx, 2, catalog.ModelAllowlist{Models: []string{"must-rollback"}})
 	require.Error(t, err)
 	var after string
 	require.NoError(t, db.QueryRow(`SELECT model_allowlist::text FROM groups WHERE id=2`).Scan(&after))

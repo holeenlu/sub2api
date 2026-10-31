@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
-	"os"
+	"github.com/Wei-Shaw/sub2api/internal/host"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -11,6 +11,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/google/wire"
@@ -29,23 +30,21 @@ func ProvideGrokOAuthService(proxyRepo ProxyRepository, oauthClient GrokOAuthCli
 
 // BuildInfo contains build information
 type BuildInfo struct {
-	Version   string
-	BuildType string
+	UpstreamVersion string
+	BuildCommit     string
+	Version         string
+	BuildType       string
 }
 
 // ProvidePricingService creates and initializes PricingService
 func ProvidePricingService(cfg *config.Config, remoteClient PricingRemoteClient) (*PricingService, error) {
 	svc := NewPricingService(cfg, remoteClient)
-	if err := svc.Initialize(); err != nil {
-		// Pricing service initialization failure should not block startup, use fallback prices
-		println("[Service] Warning: Pricing service initialization failed:", err.Error())
-	}
 	return svc, nil
 }
 
-// ProvideUpdateService creates UpdateService with BuildInfo
-func ProvideUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, buildInfo BuildInfo) *UpdateService {
-	return NewUpdateService(cache, githubClient, buildInfo.Version, buildInfo.BuildType)
+// ProvideBuildStatusService creates BuildStatusService with BuildInfo
+func ProvideBuildStatusService(buildInfo BuildInfo) *BuildStatusService {
+	return NewBuildStatusService(buildInfo.Version).WithUpstreamVersion(buildInfo.UpstreamVersion).WithBuildCommit(buildInfo.BuildCommit)
 }
 
 // ProvideEmailQueueService creates EmailQueueService with default worker count
@@ -58,7 +57,6 @@ func ProvideEmailQueueService(emailService *EmailService) *EmailQueueService {
 func ProvideAuthService(
 	entClient *dbent.Client,
 	userRepo UserRepository,
-	redeemRepo RedeemCodeRepository,
 	refreshTokenCache RefreshTokenCache,
 	cfg *config.Config,
 	settingService *SettingService,
@@ -67,32 +65,21 @@ func ProvideAuthService(
 	tencentCaptchaService *TencentCaptchaService,
 	aliyunCaptchaService *AliyunCaptchaService,
 	emailQueueService *EmailQueueService,
-	promoService *PromoService,
 	defaultSubAssigner DefaultSubscriptionAssigner,
-	affiliateService *AffiliateService,
-	userPlatformQuotaRepo UserPlatformQuotaRepository,
-	mcpOAuthService *MCPOAuthService,
-) *AuthService {
+	userPlatformQuotaRepo UserPlatformQuotaRepository) *AuthService {
 	svc := NewAuthService(
 		entClient,
 		userRepo,
-		redeemRepo,
 		refreshTokenCache,
 		cfg,
 		settingService,
 		emailService,
 		turnstileService,
 		emailQueueService,
-		promoService,
 		defaultSubAssigner,
-		affiliateService,
-		userPlatformQuotaRepo,
-	)
+		userPlatformQuotaRepo)
 	svc.SetTencentCaptchaService(tencentCaptchaService)
 	svc.SetAliyunCaptchaService(aliyunCaptchaService)
-	if mcpOAuthService != nil {
-		svc.SetMCPGrantRevoker(mcpOAuthService)
-	}
 	return svc
 }
 
@@ -107,22 +94,46 @@ func ProvideBatchImageModelPricingResolver(resolver *ModelPricingResolver) *Batc
 
 func ProvideBatchImageCleanupService(repo BatchImageRepository, accountRepo AccountRepository, cfg *config.Config) *BatchImageCleanupService {
 	svc := NewBatchImageCleanupService(repo, accountRepo, cfg)
-	svc.Start()
 	return svc
 }
 
 // ProvideOpenAIOAuthService creates OpenAIOAuthService with privacy/account enrichment support.
 func ProvideOpenAIOAuthService(
+	accountRepo AccountRepository, encryptor SecretEncryptor, cfg *config.Config,
 	proxyRepo ProxyRepository,
 	oauthClient OpenAIOAuthClient,
 	privacyClientFactory PrivacyClientFactory,
+	redisClient *redis.Client,
 ) *OpenAIOAuthService {
-	svc := NewOpenAIOAuthService(proxyRepo, oauthClient)
+	svc := NewOpenAIOAuthService(proxyRepo, oauthClient, redisClient)
+
 	svc.SetPrivacyClientFactory(privacyClientFactory)
+	svc.excelAccountRepo = accountRepo
+	if cfg != nil && cfg.Totp.EncryptionKeyConfigured {
+		svc.excelEncryptor = encryptor
+	}
 	return svc
 }
 
-// ProvideTokenRefreshService creates and starts TokenRefreshService
+// ProvideOpenAICloudService attaches Cloud to the existing gateway at startup.
+func ProvideOpenAICloudService(accounts AccountRepository, tokens *OpenAITokenProvider, oauth *OpenAIOAuthService, gateway *OpenAIGatewayService, lifetime *host.Lifetime) *OpenAICloudService {
+	svc := NewOpenAICloudService(accounts, tokens, oauth)
+	// SetCloudService also starts durable billing recovery. Invoke it only
+	// after cache/subscription readiness and normal Usage startup, before ingress.
+	owner := host.OwnBlockingShutdown("CloudBilling", func() error { gateway.StopCloudBilling(); return nil }, true)
+	lifetime.Add(host.Component{Name: "CloudBilling", Phase: host.Usage, ShutdownOrder: 20, StartOrder: 21,
+		Start: func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			gateway.SetCloudService(svc)
+			return nil
+		},
+		RequestStop: owner.RequestStop, Stop: owner.Stop})
+	return svc
+}
+
+// ProvideTokenRefreshService constructs TokenRefreshService
 func ProvideTokenRefreshService(
 	accountRepo AccountRepository,
 	oauthService *OAuthService,
@@ -147,7 +158,6 @@ func ProvideTokenRefreshService(
 	// 调用侧显式注入后台刷新策略，避免策略漂移
 	svc.SetRefreshPolicy(DefaultBackgroundRefreshPolicy())
 	svc.SetAccountRuntimeBlocker(runtimeBlocker)
-	svc.Start()
 	return svc
 }
 
@@ -221,7 +231,6 @@ func ProvideOpenAIQuotaAutoResetService(
 		settingService,
 		leaderLock,
 	)
-	service.Start()
 	return service
 }
 
@@ -335,7 +344,6 @@ func ProvideCNProviderBalanceCheckService(
 		minutes = cfg.Gateway.CNProviders.BalanceCheckIntervalMinutes
 	}
 	svc := NewCNProviderBalanceCheckService(accountRepo, balanceService, quotaService, cfg, time.Duration(minutes)*time.Minute)
-	svc.Start()
 	return svc
 }
 
@@ -385,30 +393,27 @@ func ProvideGrokTokenProvider(
 	return p
 }
 
-// ProvideDashboardAggregationService 创建并启动仪表盘聚合服务
+// ProvideDashboardAggregationService 构造仪表盘聚合服务
 func ProvideDashboardAggregationService(repo DashboardAggregationRepository, timingWheel *TimingWheelService, lockCache LeaderLockCache, db *sql.DB, cfg *config.Config, settingRepo SettingRepository) *DashboardAggregationService {
 	svc := NewDashboardAggregationService(repo, timingWheel, cfg)
 	svc.settingRepo = settingRepo
 	svc.SetLeaderLock(lockCache, db)
-	svc.Start()
 	return svc
 }
 
-// ProvideUsageCleanupService 创建并启动使用记录清理任务服务
+// ProvideUsageCleanupService 构造使用记录清理任务服务
 func ProvideUsageCleanupService(repo UsageCleanupRepository, timingWheel *TimingWheelService, dashboardAgg *DashboardAggregationService, cfg *config.Config) *UsageCleanupService {
 	svc := NewUsageCleanupService(repo, timingWheel, dashboardAgg, cfg)
-	svc.Start()
 	return svc
 }
 
-// ProvideAccountExpiryService creates and starts AccountExpiryService.
+// ProvideAccountExpiryService constructs AccountExpiryService.
 func ProvideAccountExpiryService(accountRepo AccountRepository) *AccountExpiryService {
 	svc := NewAccountExpiryService(accountRepo, time.Minute)
-	svc.Start()
 	return svc
 }
 
-// ProvideOpenAICodexVersionSyncService creates and starts OpenAICodexVersionSyncService.
+// ProvideOpenAICodexVersionSyncService constructs OpenAICodexVersionSyncService.
 // 出站 Codex 身份的版本号靠它跟随官方发布，无需为了跟版本而发新版本；面板可关闭。
 func ProvideOpenAICodexVersionSyncService(
 	settingRepo SettingRepository,
@@ -416,11 +421,10 @@ func ProvideOpenAICodexVersionSyncService(
 	githubClient GitHubReleaseClient,
 ) *OpenAICodexVersionSyncService {
 	svc := NewOpenAICodexVersionSyncService(settingRepo, settingService, githubClient, openAICodexVersionSyncInterval)
-	svc.Start()
 	return svc
 }
 
-// ProvideClaudeCodeVersionSyncService creates and starts ClaudeCodeVersionSyncService.
+// ProvideClaudeCodeVersionSyncService constructs ClaudeCodeVersionSyncService.
 // 出站 Claude Code 身份的版本号靠它跟随官方发布，无需为了跟版本而发新版本；面板可关闭。
 func ProvideClaudeCodeVersionSyncService(
 	settingRepo SettingRepository,
@@ -428,53 +432,44 @@ func ProvideClaudeCodeVersionSyncService(
 	githubClient GitHubReleaseClient,
 ) *ClaudeCodeVersionSyncService {
 	svc := NewClaudeCodeVersionSyncService(settingRepo, settingService, githubClient, claudeCodeVersionSyncInterval)
-	svc.Start()
 	return svc
 }
 
-// ProvideProxyExpiryService creates and starts ProxyExpiryService.
+// ProvideProxyExpiryService constructs ProxyExpiryService.
 func ProvideProxyExpiryService(proxyRepo ProxyRepository) *ProxyExpiryService {
 	svc := NewProxyExpiryService(proxyRepo, time.Minute)
-	svc.Start()
 	return svc
 }
 
-// ProvideSubscriptionExpiryService creates and starts SubscriptionExpiryService.
+// ProvideSubscriptionExpiryService constructs SubscriptionExpiryService.
 func ProvideSubscriptionExpiryService(userSubRepo UserSubscriptionRepository, settingRepo SettingRepository, notificationEmailService *NotificationEmailService, lockCache LeaderLockCache, db *sql.DB) *SubscriptionExpiryService {
 	svc := NewSubscriptionExpiryService(userSubRepo, time.Minute)
 	svc.SetSettingRepository(settingRepo)
 	svc.SetNotificationEmailService(notificationEmailService)
 	svc.SetLeaderLock(lockCache, db)
-	svc.Start()
 	return svc
 }
 
-// ProvideTimingWheelService creates and starts TimingWheelService
+// ProvideTimingWheelService constructs TimingWheelService
 func ProvideTimingWheelService() (*TimingWheelService, error) {
 	svc, err := NewTimingWheelService()
 	if err != nil {
 		return nil, err
 	}
-	svc.Start()
 	return svc, nil
 }
 
-// ProvideDeferredService creates and starts DeferredService
+// ProvideDeferredService constructs DeferredService
 func ProvideDeferredService(accountRepo AccountRepository, timingWheel *TimingWheelService) *DeferredService {
 	svc := NewDeferredService(accountRepo, timingWheel, 10*time.Second)
-	svc.Start()
 	return svc
 }
 
 // ProvideConcurrencyService creates ConcurrencyService and starts slot cleanup worker.
 func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountRepository, cfg *config.Config) *ConcurrencyService {
 	svc := NewConcurrencyService(cache)
-	if err := svc.CleanupStaleProcessSlots(context.Background()); err != nil {
-		logger.LegacyPrintf("service.concurrency", "Warning: startup cleanup stale process slots failed: %v", err)
-	}
 	if cfg != nil {
 		svc.SetAccountLoadBatchCacheTTL(time.Duration(cfg.Gateway.Scheduling.LoadBatchCacheTTLMS) * time.Millisecond)
-		svc.StartSlotCleanupWorker(accountRepo, cfg.Gateway.Scheduling.SlotCleanupInterval)
 	}
 	return svc
 }
@@ -482,13 +477,10 @@ func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountReposi
 // ProvideUserMessageQueueService 创建用户消息串行队列服务并启动清理 worker
 func ProvideUserMessageQueueService(cache UserMsgQueueCache, rpmCache RPMCache, cfg *config.Config) *UserMessageQueueService {
 	svc := NewUserMessageQueueService(cache, rpmCache, &cfg.Gateway.UserMessageQueue)
-	if cfg.Gateway.UserMessageQueue.CleanupIntervalSeconds > 0 {
-		svc.StartCleanupWorker(time.Duration(cfg.Gateway.UserMessageQueue.CleanupIntervalSeconds) * time.Second)
-	}
 	return svc
 }
 
-// ProvideSchedulerSnapshotService creates and starts SchedulerSnapshotService.
+// ProvideSchedulerSnapshotService constructs SchedulerSnapshotService.
 func ProvideSchedulerSnapshotService(
 	cache SchedulerCache,
 	outboxRepo SchedulerOutboxRepository,
@@ -497,7 +489,6 @@ func ProvideSchedulerSnapshotService(
 	cfg *config.Config,
 ) *SchedulerSnapshotService {
 	svc := NewSchedulerSnapshotService(cache, outboxRepo, accountRepo, groupRepo, cfg)
-	svc.Start()
 	return svc
 }
 
@@ -526,7 +517,7 @@ func ProvideRateLimitService(
 	return svc
 }
 
-// ProvideOpsMetricsCollector creates and starts OpsMetricsCollector.
+// ProvideOpsMetricsCollector constructs OpsMetricsCollector.
 func ProvideOpsMetricsCollector(
 	opsRepo OpsRepository,
 	settingRepo SettingRepository,
@@ -537,11 +528,10 @@ func ProvideOpsMetricsCollector(
 	cfg *config.Config,
 ) *OpsMetricsCollector {
 	collector := NewOpsMetricsCollector(opsRepo, settingRepo, accountRepo, concurrencyService, db, redisClient, cfg)
-	collector.Start()
 	return collector
 }
 
-// ProvideOpsAggregationService creates and starts OpsAggregationService (hourly/daily pre-aggregation).
+// ProvideOpsAggregationService constructs OpsAggregationService (hourly/daily pre-aggregation).
 func ProvideOpsAggregationService(
 	opsRepo OpsRepository,
 	settingRepo SettingRepository,
@@ -550,11 +540,10 @@ func ProvideOpsAggregationService(
 	cfg *config.Config,
 ) *OpsAggregationService {
 	svc := NewOpsAggregationService(opsRepo, settingRepo, db, redisClient, cfg)
-	svc.Start()
 	return svc
 }
 
-// ProvideOpsAlertEvaluatorService creates and starts OpsAlertEvaluatorService.
+// ProvideOpsAlertEvaluatorService constructs OpsAlertEvaluatorService.
 func ProvideOpsAlertEvaluatorService(
 	opsService *OpsService,
 	opsRepo OpsRepository,
@@ -564,11 +553,10 @@ func ProvideOpsAlertEvaluatorService(
 	proxyRepo ProxyRepository,
 ) *OpsAlertEvaluatorService {
 	svc := NewOpsAlertEvaluatorService(opsService, opsRepo, emailService, redisClient, cfg, proxyRepo)
-	svc.Start()
 	return svc
 }
 
-// ProvideOpsCleanupService creates and starts OpsCleanupService (cron scheduled).
+// ProvideOpsCleanupService constructs OpsCleanupService (cron scheduled).
 // channelMonitorSvc 让维护任务（聚合 + 历史/聚合软删）跟随 ops 清理 cron 一起跑，
 // 共享 leader lock + heartbeat。
 // settingRepo 让 cleanup service 自己读 ops_advanced_settings.data_retention 覆盖 cfg；
@@ -583,7 +571,6 @@ func ProvideOpsCleanupService(
 	opsService *OpsService,
 ) *OpsCleanupService {
 	svc := NewOpsCleanupService(opsRepo, db, redisClient, cfg, channelMonitorSvc, settingRepo)
-	svc.Start()
 	if opsService != nil {
 		opsService.SetCleanupReloader(svc)
 	}
@@ -592,16 +579,14 @@ func ProvideOpsCleanupService(
 
 func ProvideOpsSystemLogSink(opsRepo OpsRepository) *OpsSystemLogSink {
 	sink := NewOpsSystemLogSink(opsRepo)
-	sink.Start()
 	logger.SetSink(sink)
 	return sink
 }
 
 // ProvideAuditLogService 创建操作审计日志服务并启动异步写入与保留期清理协程。
-// 停止逻辑挂在 cmd/server 的 provideCleanup。
+// 启动和有序停止由根 Application 的 host.Lifetime 装配。
 func ProvideAuditLogService(repo AuditLogRepository, settingService *SettingService) *AuditLogService {
 	svc := NewAuditLogService(repo, settingService)
-	svc.Start()
 	return svc
 }
 
@@ -640,26 +625,32 @@ func ProvideSystemOperationLockService(repo IdempotencyRepository, cfg *config.C
 
 func ProvideIdempotencyCleanupService(repo IdempotencyRepository, cfg *config.Config) *IdempotencyCleanupService {
 	svc := NewIdempotencyCleanupService(repo, cfg)
-	svc.Start()
 	return svc
 }
 
 // ProvideGeminiCachedContentService creates GeminiCachedContentService and starts its mutation recovery loop.
 func ProvideGeminiCachedContentService(repo GeminiCachedContentRepository, compat *GeminiMessagesCompatService, cfg *config.Config) *GeminiCachedContentService {
 	svc := NewGeminiCachedContentService(repo, compat, cfg)
-	svc.Start()
 	return svc
 }
 
 // ProvideScheduledTestService creates ScheduledTestService.
 func ProvideScheduledTestService(
-	planRepo ScheduledTestPlanRepository,
-	resultRepo ScheduledTestResultRepository,
+	planRepo ScheduledTestPlanRepository, resultRepo ScheduledTestResultRepository,
+	accounts AccountRepository, keys *APIKeyService, users UserRepository,
+	gateway *OpenAIGatewayService,
 ) *ScheduledTestService {
-	return NewScheduledTestService(planRepo, resultRepo)
+	svc := NewScheduledTestService(planRepo, resultRepo)
+	svc.accounts, svc.keys, svc.users, svc.gateway = accounts, keys, users, gateway
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if gateway != nil && gateway.settingService != nil {
+		_ = gateway.settingService.LoadModelTraceBank(ctx)
+	}
+	return svc
 }
 
-// ProvideScheduledTestRunnerService creates and starts ScheduledTestRunnerService.
+// ProvideScheduledTestRunnerService constructs ScheduledTestRunnerService.
 func ProvideScheduledTestRunnerService(
 	planRepo ScheduledTestPlanRepository,
 	scheduledSvc *ScheduledTestService,
@@ -668,11 +659,10 @@ func ProvideScheduledTestRunnerService(
 	cfg *config.Config,
 ) *ScheduledTestRunnerService {
 	svc := NewScheduledTestRunnerService(planRepo, scheduledSvc, accountTestSvc, rateLimitSvc, cfg)
-	svc.Start()
 	return svc
 }
 
-// ProvideOpsScheduledReportService creates and starts OpsScheduledReportService.
+// ProvideOpsScheduledReportService constructs OpsScheduledReportService.
 func ProvideOpsScheduledReportService(
 	opsService *OpsService,
 	userService *UserService,
@@ -681,14 +671,12 @@ func ProvideOpsScheduledReportService(
 	cfg *config.Config,
 ) *OpsScheduledReportService {
 	svc := NewOpsScheduledReportService(opsService, userService, emailService, redisClient, cfg)
-	svc.Start()
 	return svc
 }
 
 // ProvideAPIKeyAuthCacheInvalidator 提供 API Key 认证缓存失效能力
 func ProvideAPIKeyAuthCacheInvalidator(apiKeyService *APIKeyService) APIKeyAuthCacheInvalidator {
 	// Start Pub/Sub subscriber for L1 cache invalidation across instances
-	apiKeyService.StartAuthCacheInvalidationSubscriber(context.Background())
 	return apiKeyService
 }
 
@@ -721,7 +709,7 @@ func ProvideImageTaskService(store ImageTaskStore, settings *ImageStorageSetting
 	return NewImageTaskServiceWithResolver(store, settings.Resolver(), defaultImageTaskTTL, defaultImageTaskExecutionTimeout)
 }
 
-// ProvideBackupService creates and starts BackupService
+// ProvideBackupService constructs BackupService
 func ProvideBackupService(
 	settingRepo SettingRepository,
 	cfg *config.Config,
@@ -733,7 +721,6 @@ func ProvideBackupService(
 ) *BackupService {
 	svc := NewBackupService(settingRepo, cfg, encryptor, storeFactory, dumper)
 	svc.SetLeaderLock(lockCache, db)
-	svc.Start()
 	return svc
 }
 
@@ -771,14 +758,13 @@ func ProvideOpsService(
 		systemLogSink,
 	)
 	if settingService != nil {
-		svc.SetOpenAIQuotaAutoPauseSettingsSink(settingService.SetOpenAIQuotaAutoPauseSettings)
+		svc.SetQuotaSchedulingSettingsSink(settingService.SetQuotaSchedulingSettings)
 		// Optional warm-up so the first scheduled request after process start observes
 		// a populated cache rather than zero defaults. Best-effort, sync-bounded.
 		settingService.WarmOpenAIQuotaAutoPauseSettings(context.Background())
 	}
 	svc.authCacheInvalidationWorker = authCacheInvalidationWorker
 	svc.apiKeyService = apiKeyService
-	svc.StartRuntimeSettingsRefresh(context.Background())
 	return svc
 }
 
@@ -790,17 +776,17 @@ func ProvideOpsIngressRejectAggregator(opsRepo OpsRepository, opsService *OpsSer
 		return nil
 	}
 	aggregator := NewOpsIngressRejectAggregator(repo)
-	aggregator.Start()
 	opsService.SetIngressRejectAggregator(aggregator)
 	return aggregator
 }
 
 // ProvideSettingService wires SettingService with group reader and proxy repo.
-func ProvideSettingService(scopedKeys ScopedAdminKeyRepository, settingRepo SettingRepository, groupRepo GroupRepository, proxyRepo ProxyRepository, cfg *config.Config) *SettingService {
+func ProvideSettingService(scopedKeys ScopedAdminKeyRepository, settingRepo SettingRepository, groupRepo GroupRepository, proxyRepo ProxyRepository, cfg *config.Config, prices *PricingService) *SettingService {
 	svc := NewSettingService(settingRepo, cfg)
 	svc.scopedAdminKeyRepo = scopedKeys
 	svc.SetDefaultSubscriptionGroupReader(groupRepo)
 	svc.SetProxyRepository(proxyRepo)
+	prices.SetModelSettings(svc)
 	if err := svc.LoadForwardedClientIPSettings(context.Background()); err != nil {
 		logger.LegacyPrintf("service.setting", "Warning: load forwarded client IP settings failed: %v", err)
 	}
@@ -828,6 +814,12 @@ func ProvideSettingService(scopedKeys ScopedAdminKeyRepository, settingRepo Sett
 }
 
 // ProvideBillingCacheService wires BillingCacheService with its RPM dependencies.
+func ProvideManagedChannelService(repo ChannelRepository, groupRepo GroupRepository, authCacheInvalidator APIKeyAuthCacheInvalidator, prices *PricingService, cachePubSub ChannelCachePubSub, settings *SettingService) *ChannelService {
+	svc := NewChannelService(repo, groupRepo, authCacheInvalidator, prices, cachePubSub)
+	svc.SetModelSettings(settings)
+	return svc
+}
+
 func ProvideBillingCacheService(
 	cache BillingCache,
 	userRepo UserRepository,
@@ -861,48 +853,48 @@ func ProvideAPIKeyService(
 
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
+	ProvideVendorService,
 	// Core services
 	ProvideAuthService,
 	NewPasskeyService,
 	NewUserService,
-	NewMCPOAuthService,
-	ProvideAPIKeyService,
+	ProvideLifetimeAPIKeyService,
 	ProvideAPIKeyAuthCacheInvalidator,
-	ProvideAuthCacheInvalidationWorker,
+	ProvideLifetimeAuthCacheInvalidationWorker,
 	NewGroupService,
 	NewCompositeRouteResolver,
 	NewAccountService,
 	NewProxyService,
 	NewRedeemService,
-	NewPromoService,
-	NewUsageService,
+	ProvideUsageService,
 	NewDashboardService,
-	ProvidePricingService,
+	ProvideLifetimePricingService,
 	NewBillingService,
-	ProvideBillingCacheService,
+	ProvideLifetimeBillingCacheService,
 	NewAnnouncementService,
 	NewAdminService,
-	NewGatewayService,
-	NewOpenAIGatewayService,
+	ProvideLifetimeGatewayService,
+	ProvideLifetimeOpenAIGatewayService,
 	ProvideImageStorageSettingService,
 	ProvideImageTaskService,
 	ProvideBatchImageModelPricingResolver,
 	NewBatchImagePublicService,
 	NewBatchImageDownloadService,
-	ProvideBatchImageCleanupService,
-	ProvideBatchImageWorkerRuntime,
+	ProvideLifetimeBatchImageCleanupService,
+	ProvideLifetimeBatchImageWorkerRuntime,
 	wire.Bind(new(AccountRuntimeBlocker), new(*OpenAIGatewayService)),
-	NewOAuthService,
+	ProvideLifetimeOAuthService,
 	ProvideClaudeResetCreditService,
-	ProvideOpenAIOAuthService,
-	ProvideGrokOAuthService,
+	ProvideLifetimeOpenAIOAuthService,
+	ProvideOpenAICloudService,
+	ProvideLifetimeGrokOAuthService,
 	wire.Bind(new(GrokOAuthTokenService), new(*GrokOAuthService)),
-	NewGeminiOAuthService,
-	ProvideGeminiCachedContentService,
+	ProvideLifetimeGeminiOAuthService,
+	ProvideLifetimeGeminiCachedContentService,
 	NewGeminiQuotaService,
 	NewCompositeTokenCacheInvalidator,
 	wire.Bind(new(TokenCacheInvalidator), new(*CompositeTokenCacheInvalidator)),
-	NewAntigravityOAuthService,
+	ProvideLifetimeAntigravityOAuthService,
 	ProvideOAuthRefreshAPI,
 	ProvideGeminiTokenProvider,
 	NewGeminiMessagesCompatService,
@@ -910,57 +902,56 @@ var ProviderSet = wire.NewSet(
 	ProvideGrokTokenProvider,
 	ProvideOpenAITokenProvider,
 	ProvideOpenAIQuotaService,
-	ProvideOpenAIQuotaAutoResetService,
+	ProvideLifetimeOpenAIQuotaAutoResetService,
 	ProvideGrokQuotaService,
 	ProvideCNProviderQuotaService,
 	ProvideCNProviderBalanceService,
-	ProvideCNProviderBalanceCheckService,
+	ProvideLifetimeCNProviderBalanceCheckService,
 	ProvideClaudeTokenProvider,
 	NewAntigravityGatewayService,
 	ProvideRateLimitService,
 	ProvideAccountUsageService,
 	ProvideAccountTestService,
-	ProvideUpstreamBillingProbeService,
-	ProvideOllamaCloudUsageService,
-	ProvideOpenCodeGoUsageService,
+	ProvideLifetimeUpstreamBillingProbeService,
+	ProvideLifetimeOllamaCloudUsageService,
+	ProvideLifetimeOpenCodeGoUsageService,
 	ProvideSettingService,
-	NewDataManagementService,
-	ProvideBackupService,
-	ProvideOpsSystemLogSink,
-	ProvideOpsService,
-	ProvideOpsIngressRejectAggregator,
-	ProvideAuditLogService,
-	ProvideOpsMetricsCollector,
-	ProvideOpsAggregationService,
-	ProvideOpsAlertEvaluatorService,
-	ProvideOpsCleanupService,
-	ProvideOpsScheduledReportService,
+	ProvideLifetimeBackupService,
+	ProvideLifetimeOpsSystemLogSink,
+	ProvideLifetimeOpsService,
+	ProvideLifetimeOpsIngressRejectAggregator,
+	ProvideLifetimeAuditLogService,
+	ProvideLifetimeOpsMetricsCollector,
+	ProvideLifetimeOpsAggregationService,
+	ProvideLifetimeOpsAlertEvaluatorService,
+	ProvideLifetimeOpsCleanupService,
+	ProvideLifetimeOpsScheduledReportService,
 	NewEmailService,
 	NewNotificationEmailService,
-	ProvideEmailQueueService,
+	ProvideLifetimeEmailQueueService,
 	NewTurnstileService,
 	NewTencentCaptchaService,
 	NewAliyunCaptchaService,
-	NewSubscriptionService,
+	ProvideLifetimeSubscriptionService,
 	wire.Bind(new(DefaultSubscriptionAssigner), new(*SubscriptionService)),
-	ProvideConcurrencyService,
-	ProvideUserMessageQueueService,
-	NewUsageRecordWorkerPool,
-	ProvideSchedulerSnapshotService,
+	ProvideLifetimeConcurrencyService,
+	ProvideLifetimeUserMessageQueueService,
+	ProvideLifetimeUsageRecordWorkerPool,
+	ProvideLifetimeSchedulerSnapshotService,
 	NewIdentityService,
 	NewCRSSyncService,
-	ProvideUpdateService,
-	ProvideTokenRefreshService,
+	ProvideBuildStatusService,
+	ProvideLifetimeTokenRefreshService,
 	wire.Bind(new(GrokOAuthReconciler), new(*TokenRefreshService)),
-	ProvideAccountExpiryService,
-	ProvideOpenAICodexVersionSyncService,
-	ProvideClaudeCodeVersionSyncService,
-	ProvideProxyExpiryService,
-	ProvideSubscriptionExpiryService,
-	ProvideTimingWheelService,
-	ProvideDashboardAggregationService,
-	ProvideUsageCleanupService,
-	ProvideDeferredService,
+	ProvideLifetimeAccountExpiryService,
+	ProvideLifetimeOpenAICodexVersionSyncService,
+	ProvideLifetimeClaudeCodeVersionSyncService,
+	ProvideLifetimeProxyExpiryService,
+	ProvideLifetimeSubscriptionExpiryService,
+	ProvideLifetimeTimingWheelService,
+	ProvideLifetimeDashboardAggregationService,
+	ProvideLifetimeUsageCleanupService,
+	ProvideLifetimeDeferredService,
 	NewAntigravityQuotaFetcher,
 	NewGrokQuotaFetcher,
 	NewUserAttributeService,
@@ -968,39 +959,30 @@ var ProviderSet = wire.NewSet(
 	NewTotpService,
 	NewErrorPassthroughService,
 	NewTLSFingerprintProfileService,
-	ProvidePluginManager,
+	ProvideLifetimePluginManager,
 	NewDigestSessionStore,
 	ProvideIdempotencyCoordinator,
 	ProvideSystemOperationLockService,
-	ProvideIdempotencyCleanupService,
+	ProvideLifetimeIdempotencyCleanupService,
 	ProvideScheduledTestService,
-	ProvideScheduledTestRunnerService,
+	ProvideLifetimeScheduledTestRunnerService,
 	NewGroupCapacityService,
-	NewChannelService,
+	ProvideManagedChannelService,
 	wire.Bind(new(ChannelCacheInvalidator), new(*ChannelService)),
 	NewModelPricingResolver,
 	NewModelPlazaService,
-	NewContentModerationService,
-	NewAffiliateService,
+	ProvideLifetimeContentModerationService,
 	ProvidePaymentConfigService,
 	ProvidePaymentService,
-	ProvidePaymentOrderExpiryService,
+	ProvideLifetimePaymentOrderExpiryService,
 	ProvideBalanceNotifyService,
 	ProvideChannelMonitorService,
-	ProvideChannelMonitorRunner,
+	ProvideLifetimeChannelMonitorRunner,
 	NewChannelMonitorQuotaFetcher,
 	ProvideChannelMonitorV2Service,
-	ProvideChannelMonitorV2Aggregator,
+	ProvideLifetimeChannelMonitorV2Aggregator,
 	NewChannelMonitorRequestTemplateService,
-	ProvideUserPlatformQuotaUsageFlusher,
 )
-
-// ProvideUserPlatformQuotaUsageFlusher 创建并启动 UserPlatformQuotaUsageFlusher。
-func ProvideUserPlatformQuotaUsageFlusher(cfg *config.Config, cache BillingCache, quotaRepo UserPlatformQuotaRepository, tw *TimingWheelService) *UserPlatformQuotaUsageFlusher {
-	svc := NewUserPlatformQuotaUsageFlusher(cfg, cache, quotaRepo, tw)
-	svc.Start()
-	return svc
-}
 
 // ProvidePaymentConfigService wraps NewPaymentConfigService to accept the named
 // payment.EncryptionKey type instead of raw []byte, avoiding Wire ambiguity.
@@ -1009,24 +991,30 @@ func ProvidePaymentConfigService(entClient *dbent.Client, settingRepo SettingRep
 }
 
 // ProvideBalanceNotifyService creates BalanceNotifyService
-func ProvideBalanceNotifyService(emailService *EmailService, settingRepo SettingRepository, accountRepo AccountRepository, notificationEmailService *NotificationEmailService) *BalanceNotifyService {
+func ProvideBalanceNotifyService(emailService *EmailService, settingRepo SettingRepository, accountRepo AccountRepository, notificationEmailService *NotificationEmailService, lifetime *host.Lifetime) *BalanceNotifyService {
 	svc := NewBalanceNotifyService(emailService, settingRepo, accountRepo)
 	svc.SetNotificationEmailService(notificationEmailService)
+	// Final Usage/Cloud settlements may enqueue alerts; keep this owner alive
+	// until they finish, and join SMTP before caches, Redis and PG.
+	lifetime.Add(host.Component{Name: "BalanceNotifyService", Phase: host.Usage, ShutdownOrder: 40, StartOrder: 15, Start: svc.Start, Drain: svc.Drain, Stop: svc.Stop})
 	return svc
 }
 
 // ProvidePaymentService creates PaymentService and attaches notification email delivery.
-func ProvidePaymentService(entClient *dbent.Client, registry *payment.Registry, loadBalancer payment.LoadBalancer, redeemService *RedeemService, subscriptionSvc *SubscriptionService, configService *PaymentConfigService, userRepo UserRepository, groupRepo GroupRepository, affiliateService *AffiliateService, notificationEmailService *NotificationEmailService) *PaymentService {
-	svc := NewPaymentService(entClient, registry, loadBalancer, redeemService, subscriptionSvc, configService, userRepo, groupRepo, affiliateService)
+func ProvidePaymentService(entClient *dbent.Client, registry *payment.Registry, loadBalancer payment.LoadBalancer, redeemService *RedeemService, subscriptionSvc *SubscriptionService, configService *PaymentConfigService, userRepo UserRepository, groupRepo GroupRepository, notificationEmailService *NotificationEmailService, lifetime *host.Lifetime) *PaymentService {
+	svc := NewPaymentService(entClient, registry, loadBalancer, redeemService, subscriptionSvc, configService, userRepo, groupRepo)
 	svc.SetNotificationEmailService(notificationEmailService)
+	lifetime.Add(host.Component{
+		Name: "PaymentNotifications", Phase: host.Producers, StartOrder: 40, ShutdownOrder: 35,
+		Start: svc.StartNotifications, Drain: svc.DrainNotifications, Stop: svc.StopNotifications,
+	})
 	return svc
 }
 
-// ProvidePaymentOrderExpiryService creates and starts PaymentOrderExpiryService.
+// ProvidePaymentOrderExpiryService constructs PaymentOrderExpiryService.
 func ProvidePaymentOrderExpiryService(paymentSvc *PaymentService, lockCache LeaderLockCache, db *sql.DB) *PaymentOrderExpiryService {
 	svc := NewPaymentOrderExpiryService(paymentSvc, 60*time.Second)
 	svc.SetLeaderLock(lockCache, db)
-	svc.Start()
 	return svc
 }
 
@@ -1043,7 +1031,7 @@ func ProvideChannelMonitorService(
 	return svc
 }
 
-// ProvideChannelMonitorRunner 创建并启动渠道监控调度器。
+// ProvideChannelMonitorRunner 构造渠道监控调度器。
 // 通过 SetScheduler 注入回 service 后再 Start，确保启动时加载所有 enabled monitor，
 // 后续 CRUD 也能即时同步任务表。Runner.Stop 由 cleanup function 调用。
 // settingService 用于 runner 每次 fire 读取功能开关。
@@ -1062,7 +1050,6 @@ func ProvideChannelMonitorRunner(
 		svc.SetScheduler(r)
 		svc.SetQuotaFetcher(quotaFetcher)
 	}
-	r.Start()
 	return r
 }
 
@@ -1079,10 +1066,6 @@ func ProvideChannelMonitorV2Service(repo ChannelMonitorV2Repository, settingServ
 // Set CHANNEL_MONITOR_V2_DISABLE_AGGREGATOR=1 to skip Start (local demo with seeded facts).
 func ProvideChannelMonitorV2Aggregator(repo ChannelMonitorV2Repository, db *sql.DB, settingService *SettingService) *ChannelMonitorV2Aggregator {
 	aggregator := NewChannelMonitorV2Aggregator(repo, db, settingService)
-	if os.Getenv("CHANNEL_MONITOR_V2_DISABLE_AGGREGATOR") == "1" {
-		return aggregator
-	}
-	aggregator.Start()
 	return aggregator
 }
 
@@ -1092,4 +1075,835 @@ func ProvideClaudeResetCreditService(accounts AccountRepository, tokens *ClaudeT
 	s := NewClaudeResetCreditService(accounts, tokens, proxies, settings)
 	s.ConfigureRedemption(idem, locks)
 	return s
+}
+
+func ProvideVendorCompatibleOAuthService(repo ProxyRepository, client ClaudeOAuthClient, rdb *redis.Client) *OAuthService {
+	return NewOAuthService(repo, client, rdb)
+}
+
+func ProvideVendorService(db *sql.DB, client *dbent.Client, accounts AccountRepository, adminAccounts AdminAccountRepository, proxies ProxyRepository, groups GroupRepository, users UserRepository, admin AdminService, settings *SettingService, oauth *OAuthService, openaiOAuth *OpenAIOAuthService, rdb *redis.Client, audit *AuditLogService, accountUsage *AccountUsageService, cfg *config.Config) *VendorService {
+	s := NewVendorService(db, client, accounts, proxies, groups, users, admin, settings, oauth, openaiOAuth, rdb, audit, accountUsage, cfg)
+	guard := s.NativeSupplyIdentityGuard()
+	if repo, ok := accounts.(interface {
+		SetSupplyIdentityGuard(NativeSupplyIdentityGuard)
+	}); ok {
+		repo.SetSupplyIdentityGuard(guard)
+	}
+	if repo, ok := adminAccounts.(interface {
+		SetSupplyIdentityGuard(NativeSupplyIdentityGuard)
+	}); ok {
+		repo.SetSupplyIdentityGuard(guard)
+	}
+	return s
+}
+
+// Lifetime providers register ownership immediately after construction.
+func ProvideLifetimeAPIKeyService(apiKeyRepo APIKeyRepository,
+	userRepo UserRepository,
+	groupRepo GroupRepository,
+	userSubRepo UserSubscriptionRepository,
+	userGroupRateRepo UserGroupRateRepository,
+	cache APIKeyCache,
+	cfg *config.Config,
+	billingCacheService *BillingCacheService,
+	concurrencyService *ConcurrencyService,
+	lifetime *host.Lifetime) *APIKeyService {
+	svc := ProvideAPIKeyService(apiKeyRepo, userRepo, groupRepo, userSubRepo, userGroupRateRepo, cache, cfg, billingCacheService, concurrencyService)
+	if svc != nil {
+		owner := host.OwnBlockingShutdown("APIKeyService", func() error {
+			svc.StopAuthCacheInvalidationSubscriber()
+			if svc.authCacheL1 != nil {
+				svc.authCacheL1.Close()
+			}
+			if svc.authNegativeCacheL1 != nil {
+				svc.authNegativeCacheL1.Close()
+			}
+			return nil
+		}, true)
+		lifetime.Add(host.Component{Name: "APIKeyService", ShutdownOrder: 40, Phase: host.Caches, StartOrder: 50, Constructed: true, Start: func(ctx context.Context) error { svc.StartAuthCacheInvalidationSubscriber(ctx); return nil }, RequestStop: owner.RequestStop, Stop: owner.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeAuthCacheInvalidationWorker(repo AuthCacheInvalidationOutboxRepository, cache APIKeyCache, apiKeyService *APIKeyService,
+	lifetime *host.Lifetime) *AuthCacheInvalidationWorker {
+	svc := NewAuthCacheInvalidationWorker(repo, cache, apiKeyService)
+	if svc != nil {
+		owner := host.OwnBlockingShutdown("AuthCacheInvalidationWorker", func() error {
+			svc.Stop()
+			return nil
+		}, true)
+		lifetime.Add(host.Component{Name: "AuthCacheInvalidationWorker", ShutdownOrder: 30, Phase: host.Producers, StartOrder: 50, Start: func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			svc.Start()
+			return nil
+		}, RequestStop: owner.RequestStop, Stop: owner.Stop})
+	}
+	return svc
+}
+func ProvideLifetimePricingService(cfg *config.Config, remoteClient PricingRemoteClient,
+	lifetime *host.Lifetime) (*PricingService, error) {
+	svc, err := ProvidePricingService(cfg, remoteClient)
+	if err != nil {
+		return nil, err
+	}
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "PricingService", ShutdownOrder: 30, Phase: host.Producers, StartOrder: 15, Constructed: false, Start: func(ctx context.Context) error {
+			if err := svc.Initialize(); err != nil {
+				logger.L().Warn("pricing.initialize_degraded", zap.Error(err))
+			}
+			return svc.Start(ctx)
+		}, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc, nil
+}
+func ProvideLifetimeBillingCacheService(cache BillingCache,
+	userRepo UserRepository,
+	subRepo UserSubscriptionRepository,
+	apiKeyRepo APIKeyRepository,
+	rpmCache UserRPMCache,
+	rateRepo UserGroupRateRepository,
+	cfg *config.Config,
+	userPlatformQuotaRepo UserPlatformQuotaRepository,
+	lifetime *host.Lifetime) *BillingCacheService {
+	svc := ProvideBillingCacheService(cache, userRepo, subRepo, apiKeyRepo, rpmCache, rateRepo, cfg, userPlatformQuotaRepo)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "BillingCacheService", ShutdownOrder: 30, Phase: host.Caches, StartOrder: 5, DrainBeforeUsage: true, Start: svc.Start, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeGatewayService(accountRepo AccountRepository,
+	groupRepo GroupRepository,
+	usageLogRepo UsageLogRepository,
+	usageBillingRepo UsageBillingRepository,
+	userRepo UserRepository,
+	userSubRepo UserSubscriptionRepository,
+	userGroupRateRepo UserGroupRateRepository,
+	cache GatewayCache,
+	cfg *config.Config,
+	schedulerSnapshot *SchedulerSnapshotService,
+	concurrencyService *ConcurrencyService,
+	billingService *BillingService,
+	rateLimitService *RateLimitService,
+	billingCacheService *BillingCacheService,
+	identityService *IdentityService,
+	httpUpstream HTTPUpstream,
+	deferredService *DeferredService,
+	claudeTokenProvider *ClaudeTokenProvider,
+	sessionLimitCache SessionLimitCache,
+	rpmCache RPMCache,
+	digestStore *DigestSessionStore,
+	settingService *SettingService,
+	tlsFPProfileService *TLSFingerprintProfileService,
+	channelService *ChannelService,
+	resolver *ModelPricingResolver,
+	compositeResolver *CompositeRouteResolver,
+	balanceNotifyService *BalanceNotifyService,
+	userPlatformQuotaRepo UserPlatformQuotaRepository,
+	lifetime *host.Lifetime) *GatewayService {
+	svc := NewGatewayService(accountRepo, groupRepo, usageLogRepo, usageBillingRepo, userRepo, userSubRepo, userGroupRateRepo, cache, cfg, schedulerSnapshot, concurrencyService, billingService, rateLimitService, billingCacheService, identityService, httpUpstream, deferredService, claudeTokenProvider, sessionLimitCache, rpmCache, digestStore, settingService, tlsFPProfileService, channelService, resolver, compositeResolver, balanceNotifyService, userPlatformQuotaRepo)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "GatewayService", ShutdownOrder: 10, Phase: host.Caches, StartOrder: 60, Constructed: true, Start: svc.Start, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeOpenAIGatewayService(accountRepo AccountRepository,
+	usageLogRepo UsageLogRepository,
+	usageBillingRepo UsageBillingRepository,
+	userRepo UserRepository,
+	userSubRepo UserSubscriptionRepository,
+	userGroupRateRepo UserGroupRateRepository,
+	cache GatewayCache,
+	cfg *config.Config,
+	schedulerSnapshot *SchedulerSnapshotService,
+	concurrencyService *ConcurrencyService,
+	billingService *BillingService,
+	rateLimitService *RateLimitService,
+	billingCacheService *BillingCacheService,
+	httpUpstream HTTPUpstream,
+	deferredService *DeferredService,
+	openAITokenProvider *OpenAITokenProvider,
+	grokTokenProvider *GrokTokenProvider,
+	resolver *ModelPricingResolver,
+	channelService *ChannelService,
+	balanceNotifyService *BalanceNotifyService,
+	settingService *SettingService,
+	userPlatformQuotaRepo UserPlatformQuotaRepository,
+	lifetime *host.Lifetime) *OpenAIGatewayService {
+	svc := NewOpenAIGatewayService(accountRepo, usageLogRepo, usageBillingRepo, userRepo, userSubRepo, userGroupRateRepo, cache, cfg, schedulerSnapshot, concurrencyService, billingService, rateLimitService, billingCacheService, httpUpstream, deferredService, openAITokenProvider, grokTokenProvider, resolver, channelService, balanceNotifyService, settingService, userPlatformQuotaRepo)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "BPSRecovery", ShutdownOrder: 10, Phase: host.Producers, StartOrder: 40,
+			Start: func(ctx context.Context) error { svc.logOpenAIWSModeBootstrap(); return svc.StartBPS403Recovery(ctx) },
+			Drain: svc.StopBPS403Recovery, Stop: svc.StopBPS403Recovery})
+		images := host.OwnBlockingShutdown("BPSImages", svc.CloseExcelBPSImages, true)
+		lifetime.Add(host.Component{Name: "BPSImages", ShutdownOrder: 12, Phase: host.Producers, Constructed: true, RequestStop: images.RequestStop, Stop: images.Stop})
+		// These owners are installed later during graph construction or lazily
+		// during admitted requests. Do not create a new pool while shutting down.
+		lifetime.Add(host.Component{Name: "OpenAICloudSessions", ShutdownOrder: 10, Phase: host.Producers, Constructed: true,
+			Drain: func(ctx context.Context) error { return svc.cloudSessions.Drain(ctx) },
+			Stop:  func(ctx context.Context) error { return svc.cloudSessions.Stop(ctx) }})
+		lifetime.Add(host.Component{Name: "OpenAIWSPool", ShutdownOrder: 15, Phase: host.Producers, Constructed: true,
+			Drain: func(ctx context.Context) error { return svc.openaiWSPool.Drain(ctx) },
+			Stop:  func(ctx context.Context) error { return svc.openaiWSPool.Stop(ctx) }})
+	}
+	return svc
+}
+func ProvideLifetimeBatchImageCleanupService(repo BatchImageRepository, accountRepo AccountRepository, cfg *config.Config,
+	lifetime *host.Lifetime) *BatchImageCleanupService {
+	svc := ProvideBatchImageCleanupService(repo, accountRepo, cfg)
+	if svc != nil {
+		owner := host.OwnBlockingShutdown("BatchImageCleanupService", func() error {
+			svc.Stop()
+			return nil
+		}, true)
+		lifetime.Add(host.Component{Name: "BatchImageCleanupService", ShutdownOrder: 30, Phase: host.Producers, StartOrder: 50, Constructed: false, Start: func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			svc.Start()
+			return nil
+		}, RequestStop: owner.RequestStop, Stop: owner.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeBatchImageWorkerRuntime(repo BatchImageRepository,
+	accountRepo AccountRepository,
+	queue BatchImageQueue,
+	billingRepo UsageBillingRepository,
+	usageLogRepo UsageLogRepository,
+	pricing *BatchImageModelPricingResolver,
+	authCache APIKeyAuthCacheInvalidator,
+	cfg *config.Config,
+	lifetime *host.Lifetime) *BatchImageWorkerRuntime {
+	svc := ProvideBatchImageWorkerRuntime(repo, accountRepo, queue, billingRepo, usageLogRepo, pricing, authCache, cfg)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "BatchImageWorkerRuntime", ShutdownOrder: 0, Phase: host.Producers, StartOrder: 50, Start: svc.Start, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeOAuthService(repo ProxyRepository, client ClaudeOAuthClient, rdb *redis.Client,
+	lifetime *host.Lifetime) *OAuthService {
+	svc := ProvideVendorCompatibleOAuthService(repo, client, rdb)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "OAuthService", ShutdownOrder: 50, Phase: host.Caches, StartOrder: 12, Start: svc.Start, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeOpenAIOAuthService(accountRepo AccountRepository, encryptor SecretEncryptor, cfg *config.Config,
+	proxyRepo ProxyRepository,
+	oauthClient OpenAIOAuthClient,
+	privacyClientFactory PrivacyClientFactory,
+	redisClient *redis.Client,
+	lifetime *host.Lifetime) *OpenAIOAuthService {
+	svc := ProvideOpenAIOAuthService(accountRepo, encryptor, cfg, proxyRepo, oauthClient, privacyClientFactory, redisClient)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "OpenAIOAuthService", ShutdownOrder: 50, Phase: host.Caches, StartOrder: 12, Start: svc.Start, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeGrokOAuthService(proxyRepo ProxyRepository, oauthClient GrokOAuthClient, cfg *config.Config, redisClient *redis.Client,
+	lifetime *host.Lifetime) *GrokOAuthService {
+	svc := ProvideGrokOAuthService(proxyRepo, oauthClient, cfg, redisClient)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "GrokOAuthService", ShutdownOrder: 50, Phase: host.Caches, StartOrder: 12, Start: svc.Start, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeGeminiOAuthService(proxyRepo ProxyRepository,
+	oauthClient GeminiOAuthClient,
+	codeAssist GeminiCliCodeAssistClient,
+	driveClient geminicli.DriveClient,
+	cfg *config.Config,
+	lifetime *host.Lifetime) *GeminiOAuthService {
+	svc := NewGeminiOAuthService(proxyRepo, oauthClient, codeAssist, driveClient, cfg)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "GeminiOAuthService", ShutdownOrder: 50, Phase: host.Caches, StartOrder: 12, Start: svc.Start, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeGeminiCachedContentService(repo GeminiCachedContentRepository, compat *GeminiMessagesCompatService, cfg *config.Config,
+	lifetime *host.Lifetime) *GeminiCachedContentService {
+	svc := ProvideGeminiCachedContentService(repo, compat, cfg)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "GeminiCachedContentService", ShutdownOrder: 30, Phase: host.Producers, StartOrder: 50, Start: svc.Start, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeAntigravityOAuthService(proxyRepo ProxyRepository,
+	lifetime *host.Lifetime) *AntigravityOAuthService {
+	svc := NewAntigravityOAuthService(proxyRepo)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "AntigravityOAuthService", ShutdownOrder: 50, Phase: host.Caches, StartOrder: 12, Start: svc.Start, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeOpenAIQuotaAutoResetService(accountRepo AccountRepository,
+	quotaService *OpenAIQuotaService,
+	rateLimitService *RateLimitService,
+	idempotency *IdempotencyCoordinator,
+	audit *AuditLogService,
+	settingService *SettingService,
+	leaderLock LeaderLockCache,
+	lifetime *host.Lifetime) *OpenAIQuotaAutoResetService {
+	svc := ProvideOpenAIQuotaAutoResetService(accountRepo, quotaService, rateLimitService, idempotency, audit, settingService, leaderLock)
+	if svc != nil {
+		owner := host.OwnBlockingShutdown("OpenAIQuotaAutoResetService", func() error {
+			svc.Stop()
+			return nil
+		}, true)
+		lifetime.Add(host.Component{Name: "OpenAIQuotaAutoResetService", ShutdownOrder: 0, Phase: host.Producers, StartOrder: 50, Constructed: false, Start: func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			svc.Start()
+			return nil
+		}, RequestStop: owner.RequestStop, Stop: owner.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeCNProviderBalanceCheckService(accountRepo AccountRepository,
+	balanceService *CNProviderBalanceService,
+	quotaService *CNProviderQuotaService,
+	cfg *config.Config,
+	lifetime *host.Lifetime) *CNProviderBalanceCheckService {
+	svc := ProvideCNProviderBalanceCheckService(accountRepo, balanceService, quotaService, cfg)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "CNProviderBalanceCheckService", ShutdownOrder: 30, Phase: host.Producers, StartOrder: 50, Constructed: false, Start: svc.Start, RequestStop: svc.RequestStop, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeUpstreamBillingProbeService(accountRepo AccountRepository,
+	accountTestService *AccountTestService,
+	settingService *SettingService,
+	lockCache LeaderLockCache,
+	db *sql.DB,
+	lifetime *host.Lifetime) *UpstreamBillingProbeService {
+	svc := ProvideUpstreamBillingProbeService(accountRepo, accountTestService, settingService, lockCache, db)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "UpstreamBillingProbeService", ShutdownOrder: 0, Phase: host.Producers, StartOrder: 50, Start: svc.Start, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeOllamaCloudUsageService(accountRepo AccountRepository,
+	httpUpstream HTTPUpstream,
+	settingService *SettingService,
+	encryptor SecretEncryptor,
+	cfg *config.Config,
+	lockCache LeaderLockCache,
+	db *sql.DB,
+	lifetime *host.Lifetime) *OllamaCloudUsageService {
+	svc := ProvideOllamaCloudUsageService(accountRepo, httpUpstream, settingService, encryptor, cfg, lockCache, db)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "OllamaCloudUsageService", ShutdownOrder: 0, Phase: host.Producers, StartOrder: 50, Start: svc.Start, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeOpenCodeGoUsageService(accountRepo AccountRepository,
+	httpUpstream HTTPUpstream,
+	settingService *SettingService,
+	lockCache LeaderLockCache,
+	db *sql.DB,
+	lifetime *host.Lifetime) *OpenCodeGoUsageService {
+	svc := ProvideOpenCodeGoUsageService(accountRepo, httpUpstream, settingService, lockCache, db)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "OpenCodeGoUsageService", ShutdownOrder: 0, Phase: host.Producers, StartOrder: 50, Start: svc.Start, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeBackupService(settingRepo SettingRepository,
+	cfg *config.Config,
+	encryptor SecretEncryptor,
+	storeFactory BackupObjectStoreFactory,
+	dumper DBDumper,
+	lockCache LeaderLockCache,
+	db *sql.DB,
+	lifetime *host.Lifetime) *BackupService {
+	svc := ProvideBackupService(settingRepo, cfg, encryptor, storeFactory, dumper, lockCache, db)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "BackupService", ShutdownOrder: 0, Phase: host.Producers, StartOrder: 50, Start: svc.Start, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeOpsSystemLogSink(opsRepo OpsRepository,
+	lifetime *host.Lifetime) *OpsSystemLogSink {
+	svc := ProvideOpsSystemLogSink(opsRepo)
+	if svc != nil {
+		owner := host.OwnBlockingShutdown("OpsSystemLogSink", func() error {
+			svc.Stop()
+			return nil
+		}, true)
+		lifetime.Add(host.Component{Name: "OpsSystemLogSink", ShutdownOrder: 30, Phase: host.Observations, StartOrder: 0, Constructed: false, Start: func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			svc.Start()
+			return nil
+		}, RequestStop: owner.RequestStop, Stop: owner.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeOpsService(opsRepo OpsRepository,
+	settingRepo SettingRepository,
+	cfg *config.Config,
+	accountRepo AccountRepository,
+	userRepo UserRepository,
+	concurrencyService *ConcurrencyService,
+	gatewayService *GatewayService,
+	openAIGatewayService *OpenAIGatewayService,
+	geminiCompatService *GeminiMessagesCompatService,
+	antigravityGatewayService *AntigravityGatewayService,
+	systemLogSink *OpsSystemLogSink,
+	settingService *SettingService,
+	authCacheInvalidationWorker *AuthCacheInvalidationWorker,
+	apiKeyService *APIKeyService,
+	opsMetricsCollector *OpsMetricsCollector,
+	lifetime *host.Lifetime) *OpsService {
+	svc := ProvideOpsService(opsRepo, settingRepo, cfg, accountRepo, userRepo, concurrencyService, gatewayService, openAIGatewayService, geminiCompatService, antigravityGatewayService, systemLogSink, settingService, authCacheInvalidationWorker, apiKeyService)
+	if gatewayService != nil {
+		// Bind settings during construction; the host starts telemetry after Ops.
+		gatewayService.telemetrySettings = svc
+	}
+	if svc != nil {
+		svc.nodeMetrics = opsMetricsCollector
+		owner := host.OwnBlockingShutdown("OpsService", func() error {
+			svc.StopRuntimeSettingsRefresh()
+			return nil
+		}, true)
+		lifetime.Add(host.Component{Name: "OpsService", ShutdownOrder: 30, Phase: host.Producers, StartOrder: 50, Constructed: false, Start: func(ctx context.Context) error { svc.StartRuntimeSettingsRefresh(ctx); return nil }, RequestStop: owner.RequestStop, Stop: owner.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeOpsIngressRejectAggregator(opsRepo OpsRepository, opsService *OpsService,
+	lifetime *host.Lifetime) *OpsIngressRejectAggregator {
+	svc := ProvideOpsIngressRejectAggregator(opsRepo, opsService)
+	if svc != nil {
+		owner := host.OwnBlockingShutdown("OpsIngressRejectAggregator", func() error {
+			svc.Stop()
+			return nil
+		}, true)
+		lifetime.Add(host.Component{Name: "OpsIngressRejectAggregator", ShutdownOrder: 30, Phase: host.Producers, StartOrder: 50, Constructed: false, Start: func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			svc.Start()
+			return nil
+		}, RequestStop: owner.RequestStop, Stop: owner.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeAuditLogService(repo AuditLogRepository, settingService *SettingService,
+	lifetime *host.Lifetime) *AuditLogService {
+	svc := ProvideAuditLogService(repo, settingService)
+	if svc != nil {
+		owner := host.OwnBlockingShutdown("AuditLogService", func() error {
+			svc.Stop()
+			return nil
+		}, true)
+		lifetime.Add(host.Component{Name: "AuditLogService", ShutdownOrder: 30, Phase: host.Observations, StartOrder: 0, Constructed: false, Start: func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			svc.Start()
+			return nil
+		}, RequestStop: owner.RequestStop, Stop: owner.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeOpsMetricsCollector(opsRepo OpsRepository,
+	settingRepo SettingRepository,
+	accountRepo AccountRepository,
+	concurrencyService *ConcurrencyService,
+	db *sql.DB,
+	redisClient *redis.Client,
+	cfg *config.Config,
+	lifetime *host.Lifetime) *OpsMetricsCollector {
+	svc := ProvideOpsMetricsCollector(opsRepo, settingRepo, accountRepo, concurrencyService, db, redisClient, cfg)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "OpsMetricsCollector", ShutdownOrder: 30, Phase: host.Producers, StartOrder: 50, Start: svc.Start, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeOpsAggregationService(opsRepo OpsRepository,
+	settingRepo SettingRepository,
+	db *sql.DB,
+	redisClient *redis.Client,
+	cfg *config.Config,
+	lifetime *host.Lifetime) *OpsAggregationService {
+	svc := ProvideOpsAggregationService(opsRepo, settingRepo, db, redisClient, cfg)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "OpsAggregationService", ShutdownOrder: 30, Phase: host.Producers, StartOrder: 50, Start: svc.Start, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeOpsAlertEvaluatorService(opsService *OpsService,
+	opsRepo OpsRepository,
+	emailService *EmailService,
+	redisClient *redis.Client,
+	cfg *config.Config,
+	proxyRepo ProxyRepository,
+	lifetime *host.Lifetime) *OpsAlertEvaluatorService {
+	svc := ProvideOpsAlertEvaluatorService(opsService, opsRepo, emailService, redisClient, cfg, proxyRepo)
+	if svc != nil {
+		owner := host.OwnBlockingShutdown("OpsAlertEvaluatorService", func() error {
+			svc.Stop()
+			return nil
+		}, true)
+		lifetime.Add(host.Component{Name: "OpsAlertEvaluatorService", ShutdownOrder: 30, Phase: host.Producers, StartOrder: 50, Constructed: false, Start: func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			svc.Start()
+			return nil
+		}, RequestStop: owner.RequestStop, Stop: owner.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeOpsCleanupService(opsRepo OpsRepository,
+	db *sql.DB,
+	redisClient *redis.Client,
+	cfg *config.Config,
+	channelMonitorSvc *ChannelMonitorService,
+	settingRepo SettingRepository,
+	opsService *OpsService,
+	lifetime *host.Lifetime) *OpsCleanupService {
+	svc := ProvideOpsCleanupService(opsRepo, db, redisClient, cfg, channelMonitorSvc, settingRepo, opsService)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "OpsCleanupService", ShutdownOrder: 30, Phase: host.Producers, StartOrder: 50, Start: svc.Start, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeOpsScheduledReportService(opsService *OpsService,
+	userService *UserService,
+	emailService *EmailService,
+	redisClient *redis.Client,
+	cfg *config.Config,
+	lifetime *host.Lifetime) *OpsScheduledReportService {
+	svc := ProvideOpsScheduledReportService(opsService, userService, emailService, redisClient, cfg)
+	if svc != nil {
+		owner := host.OwnBlockingShutdown("OpsScheduledReportService", func() error {
+			svc.Stop()
+			return nil
+		}, true)
+		lifetime.Add(host.Component{Name: "OpsScheduledReportService", ShutdownOrder: 30, Phase: host.Producers, StartOrder: 50, Constructed: false, Start: func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			svc.Start()
+			return nil
+		}, RequestStop: owner.RequestStop, Stop: owner.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeEmailQueueService(emailService *EmailService,
+	lifetime *host.Lifetime) *EmailQueueService {
+	svc := ProvideEmailQueueService(emailService)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "EmailQueueService", ShutdownOrder: 60, Phase: host.Producers, StartOrder: 25, Constructed: false, Start: svc.Start, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeSubscriptionService(groupRepo GroupRepository, userSubRepo UserSubscriptionRepository, billingCacheService *BillingCacheService, entClient *dbent.Client, cfg *config.Config,
+	lifetime *host.Lifetime) *SubscriptionService {
+	svc := NewSubscriptionService(groupRepo, userSubRepo, billingCacheService, entClient, cfg)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "SubscriptionService", ShutdownOrder: 50, Phase: host.Producers, StartOrder: 10, Constructed: false, Start: svc.Start, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeConcurrencyService(cache ConcurrencyCache, accountRepo AccountRepository, cfg *config.Config,
+	lifetime *host.Lifetime) *ConcurrencyService {
+	svc := ProvideConcurrencyService(cache, accountRepo, cfg)
+	if svc != nil {
+		owner := host.OwnBlockingShutdown("ConcurrencyService", func() error {
+			svc.StopSlotCleanupWorker()
+			return nil
+		}, true)
+		lifetime.Add(host.Component{Name: "ConcurrencyService", ShutdownOrder: 30, Phase: host.Producers, StartOrder: 50, Constructed: false, Start: func(ctx context.Context) error {
+			if err := svc.CleanupStaleProcessSlots(ctx); err != nil {
+				logger.L().Warn("concurrency.startup_cleanup", zap.Error(err))
+			}
+			if cfg != nil {
+				svc.StartSlotCleanupWorker(accountRepo, cfg.Gateway.Scheduling.SlotCleanupInterval)
+			}
+			return nil
+		}, RequestStop: owner.RequestStop, Stop: owner.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeUserMessageQueueService(cache UserMsgQueueCache, rpmCache RPMCache, cfg *config.Config,
+	lifetime *host.Lifetime) *UserMessageQueueService {
+	svc := ProvideUserMessageQueueService(cache, rpmCache, cfg)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "UserMessageQueueService", ShutdownOrder: 30, Phase: host.Producers, StartOrder: 50, Start: svc.Start, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeUsageRecordWorkerPool(cfg *config.Config, db *sql.DB, repo UsageBillingRepository, billing *BillingService, resolver *ModelPricingResolver, groups GroupRepository, cache BillingCache, keys *APIKeyService,
+	lifetime *host.Lifetime) *host.UsageWorker {
+	svc := ProvideUsageRecordWorkerPool(cfg, db, repo, billing, resolver, groups, cache, keys)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "UsageRecordWorkerPool", ShutdownOrder: 30, Phase: host.Usage, StartOrder: 20, Constructed: false, Start: svc.Start, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeSchedulerSnapshotService(cache SchedulerCache,
+	outboxRepo SchedulerOutboxRepository,
+	accountRepo AccountRepository,
+	groupRepo GroupRepository,
+	cfg *config.Config,
+	lifetime *host.Lifetime) *SchedulerSnapshotService {
+	svc := ProvideSchedulerSnapshotService(cache, outboxRepo, accountRepo, groupRepo, cfg)
+	if svc != nil {
+		owner := host.OwnBlockingShutdown("SchedulerSnapshotService", func() error {
+			svc.Stop()
+			return nil
+		}, true)
+		lifetime.Add(host.Component{Name: "SchedulerSnapshotService", ShutdownOrder: 30, Phase: host.Producers, StartOrder: 50, Constructed: false, Start: func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			svc.Start()
+			return nil
+		}, RequestStop: owner.RequestStop, Stop: owner.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeTokenRefreshService(accountRepo AccountRepository,
+	oauthService *OAuthService,
+	openaiOAuthService *OpenAIOAuthService,
+	geminiOAuthService *GeminiOAuthService,
+	antigravityOAuthService *AntigravityOAuthService,
+	grokOAuthService *GrokOAuthService,
+	cacheInvalidator TokenCacheInvalidator,
+	schedulerCache SchedulerCache,
+	cfg *config.Config,
+	tempUnschedCache TempUnschedCache,
+	privacyClientFactory PrivacyClientFactory,
+	proxyRepo ProxyRepository,
+	refreshAPI *OAuthRefreshAPI,
+	runtimeBlocker AccountRuntimeBlocker,
+	lifetime *host.Lifetime) *TokenRefreshService {
+	svc := ProvideTokenRefreshService(accountRepo, oauthService, openaiOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, cacheInvalidator, schedulerCache, cfg, tempUnschedCache, privacyClientFactory, proxyRepo, refreshAPI, runtimeBlocker)
+	if svc != nil {
+		owner := host.OwnBlockingShutdown("TokenRefreshService", func() error {
+			svc.Stop()
+			return nil
+		}, true)
+		lifetime.Add(host.Component{Name: "TokenRefreshService", ShutdownOrder: 30, Phase: host.Producers, StartOrder: 50, Constructed: false, Start: func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			svc.Start()
+			return nil
+		}, RequestStop: owner.RequestStop, Stop: owner.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeAccountExpiryService(accountRepo AccountRepository,
+	lifetime *host.Lifetime) *AccountExpiryService {
+	svc := ProvideAccountExpiryService(accountRepo)
+	if svc != nil {
+		owner := host.OwnBlockingShutdown("AccountExpiryService", func() error {
+			svc.Stop()
+			return nil
+		}, true)
+		lifetime.Add(host.Component{Name: "AccountExpiryService", ShutdownOrder: 30, Phase: host.Producers, StartOrder: 50, Constructed: false, Start: func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			svc.Start()
+			return nil
+		}, RequestStop: owner.RequestStop, Stop: owner.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeOpenAICodexVersionSyncService(settingRepo SettingRepository,
+	settingService *SettingService,
+	githubClient GitHubReleaseClient,
+	lifetime *host.Lifetime) *OpenAICodexVersionSyncService {
+	svc := ProvideOpenAICodexVersionSyncService(settingRepo, settingService, githubClient)
+	if svc != nil {
+		owner := host.OwnBlockingShutdown("OpenAICodexVersionSyncService", func() error {
+			svc.Stop()
+			return nil
+		}, true)
+		lifetime.Add(host.Component{Name: "OpenAICodexVersionSyncService", ShutdownOrder: 30, Phase: host.Producers, StartOrder: 50, Constructed: false, Start: func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			svc.Start()
+			return nil
+		}, RequestStop: owner.RequestStop, Stop: owner.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeClaudeCodeVersionSyncService(settingRepo SettingRepository,
+	settingService *SettingService,
+	githubClient GitHubReleaseClient,
+	lifetime *host.Lifetime) *ClaudeCodeVersionSyncService {
+	svc := ProvideClaudeCodeVersionSyncService(settingRepo, settingService, githubClient)
+	if svc != nil {
+		owner := host.OwnBlockingShutdown("ClaudeCodeVersionSyncService", func() error {
+			svc.Stop()
+			return nil
+		}, true)
+		lifetime.Add(host.Component{Name: "ClaudeCodeVersionSyncService", ShutdownOrder: 30, Phase: host.Producers, StartOrder: 50, Constructed: false, Start: func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			svc.Start()
+			return nil
+		}, RequestStop: owner.RequestStop, Stop: owner.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeProxyExpiryService(proxyRepo ProxyRepository,
+	lifetime *host.Lifetime) *ProxyExpiryService {
+	svc := ProvideProxyExpiryService(proxyRepo)
+	if svc != nil {
+		owner := host.OwnBlockingShutdown("ProxyExpiryService", func() error {
+			svc.Stop()
+			return nil
+		}, true)
+		lifetime.Add(host.Component{Name: "ProxyExpiryService", ShutdownOrder: 30, Phase: host.Producers, StartOrder: 50, Constructed: false, Start: func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			svc.Start()
+			return nil
+		}, RequestStop: owner.RequestStop, Stop: owner.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeSubscriptionExpiryService(userSubRepo UserSubscriptionRepository, settingRepo SettingRepository, notificationEmailService *NotificationEmailService, lockCache LeaderLockCache, db *sql.DB,
+	lifetime *host.Lifetime) *SubscriptionExpiryService {
+	svc := ProvideSubscriptionExpiryService(userSubRepo, settingRepo, notificationEmailService, lockCache, db)
+	if svc != nil {
+		owner := host.OwnBlockingShutdown("SubscriptionExpiryService", func() error {
+			svc.Stop()
+			return nil
+		}, true)
+		lifetime.Add(host.Component{Name: "SubscriptionExpiryService", ShutdownOrder: 30, Phase: host.Producers, StartOrder: 50, Constructed: false, Start: func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			svc.Start()
+			return nil
+		}, RequestStop: owner.RequestStop, Stop: owner.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeTimingWheelService(lifetime *host.Lifetime) (*TimingWheelService, error) {
+	svc, err := ProvideTimingWheelService()
+	if err != nil {
+		return nil, err
+	}
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "TimingWheelService", Phase: host.Caches, ShutdownOrder: 90, StartOrder: 10, Start: svc.Start, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc, nil
+}
+func ProvideLifetimeDashboardAggregationService(repo DashboardAggregationRepository, timingWheel *TimingWheelService, lockCache LeaderLockCache, db *sql.DB, cfg *config.Config, settingRepo SettingRepository,
+	lifetime *host.Lifetime) *DashboardAggregationService {
+	svc := ProvideDashboardAggregationService(repo, timingWheel, lockCache, db, cfg, settingRepo)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "DashboardAggregationService", ShutdownOrder: 35, Phase: host.Producers, StartOrder: 50, Start: svc.Start, RequestStop: svc.RequestStop, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeUsageCleanupService(repo UsageCleanupRepository, timingWheel *TimingWheelService, dashboardAgg *DashboardAggregationService, cfg *config.Config,
+	lifetime *host.Lifetime) *UsageCleanupService {
+	svc := ProvideUsageCleanupService(repo, timingWheel, dashboardAgg, cfg)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "UsageCleanupService", ShutdownOrder: 30, Phase: host.Producers, StartOrder: 50, Start: svc.Start, RequestStop: svc.RequestStop, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeDeferredService(accountRepo AccountRepository, timingWheel *TimingWheelService,
+	lifetime *host.Lifetime) *DeferredService {
+	svc := ProvideDeferredService(accountRepo, timingWheel)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "DeferredService", ShutdownOrder: 20, Phase: host.Caches, StartOrder: 50, Start: svc.Start, RequestStop: svc.RequestStop, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimePluginManager(repo PluginRepository, encryptor SecretEncryptor, cfg *config.Config, hostInfo PluginHostInfo, kvStore PluginKVStore, gateway *OpenAIGatewayService,
+	lifetime *host.Lifetime) *PluginManager {
+	svc := ProvidePluginManager(repo, encryptor, cfg, hostInfo, kvStore, gateway)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "PluginManager", ShutdownOrder: 20, Phase: host.Producers, StartOrder: 50, Constructed: false, Start: svc.Start, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeIdempotencyCleanupService(repo IdempotencyRepository, cfg *config.Config,
+	lifetime *host.Lifetime) *IdempotencyCleanupService {
+	svc := ProvideIdempotencyCleanupService(repo, cfg)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "IdempotencyCleanupService", ShutdownOrder: 30, Phase: host.Producers, StartOrder: 50, Start: svc.Start, RequestStop: svc.RequestStop, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeScheduledTestRunnerService(planRepo ScheduledTestPlanRepository,
+	scheduledSvc *ScheduledTestService,
+	accountTestSvc *AccountTestService,
+	rateLimitSvc *RateLimitService,
+	cfg *config.Config,
+	lifetime *host.Lifetime) *ScheduledTestRunnerService {
+	svc := ProvideScheduledTestRunnerService(planRepo, scheduledSvc, accountTestSvc, rateLimitSvc, cfg)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "ScheduledTestRunnerService", ShutdownOrder: 0, Phase: host.Producers, StartOrder: 50, Start: svc.Start, RequestStop: svc.RequestStop, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeContentModerationService(settingRepo SettingRepository,
+	repo ContentModerationRepository,
+	hashCache ContentModerationHashCache,
+	groupRepo GroupRepository,
+	userRepo UserRepository,
+	proxyRepo ProxyRepository,
+	authCacheInvalidator APIKeyAuthCacheInvalidator,
+	emailService *EmailService,
+	lifetime *host.Lifetime) *ContentModerationService {
+	svc := NewContentModerationService(settingRepo, repo, hashCache, groupRepo, userRepo, proxyRepo, authCacheInvalidator, emailService)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "ContentModerationService", ShutdownOrder: 40, Phase: host.Producers, StartOrder: 50, Constructed: false, Start: svc.Start, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimePaymentOrderExpiryService(paymentSvc *PaymentService, lockCache LeaderLockCache, db *sql.DB,
+	lifetime *host.Lifetime) *PaymentOrderExpiryService {
+	svc := ProvidePaymentOrderExpiryService(paymentSvc, lockCache, db)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "PaymentOrderExpiryService", ShutdownOrder: 30, Phase: host.Producers, StartOrder: 50, Constructed: false, Start: svc.Start, RequestStop: svc.RequestStop, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeChannelMonitorRunner(monitor *ChannelMonitorService,
+	settingService *SettingService,
+	quotaFetcher *ChannelMonitorQuotaFetcher,
+	lifetime *host.Lifetime) *ChannelMonitorRunner {
+	svc := ProvideChannelMonitorRunner(monitor, settingService, quotaFetcher)
+	if svc != nil {
+		owner := host.OwnBlockingShutdown("ChannelMonitorRunner", func() error {
+			svc.Stop()
+			return nil
+		}, true)
+		lifetime.Add(host.Component{Name: "ChannelMonitorRunner", ShutdownOrder: 0, Phase: host.Producers, StartOrder: 50, Constructed: false, Start: func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			svc.Start()
+			return nil
+		}, RequestStop: owner.RequestStop, Stop: owner.Stop})
+	}
+	return svc
+}
+func ProvideLifetimeChannelMonitorV2Aggregator(repo ChannelMonitorV2Repository, db *sql.DB, settingService *SettingService,
+	lifetime *host.Lifetime) *ChannelMonitorV2Aggregator {
+	svc := ProvideChannelMonitorV2Aggregator(repo, db, settingService)
+	if svc != nil {
+		lifetime.Add(host.Component{Name: "ChannelMonitorV2Aggregator", ShutdownOrder: 30, Phase: host.Producers, StartOrder: 50, Start: svc.Start, RequestStop: svc.RequestStop, Drain: svc.Drain, Stop: svc.Stop})
+	}
+	return svc
 }

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/sessionstore"
 	"io"
 	"math"
 	"net/http"
@@ -16,7 +17,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -277,7 +277,7 @@ func geminiCachedContentBoundFromContext(ctx context.Context) bool {
 }
 
 // isGeminiBoundCacheUpstreamPassthrough 判断绑定缓存的请求在上游网关账号上收到的错误是否只反映
-// 上游持有缓存的那个账号的状态（429 / 5xx），不应据此限流或封禁本账号。
+// 上游持有缓存的那个账号的状态（429 / 5xx），不应据此限流或重试本账号。
 func isGeminiBoundCacheUpstreamPassthrough(ctx context.Context, account *Account, statusCode int) bool {
 	if statusCode != http.StatusTooManyRequests && statusCode < http.StatusInternalServerError {
 		return false
@@ -626,46 +626,47 @@ type GeminiCachedContentService struct {
 	cfg    *config.Config
 	now    func() time.Time
 
-	startOnce sync.Once
-	stopOnce  sync.Once
-	stopCh    chan struct{}
+	recovery *sessionstore.Lifecycle
 }
 
 func NewGeminiCachedContentService(repo GeminiCachedContentRepository, compat *GeminiMessagesCompatService, cfg *config.Config) *GeminiCachedContentService {
-	return &GeminiCachedContentService{repo: repo, compat: compat, cfg: cfg, now: time.Now, stopCh: make(chan struct{})}
+	s := &GeminiCachedContentService{repo: repo, compat: compat, cfg: cfg, now: time.Now}
+	s.recovery = sessionstore.NewLifecycle(geminiCachedContentMutationRecoveryInterval, s.runMutationRecovery)
+	return s
 }
 
-// Start 启动后台回滚恢复：定期处理租约已过期仍未清除的修改意图。
-func (s *GeminiCachedContentService) Start() {
+// Start starts recovery only after the repositories and upstream client exist.
+func (s *GeminiCachedContentService) Start(ctx context.Context) error {
 	if s == nil || s.repo == nil {
-		return
+		return errors.New("gemini cached content repository not configured")
 	}
-	s.startOnce.Do(func() { go s.runMutationRecovery() })
+	return s.recovery.Start(ctx)
 }
 
-// Stop 停止后台回滚恢复。
-func (s *GeminiCachedContentService) Stop() {
+// Drain seals recovery/upstream admission and joins already accepted work.
+// HTTP and cache-mutation producers must drain before this dependency.
+func (s *GeminiCachedContentService) Drain(ctx context.Context) error {
 	if s == nil {
-		return
+		return nil
 	}
-	s.stopOnce.Do(func() { close(s.stopCh) })
+	return s.recovery.Drain(ctx)
 }
 
-func (s *GeminiCachedContentService) runMutationRecovery() {
-	ticker := time.NewTicker(geminiCachedContentMutationRecoveryInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-s.stopCh:
-			return
-		case <-ticker.C:
-			recovered, err := s.RecoverStaleMutations(context.Background())
-			if err != nil {
-				logger.LegacyPrintf("service.gemini_cached_content", "Warning: gemini cached content mutation recovery failed (recovered=%d): %v", recovered, err)
-			} else if recovered > 0 {
-				logger.LegacyPrintf("service.gemini_cached_content", "gemini cached content mutation recovery rolled back %d stale mutations", recovered)
-			}
-		}
+// Stop cancels recovery and detached upstream operations and joins their actual
+// completion. A timeout retains the same owner for a subsequent bounded join.
+func (s *GeminiCachedContentService) Stop(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	return s.recovery.Stop(ctx)
+}
+
+func (s *GeminiCachedContentService) runMutationRecovery(ctx context.Context) {
+	recovered, err := s.RecoverStaleMutations(ctx)
+	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, sessionstore.ErrClosed) {
+		logger.LegacyPrintf("service.gemini_cached_content", "Warning: gemini cached content mutation recovery failed (recovered=%d): %v", recovered, err)
+	} else if recovered > 0 {
+		logger.LegacyPrintf("service.gemini_cached_content", "gemini cached content mutation recovery rolled back %d stale mutations", recovered)
 	}
 }
 
@@ -747,6 +748,11 @@ func (m *GeminiCachedContentMutation) Baseline() time.Time {
 // BeginMutation 登记修改 record 有效期的意图并取得租约。同一缓存有进行中的修改，或库中到期时间已不是
 // record.ExpireTime 时返回 ErrGeminiCachedContentMutationConflict；租约已过期的遗留意图先回滚恢复再登记。
 func (s *GeminiCachedContentService) BeginMutation(ctx context.Context, record *GeminiCachedContent) (*GeminiCachedContentMutation, error) {
+	ctx, finish, err := s.recovery.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	for attempt := 0; ; attempt++ {
 		token, err := NewGeminiCachedContentPublicID()
 		if err != nil {
@@ -790,6 +796,11 @@ func (s *GeminiCachedContentService) ReleaseMutation(ctx context.Context, m *Gem
 
 // RecoverStaleMutations 回滚恢复一批租约已过期的修改意图，返回完成恢复的数量。
 func (s *GeminiCachedContentService) RecoverStaleMutations(ctx context.Context) (int, error) {
+	ctx, finish, err := s.recovery.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer finish()
 	listCtx, cancel := context.WithTimeout(ctx, geminiCachedContentMutationRecoveryTimeout)
 	ids, err := s.repo.ListStaleMutations(listCtx, geminiCachedContentMutationRecoveryBatch)
 	cancel()
@@ -799,10 +810,8 @@ func (s *GeminiCachedContentService) RecoverStaleMutations(ctx context.Context) 
 	recovered := 0
 	var errs []error
 	for _, id := range ids {
-		select {
-		case <-s.stopCh:
-			return recovered, errors.Join(errs...)
-		default:
+		if err := ctx.Err(); err != nil {
+			return recovered, errors.Join(append(errs, err)...)
 		}
 		itemCtx, cancel := context.WithTimeout(ctx, geminiCachedContentMutationRecoveryTimeout)
 		ok, err := s.recoverStaleMutation(itemCtx, id)
@@ -1044,7 +1053,12 @@ func (s *GeminiCachedContentService) doUpstream(ctx context.Context, account *Ac
 	if s.compat == nil || s.compat.httpUpstream == nil {
 		return nil, geminiCachedContentNotSent(errors.New("gemini upstream client not configured"))
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	ctx, finish, err := s.recovery.BeginDetached(ctx)
+	if err != nil {
+		return nil, geminiCachedContentNotSent(err)
+	}
+	defer finish()
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	var reader io.Reader
 	if body != nil {
@@ -1084,7 +1098,11 @@ func (s *GeminiCachedContentService) doUpstream(ctx context.Context, account *Ac
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			s.recovery.RecordCloseError(fmt.Errorf("gemini cached content response close: %w", err))
+		}
+	}()
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, geminiCachedContentResponseMaxBytes))
 	success := resp.StatusCode >= 200 && resp.StatusCode < 300
 	if err != nil {
@@ -1151,7 +1169,7 @@ func geminiCachedContentCollectionURL(account *Account, base, mappedModel string
 			return "", fmt.Errorf("invalid vertex location: %s", location)
 		}
 		return fmt.Sprintf("https://%s/v1/projects/%s/locations/%s/cachedContents",
-			geminiCachedContentVertexHost(location), url.PathEscape(projectID), url.PathEscape(location)), nil
+			vertexAPIHost(location), url.PathEscape(projectID), url.PathEscape(location)), nil
 	default:
 		return "", fmt.Errorf("account type %s does not support explicit context caching", account.Type)
 	}
@@ -1173,17 +1191,10 @@ func geminiCachedContentResourceURL(account *Account, base, upstreamName string)
 		if m == nil {
 			return "", fmt.Errorf("invalid upstream cached content name: %s", upstreamName)
 		}
-		return fmt.Sprintf("https://%s/v1/%s", geminiCachedContentVertexHost(m[1]), upstreamName), nil
+		return fmt.Sprintf("https://%s/v1/%s", vertexAPIHost(m[1]), upstreamName), nil
 	default:
 		return "", fmt.Errorf("account type %s does not support explicit context caching", account.Type)
 	}
-}
-
-func geminiCachedContentVertexHost(location string) string {
-	if location == "global" {
-		return "aiplatform.googleapis.com"
-	}
-	return location + "-aiplatform.googleapis.com"
 }
 
 // GeminiCachedContentView 返回客户端可见的缓存元数据。

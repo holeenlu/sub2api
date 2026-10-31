@@ -2,6 +2,13 @@ import { defineConfig, loadEnv, Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import checker from 'vite-plugin-checker'
 import { resolve } from 'path'
+import { sanitizeImageReference } from './src/shared/lib/imageReference.mjs'
+
+// Duplicated on purpose: tsconfig.node.json is a `composite` project scoped to
+// vite.config.ts, so importing src/shared/config/project.ts here would emit brand.js /
+// brand.d.ts into the source tree. Keep in sync with BRAND_TITLE_SUFFIX_EN in
+// src/shared/config/project.ts.
+const BRAND_TITLE_SUFFIX_EN = 'AI API Gateway'
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => ({
@@ -13,34 +20,21 @@ function escapeHtml(value: string): string {
   })[character] || character)
 }
 
-function isSafeImageUrl(value: string): boolean {
-  const trimmed = value.trim()
-  if ((trimmed.startsWith('/') && !trimmed.startsWith('//')) || /^data:image\//i.test(trimmed)) {
-    return true
-  }
-  try {
-    const parsed = new URL(trimmed)
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
-  } catch {
-    return false
-  }
-}
-
 function injectBranding(html: string, config: { site_name?: string; site_logo?: string }): string {
   let brandedHtml = html
   const siteName = config.site_name?.trim()
   if (siteName) {
     brandedHtml = brandedHtml.replace(
       /<title>[^<]*<\/title>/i,
-      `<title>${escapeHtml(siteName)} - AI API Gateway</title>`,
+      () => `<title>${escapeHtml(siteName)} - ${escapeHtml(BRAND_TITLE_SUFFIX_EN)}</title>`,
     )
   }
 
-  const siteLogo = config.site_logo?.trim()
-  if (siteLogo && isSafeImageUrl(siteLogo)) {
+  const siteLogo = sanitizeImageReference(config.site_logo || '')
+  if (siteLogo) {
     brandedHtml = brandedHtml.replace(
       /<link\s+rel=["']icon["'][^>]*>/i,
-      `<link rel="icon" href="${escapeHtml(siteLogo)}" />`,
+      () => `<link rel="icon" href="${escapeHtml(siteLogo)}" />`,
     )
   }
   return brandedHtml
@@ -64,14 +58,31 @@ function injectPublicSettings(backendUrl: string): Plugin {
           if (response.ok) {
             const data = await response.json()
             if (data.code === 0 && data.data) {
-              const script = `<script>window.__APP_CONFIG__=${JSON.stringify(data.data)};</script>`
-              return injectBranding(html, data.data).replace('</head>', `${script}\n</head>`)
+              const serialized = JSON.stringify(data.data).replace(/</g, '\\u003c')
+              const script = `<script>window.__APP_CONFIG__=${serialized};</script>`
+              return injectBranding(html, data.data).replace('</head>', () => `${script}\n</head>`)
             }
           }
         } catch (e) {
           console.warn('[vite] 无法获取公开配置，将回退到 API 调用:', (e as Error).message)
         }
         return html
+      }
+    }
+  }
+}
+
+// Static supplier portals obtain their initial favicon from the same-origin
+// public settings endpoint, before the application settings request finishes.
+function vendorFavicon(enabled: boolean): Plugin {
+  return {
+    name: 'vendor-favicon',
+    transformIndexHtml: {
+      order: 'pre',
+      handler(html) {
+        return enabled
+          ? html.replace(/<link\s+rel=["']icon["'][^>]*>/i, '<link rel="icon" href="/api/v1/settings/favicon" />')
+          : html
       }
     }
   }
@@ -87,20 +98,27 @@ export default defineConfig(({ mode }) => {
     plugins: [
       vue(),
       checker({
+        // Production entrypoints run vue-tsc before Vite; keep live dev checks.
+        enableBuild: false,
         vueTsc: true
       }),
+      vendorFavicon(env.VITE_VENDOR_PORTAL === 'true'),
       injectPublicSettings(backendUrl)
     ],
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
-      // 使用 vue-i18n 运行时版本，避免 CSP unsafe-eval 问题；
-      // v10 起 JIT 编译恒开启，消息编译为 AST 对象而非 JS 代码，无需 unsafe-eval
+      // 使用 vue-i18n 运行时版本，避免 CSP unsafe-eval 问题
       'vue-i18n': 'vue-i18n/dist/vue-i18n.runtime.esm-bundler.js'
     }
   },
+  define: {
+    // 启用 vue-i18n JIT 编译，在 CSP 环境下处理消息插值
+    // JIT 编译器生成 AST 对象而非 JS 代码，无需 unsafe-eval
+    __INTLIFY_JIT_COMPILATION__: true
+  },
   build: {
-    outDir: '../backend/internal/web/dist',
+    outDir: 'dist',
     emptyOutDir: true,
     rollupOptions: {
       output: {
@@ -120,8 +138,13 @@ export default defineConfig(({ mode }) => {
               return 'vendor-vue'
             }
 
-            // UI 工具库（较大，单独分离）
-            if (id.includes('/@vueuse/') || id.includes('/xlsx/')) {
+            // Spreadsheet export is requested on demand; do not pull it into shared UI dependencies.
+            if (id.includes('/xlsx/')) {
+              return 'vendor-xlsx'
+            }
+
+            // UI 工具库
+            if (id.includes('/@vueuse/')) {
               return 'vendor-ui'
             }
 
@@ -140,8 +163,23 @@ export default defineConfig(({ mode }) => {
               return 'vendor-stripe'
             }
 
-            // 其他小型第三方库合并
-            return 'vendor-misc'
+            // Importing the SDK injects payment scripts. Keep it and its tracker
+            // out of the eagerly loaded shared chunk, even on non-payment pages.
+            if (id.includes('/@airwallex/')) {
+              return 'vendor-airwallex'
+            }
+
+            // Cache widely used libraries independently without joining their
+            // loading boundaries to unrelated route-only dependencies.
+            if (id.includes('/axios/')) return 'vendor-http'
+            if (id.includes('/dompurify/')) return 'vendor-sanitize'
+            if (id.includes('/marked/')) return 'vendor-markdown'
+            if (id.includes('/driver.js/')) return 'vendor-tour'
+            if (id.includes('/@tanstack/')) return 'vendor-virtual'
+
+            // Let Rollup share the remaining dependencies by their consumers.
+            // A catch-all chunk would eagerly load route-only editors, QR code
+            // generation and downloads whenever the public HTTP client loads.
           }
 
           // 应用代码：按入口点自动分包，不手动干预

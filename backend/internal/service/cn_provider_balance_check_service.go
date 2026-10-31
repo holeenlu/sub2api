@@ -24,7 +24,7 @@ const cnQuotaProbeConcurrency = 4
 //   - coding plan：调用 CNProviderQuotaService 探测 5h/weekly 滚动窗口并落 extra 快照，
 //     调度阈值评估（cnProviderThresholdCandidates）据此自动停调/恢复。
 //
-// 克隆自 AccountExpiryService 的 Start/Stop/runOnce + ticker 骨架。
+// 周期调度复用维护任务 owner，停止信号传入实际仓储与探测并等待退出。
 // 余额探测仅覆盖有公开余额端点的 kimi / deepseek；智谱无余额端点，仅靠响应式 429/402。
 // 额度探测覆盖 kimi / zhipu 的 coding plan 账号（deepseek 无 coding 套餐）。
 // Command Code 账号一次探测同时刷新窗口快照与积分余额，积分低于阈值时同样临时停调。
@@ -35,13 +35,11 @@ type CNProviderBalanceCheckService struct {
 	quotaService   cnQuotaProber
 	cfg            *config.Config
 	interval       time.Duration
-	stopCh         chan struct{}
-	stopOnce       sync.Once
-	wg             sync.WaitGroup
+	tasks          maintenanceTaskOwner
 }
 
 // NewCNProviderBalanceCheckService 构造周期余额/额度检测服务。
-// interval <= 0 时 Start() 直接返回（不启动），便于通过配置关闭。
+// interval <= 0 时 Start(ctx) 直接返回（不启动），便于通过配置关闭。
 func NewCNProviderBalanceCheckService(
 	accountRepo AccountRepository,
 	balanceService *CNProviderBalanceService,
@@ -55,50 +53,57 @@ func NewCNProviderBalanceCheckService(
 		quotaService:   quotaService,
 		cfg:            cfg,
 		interval:       interval,
-		stopCh:         make(chan struct{}),
 	}
 }
 
-func (s *CNProviderBalanceCheckService) Start() {
-	if s == nil || s.accountRepo == nil || s.balanceService == nil || s.cfg == nil {
-		return
+func (s *CNProviderBalanceCheckService) Start(ctx context.Context) error {
+	if s == nil || s.accountRepo == nil || s.balanceService == nil || s.cfg == nil ||
+		!s.cfg.Gateway.CNProviders.BalanceCheckEnabled || s.interval <= 0 {
+		return nil
 	}
-	if !s.cfg.Gateway.CNProviders.BalanceCheckEnabled {
-		return
-	}
-	if s.interval <= 0 {
-		return
-	}
-	log.Printf("[CNBalance] started (interval=%s threshold=%.2f)", s.interval, s.cfg.Gateway.CNProviders.BalanceThreshold)
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		ticker := time.NewTicker(s.interval)
-		defer ticker.Stop()
-
-		// 启动后先等待一个周期再首次探测，避免与进程启动峰重叠。
-		for {
-			select {
-			case <-ticker.C:
-				s.runOnce()
-			case <-s.stopCh:
-				return
-			}
-		}
-	}()
-}
-
-func (s *CNProviderBalanceCheckService) Stop() {
-	if s == nil {
-		return
-	}
-	s.stopOnce.Do(func() {
-		close(s.stopCh)
+	return s.tasks.start(ctx, func(context.Context) error {
+		log.Printf("[CNBalance] started (interval=%s threshold=%.2f)", s.interval, s.cfg.Gateway.CNProviders.BalanceThreshold)
+		return s.tasks.launch(s.loop)
 	})
-	s.wg.Wait()
 }
 
-func (s *CNProviderBalanceCheckService) runOnce() {
+func (s *CNProviderBalanceCheckService) loop(ctx context.Context) {
+	ticker := time.NewTicker(s.interval)
+	defer ticker.Stop()
+	// Preserve the existing first-cycle delay to avoid startup probe bursts.
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.runOnce(ctx)
+		}
+	}
+}
+
+func (s *CNProviderBalanceCheckService) RequestStop() {
+	if s != nil {
+		s.tasks.seal(true)
+	}
+}
+
+// Periodic probes have no accepted client jobs to finish. Drain cancels their
+// owned IO and joins the actual loop; timeout retains the same completion.
+func (s *CNProviderBalanceCheckService) Drain(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	return s.tasks.stop(ctx)
+}
+
+func (s *CNProviderBalanceCheckService) Stop(ctx context.Context) error {
+	return s.Drain(ctx)
+}
+
+func (s *CNProviderBalanceCheckService) runOnce(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
 	// 收集 coding 探测目标（kimi/deepseek + 智谱）与 payg 检查队列。
 	// coding 探测统一在收集完成后按 4 并发执行：单账号探测 15-20s，串行 ×
 	// 多账号会耗尽整体预算（120s 上限），排在后面的账号快照会饥饿，
@@ -136,7 +141,10 @@ func (s *CNProviderBalanceCheckService) runOnce() {
 		}
 	}
 	for _, platform := range s.platforms() {
-		accounts, err := s.accountRepo.ListByPlatform(context.Background(), platform)
+		if ctx.Err() != nil {
+			return
+		}
+		accounts, err := s.accountRepo.ListByPlatform(ctx, platform)
 		if err != nil {
 			log.Printf("[CNBalance] list %s accounts failed: %v", platform, err)
 			continue
@@ -146,7 +154,10 @@ func (s *CNProviderBalanceCheckService) runOnce() {
 	// 智谱 / MiniMax 无余额端点，仅进额度探测。
 	if s.quotaService != nil {
 		for _, platform := range []string{PlatformZhipu, PlatformMiniMax} {
-			accounts, err := s.accountRepo.ListByPlatform(context.Background(), platform)
+			if ctx.Err() != nil {
+				return
+			}
+			accounts, err := s.accountRepo.ListByPlatform(ctx, platform)
 			if err != nil {
 				log.Printf("[CNBalance] list %s accounts failed: %v", platform, err)
 				continue
@@ -156,18 +167,21 @@ func (s *CNProviderBalanceCheckService) runOnce() {
 	}
 
 	// 预算按工作量放大：4 并发 × 15s/批 + payg 每账号 5s，下限 30s 上限 300s。
-	accountTargets := s.collectAccountProbeTargets()
+	accountTargets := s.collectAccountProbeTargets(ctx)
 	batches := (len(quotaTargets) + len(accountTargets) + cnQuotaProbeConcurrency - 1) / cnQuotaProbeConcurrency
 	timeout := 30*time.Second + time.Duration(batches)*15*time.Second + time.Duration(len(paygTargets))*5*time.Second
 	if timeout > 300*time.Second {
 		timeout = 300 * time.Second
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	threshold := s.cfg.Gateway.CNProviders.BalanceThreshold
 	paused, cleared := 0, 0
 	for _, account := range paygTargets {
+		if ctx.Err() != nil {
+			return
+		}
 		switch s.checkOne(ctx, account, threshold) {
 		case cnBalancePaused:
 			paused++
@@ -183,7 +197,11 @@ func (s *CNProviderBalanceCheckService) runOnce() {
 			wg.Add(1)
 			go func(t quotaTarget) {
 				defer wg.Done()
-				sem <- struct{}{}
+				select {
+				case sem <- struct{}{}:
+				case <-ctx.Done():
+					return
+				}
 				defer func() { <-sem }()
 				s.probeQuota(ctx, t.id, t.platform)
 			}(target)
@@ -199,7 +217,11 @@ func (s *CNProviderBalanceCheckService) runOnce() {
 			wg.Add(1)
 			go func(t accountProbeTarget) {
 				defer wg.Done()
-				sem <- struct{}{}
+				select {
+				case sem <- struct{}{}:
+				case <-ctx.Done():
+					return
+				}
 				defer func() { <-sem }()
 				switch t.check(ctx, t.account, threshold) {
 				case cnBalancePaused:
@@ -234,7 +256,7 @@ type accountProbeTarget struct {
 // 该平台的检测函数。一次探测同时刷新窗口快照与积分余额：
 //   - Command Code：手动可调度的账号再按积分余额停调 / 恢复（窗口快照供阈值停调读取）；
 //   - Cline：探测中按结果设置或解除两个钱包的冷却，不停整个账号。
-func (s *CNProviderBalanceCheckService) collectAccountProbeTargets() []accountProbeTarget {
+func (s *CNProviderBalanceCheckService) collectAccountProbeTargets(ctx context.Context) []accountProbeTarget {
 	if s.quotaService == nil {
 		return nil
 	}
@@ -247,7 +269,10 @@ func (s *CNProviderBalanceCheckService) collectAccountProbeTargets() []accountPr
 		{PlatformCommandCode, (*Account).commandCodeUsageSupported, s.checkCommandCode},
 		{PlatformCline, (*Account).clineAccountAPISupported, s.checkCline},
 	} {
-		accounts, err := s.accountRepo.ListByPlatform(context.Background(), p.platform)
+		if ctx.Err() != nil {
+			return targets
+		}
+		accounts, err := s.accountRepo.ListByPlatform(ctx, p.platform)
 		if err != nil {
 			log.Printf("[CNBalance] list %s accounts failed: %v", p.platform, err)
 			continue

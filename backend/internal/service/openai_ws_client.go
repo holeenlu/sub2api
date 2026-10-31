@@ -2,11 +2,16 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/gateway/model"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyutil"
+	native "github.com/Wei-Shaw/sub2api/internal/providers/openai"
 	"io"
+	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,10 +19,11 @@ import (
 
 	openaiwsv2 "github.com/Wei-Shaw/sub2api/internal/service/openai_ws_v2"
 	coderws "github.com/coder/websocket"
-	"github.com/coder/websocket/wsjson"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
-const openAIWSMessageReadLimitBytes int64 = 16 * 1024 * 1024
+const openAIWSMessageReadLimitBytes int64 = 64 * 1024 * 1024
 const (
 	openAIWSProxyTransportMaxIdleConns        = 128
 	openAIWSProxyTransportMaxIdleConnsPerHost = 64
@@ -140,6 +146,20 @@ func (d *coderOpenAIWSClientDialer) Dial(
 		opts.HTTPClient = proxyClient
 	}
 
+	// Retain the existing HTTP client/proxy/TLS configuration. The per-dial
+	// adapter only wraps the successfully upgraded duplex body, where coder
+	// flushes WS bytes while holding its actual data/control frame write lock.
+	baseClient := opts.HTTPClient
+	if baseClient == nil {
+		baseClient = http.DefaultClient
+	}
+	guardedClient := *baseClient
+	baseTransport := guardedClient.Transport
+	if baseTransport == nil {
+		baseTransport = http.DefaultTransport
+	}
+	guardedClient.Transport = &openAIWSUpgradeTransport{base: baseTransport, connection: wrapped}
+	opts.HTTPClient = &guardedClient
 	conn, resp, err := coderws.Dial(ctx, targetURL, opts)
 	if err != nil {
 		status := 0
@@ -174,7 +194,7 @@ func (d *coderOpenAIWSClientDialer) proxyHTTPClient(proxy string) (*http.Client,
 	if normalizedProxy == "" {
 		return nil, errors.New("proxy url is empty")
 	}
-	parsedProxyURL, err := url.Parse(normalizedProxy)
+	_, parsedProxyURL, err := proxyurl.Parse(normalizedProxy)
 	if err != nil {
 		return nil, fmt.Errorf("invalid proxy url: %w", err)
 	}
@@ -189,6 +209,7 @@ func (d *coderOpenAIWSClientDialer) proxyHTTPClient(proxy string) (*http.Client,
 	}
 	d.cleanupProxyClientsLocked(now)
 	transport := &http.Transport{
+		DialContext:         (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 		Proxy:               http.ProxyURL(parsedProxyURL),
 		MaxIdleConns:        openAIWSProxyTransportMaxIdleConns,
 		MaxIdleConnsPerHost: openAIWSProxyTransportMaxIdleConnsPerHost,
@@ -197,6 +218,12 @@ func (d *coderOpenAIWSClientDialer) proxyHTTPClient(proxy string) (*http.Client,
 		ForceAttemptHTTP2:   true,
 	}
 	client := &http.Client{Transport: transport}
+	if err := proxyutil.ConfigureTransportProxy(transport, parsedProxyURL); err != nil {
+		return nil, err
+	}
+	if proxyutil.IsVendorProxy(parsedProxyURL) {
+		client.CheckRedirect = proxyutil.VendorRedirectPolicy(client.CheckRedirect)
+	}
 	d.proxyClients[normalizedProxy] = &openAIWSProxyClientEntry{
 		client:           client,
 		lastUsedUnixNano: now,
@@ -289,8 +316,22 @@ func (d *coderOpenAIWSClientDialer) SnapshotTransportMetrics() OpenAIWSTransport
 }
 
 type coderOpenAIWSClientConn struct {
-	conn          *coderws.Conn
-	upstreamPings atomic.Int64
+	handshakeURL            string
+	handshakeRequestHeaders http.Header
+	wire                    *openAIWSGuardedBody
+	conn                    *coderws.Conn
+	upstreamPings           atomic.Int64
+}
+
+// The successful upgrade's final request includes the actual redirect target
+// and the headers the controlled client handed to transport. It is immutable.
+func (c *coderOpenAIWSClientConn) takeNativeHandshakeRequest() (string, http.Header) {
+	if c == nil {
+		return "", nil
+	}
+	headers := c.handshakeRequestHeaders
+	c.handshakeRequestHeaders = nil
+	return c.handshakeURL, headers
 }
 
 func (c *coderOpenAIWSClientConn) UpstreamPingCount() int64 {
@@ -309,7 +350,19 @@ func (c *coderOpenAIWSClientConn) WriteJSON(ctx context.Context, value any) erro
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return wsjson.Write(ctx, c.conn, value)
+	// 转发器已生成最终 JSON，直接写入同一帧，避免再次编码整份长对话。
+	// 保持 WriteJSON 的合法 JSON 合同，不能把无效 RawMessage 发到上游。
+	if raw, ok := value.(json.RawMessage); ok && raw != nil {
+		if !json.Valid(raw) {
+			return errors.New("invalid websocket JSON payload")
+		}
+		return c.WriteFrame(ctx, coderws.MessageText, raw)
+	}
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return c.WriteFrame(ctx, coderws.MessageText, payload)
 }
 
 func (c *coderOpenAIWSClientConn) ReadMessage(ctx context.Context) ([]byte, error) {
@@ -353,7 +406,132 @@ func (c *coderOpenAIWSClientConn) WriteFrame(ctx context.Context, msgType coderw
 	if ctx == nil {
 		ctx = context.Background()
 	}
+
+	// Raw entry points carry controls only. Every response.create, including
+	// generate:false, must arrive through the concrete permit-aware writer.
+	if msgType == coderws.MessageText || msgType == coderws.MessageBinary {
+		create, err := nativeWSIsCreate(payload)
+		if err != nil {
+			return err
+		}
+		if create {
+			return native.ErrInvalidWSPreparation
+		}
+	}
+	// Each upstream socket carries one lane. Strip only at this final boundary:
+	// local cancellation, history and ownership still need the original envelope.
+	if (msgType == coderws.MessageText || msgType == coderws.MessageBinary) && gjson.GetBytes(payload, "stream_id").Exists() {
+		var err error
+		payload, err = sjson.DeleteBytes(payload, "stream_id")
+		if err != nil {
+			return err
+		}
+	}
 	return c.conn.Write(ctx, msgType, payload)
+}
+
+// WriteWS holds the existing message writer. Begin fences its acquisition;
+// openAIWSGuardedBody fences the subsequent inner frame-write mutex as well.
+// Denial never flushes Writer.Close: only this exclusive socket is retired.
+func (c *coderOpenAIWSClientConn) WriteWS(ctx context.Context, write *native.WSWrite) (model.SendState, error) {
+	if c == nil || c.conn == nil || c.wire == nil || ctx == nil || write == nil {
+		return model.SendNotSent, native.ErrInvalidWSPreparation
+	}
+	writer, err := c.conn.Writer(ctx, coderws.MessageType(write.MessageType()))
+	if err != nil {
+		return model.SendNotSent, err
+	}
+	// A previous message has finished all physical writes before this message
+	// lock becomes available. Its deferred cleanup cannot clear our new gate.
+	c.wire.active.Store(nil)
+	payload, err := write.Begin(ctx)
+	if err != nil {
+		return model.SendNotSent, errors.Join(err, c.conn.CloseNow())
+	}
+	gate := &openAIWSPhysicalWrite{ctx: ctx, write: write}
+	c.wire.active.Store(gate)
+	defer c.wire.active.CompareAndSwap(gate, nil)
+	fail := func(err error) (model.SendState, error) {
+		state := model.SendAmbiguous
+		if refused := gate.refused.Load(); refused != nil && !gate.invoked.Load() {
+			state = model.SendNotSent
+			err = errors.Join(err, refused.err)
+		}
+		return state, errors.Join(err, c.conn.CloseNow())
+	}
+	// The bytes/opcode are sealed; do not perform legacy envelope rewriting.
+	if _, err := writer.Write(payload); err != nil {
+		return fail(err)
+	}
+	if err := writer.Close(); err != nil {
+		return fail(err)
+	}
+	return model.SendSent, nil
+}
+
+type openAIWSUpgradeTransport struct {
+	base       http.RoundTripper
+	connection *coderOpenAIWSClientConn
+}
+
+func (t *openAIWSUpgradeTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	response, err := t.base.RoundTrip(request)
+	if err != nil || response == nil || response.StatusCode != http.StatusSwitchingProtocols {
+		return response, err
+	}
+	duplex, ok := response.Body.(io.ReadWriteCloser)
+	if !ok {
+		return response, nil
+	} // coder rejects an invalid upgrade body.
+	body := &openAIWSGuardedBody{ReadWriteCloser: duplex}
+	t.connection.wire = body
+	target := *request.URL
+	if target.Scheme == "http" {
+		target.Scheme = "ws"
+	} else if target.Scheme == "https" {
+		target.Scheme = "wss"
+	}
+	t.connection.handshakeURL = target.String()
+	t.connection.handshakeRequestHeaders = cloneHeader(request.Header)
+	response.Body = body
+	return response, nil
+}
+
+type openAIWSWriteRefusal struct{ err error }
+type openAIWSPhysicalWrite struct {
+	ctx     context.Context
+	write   *native.WSWrite
+	invoked atomic.Bool
+	refused atomic.Pointer[openAIWSWriteRefusal]
+}
+
+// This is the original upgraded byte stream, not another connection or writer
+// coordinator. coder calls Write under writeFrameMu, including buffered flushes
+// and compressed frames. At the start of a message the buffer begins with a
+// data/continuation opcode (0..2) or a control opcode (8..10). coder always
+// flushes each control frame under writeFrameMu, so a control-first flush cannot
+// also contain a later data frame. If buffered data precedes a control, its data
+// header is first and is fenced here. No payload/body protocol is reinterpreted.
+// Return refusal without I/O; CloseNow/join belongs to
+// WriteWS after coder has released that mutex, avoiding a close-under-lock deadlock.
+type openAIWSGuardedBody struct {
+	io.ReadWriteCloser
+	active atomic.Pointer[openAIWSPhysicalWrite]
+}
+
+func (b *openAIWSGuardedBody) Write(payload []byte) (int, error) {
+	if gate := b.active.Load(); gate != nil && len(payload) != 0 && payload[0]&0x0f <= 2 {
+		if err := gate.write.RevalidateWrite(gate.ctx); err != nil {
+			gate.refused.CompareAndSwap(nil, &openAIWSWriteRefusal{err: err})
+			return 0, err
+		}
+		gate.invoked.Store(true)
+		// This is the linearization point of the admitted send, not permission for
+		// another message. Later fragments retain the same write context; unrelated
+		// pongs must not recheck a first-output permission after output is committed.
+		b.active.CompareAndSwap(gate, nil)
+	}
+	return b.ReadWriteCloser.Write(payload)
 }
 
 func (c *coderOpenAIWSClientConn) Ping(ctx context.Context) error {

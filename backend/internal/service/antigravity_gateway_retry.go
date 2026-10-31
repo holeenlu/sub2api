@@ -122,6 +122,9 @@ func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParam
 		p.account.IsOveragesEnabled() &&
 		!p.account.isCreditsExhausted() {
 		result := s.attemptCreditsOveragesRetry(p, baseURL, modelName, waitDuration, resp.StatusCode, respBody)
+		if result.err != nil {
+			return &smartRetryResult{action: smartRetryActionBreakWithResp, err: result.err}
+		}
 		if result.handled && result.resp != nil {
 			return &smartRetryResult{
 				action: smartRetryActionBreakWithResp,
@@ -199,13 +202,8 @@ func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParam
 			log.Printf("%s status=%d oauth_smart_retry attempt=%d/%d delay=%v model=%s account=%d",
 				p.prefix, resp.StatusCode, attempt, maxAttempts, waitDuration, modelName, p.account.ID)
 
-			timer := time.NewTimer(waitDuration)
-			select {
-			case <-p.ctx.Done():
-				timer.Stop()
-				log.Printf("%s status=context_canceled_during_smart_retry", p.prefix)
-				return &smartRetryResult{action: smartRetryActionBreakWithResp, err: p.ctx.Err()}
-			case <-timer.C:
+			if waitErr := WaitOpenAITurnRetry(p.ctx, waitDuration); waitErr != nil {
+				return &smartRetryResult{action: smartRetryActionBreakWithResp, err: waitErr}
 			}
 
 			// 智能重试：创建新请求
@@ -223,7 +221,10 @@ func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParam
 				}
 			}
 
-			retryResp, retryErr := p.httpUpstream.Do(retryReq, p.proxyURL, p.account.ID, p.account.Concurrency)
+			retryResp, retryErr := qualifiedAccountUpstream(p.accountRepo, p.httpUpstream, p.account, vendorDispatchGroup(p.c), p.settingService).Do(retryReq, p.proxyURL, p.account.ID, p.account.Concurrency)
+			if retryErr != nil && (IsTurnBudgetError(retryErr) || errors.Is(retryErr, ErrTurnTargetExhausted)) {
+				return &smartRetryResult{action: smartRetryActionBreakWithResp, err: retryErr}
+			}
 			if retryErr == nil && retryResp != nil && retryResp.StatusCode != http.StatusTooManyRequests && retryResp.StatusCode != http.StatusServiceUnavailable {
 				log.Printf("%s status=%d smart_retry_success attempt=%d/%d", p.prefix, retryResp.StatusCode, attempt, maxAttempts)
 				// 重试成功，清除 MODEL_CAPACITY_EXHAUSTED cooldown
@@ -381,13 +382,8 @@ func (s *AntigravityGatewayService) handleSingleAccountRetryInPlace(
 		logger.LegacyPrintf("service.antigravity_gateway", "%s status=%d single_account_503_retry attempt=%d/%d delay=%v total_waited=%v model=%s account=%d",
 			p.prefix, resp.StatusCode, attempt, antigravitySingleAccountSmartRetryMaxAttempts, waitDuration, totalWaited, modelName, p.account.ID)
 
-		timer := time.NewTimer(waitDuration)
-		select {
-		case <-p.ctx.Done():
-			timer.Stop()
-			logger.LegacyPrintf("service.antigravity_gateway", "%s status=context_canceled_during_single_account_retry", p.prefix)
-			return &smartRetryResult{action: smartRetryActionBreakWithResp, err: p.ctx.Err()}
-		case <-timer.C:
+		if waitErr := WaitOpenAITurnRetry(p.ctx, waitDuration); waitErr != nil {
+			return &smartRetryResult{action: smartRetryActionBreakWithResp, err: waitErr}
 		}
 		totalWaited += waitDuration
 
@@ -398,7 +394,10 @@ func (s *AntigravityGatewayService) handleSingleAccountRetryInPlace(
 			break
 		}
 
-		retryResp, retryErr := p.httpUpstream.Do(retryReq, p.proxyURL, p.account.ID, p.account.Concurrency)
+		retryResp, retryErr := qualifiedAccountUpstream(p.accountRepo, p.httpUpstream, p.account, vendorDispatchGroup(p.c), p.settingService).Do(retryReq, p.proxyURL, p.account.ID, p.account.Concurrency)
+		if retryErr != nil && (IsTurnBudgetError(retryErr) || errors.Is(retryErr, ErrTurnTargetExhausted)) {
+			return &smartRetryResult{action: smartRetryActionBreakWithResp, err: retryErr}
+		}
 		if retryErr == nil && retryResp != nil && retryResp.StatusCode != http.StatusTooManyRequests && retryResp.StatusCode != http.StatusServiceUnavailable {
 			logger.LegacyPrintf("service.antigravity_gateway", "%s status=%d single_account_503_retry_success attempt=%d/%d total_waited=%v",
 				p.prefix, retryResp.StatusCode, attempt, antigravitySingleAccountSmartRetryMaxAttempts, totalWaited)
@@ -536,11 +535,18 @@ urlFallbackLoop:
 				return nil, err
 			}
 
-			resp, err = p.httpUpstream.Do(upstreamReq, p.proxyURL, p.account.ID, p.account.Concurrency)
+			resp, err = qualifiedAccountUpstream(p.accountRepo, p.httpUpstream, p.account, vendorDispatchGroup(p.c), p.settingService).Do(upstreamReq, p.proxyURL, p.account.ID, p.account.Concurrency)
 			if err == nil && resp == nil {
 				err = errors.New("upstream returned nil response")
 			}
 			if err != nil {
+				if IsTurnBudgetError(err) {
+					return nil, err
+				}
+				var recovery *UpstreamFailoverError
+				if errors.As(err, &recovery) {
+					return nil, err
+				}
 				safeErr := sanitizeUpstreamErrorMessage(err.Error())
 				appendOpsUpstreamError(p.c, OpsUpstreamErrorEvent{
 					ProxyID:            opsUpstreamProxyID(p.account),
@@ -557,17 +563,17 @@ urlFallbackLoop:
 					logger.LegacyPrintf("service.antigravity_gateway", "%s URL fallback (connection error): %s -> %s", p.prefix, baseURL, availableURLs[urlIdx+1])
 					continue urlFallbackLoop
 				}
-				if attempt < antigravityMaxRetries {
+				if attempt < antigravityMaxRetries && (requestDefinitelyUnsent(err) || NativeUncertainReplaySafe(p.body)) {
 					logger.LegacyPrintf("service.antigravity_gateway", "%s status=request_failed retry=%d/%d error=%v", p.prefix, attempt, antigravityMaxRetries, err)
 					if !sleepAntigravityBackoffWithContext(p.ctx, attempt) {
 						logger.LegacyPrintf("service.antigravity_gateway", "%s status=context_canceled_during_backoff", p.prefix)
-						return nil, p.ctx.Err()
+						return nil, turnRetryWaitError(p.ctx)
 					}
 					continue
 				}
 				logger.LegacyPrintf("service.antigravity_gateway", "%s status=request_failed retries_exhausted error=%v", p.prefix, err)
 				setOpsUpstreamError(p.c, 0, safeErr, "")
-				return nil, fmt.Errorf("upstream request failed after retries: %w", err)
+				return nil, &UpstreamFailoverError{StatusCode: http.StatusBadGateway, Cause: err, RequestNotSent: requestDefinitelyUnsent(err), Reason: "antigravity_transport_exhausted"}
 			}
 
 			// 统一处理错误响应
@@ -594,6 +600,11 @@ urlFallbackLoop:
 						Header:     resp.Header.Clone(),
 						Body:       io.NopCloser(bytes.NewReader(respBody)),
 					}
+					break urlFallbackLoop
+				}
+
+				if resp.StatusCode >= 500 && !NativeUncertainReplaySafe(p.body) {
+					resp.Body = io.NopCloser(bytes.NewReader(respBody))
 					break urlFallbackLoop
 				}
 
@@ -637,7 +648,7 @@ urlFallbackLoop:
 						logger.LegacyPrintf("service.antigravity_gateway", "%s status=%d retry=%d/%d body=%s", p.prefix, resp.StatusCode, attempt, antigravityMaxRetries, truncateForLog(respBody, 200))
 						if !sleepAntigravityBackoffWithContext(p.ctx, attempt) {
 							logger.LegacyPrintf("service.antigravity_gateway", "%s status=context_canceled_during_backoff", p.prefix)
-							return nil, p.ctx.Err()
+							return nil, turnRetryWaitError(p.ctx)
 						}
 						continue
 					}
@@ -674,7 +685,7 @@ urlFallbackLoop:
 						logger.LegacyPrintf("service.antigravity_gateway", "%s status=%d retry=%d/%d body=%s", p.prefix, resp.StatusCode, attempt, antigravityMaxRetries, truncateForLog(respBody, 500))
 						if !sleepAntigravityBackoffWithContext(p.ctx, attempt) {
 							logger.LegacyPrintf("service.antigravity_gateway", "%s status=context_canceled_during_backoff", p.prefix)
-							return nil, p.ctx.Err()
+							return nil, turnRetryWaitError(p.ctx)
 						}
 						// 追踪 INTERNAL 500：非匹配的 attempt 清除标记
 						if !isAntigravityInternalServerError(resp.StatusCode, respBody) {
@@ -840,14 +851,7 @@ func sleepAntigravityBackoffWithContext(ctx context.Context, attempt int) bool {
 		sleepFor = 0
 	}
 
-	timer := time.NewTimer(sleepFor)
-	select {
-	case <-ctx.Done():
-		timer.Stop()
-		return false
-	case <-timer.C:
-		return true
-	}
+	return WaitOpenAITurnRetry(ctx, sleepFor) == nil
 }
 
 // isSingleAccountRetry 检查是否处于单账号退避重试模式：显式标记优先，否则使用请求挂载的延迟判定。

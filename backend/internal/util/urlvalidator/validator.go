@@ -179,3 +179,22 @@ func isBlockedHost(host string) bool {
 	}
 	return false
 }
+
+// SafeImageURL validates a browser image reference without making a server-side request.
+func SafeImageURL(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || strings.ContainsAny(trimmed, "\r\n\t\\") {
+		return ""
+	}
+	if strings.HasPrefix(trimmed, "/") && !strings.HasPrefix(trimmed, "//") {
+		return trimmed
+	}
+	if strings.HasPrefix(strings.ToLower(trimmed), "data:image/") {
+		return trimmed
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.Hostname() == "" || parsed.User != nil {
+		return ""
+	}
+	return trimmed
+}

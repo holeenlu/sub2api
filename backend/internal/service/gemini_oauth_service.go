@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"io"
 	"net/http"
 	"regexp"
@@ -99,6 +100,11 @@ type GeminiAuthURLResult struct {
 }
 
 func (s *GeminiOAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64, redirectURI, projectID, oauthType, tierID string) (*GeminiAuthURLResult, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	state, err := geminicli.GenerateState()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate state: %w", err)
@@ -137,14 +143,15 @@ func (s *GeminiOAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64
 	}
 
 	session := &geminicli.OAuthSession{
-		State:        state,
-		CodeVerifier: codeVerifier,
-		ProxyURL:     proxyURL,
-		RedirectURI:  redirectURI,
-		ProjectID:    strings.TrimSpace(projectID),
-		TierID:       canonicalGeminiTierIDForOAuthType(oauthType, tierID),
-		OAuthType:    oauthType,
-		CreatedAt:    time.Now(),
+		Authorization: authz.CaptureLease(ctx),
+		State:         state,
+		CodeVerifier:  codeVerifier,
+		ProxyURL:      proxyURL,
+		RedirectURI:   redirectURI,
+		ProjectID:     strings.TrimSpace(projectID),
+		TierID:        canonicalGeminiTierIDForOAuthType(oauthType, tierID),
+		OAuthType:     oauthType,
+		CreatedAt:     time.Now(),
 	}
 	s.sessionStore.Set(sessionID, session)
 
@@ -361,6 +368,11 @@ func inferGoogleOneTier(storageBytes int64) string {
 // 2. Personal accounts will get 403/404 from cloudaicompanion.googleapis.com
 // 3. Google consumer (Google One) and enterprise (GCP) systems are physically isolated
 func (s *GeminiOAuthService) FetchGoogleOneTier(ctx context.Context, accessToken, proxyURL string) (string, *geminicli.DriveStorageInfo, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	defer finish()
 	logger.LegacyPrintf("service.gemini_oauth", "[GeminiOAuth] Starting FetchGoogleOneTier (Google One personal account)")
 
 	// Use Drive API to infer tier from storage quota (requires drive.readonly scope)
@@ -393,6 +405,11 @@ func (s *GeminiOAuthService) RefreshAccountGoogleOneTier(
 	ctx context.Context,
 	account *Account,
 ) (tierID string, extra map[string]any, credentials map[string]any, err error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	defer finish()
 	if account == nil {
 		return "", nil, nil, fmt.Errorf("account is nil")
 	}
@@ -443,6 +460,11 @@ func (s *GeminiOAuthService) RefreshAccountGoogleOneTier(
 }
 
 func (s *GeminiOAuthService) ExchangeCode(ctx context.Context, input *GeminiExchangeCodeInput) (*GeminiTokenInfo, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	logger.LegacyPrintf("service.gemini_oauth", "[GeminiOAuth] ========== ExchangeCode START ==========")
 	logger.LegacyPrintf("service.gemini_oauth", "[GeminiOAuth] SessionID: %s", input.SessionID)
 
@@ -450,6 +472,9 @@ func (s *GeminiOAuthService) ExchangeCode(ctx context.Context, input *GeminiExch
 	if !ok {
 		logger.LegacyPrintf("service.gemini_oauth", "[GeminiOAuth] ERROR: Session not found or expired")
 		return nil, fmt.Errorf("session not found or expired")
+	}
+	if err := authz.CheckLease(ctx, session.Authorization, "accounts.authorize"); err != nil {
+		return nil, err
 	}
 	if strings.TrimSpace(input.State) == "" || input.State != session.State {
 		logger.LegacyPrintf("service.gemini_oauth", "[GeminiOAuth] ERROR: Invalid state")
@@ -673,6 +698,11 @@ func (s *GeminiOAuthService) ExchangeCode(ctx context.Context, input *GeminiExch
 }
 
 func (s *GeminiOAuthService) RefreshToken(ctx context.Context, oauthType, refreshToken, proxyURL string) (*GeminiTokenInfo, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	var lastErr error
 
 	for attempt := 0; attempt <= 3; attempt++ {
@@ -731,6 +761,11 @@ func isNonRetryableGeminiOAuthError(err error) bool {
 }
 
 func (s *GeminiOAuthService) RefreshAccountToken(ctx context.Context, account *Account) (*GeminiTokenInfo, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	if account.Platform != PlatformGemini || account.Type != AccountTypeOAuth {
 		return nil, fmt.Errorf("account is not a Gemini OAuth account")
 	}
@@ -915,8 +950,19 @@ func (s *GeminiOAuthService) BuildAccountCredentials(tokenInfo *GeminiTokenInfo)
 	return creds
 }
 
-func (s *GeminiOAuthService) Stop() {
-	s.sessionStore.Stop()
+// Start explicitly starts the session owner; constructors do not start workers.
+func (s *GeminiOAuthService) Start(ctx context.Context) error {
+	return s.sessionStore.Start(ctx)
+}
+
+// Drain rejects new OAuth work and waits for admitted operations and the janitor.
+func (s *GeminiOAuthService) Drain(ctx context.Context) error {
+	return s.sessionStore.Drain(ctx)
+}
+
+// Stop cancels and joins the same owner, retaining join state after a timeout.
+func (s *GeminiOAuthService) Stop(ctx context.Context) error {
+	return s.sessionStore.Stop(ctx)
 }
 
 func (s *GeminiOAuthService) fetchProjectID(ctx context.Context, accessToken, proxyURL string) (string, string, error) {

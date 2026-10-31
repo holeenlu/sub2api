@@ -56,15 +56,12 @@ var definitions = []permissionDefinition{
 	{Permission{"announcements.read", "读取所有公告与阅读记录", "内容", "global"}, []string{"GET /announcements", "GET /announcements/:id", "GET /announcements/:id/read-status"}},
 	{Permission{"announcements.write", "创建、发布与修改公告", "内容", "global"}, []string{"POST /announcements", "PUT /announcements/:id"}},
 	{Permission{"announcements.delete", "删除公告", "内容", "global"}, []string{"DELETE /announcements/:id"}},
-	{Permission{"promo.read", "读取优惠码及使用记录", "财务", "global"}, []string{"GET /promo-codes", "GET /promo-codes/:id", "GET /promo-codes/:id/usages"}},
-	{Permission{"promo.write", "创建与修改优惠码权益", "财务", "global"}, []string{"POST /promo-codes", "PUT /promo-codes/:id"}},
-	{Permission{"promo.delete", "删除优惠码", "财务", "global"}, []string{"DELETE /promo-codes/:id"}},
 	{Permission{"ops.read", "读取全站运维指标", "监控", "global"}, []string{"GET /ops/concurrency", "GET /ops/user-concurrency", "GET /ops/account-availability", "GET /ops/realtime-traffic", "GET /ops/ingress-rejections", "GET /ops/ingress-rejections/health", "GET /ops/auth-cache-invalidation/health", "GET /ops/dashboard/snapshot-v2", "GET /ops/dashboard/overview", "GET /ops/dashboard/throughput-trend", "GET /ops/dashboard/latency-histogram", "GET /ops/dashboard/error-trend", "GET /ops/dashboard/error-distribution", "GET /ops/dashboard/openai-token-stats"}},
 	{Permission{"ops.errors.read", "读取全站请求错误详情（敏感）", "监控", "global"}, []string{"GET /ops/errors", "GET /ops/errors/:id", "GET /ops/request-errors", "GET /ops/request-errors/:id", "GET /ops/request-errors/:id/upstream-errors", "GET /ops/upstream-errors", "GET /ops/upstream-errors/:id", "GET /ops/requests"}},
 	{Permission{"ops.errors.resolve", "标记请求错误处理状态", "监控", "global"}, []string{"PUT /ops/errors/:id/resolve", "PUT /ops/request-errors/:id/resolve", "PUT /ops/upstream-errors/:id/resolve"}},
 	{Permission{"ops.alerts.read", "读取全站告警规则与事件", "监控", "global"}, []string{"GET /ops/alert-rules", "GET /ops/alert-events", "GET /ops/alert-events/:id"}},
 	{Permission{"ops.alerts.write", "修改告警规则、状态与静默", "监控", "global"}, []string{"POST /ops/alert-rules", "PUT /ops/alert-rules/:id", "DELETE /ops/alert-rules/:id", "PUT /ops/alert-events/:id/status", "POST /ops/alert-silences"}},
-	{Permission{"system.read", "读取系统版本与可更新版本", "系统", "global"}, []string{"GET /system/version", "GET /system/check-updates", "GET /system/rollback-versions"}},
+	{Permission{"system.read", "读取系统版本", "系统", "global"}, []string{"GET /system/version"}},
 }
 
 func PermissionCatalog() []Permission {

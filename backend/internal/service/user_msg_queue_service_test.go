@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -40,15 +41,15 @@ func (c *cleanupWorkerUserMsgQueueCache) ReconcileExpiredLockCandidates(_ contex
 	return 1, nil
 }
 
-func TestStartCleanupWorker_ReconcilesExpiredLockCandidates(t *testing.T) {
+func TestUserMessageQueueStartReconcilesExpiredLockCandidates(t *testing.T) {
 	cache := &cleanupWorkerUserMsgQueueCache{}
-	svc := NewUserMessageQueueService(cache, nil, nil)
-	defer svc.Stop()
+	svc := NewUserMessageQueueService(cache, nil, &config.UserMessageQueueConfig{CleanupIntervalSeconds: 1})
+	defer stopMaintenanceForTest(t, svc)
 
-	svc.StartCleanupWorker(time.Millisecond)
+	require.NoError(t, svc.Start(t.Context()))
 
 	require.Eventually(t, func() bool {
 		return cache.reconcileCalls.Load() > 0
-	}, time.Second, 10*time.Millisecond)
+	}, 2*time.Second, 10*time.Millisecond)
 	require.EqualValues(t, 1000, cache.maxCount.Load())
 }

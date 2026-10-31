@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/gateway/session"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -25,6 +26,7 @@ type openAIWSPreemptCloseRecorder struct {
 	reason       string
 	release      chan struct{}
 	closed       chan struct{}
+	releaseOnce  sync.Once
 }
 
 func (r *openAIWSPreemptCloseRecorder) Close(code coderws.StatusCode, reason string) error {
@@ -87,7 +89,7 @@ func TestOpenAIWSIngressSessionPreemptionCancelsAfterCloseGrace(t *testing.T) {
 	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 	firstMessage := []byte(`{"type":"response.create","input":"hello"}`)
 	closer := &openAIWSPreemptCloseRecorder{closed: make(chan struct{}), release: make(chan struct{})}
-	defer close(closer.release)
+	defer closer.CloseNow()
 
 	firstCtx, firstCleanup, armed := svc.BeginOpenAIWSIngressSessionPreemptionWithClient(
 		context.Background(), newOpenAIWSPreemptCodexContext(11, "thread-a"), account, firstMessage, closer,
@@ -109,30 +111,6 @@ func TestOpenAIWSIngressSessionPreemptionCancelsAfterCloseGrace(t *testing.T) {
 		t.Fatal("对端不回应关闭帧时也必须在宽限期内取消旧连接")
 	}
 	require.ErrorIs(t, context.Cause(firstCtx), errOpenAIWSSessionPreempted)
-}
-
-func TestOpenAIWSSessionPreemptRegistryCancelsSameScopedSessionOnly(t *testing.T) {
-	var registry openAIWSSessionPreemptRegistry
-	key := openAIWSSessionPreemptKey{groupID: 7, apiKeyID: 11, sessionHash: "sess"}
-	other := openAIWSSessionPreemptKey{groupID: 7, apiKeyID: 12, sessionHash: "sess"}
-	firstCtx, firstCancel := context.WithCancel(context.Background())
-	firstCleanup, replaced := registry.Begin(key, firstCancel)
-	require.False(t, replaced)
-	otherCtx, otherCancel := context.WithCancel(context.Background())
-	otherCleanup, replaced := registry.Begin(other, otherCancel)
-	require.False(t, replaced)
-	secondCtx, secondCancel := context.WithCancel(context.Background())
-	secondCleanup, replaced := registry.Begin(key, secondCancel)
-	require.True(t, replaced)
-
-	require.ErrorIs(t, firstCtx.Err(), context.Canceled)
-	require.NoError(t, otherCtx.Err())
-	require.NoError(t, secondCtx.Err())
-	firstCleanup()
-	require.NoError(t, secondCtx.Err(), "stale cleanup must not remove the replacement")
-
-	secondCleanup()
-	otherCleanup()
 }
 
 type openAIWSSessionPreemptCacheStub struct {
@@ -300,25 +278,6 @@ func TestOpenAIWSIngressSessionPreemptionRespectsResolvedMode(t *testing.T) {
 	require.True(t, IsOpenAIWSSessionPreemptedError(context.Cause(sharedCtx)), "ctx_pool must retain shared-session preemption")
 }
 
-func TestOpenAIWSSessionPreemptRemoteClaimAndStaleReleaseAreAtomic(t *testing.T) {
-	cache := &openAIWSSessionPreemptCacheStub{}
-	svc := &OpenAIGatewayService{cache: cache}
-	key := openAIWSSessionPreemptKey{groupID: 7, apiKeyID: 11, sessionHash: "sess"}
-
-	previous, ok := svc.claimOpenAIWSSessionPreemptOwner(context.Background(), key, "owner-a")
-	require.True(t, ok)
-	require.Empty(t, previous)
-	previous, ok = svc.claimOpenAIWSSessionPreemptOwner(context.Background(), key, "owner-b")
-	require.True(t, ok)
-	require.Equal(t, "owner-a", previous)
-	svc.releaseOpenAIWSSessionPreemptOwner(context.Background(), key, "owner-a")
-
-	cache.mu.Lock()
-	current := string(cache.owners[cache.key(key.groupID, openAIWSSessionPreemptCacheHash(key.apiKeyID, key.sessionHash))])
-	cache.mu.Unlock()
-	require.Equal(t, "owner-b", current, "stale cleanup must preserve the replacement owner")
-}
-
 func TestOpenAIWSHTTPBridgeSessionPreemptionEligibility(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tests := []struct {
@@ -327,7 +286,17 @@ func TestOpenAIWSHTTPBridgeSessionPreemptionEligibility(t *testing.T) {
 		defaultMode   string
 		accountMode   string
 		wantArmed     bool
+		bps           bool
+		bpsDisabled   bool
+		missingModels bool
+		emptyModels   bool
 	}{
+		{name: "BPS independent bridge with native ctx pool", bps: true, routerEnabled: true, defaultMode: OpenAIWSIngressModeCtxPool},
+		{name: "BPS independent bridge with native WS off", bps: true, routerEnabled: true, defaultMode: OpenAIWSIngressModeOff},
+		{name: "BPS independent bridge with router disabled", bps: true},
+		{name: "BPS missing model selection retains native preemption", bps: true, missingModels: true, routerEnabled: true, defaultMode: OpenAIWSIngressModeCtxPool, wantArmed: true},
+		{name: "BPS empty model selection retains native preemption", bps: true, emptyModels: true, routerEnabled: true, defaultMode: OpenAIWSIngressModeCtxPool, wantArmed: true},
+		{name: "BPS disabled preserves native preemption", bps: true, bpsDisabled: true, wantArmed: true},
 		{name: "explicit HTTP bridge", routerEnabled: true, defaultMode: OpenAIWSIngressModeCtxPool, accountMode: OpenAIWSIngressModeHTTPBridge},
 		{name: "default HTTP bridge", routerEnabled: true, defaultMode: OpenAIWSIngressModeHTTPBridge},
 		{name: "ctx pool overrides bridge default", routerEnabled: true, defaultMode: OpenAIWSIngressModeHTTPBridge, accountMode: OpenAIWSIngressModeCtxPool, wantArmed: true},
@@ -350,8 +319,21 @@ func TestOpenAIWSHTTPBridgeSessionPreemptionEligibility(t *testing.T) {
 			}
 			account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
 				Extra: map[string]any{"openai_oauth_responses_websockets_v2_mode": tt.accountMode}}
-			firstMessage := []byte(`{"type":"response.create","prompt_cache_key":"cache-a","input":"first request"}`)
-			secondMessage := []byte(`{"type":"response.create","prompt_cache_key":"cache-b","input":"second request"}`)
+			if tt.bps {
+				account.Extra["openai_excel_bps"] = true
+				account.Extra["openai_excel_bps_models"] = []string{"gpt-6-astra"}
+				if tt.missingModels {
+					delete(account.Extra, "openai_excel_bps_models")
+				} else if tt.emptyModels {
+					account.Extra["openai_excel_bps_models"] = []string{}
+				}
+				account.Credentials = excelAccount().Credentials
+				if !tt.bpsDisabled {
+					svc.settingService = excelBPSSettingsTestService()
+				}
+			}
+			firstMessage := []byte(`{"type":"response.create","model":"gpt-6-astra","prompt_cache_key":"cache-a","input":"first request"}`)
+			secondMessage := []byte(`{"type":"response.create","model":"gpt-6-astra","prompt_cache_key":"cache-b","input":"second request"}`)
 			first, cleanupFirst, firstArmed := svc.BeginOpenAIWSIngressSessionPreemption(context.Background(), newContext(), account, firstMessage)
 			defer cleanupFirst()
 			second, cleanupSecond, secondArmed := svc.BeginOpenAIWSIngressSessionPreemption(context.Background(), newContext(), account, secondMessage)
@@ -370,18 +352,6 @@ func TestOpenAIWSHTTPBridgeSessionPreemptionEligibility(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestNewOpenAIWSSessionPreemptKeyRequiresFullIsolationScope(t *testing.T) {
-	_, ok := newOpenAIWSSessionPreemptKey(0, 11, "sess")
-	require.False(t, ok)
-	_, ok = newOpenAIWSSessionPreemptKey(7, 0, "sess")
-	require.False(t, ok)
-	_, ok = newOpenAIWSSessionPreemptKey(7, 11, " ")
-	require.False(t, ok)
-	key, ok := newOpenAIWSSessionPreemptKey(7, 11, " sess ")
-	require.True(t, ok)
-	require.Equal(t, "sess", key.sessionHash)
 }
 
 func newOpenAIWSPreemptCodexContext(apiKeyID int64, threadID string) *gin.Context {
@@ -529,8 +499,50 @@ func TestOpenAIWSIngressSessionPreemptionClaimsRemoteOwnerByExecutionScope(t *te
 
 	stub.mu.Lock()
 	defer stub.mu.Unlock()
-	_, scoped := stub.owners[stub.key(7, openAIWSSessionPreemptCacheHash(11, scope))]
-	_, legacyKeyed := stub.owners[stub.key(7, openAIWSSessionPreemptCacheHash(11, legacy))]
+	_, scoped := stub.owners[stub.key(7, session.OwnerCacheHash(11, scope))]
+	_, legacyKeyed := stub.owners[stub.key(7, session.OwnerCacheHash(11, legacy))]
 	require.True(t, scoped, "remote owner must be claimed under the execution scope")
 	require.False(t, legacyKeyed, "remote owner must not be claimed under the legacy session hash")
+}
+
+func (r *openAIWSPreemptCloseRecorder) CloseNow() error {
+	if r.release != nil {
+		r.releaseOnce.Do(func() { close(r.release) })
+	}
+	return nil
+}
+
+func TestOpenAIWSIngressPreemptionCancelsWhileRealCloseHandshakeWaits(t *testing.T) {
+	accepted := make(chan *coderws.Conn, 1)
+	finishServer := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		accepted <- conn
+		<-finishServer
+	}))
+	t.Cleanup(func() { close(finishServer); server.Close() })
+	client, _, err := coderws.Dial(t.Context(), "ws"+server.URL[4:], nil)
+	require.NoError(t, err)
+	defer client.CloseNow()
+	conn := <-accepted
+	svc := &OpenAIGatewayService{}
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	first, cleanup, armed := svc.BeginOpenAIWSIngressSessionPreemptionWithClient(t.Context(), newOpenAIWSPreemptCodexContext(11, "real-close"), account, []byte(`{"type":"response.create","input":"hello"}`), conn)
+	require.True(t, armed)
+	t.Cleanup(cleanup)
+	_, cleanupNext, armed := svc.BeginOpenAIWSIngressSessionPreemption(t.Context(), newOpenAIWSPreemptCodexContext(11, "real-close"), account, []byte(`{"type":"response.create","input":"hello"}`))
+	require.True(t, armed)
+	t.Cleanup(cleanupNext)
+	// The client deliberately does not read/respond to the server close frame.
+	select {
+	case <-first.Done():
+		require.ErrorIs(t, context.Cause(first), errOpenAIWSSessionPreempted)
+	case <-time.After(openAIWSSessionPreemptCloseGrace + time.Second):
+		t.Fatal("real websocket handshake delayed execution cancellation")
+	}
+	require.NoError(t, client.CloseNow())
+	cleanup() // joins the actual socket close and the remote-watch owner
 }

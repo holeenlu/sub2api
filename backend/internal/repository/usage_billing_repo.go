@@ -4,22 +4,42 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"math"
 	"strings"
+	"sync/atomic"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/internal/billing"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 type usageBillingRepository struct {
-	db *sql.DB
+	nativePreparation    atomic.Pointer[nativeIntentPreparationHook]
+	systemOnePreparation atomic.Pointer[systemOnePreparationHook]
+	db                   *sql.DB
+	reprice              func(context.Context, *service.UsageBillingCommand) error
+	invalidate           func(context.Context, *service.UsageBillingCommand) error
 }
 
 func NewUsageBillingRepository(_ *dbent.Client, sqlDB *sql.DB) service.UsageBillingRepository {
 	return &usageBillingRepository{db: sqlDB}
 }
 
-func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBillingCommand) (_ *service.UsageBillingApplyResult, err error) {
+func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBillingCommand) (*service.UsageBillingApplyResult, error) {
+	if cmd == nil {
+		return nil, service.ErrUsageBillingRecordRequired
+	}
+	adapter := &usageBillingLedger{repo: r}
+	ledger := billing.Ledger{Journal: adapter, Transaction: adapter}
+	if r != nil && r.invalidate != nil {
+		ledger.Invalidator = adapter
+	}
+	err := ledger.Settle(ctx, cmd)
+	return adapter.result, err
+}
+
+func (r *usageBillingRepository) applyUsageBillingTransaction(ctx context.Context, cmd *service.UsageBillingCommand) (_ *service.UsageBillingApplyResult, err error) {
 	if cmd == nil {
 		return &service.UsageBillingApplyResult{}, nil
 	}
@@ -46,19 +66,48 @@ func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBi
 	if err != nil {
 		return nil, err
 	}
-	if !applied {
+	if !applied && cmd.UsageLog == nil {
 		return &service.UsageBillingApplyResult{Applied: false}, nil
 	}
-
-	result := &service.UsageBillingApplyResult{Applied: true}
-	if err := r.applyUsageBillingEffects(ctx, tx, cmd, result); err != nil {
-		return nil, err
+	result := &service.UsageBillingApplyResult{Applied: applied}
+	if applied {
+		if err := r.applyUsageBillingEffects(ctx, tx, cmd, result); err != nil {
+			return nil, err
+		}
+	}
+	if cmd.UsageLog != nil {
+		logs := cmd.UsageLogs
+		if len(logs) == 0 {
+			logs = []*service.UsageLog{cmd.UsageLog}
+		}
+		for _, log := range logs {
+			if log == nil {
+				continue
+			}
+			log.BillingStatus = service.SettledUsageBillingStatus(log)
+			var err error
+			if applied {
+				err = execUsageSettlementLog(ctx, tx, prepareUsageLogInsert(log))
+			} else {
+				err = execUsageLogInsertNoResult(ctx, tx, prepareUsageLogInsert(log))
+			}
+			if err != nil {
+				return nil, err
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE usage_billing_events SET status='settled',last_error=NULL,updated_at=NOW() WHERE event_type='money' AND request_id=$1 AND api_key_id=$2 AND status<>'applied'`, cmd.RequestID, cmd.APIKeyID); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	tx = nil
+	if cmd.UsageLog != nil {
+		cmd.UsageLog.SettlementRecorded = true
+		cmd.UsageLog.BillingStatus = service.SettledUsageBillingStatus(cmd.UsageLog)
+	}
 	return result, nil
 }
 
@@ -110,20 +159,21 @@ func (r *usageBillingRepository) claimUsageBillingRequest(ctx context.Context, t
 }
 
 func (r *usageBillingRepository) ReserveBatchImageBalance(ctx context.Context, cmd *service.BatchImageBalanceHoldCommand) (*service.BatchImageBalanceHoldResult, error) {
-	return r.applyBatchImageBalanceHold(ctx, cmd, reserveUsageBillingBatchImageBalance)
+	return r.applyBatchImageBalanceHold(ctx, cmd, "hold", reserveUsageBillingBatchImageBalance)
 }
 
 func (r *usageBillingRepository) CaptureBatchImageBalance(ctx context.Context, cmd *service.BatchImageBalanceHoldCommand) (*service.BatchImageBalanceHoldResult, error) {
-	return r.applyBatchImageBalanceHold(ctx, cmd, captureUsageBillingBatchImageBalance)
+	return r.applyBatchImageBalanceHold(ctx, cmd, "capture", captureUsageBillingBatchImageBalance)
 }
 
 func (r *usageBillingRepository) ReleaseBatchImageBalance(ctx context.Context, cmd *service.BatchImageBalanceHoldCommand) (*service.BatchImageBalanceHoldResult, error) {
-	return r.applyBatchImageBalanceHold(ctx, cmd, releaseUsageBillingBatchImageBalance)
+	return r.applyBatchImageBalanceHold(ctx, cmd, "release", releaseUsageBillingBatchImageBalance)
 }
 
 func (r *usageBillingRepository) applyBatchImageBalanceHold(
 	ctx context.Context,
 	cmd *service.BatchImageBalanceHoldCommand,
+	operation string,
 	apply func(context.Context, *sql.Tx, *service.BatchImageBalanceHoldCommand) (*service.BatchImageBalanceHoldResult, error),
 ) (_ *service.BatchImageBalanceHoldResult, err error) {
 	if cmd == nil {
@@ -155,7 +205,29 @@ func (r *usageBillingRepository) applyBatchImageBalanceHold(
 		return &service.BatchImageBalanceHoldResult{Applied: false}, nil
 	}
 
-	result, err := apply(ctx, tx, cmd)
+	// Check after dedup so retries of an already committed historical operation
+	// remain idempotent. Unapplied high-precision holds require explicit review.
+	if math.IsNaN(cmd.HoldAmount) || math.IsInf(cmd.HoldAmount, 0) || cmd.HoldAmount < 0 ||
+		math.IsNaN(cmd.ActualAmount) || math.IsInf(cmd.ActualAmount, 0) || cmd.ActualAmount < 0 ||
+		cmd.HoldAmount != service.QuantizeUsageBillingAmount(cmd.HoldAmount) || cmd.ActualAmount != service.QuantizeUsageBillingAmount(cmd.ActualAmount) {
+		return nil, service.ErrBatchImageLegacyMoneyPrecision
+	}
+	// Only exact legacy amounts are unambiguous. New version-2 tasks quantize
+	// both values before constructing this command.
+
+	var result *service.BatchImageBalanceHoldResult
+	if cmd.MonetaryVersion >= 2 {
+		result, err = applyOwnedBatchImageMoney(ctx, tx, cmd, operation, apply)
+	} else {
+		var owned bool
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM batch_image_money_holds WHERE batch_id=$1 AND api_key_id=$2)`, cmd.BatchID, cmd.APIKeyID).Scan(&owned); err != nil {
+			return nil, err
+		}
+		if owned {
+			return nil, service.ErrBatchImageLegacyMoneyPrecision
+		}
+		result, err = apply(ctx, tx, cmd)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -209,6 +281,13 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 			return err
 		}
 		result.QuotaState = quotaState
+	}
+
+	// Preserve existing user/key/account lock order; platform quota follows those rows.
+	if cost := cmd.UserPlatformQuotaCost(); cost > 0 && cmd.Platform != "" {
+		if err := incrementUsageBillingPlatformQuota(ctx, tx, cmd.UserID, cmd.Platform, cost); err != nil {
+			return err
+		}
 	}
 
 	return nil

@@ -19,11 +19,11 @@ func TestBatchImageWorkerRuntime_QueueDisabledDoesNotStart(t *testing.T) {
 		&config.Config{BatchImage: config.BatchImageConfig{QueueEnabled: false}},
 	)
 
-	runtime.Start()
+	runtime.Start(context.Background())
 
 	require.False(t, runtime.Running())
 	require.Zero(t, queue.reserveCalls.Load())
-	require.NotPanics(t, runtime.Stop)
+	require.NoError(t, runtime.Stop(context.Background()))
 }
 
 func TestBatchImageWorkerRuntime_QueueEnabledStartsAndStops(t *testing.T) {
@@ -37,15 +37,15 @@ func TestBatchImageWorkerRuntime_QueueEnabledStartsAndStops(t *testing.T) {
 		&config.Config{BatchImage: config.BatchImageConfig{QueueEnabled: true}},
 	)
 
-	runtime.Start()
+	runtime.Start(context.Background())
 
 	require.Eventually(t, func() bool {
 		return runtime.Running() && queue.reserveCalls.Load() > 0
 	}, time.Second, 10*time.Millisecond)
 	require.Empty(t, processor.processed)
-	require.NotPanics(t, runtime.Stop)
+	require.NoError(t, runtime.Stop(context.Background()))
 	require.False(t, runtime.Running())
-	require.NotPanics(t, runtime.Stop)
+	require.NoError(t, runtime.Stop(context.Background()))
 }
 
 type blockingBatchImageRuntimeQueue struct {

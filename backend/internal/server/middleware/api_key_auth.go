@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/access"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
@@ -121,9 +123,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		// ── 3. 基础鉴权（始终执行） ─────────────────────────────────
 
 		// disabled / 未知状态 → 无条件拦截（expired 和 quota_exhausted 留给计费阶段）
-		if !apiKey.IsActive() &&
-			apiKey.Status != service.StatusAPIKeyExpired &&
-			apiKey.Status != service.StatusAPIKeyQuotaExhausted {
+		if !access.KeyStatusPermitsAuthentication(apiKey.Status) {
 			MarkIngressRejected(c, IngressRejectAPIKeyDisabled)
 			AbortWithError(c, 401, "API_KEY_DISABLED", "API key is disabled")
 			return
@@ -152,7 +152,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		}
 
 		// 检查用户状态
-		if !apiKey.User.IsActive() {
+		if !access.KeyUserIsActive(apiKey.User.Status) {
 			MarkIngressRejected(c, IngressRejectUserInactive)
 			AbortWithError(c, 401, "USER_INACTIVE", "User account is not active")
 			return
@@ -184,6 +184,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			if !billingInfoRequest {
 				_ = apiKeyService.TouchLastUsed(c.Request.Context(), apiKey.ID)
 			}
+			service.MarkOpenAIRequestTimingStage(c, "auth_done")
 			c.Next()
 			return
 		}
@@ -214,23 +215,12 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		// ── 6. 计费执行（skipBilling 时整块跳过） ────────────────────
 
 		if !skipBilling {
-			// Key 状态检查
-			switch apiKey.Status {
-			case service.StatusAPIKeyQuotaExhausted:
-				abortWithAPIKeyQuotaError(c)
-				return
-			case service.StatusAPIKeyExpired:
-				AbortWithError(c, 403, "API_KEY_EXPIRED", "API key 已过期")
-				return
-			}
-
-			// 运行时过期/配额检查（即使状态是 active，也要检查时间和用量）
-			if apiKey.IsExpired() {
-				AbortWithError(c, 403, "API_KEY_EXPIRED", "API key 已过期")
-				return
-			}
-			if apiKey.IsQuotaExhausted() {
-				abortWithAPIKeyQuotaError(c)
+			if err := access.KeyQuotaError(apiKeyAccessState(apiKey), false, time.Now()); err != nil {
+				if errors.Is(err, access.ErrKeyQuotaExhausted) {
+					abortWithAPIKeyQuotaError(c)
+				} else {
+					AbortWithError(c, 403, "API_KEY_EXPIRED", "API key 已过期")
+				}
 				return
 			}
 
@@ -260,7 +250,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 				}
 			} else {
 				// 非订阅模式 或 订阅模式但 subscriptionService 未注入：回退到余额检查
-				if apiKeyBalanceBelowAuthThreshold(apiKey.User.Balance, cfg) {
+				if !apiKey.User.IsSuperAdmin() && apiKeyBalanceBelowAuthThreshold(apiKey.User.Balance, cfg) {
 					AbortWithError(c, 403, "INSUFFICIENT_BALANCE", "Insufficient account balance")
 					return
 				}
@@ -283,6 +273,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			_ = apiKeyService.TouchLastUsed(c.Request.Context(), apiKey.ID)
 		}
 
+		service.MarkOpenAIRequestTimingStage(c, "auth_done")
 		c.Next()
 	}
 }
@@ -413,6 +404,34 @@ func abortIfAPIKeyGroupUnavailable(c *gin.Context, apiKey *service.APIKey) bool 
 	return true
 }
 
+// ValidateAPIKeyContinuation reuses the HTTP access rules for an already
+// upgraded socket without attempting to write an HTTP error after status 101.
+func ValidateAPIKeyContinuation(c *gin.Context, key *service.APIKey, cfg *config.Config) error {
+	if key == nil || !access.KeyStatusPermitsAuthentication(key.Status) || key.User == nil || !access.KeyUserIsActive(key.User.Status) {
+		return fmt.Errorf("API key authorization is no longer valid")
+	}
+	if _, message, ok := validateAPIKeyGroupAvailable(key); !ok {
+		return fmt.Errorf("%s", message)
+	}
+	if !validateAPIKeyGroupAllowed(key) {
+		return fmt.Errorf("API key group is no longer allowed")
+	}
+	if len(key.IPWhitelist) > 0 || len(key.IPBlacklist) > 0 {
+		trust := false
+		if cfg != nil {
+			trust = cfg.TrustForwardedIPForAPIKeyACL()
+		}
+		allowed, _ := ip.CheckIPRestrictionWithCompiledRules(ip.GetSecurityClientIP(c, trust), key.CompiledIPWhitelist, key.CompiledIPBlacklist)
+		if !allowed {
+			return fmt.Errorf("API key access denied")
+		}
+	}
+	if access.KeyQuotaError(apiKeyAccessState(key), cfg != nil && cfg.RunMode == config.RunModeSimple, time.Now()) != nil {
+		return fmt.Errorf("API key quota or expiry no longer permits this request")
+	}
+	return nil
+}
+
 func abortIfAPIKeyGroupNotAllowed(c *gin.Context, apiKey *service.APIKey) bool {
 	if validateAPIKeyGroupAllowed(apiKey) {
 		return false
@@ -423,27 +442,55 @@ func abortIfAPIKeyGroupNotAllowed(c *gin.Context, apiKey *service.APIKey) bool {
 	return true
 }
 
+// These adapters serve HTTP, Google, and upgraded-WS callers with service
+// entities. Retire them when ingress receives access facts directly; protocol
+// error formatting remains at ingress rather than in the policy package.
 func validateAPIKeyGroupAllowed(apiKey *service.APIKey) bool {
-	if apiKey == nil || apiKey.GroupID == nil || apiKey.User == nil || apiKey.Group == nil {
-		return true
+	bound, group := apiKeyGroupFacts(apiKey)
+	var binding *access.GroupBinding
+	if apiKey != nil && apiKey.User != nil {
+		binding = &access.GroupBinding{
+			Vendor:               apiKey.User.IsVendor(),
+			RestrictPublicGroups: apiKey.User.RestrictPublicGroups,
+			AllowedGroups:        apiKey.User.AllowedGroups,
+		}
 	}
-	group := apiKey.Group
-	if group.IsSubscriptionType() {
-		return true
-	}
-	return apiKey.User.CanBindGroup(group.ID, group.IsExclusive)
+	return access.APIKeyGroupAllowed(bound, binding, group)
 }
 
 func validateAPIKeyGroupAvailable(apiKey *service.APIKey) (string, string, bool) {
-	if apiKey == nil || apiKey.GroupID == nil {
+	bound, group := apiKeyGroupFacts(apiKey)
+	switch access.APIKeyGroupAvailable(bound, group) {
+	case access.GroupAvailable:
 		return "", "", true
-	}
-	group := apiKey.Group
-	if group == nil || strings.EqualFold(group.Status, "deleted") {
+	case access.GroupDeleted:
 		return "GROUP_DELETED", "API Key 所属分组已删除", false
-	}
-	if !group.IsActive() {
+	default:
 		return "GROUP_DISABLED", "API Key 所属分组已停用", false
 	}
-	return "", "", true
+}
+
+// apiKeyGroupFacts is the shared HTTP/Google/continuation entity boundary.
+// Keep GroupID presence separate from the loaded edge's ID; the existing rules
+// use the edge for grants and never equate an explicit zero with absence.
+func apiKeyGroupFacts(apiKey *service.APIKey) (bool, *access.Group) {
+	if apiKey == nil {
+		return false, nil
+	}
+	if apiKey.Group == nil {
+		return apiKey.GroupID != nil, nil
+	}
+	group := apiKey.Group
+	return apiKey.GroupID != nil, &access.Group{
+		ID:           group.ID,
+		Status:       group.Status,
+		IsExclusive:  group.IsExclusive,
+		Subscription: group.IsSubscriptionType(),
+	}
+}
+
+// apiKeyAccessState converts an already-loaded entity without moving protocol
+// error ordering, IP extraction, or subscription/billing side effects into access.
+func apiKeyAccessState(key *service.APIKey) access.KeyState {
+	return access.KeyState{Status: key.Status, ExpiresAt: key.ExpiresAt, Quota: key.Quota, QuotaUsed: key.QuotaUsed}
 }

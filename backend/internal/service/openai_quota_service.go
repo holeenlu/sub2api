@@ -184,11 +184,10 @@ func (s *OpenAIQuotaService) QueryUsage(ctx context.Context, accountID int64) (*
 		if headerErr != nil {
 			return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_QUOTA_AUTH_FAILED", "failed to build upstream authentication: %v", headerErr)
 		}
-		resp, err := client.R().
-			SetContext(callCtx).
-			SetHeaders(quotaHeaders).
-			SetSuccessResult(&payload).
-			Get(chatGPTUsageURL)
+		observed, resp, err := queryOpenAIQuotaUsage(callCtx, client, quotaHeaders)
+		if observed != nil {
+			payload = *observed
+		}
 		if err != nil {
 			return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_QUOTA_REQUEST_FAILED", "upstream request failed: %v", err)
 		}
@@ -730,4 +729,10 @@ func mapUpstreamStatus(status int) int {
 	default:
 		return http.StatusBadGateway
 	}
+}
+
+func queryOpenAIQuotaUsage(ctx context.Context, client *req.Client, headers map[string]string) (*OpenAIQuotaUsage, *req.Response, error) {
+	var usage OpenAIQuotaUsage
+	response, err := client.R().SetContext(ctx).SetHeaders(headers).SetSuccessResult(&usage).Get(chatGPTUsageURL)
+	return &usage, response, err
 }

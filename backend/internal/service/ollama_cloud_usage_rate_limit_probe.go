@@ -81,8 +81,8 @@ func (s *OllamaCloudUsageService) ScheduleOllamaCloudUsageRateLimitProbe(
 		return false
 	}
 	s.mu.Lock()
-	running := s.started && !s.stopped
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	running := s.started && !s.stopped && s.parentCtx.Err() == nil
 	if !running {
 		return false
 	}
@@ -135,6 +135,8 @@ func (s *OllamaCloudUsageService) probeLoop() {
 			s.probeMu.Unlock()
 			select {
 			case <-s.probeWake:
+			case <-s.drainCh:
+				return
 			case <-s.parentCtx.Done():
 				return
 			}

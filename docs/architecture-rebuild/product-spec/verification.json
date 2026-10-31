@@ -1,0 +1,1530 @@
+{
+  "schema_version": 3,
+  "review_date": "2026-10-27",
+  "scope": "Final frontend e5 source and scoped development evidence; actual full tests/builds remain bound to 63fe. Backend and runtime/business acceptance remain incomplete.",
+  "comparison_baseline": "6f48d6ab6fcc29763af84410690530aeaa957403",
+  "maintenance_baseline": "c2a10f2aae9597ca2fe8c94813e21b00b6bde53a",
+  "frontend_frozen_hash": "e5a6080563419821daef5eb96e29a95b95f8d80c722b2f8af68dca762878277d",
+  "freeze_meaning": "Frontend source/development handoff only; backend, supplier DTO, stale-edit atomic contract and joint runtime acceptance are not completed.",
+  "branch": "codex/sub2api-rebuild",
+  "head": "673c53c130c11cf1cb55abf0722dd996bf79eded",
+  "document_checks": {
+    "status": "passed_final_documentation_json_counts_links_source_references",
+    "markdown_files": 10,
+    "json_files": 3,
+    "local_links": 840,
+    "fragment_occurrences": 19,
+    "broken_links": [],
+    "invalid_fragment_links": [],
+    "current_state_contradictions": [],
+    "catalog_sha256": "f583bef1ab284f6cb20530917bcf415d6f1b0c5887b9a8eabd1f0f0aa5fa5c98",
+    "catalog_counts": {
+      "cases": 753,
+      "pages": 92,
+      "redirects": 17,
+      "aliases": 2,
+      "settings_panels": 51,
+      "by_layer": {
+        "external_e2e": 48,
+        "local_e2e": 683,
+        "manual": 19,
+        "static": 3
+      },
+      "by_priority": {
+        "P0": 461,
+        "P1": 292,
+        "P2": 0
+      }
+    },
+    "settings_tabs": [
+      "general",
+      "agreement",
+      "security",
+      "users",
+      "gateway",
+      "features",
+      "payment",
+      "email",
+      "backup",
+      "roles"
+    ],
+    "case_initial_status_counts": {
+      "not_run": 753
+    },
+    "traceability_counts": {
+      "page_entries": 92,
+      "settings_panels": 51,
+      "settings_tabs": 10,
+      "case_references": 753,
+      "numbered_feature_sections": 162,
+      "common_requirements": 13,
+      "cases_explicitly_referenced_by_features": 358,
+      "cases_associated_by_chapter_only": 395
+    },
+    "feature_sections_by_chapter": {
+      "01-PUBLIC-IDENTITY-KEYS.md": 44,
+      "02-RESOURCES-ACCESS-CATALOG.md": 41,
+      "03-PAYMENTS-USAGE.md": 31,
+      "04-OPERATIONS-SUPPLY-SYSTEM.md": 46
+    },
+    "unique_explicit_case_references_in_documents": 450,
+    "unknown_case_ids": [],
+    "retired_case_ids_in_active_references": [],
+    "source_reference_count": 461,
+    "source_references_missing": [],
+    "source_reference_hash_mismatches": [],
+    "maintenance_rows_with_final_application_binding": 35,
+    "current_frontend_manifest_sha256": "e5a6080563419821daef5eb96e29a95b95f8d80c722b2f8af68dca762878277d",
+    "scope_qualified_reuse": {
+      "actual_full_test_build_input": "63fe672756a98e4bd842d36dc1494181e6fb3338186872769efadb97e04972f8",
+      "final_input": "e5a6080563419821daef5eb96e29a95b95f8d80c722b2f8af68dca762878277d",
+      "original_input_hashes_preserved": true
+    },
+    "catalog_files_modified": false,
+    "application_tests_or_builds_run": false,
+    "closeout": {
+      "checked_at_utc": "2026-10-26T20:07:16.722696+00:00",
+      "status": "completed_documentation_closeout_stop_writing_after_this_batch",
+      "scope": [
+        "docs/architecture-rebuild/FRONTEND_REVIEW.md",
+        "docs/architecture-rebuild/product-spec/**"
+      ],
+      "frontend_or_shared_root_files_written": false,
+      "application_tests_or_builds_run_by_document_worker": false,
+      "source_manifest_sha256": "e5a6080563419821daef5eb96e29a95b95f8d80c722b2f8af68dca762878277d",
+      "actual_full_test_build_input_sha256": "63fe672756a98e4bd842d36dc1494181e6fb3338186872769efadb97e04972f8",
+      "business_acceptance": "not_run"
+    }
+  },
+  "source_comparison": {
+    "baseline_source_files": 1215,
+    "current_source_files": 1942,
+    "baseline_production_explicit_any": 352,
+    "current_production_explicit_any": 0,
+    "package_and_lock_unchanged": true,
+    "canonical_routes_added": [],
+    "canonical_routes_removed": [],
+    "scope": "Current e5 production/input statistics reused from 63fe measurement under exact one-test-type-only delta and production-reuse-proof; no final AST reexecution claimed."
+  },
+  "traceability": {
+    "page_entries": 92,
+    "settings_panels": 51,
+    "settings_tabs": 10,
+    "case_references": 753,
+    "numbered_feature_sections": 162,
+    "common_requirements": 13,
+    "cases_explicitly_referenced_by_features": 358,
+    "cases_associated_by_chapter_only": 395
+  },
+  "findings": [
+    {
+      "id": "FR-01",
+      "disposition": "production router now consumes the single factory; actual Router regressions added; deployed acceptance pending"
+    },
+    {
+      "id": "FR-02",
+      "disposition": "retired path examples corrected"
+    },
+    {
+      "id": "FR-04",
+      "disposition": "retracted false finding; original role values already correct; added role-to-case checks"
+    },
+    {
+      "id": "FR-05",
+      "disposition": "scope/permission/target cancellation wired; unmount no longer flushes; deployed acceptance pending"
+    },
+    {
+      "id": "FR-06",
+      "disposition": "refund eligibility matches existing backend type/status contract; sandbox acceptance pending"
+    },
+    {
+      "id": "QA-PRE-001",
+      "disposition": "availability gate and cancellation implemented; deployed home regression pending"
+    },
+    {
+      "id": "FR-07",
+      "disposition": "Primary authorized=false, unknown-state write gating, task revalidation and empty-session gating implemented. 70 component / 288 affected tests pass; real OAuth acceptance pending."
+    }
+  ],
+  "known_gaps": [
+    {
+      "id": "FR-03",
+      "kind": "runtime_acceptance_and_complex_templates",
+      "summary": "Large active templates remain. The controlled 60-sample comparison is bound to pre-Excel-fix 5085; final-source loading checks are a separate smaller scope. No stable production latency or final Docker/page acceptance claimed."
+    },
+    {
+      "id": "BPS-FAILURE-RECOVERY-PROJECTION",
+      "kind": "safe_dto_migration_and_unclosed_concurrency_contract",
+      "feature_ids": [
+        "FS-RES-004",
+        "FS-RES-005"
+      ],
+      "case_ids": [
+        "FE-RES-BPS-EXPLICIT-MODELS",
+        "FE-RES-BPS-PUBLIC-RECOVERY",
+        "FE-RES-BPS-STALE-EDIT"
+      ],
+      "status": "not_closed",
+      "summary": "安全DTO消费已交接；当前独立BPS用例均not_run。成功测试自动恢复保留BPS，管理员明确覆盖另验；supplier投影与陈旧enabled编辑/旧probe原子并发合同仍未闭环。",
+      "dependencies": [
+        {
+          "id": "BPS-SAFE-DTO-CONSUMER",
+          "owner": "frontend_integrator",
+          "status": "production_migration_reported_scoped_tests_passed_final_snapshot_pending",
+          "summary": "MAIN确认生产consumer均迁至readBPSRecoveryPresentation(account.excel_bps_403_recovery)，旧reader及专属测试删除无shim；220相关tests通过，未绑定最终snapshot，整体联调与其他依赖未闭环。"
+        },
+        {
+          "id": "BPS-SUPPLIER-PROJECTION",
+          "owner": "backend_integrator",
+          "status": "not_closed",
+          "summary": "supplier安全BPS状态投影尚未新增；不能透传私有extra或由管理DTO推断供应商可见。"
+        },
+        {
+          "id": "BPS-MIXED-SCOPE-RECOVERY",
+          "owner": "backend_integrator",
+          "status": "separate_automatic_recovery_and_explicit_admin_override_acceptance_not_run",
+          "summary": "成功测试后的自动恢复保留BPS范围冷却；管理员明确恢复覆盖按独立权限与真实端点核对，不对所有recover作同一保留/清空要求。对应FE-RES-BPS-PUBLIC-RECOVERY，not_run。"
+        },
+        {
+          "id": "BPS-STALE-TRUE-WRITE",
+          "owner": "frontend_and_backend_integrators",
+          "status": "atomic_backend_contract_and_runtime_evidence_required",
+          "summary": "陈旧enabled草稿不得回写旧true重新开启BPS；必须后端原子更新或等效并发合同，缺少则FE-RES-BPS-STALE-EDIT blocked，GET预检不替代；尚无运行闭环证据。"
+        },
+        {
+          "id": "BPS-FINAL-CONTRACT",
+          "owner": "frontend_and_backend_integrators",
+          "status": "not_closed",
+          "summary": "明确停止才发送既有false并原子取消旧claim；普通已关闭账号编辑不产生停止意图，旧probe不能覆盖停止。FE-RES-BPS-STALE-EDIT仍not_run，最终source/联合验收待定。"
+        }
+      ]
+    }
+  ],
+  "maintenance_sync": {
+    "total_paths": 54,
+    "increment_paths": 12,
+    "source_matrix": "source-review.json",
+    "scope": "fixed_local_025945_source_review_not_remote_refresh_or_deployed_acceptance",
+    "new_mapping_paths": 8,
+    "reused_rows": 41,
+    "semantically_reviewed_rows": 13,
+    "latest_input": "c2a10f2aae9597ca2fe8c94813e21b00b6bde53a",
+    "latest_input_delta_paths": 35,
+    "latest_input_application_status": "pending",
+    "historical_counts_scope": "existing total_paths/increment_paths describe only 025945 historical matrix"
+  },
+  "current_validation": {
+    "status": "development_evidence_verified_with_scoped_reuse_business_acceptance_pending",
+    "source_manifest_sha256": "e5a6080563419821daef5eb96e29a95b95f8d80c722b2f8af68dca762878277d",
+    "full_vitest": {
+      "run": "frontend/.local/frontend-final-c2-fixed-20261027/full-tests-run.json",
+      "report": "frontend/.local/frontend-final-c2-fixed-20261027/full-tests.json",
+      "files": 600,
+      "tests": 6196,
+      "passed": 6196,
+      "failed": 0,
+      "pending": 0,
+      "todo": 0,
+      "elapsed_seconds": 146.408,
+      "actual_input_sha256": "63fe672756a98e4bd842d36dc1494181e6fb3338186872769efadb97e04972f8",
+      "actual_output_source_sha256": "63fe672756a98e4bd842d36dc1494181e6fb3338186872769efadb97e04972f8",
+      "source_drift": [],
+      "reuse_for_final_sha256": "e5a6080563419821daef5eb96e29a95b95f8d80c722b2f8af68dca762878277d",
+      "rerun_on_final_source_claimed": false
+    },
+    "static_checks": {
+      "report": "frontend/.local/frontend-final-c2-fixed-20261027/static-checks.json",
+      "count": 5,
+      "passed": 5,
+      "actual_input_sha256": "e5a6080563419821daef5eb96e29a95b95f8d80c722b2f8af68dca762878277d",
+      "source_drift": [],
+      "checks": [
+        {
+          "log": "production-types.log",
+          "exit_code": 0,
+          "elapsed_seconds": 14.004
+        },
+        {
+          "log": "node-types.log",
+          "exit_code": 0,
+          "elapsed_seconds": 0.636
+        },
+        {
+          "log": "changed-types.log",
+          "exit_code": 0,
+          "elapsed_seconds": 14.551
+        },
+        {
+          "log": "changed-lint.log",
+          "exit_code": 0,
+          "elapsed_seconds": 2.311
+        },
+        {
+          "log": "generated-i18n.log",
+          "exit_code": 0,
+          "elapsed_seconds": 0.44
+        }
+      ]
+    },
+    "builds": {
+      "report": "frontend/.local/frontend-final-c2-fixed-20261027/builds.json",
+      "actual_input_sha256": "63fe672756a98e4bd842d36dc1494181e6fb3338186872769efadb97e04972f8",
+      "actual_output_source_sha256": "63fe672756a98e4bd842d36dc1494181e6fb3338186872769efadb97e04972f8",
+      "source_drift": [],
+      "reuse_for_final_sha256": "e5a6080563419821daef5eb96e29a95b95f8d80c722b2f8af68dca762878277d",
+      "rebuilt_on_final_source_claimed": false,
+      "runs": [
+        {
+          "role": "build-main.log",
+          "exit_code": 0,
+          "elapsed_seconds": 16.094
+        },
+        {
+          "role": "build-vendor.log",
+          "exit_code": 0,
+          "elapsed_seconds": 11.936
+        }
+      ]
+    },
+    "reuse_proof": {
+      "type_fix": "frontend/.local/frontend-final-c2-fixed-20261027/test-type-fix.json",
+      "production_proof": "frontend/.local/frontend-final-c2-fixed-20261027/production-reuse-proof.json",
+      "build_summary": "frontend/.local/frontend-final-c2-fixed-20261027/build-summary.json",
+      "only_changed_file": "frontend/src/features/operations/dashboard/components/__tests__/OpsNodeMetrics.spec.ts",
+      "before_sha256": "e15d81987a7fbee940b50da088227bbf12c95151d3831553ef5b4cb4aebd677f",
+      "after_sha256": "5cb831c594cbee9a717bccbc324254a5f57b8385d56b1e88fae4bcf6fbb875be",
+      "emitted_javascript_identical": true,
+      "emitted_javascript_sha256": "1982c669eca4f99ce4202460ed215e264d27c938d05f41d8cfd9fa9c97034f4c",
+      "production_inputs_identical": true,
+      "production_input_files": 1316,
+      "production_input_sha256": "68de85cdfd40a5bfabd3e638db5ebfa796f3e6a5570f90a3659419ff22367613"
+    },
+    "type_fix_followup": {
+      "report": "frontend/.local/frontend-final-c2-fixed-20261027/final-test-type-regression.json",
+      "files": 1,
+      "tests": 9,
+      "passed": 9,
+      "failed": 0,
+      "pending": 0,
+      "todo": 0,
+      "tested_file_sha256": "5cb831c594cbee9a717bccbc324254a5f57b8385d56b1e88fae4bcf6fbb875be"
+    },
+    "source_metrics": {
+      "path": "frontend/.local/frontend-final-c2-fixed-20261027/source-metrics.json",
+      "actual_measurement_input_sha256": "63fe672756a98e4bd842d36dc1494181e6fb3338186872769efadb97e04972f8",
+      "reused_for_final_sha256": "e5a6080563419821daef5eb96e29a95b95f8d80c722b2f8af68dca762878277d",
+      "remeasured_on_final_claimed": false,
+      "scope": "All source inventory; production TS/TSX/Vue scripts excluding tests; AnyKeyword excludes templates, comments, strings and implicit any."
+    },
+    "build_summary": {
+      "measured_at_utc": "2026-10-26T19:54:16.860319+00:00",
+      "built_source_manifest_sha256": "63fe672756a98e4bd842d36dc1494181e6fb3338186872769efadb97e04972f8",
+      "current_source_manifest_sha256": "e5a6080563419821daef5eb96e29a95b95f8d80c722b2f8af68dca762878277d",
+      "reuse_basis": "Only the exact type-only test fixture patch in test-type-fix.json differs; production source, dependencies, configuration and test emitted JavaScript are unchanged. Full suite/build receipts retain their actual source hash.",
+      "delta": [
+        "frontend/src/features/operations/dashboard/components/__tests__/OpsNodeMetrics.spec.ts"
+      ],
+      "roles": {
+        "main": {
+          "entry": {
+            "index.html": {
+              "file": "assets/index-CG3E1ivf.js",
+              "bytes": 370376,
+              "sha256": "97490e217787dd02b2ec6f4b49bb861818706c94fc8063628aa92e752a7d97a1"
+            }
+          },
+          "entry_static_js_bytes": 611885,
+          "largest_js": [
+            {
+              "file": "assets/vendor-xlsx-B2eTCt_Q.js",
+              "bytes": 500005,
+              "sha256": "af49f50bf8b3acb4ad0867fc1ab4972a4548e4d5debb95b2b7ffb325700655f6"
+            },
+            {
+              "file": "assets/index-CG3E1ivf.js",
+              "bytes": 370376,
+              "sha256": "97490e217787dd02b2ec6f4b49bb861818706c94fc8063628aa92e752a7d97a1"
+            },
+            {
+              "file": "assets/AccountsPage-CfMliRem.js",
+              "bytes": 369886,
+              "sha256": "8142acbd01b99caa6823650161bdf9ed16c81fc94175e789e6709d9a3cca18a3"
+            },
+            {
+              "file": "assets/VendorPortalPage-DyIJUoHW.js",
+              "bytes": 296199,
+              "sha256": "0e9597a424a3d1e35db8d73dadfd7c858da38a0167d09291806ac4b79f1e864e"
+            },
+            {
+              "file": "assets/CreateAccountModal-Bu-lu2x6.js",
+              "bytes": 287668,
+              "sha256": "11be6270c5693015ea9715e246db69d33f29bd4b7a2ca890c56d1f147e574baf"
+            },
+            {
+              "file": "assets/EditAccountModal.vue_vue_type_script_setup_true_lang-qyZRGPbR.js",
+              "bytes": 280514,
+              "sha256": "43b69041ac6d5cfb310801ace20d142f254973bfa1bbd01d67f7776635451108"
+            },
+            {
+              "file": "assets/OpsDashboard-BqKwxwnq.js",
+              "bytes": 233163,
+              "sha256": "432acac487f096d7fdd2e992df94d216cfd831c848bf5bf8f65dac8f8a671db4"
+            },
+            {
+              "file": "assets/index-yjby-O12.js",
+              "bytes": 197074,
+              "sha256": "f4b3db8ae7887e1e36cb4ae66fff34c0ad1381e1e4d094302cf2758948ff6246"
+            }
+          ],
+          "file_count": 489,
+          "total_bytes": 10500961,
+          "artifact_sha256": "1d0b3aa3d8c6e582ddb19cdb302af18418c57ed05418e4b2d3236b490f3c86c8",
+          "manifest_sha256": "944ce61651d49873483f1762374de97bc2de59b1abe6b3d81110456228124077"
+        },
+        "vendor": {
+          "entry": {
+            "index.html": {
+              "file": "assets/index-erRXujK1.js",
+              "bytes": 370142,
+              "sha256": "699bb41ec1806c3b3dc99d0d72d2388f5d613d796ad90cd95022bb3b0c36dfa2"
+            }
+          },
+          "entry_static_js_bytes": 611651,
+          "largest_js": [
+            {
+              "file": "assets/vendor-xlsx-B2eTCt_Q.js",
+              "bytes": 500005,
+              "sha256": "af49f50bf8b3acb4ad0867fc1ab4972a4548e4d5debb95b2b7ffb325700655f6"
+            },
+            {
+              "file": "assets/index-erRXujK1.js",
+              "bytes": 370142,
+              "sha256": "699bb41ec1806c3b3dc99d0d72d2388f5d613d796ad90cd95022bb3b0c36dfa2"
+            },
+            {
+              "file": "assets/AccountsPage-BCzt5i4g.js",
+              "bytes": 369886,
+              "sha256": "63ccf6a95512fc6f582342c7da53cec3e1ab9a3f695f8fe77b7be5cdc24d4926"
+            },
+            {
+              "file": "assets/VendorPortalPage-DniIGHBE.js",
+              "bytes": 296199,
+              "sha256": "d1ba13995c1a0cc8e1111b441b928c0f0ee59ee31ab7ef079af0a1747755912e"
+            },
+            {
+              "file": "assets/CreateAccountModal-DIFyEC1Y.js",
+              "bytes": 287668,
+              "sha256": "09a7e4d40040e242e517210fffdf6188f1993a2fe60bb7ef59761507643eced9"
+            },
+            {
+              "file": "assets/EditAccountModal.vue_vue_type_script_setup_true_lang-aYYFjuXd.js",
+              "bytes": 280514,
+              "sha256": "cca9ea0cd3f4c5ad941e3afef1470c1e2aee89249eda0c0f0a61375a5ba2b2ae"
+            },
+            {
+              "file": "assets/OpsDashboard-CJ8F0A8D.js",
+              "bytes": 233163,
+              "sha256": "90ac1f76c009c8b16f35c7d1408c077478d4d113c4d1b5d70f9839b49d23585d"
+            },
+            {
+              "file": "assets/index-yjby-O12.js",
+              "bytes": 197074,
+              "sha256": "f4b3db8ae7887e1e36cb4ae66fff34c0ad1381e1e4d094302cf2758948ff6246"
+            }
+          ],
+          "file_count": 489,
+          "total_bytes": 10500721,
+          "artifact_sha256": "21a5a62b71ea3309375daf82808f2fd00a196deba0b9bcbbbb9d2d76b9ec7110",
+          "manifest_sha256": "28989dff54ce8bc25b9e35582e0440145a1532c55d2c6a1f20722b8a34067210"
+        }
+      },
+      "measurement": "Disk UTF-8 bytes; entry static JS follows only manifest imports, not dynamic imports; not browser traffic or real-user performance."
+    },
+    "catalog_tests": {
+      "passed": 6,
+      "included_in_full_6196": true,
+      "business_case_status": "not_run"
+    },
+    "browser_performance_rerun_for_current_source": false,
+    "business_acceptance": "not_run",
+    "reviewer_ran_tests_or_builds": false,
+    "evidence_file_sha256": {
+      "frontend/.local/frontend-final-c2-fixed-20261027/HANDOFF.md": "61a8abe91a1b29014b06ebc4d77d58028cf60c7e8e56796506b81068ed69a993",
+      "frontend/.local/frontend-final-c2-fixed-20261027/integration-receipt.json": "35d5464aab75300d3f19ca87546cf0aeece43f90cace0e41e727eaabfda898f0",
+      "frontend/.local/frontend-final-c2-fixed-20261027/source-manifest.json": "b08e90e1bafb894ca01980f7d6c675319039bdc2f822c1158d14d6c228d2a34d",
+      "frontend/.local/frontend-final-c2-fixed-20261027/build-and-full-test-source-manifest.json": "8e268f71e40889dcb2f82d3a136d533c6b26f6895e8938abdf68b1aa10829b54",
+      "frontend/.local/frontend-final-c2-fixed-20261027/full-tests-run.json": "9481556c409c8d2d6a695d52a7c3342c4666f96737b722518e736e7b41f99c46",
+      "frontend/.local/frontend-final-c2-fixed-20261027/full-tests.json": "3f6192c25101399b72b99753bed4c0ca135be08b9174c0cbd08179dbf67f5e76",
+      "frontend/.local/frontend-final-c2-fixed-20261027/static-checks.json": "c5a6b44482de5636d0b0b6b9e5d1f6a95ef57ce8376e07547e5eb66174d73d7e",
+      "frontend/.local/frontend-final-c2-fixed-20261027/builds.json": "518242d2a9ca9bf9098b5092323ac86715d73496839890bbdb14c7dd08c42e56",
+      "frontend/.local/frontend-final-c2-fixed-20261027/test-type-fix.json": "652f0a98d7926b79b9ee2ed0157c83ec0e2d7321532d46827da48d5f3d4a3a21",
+      "frontend/.local/frontend-final-c2-fixed-20261027/production-reuse-proof.json": "1214bbc6e37804471afe3145f98a1058fc1841f7fc5ca3ba96e9a761a904effc",
+      "frontend/.local/frontend-final-c2-fixed-20261027/final-test-type-regression.json": "3000a7abebb5dd8e6e9f8805836539f2d555352d4f28dc888edda3beb8c20a7a",
+      "frontend/.local/frontend-final-c2-fixed-20261027/source-metrics.json": "0baa0edc9af9ef31f38d8ef6d7f784c9c7add9637417ad9e6486c557c3f27fee",
+      "frontend/.local/frontend-final-c2-fixed-20261027/build-summary.json": "d24c0fb70da45a5af23f9eb52689acf5db6897643da5f9aa19463ce192846298",
+      "frontend/.local/frontend-final-c2-fixed-20261027/delta-final-from-f4fe.json": "333a97ed4143688b8d61f12cadde877b432dc091eb0793a65fb5c62a8c14ec23"
+    },
+    "counting_note": "6196 full-suite tests already include catalog regressions. 9 followup tests and worker 390/190/220 scopes overlap; do not add them."
+  },
+  "execution_boundaries": {
+    "application_full_tests_rerun": false,
+    "affected_tests_run": false,
+    "application_builds_rerun": false,
+    "docker_or_business_browser_acceptance_run": false,
+    "frontend_cases_executed_this_wave": 0,
+    "git_index_commit_push_changed": false,
+    "all_frontend_plan_and_joint_acceptance_complete": false,
+    "controlled_synthetic_browser_comparison_run": false,
+    "final_business_cases_executed_this_wave": 0,
+    "scope": "This documentation audit only; earlier execution is retained under historical_evidence and last_verified_checkpoint."
+  },
+  "historical_evidence": {
+    "prior_spec_verification": "frontend/.local/frontend-rule-closure/prior-spec-verification.json",
+    "prior_source_hash": "748782a3af429e29765bb6fd90a1c66385f2191623521ee5119ac4e195438ff4",
+    "old_deployed_source_hash": "d4d7bfae71c4ccbca8d36302cf9d709c1bd06a1544e8ff95579d6315be7809f5",
+    "prior_20261026_spec_verification": "frontend/.local/frontend-completion-20261027/prior-spec-verification.json",
+    "pre_excel_fix_source_hash": "5085f2982933173be500a57ab401addd6111b6d4d95a02a93c42270a3c4bbbd0",
+    "checkpoint_5c3005_document_state": {
+      "frontend_frozen_hash": "5c30054b56eb0b6be36401a8f1819b767f257682ab3a1beb5d28ff7aad8c72bd",
+      "source_comparison": {
+        "baseline_source_files": 1215,
+        "current_source_files": 1939,
+        "baseline_production_explicit_any": 352,
+        "current_production_explicit_any": 0,
+        "package_and_lock_unchanged": true,
+        "canonical_routes_added": [],
+        "canonical_routes_removed": []
+      },
+      "document_checks": {
+        "markdown_files": 10,
+        "local_links": 807,
+        "broken_links": [],
+        "fragment_links": [
+          "../CONTRACTS.md#bps-routing-20261027",
+          "../CONTRACTS.md#bps-failure-recovery-20261027"
+        ],
+        "invalid_fragment_links": [],
+        "feature_sections_by_chapter": {
+          "01-PUBLIC-IDENTITY-KEYS.md": 44,
+          "02-RESOURCES-ACCESS-CATALOG.md": 41,
+          "03-PAYMENTS-USAGE.md": 31,
+          "04-OPERATIONS-SUPPLY-SYSTEM.md": 46
+        },
+        "feature_sections": 162,
+        "common_rules": 13,
+        "unique_explicit_case_references_in_documents": 449,
+        "invalid_case_ids": [],
+        "case_ids_valid": true,
+        "page_entries": 92,
+        "settings_panels": 52,
+        "trace_cases": 752,
+        "trace_missing_cases": [],
+        "trace_unknown_cases": [],
+        "feature_explicit_cases": 355,
+        "chapter_only_cases": 397,
+        "source_paths_missing": [],
+        "case_initial_statuses": [
+          "not_run"
+        ],
+        "frontend_manifest_files": 2006,
+        "frontend_manifest_bytes": 18826234,
+        "contract_source_drift": [],
+        "source_metrics_corrected": true
+      },
+      "current_validation": {
+        "node": "v24.22.1",
+        "full_vitest": {
+          "report": "frontend/.local/frontend-completion-20261027/full-tests.json",
+          "run": "frontend/.local/frontend-completion-20261027/full-tests-run.json",
+          "files": 594,
+          "numTotalTests": 5815,
+          "numPassedTests": 5815,
+          "numFailedTests": 0,
+          "numPendingTests": 0,
+          "success": true,
+          "input_sha256": "ff45d0685ac81eaf7740f3a937fdbc751dc57cd55e58152d10ced3ba5492cb71"
+        },
+        "followup_vitest": [
+          {
+            "report": "frontend/.local/frontend-completion-20261027/final-copy-tests.json",
+            "run": "frontend/.local/frontend-completion-20261027/final-copy-tests-run.json",
+            "tests": 199,
+            "files": 17,
+            "source_sha256": "5085f2982933173be500a57ab401addd6111b6d4d95a02a93c42270a3c4bbbd0"
+          },
+          {
+            "report": "frontend/.local/frontend-completion-20261027/excel-auth-empty-scope-affected-tests.json",
+            "run": "frontend/.local/frontend-completion-20261027/excel-auth-empty-scope-validation-summary.json",
+            "tests": 288,
+            "files": 10,
+            "component_tests": 70,
+            "input_scope": "Input manifest recorded by worker; final file digests independently matched to final source manifest."
+          },
+          {
+            "report": "frontend/.local/frontend-completion-20261027/final-catalog-locale-tests.json",
+            "run": "frontend/.local/frontend-completion-20261027/final-catalog-locale-tests-run.json",
+            "tests": 105,
+            "files": 15,
+            "source_sha256": "5c30054b56eb0b6be36401a8f1819b767f257682ab3a1beb5d28ff7aad8c72bd"
+          }
+        ],
+        "counting_note": "Sets overlap; never sum the counts. The full suite was not rerun on final 5c3005; actual changed consumers, types, locales and both builds were revalidated.",
+        "production_node_control_types": {
+          "earlier_scoped": "frontend/.local/frontend-completion-20261027/static-checks.json",
+          "final_production_and_component_types": "frontend/.local/frontend-completion-20261027/excel-auth-empty-scope-validation-summary.json",
+          "unchanged_control_type_evidence": "frontend/.local/frontend-rule-closure/static-final.json"
+        },
+        "lint": {
+          "earlier_full_scan": {
+            "full_scan": "frontend/.local/frontend-rule-closure/full-eslint.json",
+            "files": 1803,
+            "initial_errors": 2,
+            "initial_warnings": 0,
+            "initial_error_files": [
+              "frontend/src/shared/ui/__tests__/Select.types.vue"
+            ],
+            "repair": "frontend/.local/frontend-rule-closure/static-final.json#eslint-repair",
+            "fixture_lint": "frontend/.local/frontend-rule-closure/settings-final-checks.json#settings-fixture-lint",
+            "unresolved_errors": 0
+          },
+          "changed_files": "frontend/.local/frontend-completion-20261027/static-checks.json",
+          "final_component": "frontend/.local/frontend-completion-20261027/excel-auth-empty-scope-validation-summary.json",
+          "final_locale": "frontend/.local/frontend-completion-20261027/excel-auth-handoff.json",
+          "no_unresolved_errors_in_executed_checks": true
+        },
+        "generated_locale_check": "frontend/.local/frontend-completion-20261027/excel-auth-empty-scope-validation-summary.json",
+        "builds": "frontend/.local/frontend-completion-20261027/builds.json",
+        "build_summary": "frontend/.local/frontend-completion-20261027/build-summary.json",
+        "source_manifest": "frontend/.local/frontend-completion-20261027/source-manifest.json",
+        "delta_from_last_5085_checkpoint": "frontend/.local/frontend-completion-20261027/delta-after-5085.json",
+        "source_metrics": "frontend/.local/frontend-completion-20261027/source-metrics.json",
+        "runtime_source_drift_since_final_build": [],
+        "failed_attempts_retained": [
+          "frontend/.local/frontend-completion-20261027/static-first-attempt/",
+          "frontend/.local/frontend-completion-20261027/excel-auth-before-tests-run.json",
+          "frontend/.local/frontend-completion-20261027/excel-auth-empty-scope-before-tests-run.json",
+          "frontend/.local/frontend-completion-20261027/excel-auth-generate-tw-attempt1-run.json"
+        ]
+      },
+      "execution_boundaries": {
+        "application_full_tests_rerun": true,
+        "affected_tests_run": true,
+        "application_builds_rerun": true,
+        "docker_or_business_browser_acceptance_run": false,
+        "frontend_cases_executed_this_wave": 0,
+        "git_index_commit_push_changed": false,
+        "all_frontend_plan_and_joint_acceptance_complete": false,
+        "controlled_synthetic_browser_comparison_run": true,
+        "final_business_cases_executed_this_wave": 0
+      },
+      "note": "Previous record retained at its original hash. Historical tests, performance, and deployment are not current evidence."
+    },
+    "document_audit_before_c2_input": {
+      "markdown_files": 10,
+      "local_links": 823,
+      "broken_links": [],
+      "fragment_links": [
+        "../CONTRACTS.md#bps-failure-recovery-20261027",
+        "../CONTRACTS.md#bps-routing-20261027",
+        "SETTINGS_AND_CONTRACTS.md#5-服务端依赖边界",
+        "product-spec/SETTINGS_AND_CONTRACTS.md#5-服务端依赖边界"
+      ],
+      "fragment_occurrences": 8,
+      "invalid_fragment_links": [],
+      "feature_sections_by_chapter": {
+        "01-PUBLIC-IDENTITY-KEYS.md": 44,
+        "02-RESOURCES-ACCESS-CATALOG.md": 41,
+        "03-PAYMENTS-USAGE.md": 31,
+        "04-OPERATIONS-SUPPLY-SYSTEM.md": 46
+      },
+      "feature_sections": 162,
+      "common_rules": 13,
+      "unique_explicit_case_references_in_documents": 449,
+      "invalid_case_ids": [],
+      "case_ids_valid": true,
+      "page_entries": 92,
+      "settings_panels": 52,
+      "trace_cases": 752,
+      "trace_missing_cases": [],
+      "trace_unknown_cases": [],
+      "feature_explicit_cases": 355,
+      "chapter_only_cases": 397,
+      "source_paths_missing": [],
+      "case_initial_statuses": [
+        "not_run"
+      ],
+      "case_initial_status_counts": {
+        "not_run": 752
+      },
+      "frontend_manifest_files": 2011,
+      "frontend_manifest_bytes": 18873504,
+      "frontend_manifest_scope": "preserved historical f4fe checkpoint only; current source not frozen",
+      "current_frontend_manifest_sha256": null,
+      "contract_source_drift": null,
+      "source_metrics_corrected": null,
+      "source_semantic_audit_performed": false,
+      "validation_receipt": "frontend/.local/bps-frontend-integration-20261027/docs-audit-validation.json"
+    },
+    "pre_final_development_validation": {
+      "status": "awaiting_fixed_directory_full_tests_static_and_builds",
+      "source_manifest": null,
+      "runtime_source_drift_since_final_build": null,
+      "recorded_checkpoint_sha256": "f4fe8a8f0eba6b9ba313f24989921aaf60383ea6c0bfa6aaead45403880b83b8",
+      "recorded_checkpoint_ref": "last_verified_checkpoint",
+      "reexecuted_by_document_reviewer": false,
+      "note": "Historical f4fe full tests/checks/builds verified from receipts only; current code and backend consumers are owned by MAIN.",
+      "catalog_consistency": {
+        "run_receipt": "frontend/.local/frontend-acceptance-c2-20261027/catalog-tabs-update.json",
+        "run_receipt_sha256": "0e43bc6055fae1154f4107b5e71818a7cb759c6745326a8ca4d81fc7df1a571d",
+        "report": "frontend/.local/frontend-acceptance-c2-20261027/catalog-tabs-tests.json",
+        "report_sha256": "e78d83c4724e32a545786ead155037a9143fa73330d1852dc7dda9471bcf3993",
+        "catalog_sha256": "f583bef1ab284f6cb20530917bcf415d6f1b0c5887b9a8eabd1f0f0aa5fa5c98",
+        "route_inventory_sha256": "3388e57dc64ce633335f4916473d24e72043540581c754bdcffde20c0863d390",
+        "tests": 6,
+        "passed": 6,
+        "failed": 0,
+        "pending": 0,
+        "test_files": 1,
+        "elapsed_seconds": 1.353,
+        "exit_code": 0,
+        "scope": "Actual route, settings panel and tab catalog consistency regression only, not the 753 business acceptance cases.",
+        "checked_existing_receipts_by_document_worker": true,
+        "reexecuted_by_document_worker": false,
+        "business_case_status": "not_run",
+        "source_manifest_sha256": null
+      },
+      "final_source_manifest_sha256": null
+    }
+  },
+  "coordination": "MAIN owns frontend safe DTO migration, backend, shared work-items, Docker and Git. This worker edits only FRONTEND_REVIEW.md and product-spec; audit evidence uses docs-* in bps-frontend-integration-20261027. Final source manifest and validation pending.",
+  "files": {
+    "docs/architecture-rebuild/FRONTEND_REVIEW.md": {
+      "sha256": "9b70829a79d32ef4120880295c60b4ec8e499d6d25b9c7972ac0fcdd2a736297",
+      "bytes": 21186
+    },
+    "docs/architecture-rebuild/product-spec/01-PUBLIC-IDENTITY-KEYS.md": {
+      "sha256": "c8c1ab580b4c9b7fdef45f94178ff8498dd0e26791c88f590f474828f5e6b9fb",
+      "bytes": 82502
+    },
+    "docs/architecture-rebuild/product-spec/02-RESOURCES-ACCESS-CATALOG.md": {
+      "sha256": "01f03da27db48087e9ee9cb206d770292ce8a9451615d9933036fdf496eff56c",
+      "bytes": 84033
+    },
+    "docs/architecture-rebuild/product-spec/03-PAYMENTS-USAGE.md": {
+      "sha256": "03cbc76b302e47243c522e43ac7ea66aef9b27fe2598c56fc2c6f1549ddbce03",
+      "bytes": 55345
+    },
+    "docs/architecture-rebuild/product-spec/04-OPERATIONS-SUPPLY-SYSTEM.md": {
+      "sha256": "5a809218bf24686334712ae8352cf72d5261cfbadbef369db216ca3e2b2f4fc0",
+      "bytes": 74234
+    },
+    "docs/architecture-rebuild/product-spec/PAGES_AND_PERMISSIONS.md": {
+      "sha256": "6135be4e0262073788ab87f2f84bcd6f497306d3b7d455fa744469652cd5b85c",
+      "bytes": 22421
+    },
+    "docs/architecture-rebuild/product-spec/README.md": {
+      "sha256": "7507dfecf716dfd84d68732f232cb3e60cf2ad04492a63cf99f2025c90501cf5",
+      "bytes": 6432
+    },
+    "docs/architecture-rebuild/product-spec/REVIEW-EVIDENCE.md": {
+      "sha256": "fe87aeb4959f77fc5e054c36b80e0a647f98b8bfe99962b152dd3e7d73a46e2c",
+      "bytes": 26919
+    },
+    "docs/architecture-rebuild/product-spec/SETTINGS_AND_CONTRACTS.md": {
+      "sha256": "e50cd52a675c523c2e8107f5ad9809f2dbaf81be9d1fe77a75f7ee1cdefc0fcb",
+      "bytes": 23466
+    },
+    "docs/architecture-rebuild/product-spec/SPECIFICATION.md": {
+      "sha256": "4c079cdb7c1dcb0034d6c01ba6cc701913edc4e7beec9138ceeae5f80ada908c",
+      "bytes": 17149
+    },
+    "docs/architecture-rebuild/product-spec/source-review.json": {
+      "sha256": "07e33d11d6488d89e8feef1670397d2358eafbcadac7a5f8fd6896b6b684a5a6",
+      "bytes": 395662
+    },
+    "docs/architecture-rebuild/product-spec/traceability.json": {
+      "sha256": "b85e7f5813111ad417a1c923a5f42098e07e48a5d17e4faecc16139fb0bb081f",
+      "bytes": 445974
+    }
+  },
+  "file_manifest_note": "File hashes cover documents and data excluding this self-referential receipt; frontend source uses the separate manifest.",
+  "controlled_performance": {
+    "full_comparison_source_sha256": "5085f2982933173be500a57ab401addd6111b6d4d95a02a93c42270a3c4bbbd0",
+    "formal_samples": 60,
+    "warmups": 6,
+    "all_valid": true,
+    "source": "frontend/.local/performance-closure-20261026/compare-final-20261027-03-results.json",
+    "final_loading_checks": "frontend/.local/performance-closure-20261026/final-handoff.json",
+    "business_cases_counted": 0,
+    "limits": "Synthetic APIs, shared host, no latency SLO claim; vendor not in full browser timing comparison.",
+    "final_source_sha256": "5c30054b56eb0b6be36401a8f1819b767f257682ab3a1beb5d28ff7aad8c72bd",
+    "final_loading_scenarios": {
+      "pages": 3,
+      "payment": 2,
+      "passed": 5,
+      "per_scenario_samples": 1,
+      "timing_distribution_claimed": false
+    },
+    "scope": "Historical 5085 timing and historical 5c3005 loading checks only. Original hashes retained; not f4fe or current source evidence."
+  },
+  "last_verified_checkpoint": {
+    "status": "final_development_checkpoint_with_scope_qualified_reuse",
+    "manifest_path": "frontend/.local/frontend-final-c2-fixed-20261027/source-manifest.json",
+    "manifest_sha256": "e5a6080563419821daef5eb96e29a95b95f8d80c722b2f8af68dca762878277d",
+    "manifest_file_sha256": "b08e90e1bafb894ca01980f7d6c675319039bdc2f822c1158d14d6c228d2a34d",
+    "manifest_files": 2009,
+    "manifest_bytes": 18901651,
+    "actual_test_and_build_source_sha256": "63fe672756a98e4bd842d36dc1494181e6fb3338186872769efadb97e04972f8",
+    "full_vitest": {
+      "run": "frontend/.local/frontend-final-c2-fixed-20261027/full-tests-run.json",
+      "report": "frontend/.local/frontend-final-c2-fixed-20261027/full-tests.json",
+      "files": 600,
+      "tests": 6196,
+      "passed": 6196,
+      "failed": 0,
+      "pending": 0,
+      "todo": 0,
+      "elapsed_seconds": 146.408,
+      "actual_input_sha256": "63fe672756a98e4bd842d36dc1494181e6fb3338186872769efadb97e04972f8",
+      "actual_output_source_sha256": "63fe672756a98e4bd842d36dc1494181e6fb3338186872769efadb97e04972f8",
+      "source_drift": [],
+      "reuse_for_final_sha256": "e5a6080563419821daef5eb96e29a95b95f8d80c722b2f8af68dca762878277d",
+      "rerun_on_final_source_claimed": false
+    },
+    "static_checks": {
+      "report": "frontend/.local/frontend-final-c2-fixed-20261027/static-checks.json",
+      "count": 5,
+      "passed": 5,
+      "actual_input_sha256": "e5a6080563419821daef5eb96e29a95b95f8d80c722b2f8af68dca762878277d",
+      "source_drift": [],
+      "checks": [
+        {
+          "log": "production-types.log",
+          "exit_code": 0,
+          "elapsed_seconds": 14.004
+        },
+        {
+          "log": "node-types.log",
+          "exit_code": 0,
+          "elapsed_seconds": 0.636
+        },
+        {
+          "log": "changed-types.log",
+          "exit_code": 0,
+          "elapsed_seconds": 14.551
+        },
+        {
+          "log": "changed-lint.log",
+          "exit_code": 0,
+          "elapsed_seconds": 2.311
+        },
+        {
+          "log": "generated-i18n.log",
+          "exit_code": 0,
+          "elapsed_seconds": 0.44
+        }
+      ]
+    },
+    "builds": {
+      "report": "frontend/.local/frontend-final-c2-fixed-20261027/builds.json",
+      "actual_input_sha256": "63fe672756a98e4bd842d36dc1494181e6fb3338186872769efadb97e04972f8",
+      "actual_output_source_sha256": "63fe672756a98e4bd842d36dc1494181e6fb3338186872769efadb97e04972f8",
+      "source_drift": [],
+      "reuse_for_final_sha256": "e5a6080563419821daef5eb96e29a95b95f8d80c722b2f8af68dca762878277d",
+      "rebuilt_on_final_source_claimed": false,
+      "runs": [
+        {
+          "role": "build-main.log",
+          "exit_code": 0,
+          "elapsed_seconds": 16.094
+        },
+        {
+          "role": "build-vendor.log",
+          "exit_code": 0,
+          "elapsed_seconds": 11.936
+        }
+      ]
+    },
+    "reuse_proof": {
+      "type_fix": "frontend/.local/frontend-final-c2-fixed-20261027/test-type-fix.json",
+      "production_proof": "frontend/.local/frontend-final-c2-fixed-20261027/production-reuse-proof.json",
+      "build_summary": "frontend/.local/frontend-final-c2-fixed-20261027/build-summary.json",
+      "only_changed_file": "frontend/src/features/operations/dashboard/components/__tests__/OpsNodeMetrics.spec.ts",
+      "before_sha256": "e15d81987a7fbee940b50da088227bbf12c95151d3831553ef5b4cb4aebd677f",
+      "after_sha256": "5cb831c594cbee9a717bccbc324254a5f57b8385d56b1e88fae4bcf6fbb875be",
+      "emitted_javascript_identical": true,
+      "emitted_javascript_sha256": "1982c669eca4f99ce4202460ed215e264d27c938d05f41d8cfd9fa9c97034f4c",
+      "production_inputs_identical": true,
+      "production_input_files": 1316,
+      "production_input_sha256": "68de85cdfd40a5bfabd3e638db5ebfa796f3e6a5570f90a3659419ff22367613"
+    },
+    "evidence_file_sha256": {
+      "frontend/.local/frontend-final-c2-fixed-20261027/HANDOFF.md": "61a8abe91a1b29014b06ebc4d77d58028cf60c7e8e56796506b81068ed69a993",
+      "frontend/.local/frontend-final-c2-fixed-20261027/integration-receipt.json": "35d5464aab75300d3f19ca87546cf0aeece43f90cace0e41e727eaabfda898f0",
+      "frontend/.local/frontend-final-c2-fixed-20261027/source-manifest.json": "b08e90e1bafb894ca01980f7d6c675319039bdc2f822c1158d14d6c228d2a34d",
+      "frontend/.local/frontend-final-c2-fixed-20261027/build-and-full-test-source-manifest.json": "8e268f71e40889dcb2f82d3a136d533c6b26f6895e8938abdf68b1aa10829b54",
+      "frontend/.local/frontend-final-c2-fixed-20261027/full-tests-run.json": "9481556c409c8d2d6a695d52a7c3342c4666f96737b722518e736e7b41f99c46",
+      "frontend/.local/frontend-final-c2-fixed-20261027/full-tests.json": "3f6192c25101399b72b99753bed4c0ca135be08b9174c0cbd08179dbf67f5e76",
+      "frontend/.local/frontend-final-c2-fixed-20261027/static-checks.json": "c5a6b44482de5636d0b0b6b9e5d1f6a95ef57ce8376e07547e5eb66174d73d7e",
+      "frontend/.local/frontend-final-c2-fixed-20261027/builds.json": "518242d2a9ca9bf9098b5092323ac86715d73496839890bbdb14c7dd08c42e56",
+      "frontend/.local/frontend-final-c2-fixed-20261027/test-type-fix.json": "652f0a98d7926b79b9ee2ed0157c83ec0e2d7321532d46827da48d5f3d4a3a21",
+      "frontend/.local/frontend-final-c2-fixed-20261027/production-reuse-proof.json": "1214bbc6e37804471afe3145f98a1058fc1841f7fc5ca3ba96e9a761a904effc",
+      "frontend/.local/frontend-final-c2-fixed-20261027/final-test-type-regression.json": "3000a7abebb5dd8e6e9f8805836539f2d555352d4f28dc888edda3beb8c20a7a",
+      "frontend/.local/frontend-final-c2-fixed-20261027/source-metrics.json": "0baa0edc9af9ef31f38d8ef6d7f784c9c7add9637417ad9e6486c557c3f27fee",
+      "frontend/.local/frontend-final-c2-fixed-20261027/build-summary.json": "d24c0fb70da45a5af23f9eb52689acf5db6897643da5f9aa19463ce192846298",
+      "frontend/.local/frontend-final-c2-fixed-20261027/delta-final-from-f4fe.json": "333a97ed4143688b8d61f12cadde877b432dc091eb0793a65fb5c62a8c14ec23"
+    },
+    "business_acceptance": "not_run",
+    "reexecuted_by_document_reviewer": false
+  },
+  "current_user_requirements": [
+    {
+      "id": "WP-18-BPS-EXPLICIT-MODEL-SELECTION-20261027",
+      "origin": "explicit_user_revision_after_c2a10f2_maintenance_baseline",
+      "contract": "docs/architecture-rebuild/CONTRACTS.md#bps-routing-20261027",
+      "contract_line_at_review": 82,
+      "requirement": "BPS只匹配最终账号映射后的明确勾选模型；缺失、空、null或畸形列表不表示全选，不自动填充历史账号列表。Cloud优先并保留已保存BPS列表，关闭Cloud后按列表恢复。具备Native授权的独立新请求可走Native，Excel-only不得因此获得Native权限。",
+      "implementation_handoff": "Workers stopped; Arendt retirement and Meitner metadata/types integrated. e5 static checks pass; 63fe full tests/builds reused with exact type-only JS and production equivalence proofs. Backend routing and real acceptance remain authoritative.",
+      "validation_status": "frontend_implementation_and_development_evidence_verified_business_not_run",
+      "source_manifest_sha256": "e5a6080563419821daef5eb96e29a95b95f8d80c722b2f8af68dca762878277d",
+      "business_acceptance": "not_run",
+      "maintenance_compatibility_conflict_ref": "source-review.json#maintenance_sync.pending_wave.legacy_all_models_conflict"
+    }
+  ],
+  "latest_maintenance_input": {
+    "commit": "c2a10f2aae9597ca2fe8c94813e21b00b6bde53a",
+    "previous_input": "025945a5233d0c9698a5ac63a9e6a79109b25bfa",
+    "frontend_delta_paths": 35,
+    "remote_confirmation": {
+      "reported_by": "MAIN",
+      "method": "live ls-remote",
+      "independently_repeated_by_document_reviewer": false
+    },
+    "local_object_read_by_document_reviewer": true,
+    "review_status": "maintenance_semantics_and_owner_integration_reconciled_final_development_evidence_verified_business_pending",
+    "application_status": "all_35_paths_have_applied_or_retired_semantics_frontend_development_verified_business_pending",
+    "source_manifest_sha256": null,
+    "requirements_boundary": "c2 retains legacy all-models compatibility. Explicit selection is a later user revision, not delivered by this maintenance baseline.",
+    "mapping_receipt": "frontend/.local/bps-frontend-integration-20261027/docs-c2a10f2-semantic-mapping.json",
+    "mapping_receipt_sha256": "3f20dbbd8fb9e8e5319805e0ee895c900867ccfb5e7af8a536fc9fabbd6060e6",
+    "change_counts": {
+      "D": 7,
+      "M": 27,
+      "A": 1
+    },
+    "document_preflight": "frontend/.local/bps-frontend-integration-20261027/docs-c2a10f2-document-checks.json",
+    "mapping_receipt_scope": "Original docs-c2a10f2-semantic-mapping.json is the read-only pre-application mapping; updated per-path application states live in source-review.json and are not written back to that historical receipt."
+  },
+  "catalog_transition": {
+    "status": "current_catalog_reconciled_final_source_pending",
+    "prior_validated_counts": {
+      "settings_panels": 52,
+      "cases": 752
+    },
+    "note": "Current 753 cases/92 pages/51 panels/10 Settings tabs are reconciled and all business cases remain not_run. Frontend e5 development evidence is complete with scoped reuse; backend and final Docker/page/external acceptance remain pending.",
+    "current_catalog_counts": {
+      "cases": 753,
+      "pages": 92,
+      "redirects": 17,
+      "aliases": 2,
+      "settings_panels": 51,
+      "by_layer": {
+        "external_e2e": 48,
+        "local_e2e": 683,
+        "manual": 19,
+        "static": 3
+      },
+      "by_priority": {
+        "P0": 461,
+        "P1": 292,
+        "P2": 0
+      }
+    },
+    "current_catalog_sha256": "f583bef1ab284f6cb20530917bcf415d6f1b0c5887b9a8eabd1f0f0aa5fa5c98",
+    "current_settings_tabs": 10
+  },
+  "safe_recovery_dto_followup": {
+    "status": "production_migration_in_final_frontend_development_validated_business_pending",
+    "reported_by": "MAIN",
+    "public_field": "Account.excel_bps_403_recovery",
+    "reader": "readBPSRecoveryPresentation",
+    "source": "frontend/src/features/resources/model/bpsRecoveryPresentation.ts",
+    "test_source": "frontend/src/features/resources/model/__tests__/bpsRecoveryPresentation.spec.ts",
+    "states": [
+      "history",
+      "reauthorization_required",
+      "paused",
+      "pending",
+      "failed",
+      "probing",
+      "unknown"
+    ],
+    "safe_fields_consumed": [
+      "state",
+      "reason",
+      "next_probe_at",
+      "last_result.status",
+      "last_result.reason",
+      "last_result.completed_at"
+    ],
+    "semantics": "Absent projection remains absent; malformed/future state is unknown. No private extra.failure reads, no authorization inference from reason. next_probe_at is considered only for pending/failed/probing; last_result status is restored/failed/unknown; timestamps use strict parser, invalid calendar dates and 24:00 reject.",
+    "removed_sources": [
+      "frontend/src/features/resources/model/bpsFailurePresentation.ts",
+      "frontend/src/features/resources/model/__tests__/bpsFailurePresentation.spec.ts"
+    ],
+    "shim_present": false,
+    "path_deletion_and_reader_shape_checked_by_document_reviewer": true,
+    "all_production_consumers_verified_by": "MAIN; this reviewer did not repeat the consumer audit",
+    "scoped_tests": {
+      "passed": 220,
+      "reported_by": "MAIN",
+      "receipt_path": null,
+      "independently_reexecuted": false,
+      "receipt_independently_verified": false,
+      "files": null
+    },
+    "source_manifest_sha256": "e5a6080563419821daef5eb96e29a95b95f8d80c722b2f8af68dca762878277d",
+    "covered_by_historical_f4fe_6005": false,
+    "business_acceptance": "not_run"
+  },
+  "historical_reviewed_maintenance_baseline": "025945a5233d0c9698a5ac63a9e6a79109b25bfa",
+  "maintenance_baseline_scope": "latest confirmed input for pending application; not an applied or verified source snapshot",
+  "catalog_update": {
+    "receipt": "frontend/.local/frontend-acceptance-c2-20261027/catalog-tabs-update.json",
+    "receipt_sha256": "0e43bc6055fae1154f4107b5e71818a7cb759c6745326a8ca4d81fc7df1a571d",
+    "catalog_sha256": "f583bef1ab284f6cb20530917bcf415d6f1b0c5887b9a8eabd1f0f0aa5fa5c98",
+    "catalog_markdown_sha256": "584e2fda0c9cf6dc68e1ef3a56e8c7480136906768d1730bb47bbdcbfde4a4e9",
+    "counts": {
+      "cases": 753,
+      "pages": 92,
+      "redirects": 17,
+      "aliases": 2,
+      "settings_panels": 51,
+      "by_layer": {
+        "external_e2e": 48,
+        "local_e2e": 683,
+        "manual": 19,
+        "static": 3
+      },
+      "by_priority": {
+        "P0": 461,
+        "P1": 292,
+        "P2": 0
+      }
+    },
+    "retired_case_ids": [
+      "FE-SETTING-BPSDEFAULTSPANEL-FIELDS",
+      "FE-SETTING-BPSDEFAULTSPANEL-WRITE"
+    ],
+    "added_case_ids": [
+      "FE-RES-BPS-EXPLICIT-MODELS",
+      "FE-RES-BPS-PUBLIC-RECOVERY",
+      "FE-RES-BPS-STALE-EDIT"
+    ],
+    "case_initial_status_counts": {
+      "not_run": 753
+    },
+    "status": "current_tab_aware_catalog_and_specification_reconciled_business_not_run",
+    "source_manifest_sha256": "e5a6080563419821daef5eb96e29a95b95f8d80c722b2f8af68dca762878277d",
+    "feature_recount": {
+      "sections": 162,
+      "by_chapter": {
+        "01-PUBLIC-IDENTITY-KEYS.md": 44,
+        "02-RESOURCES-ACCESS-CATALOG.md": 41,
+        "03-PAYMENTS-USAGE.md": 31,
+        "04-OPERATIONS-SUPPLY-SYSTEM.md": 46
+      },
+      "removed_feature_ids": [],
+      "removed_panel_rows": 1,
+      "retired_panel_was_standalone_feature": false,
+      "note": "BPSDefaultsPanel was a panel appendix entry, not a standalone FS heading. Its row and case associations are removed; section count is independently recomputed, not held at 162."
+    },
+    "receipt_catalog_sha256": "f583bef1ab284f6cb20530917bcf415d6f1b0c5887b9a8eabd1f0f0aa5fa5c98",
+    "settings_tabs": 10,
+    "current_input_sha256": {
+      "frontend/tests/acceptance/cases.json": "f583bef1ab284f6cb20530917bcf415d6f1b0c5887b9a8eabd1f0f0aa5fa5c98",
+      "frontend/tests/acceptance/route-inventory.json": "3388e57dc64ce633335f4916473d24e72043540581c754bdcffde20c0863d390",
+      "frontend/tests/acceptance/CASES.md": "584e2fda0c9cf6dc68e1ef3a56e8c7480136906768d1730bb47bbdcbfde4a4e9",
+      "frontend/tests/acceptance/FIXTURES.md": "ab429a5858d1ee0c1543451c637f33a864d95c436a655e9e466c9c32f08e7a98"
+    },
+    "subsequent_tab_revision": {
+      "reported_by": "MAIN",
+      "settings_tabs_from": 11,
+      "settings_tabs_to": 10,
+      "original_receipt_rebound": false,
+      "note": "Current files read directly after MAIN updated inventory/cases/CASES/FIXTURES. Counts and case identities unchanged; newer source/test execution not certified."
+    },
+    "previous_stage_receipt": {
+      "path": "frontend/.local/frontend-acceptance-c2-20261027/catalog-update.json",
+      "file_sha256": "50657b2c177a3a4666cf3ece28c9f99fbd5034d245de1ca23a2d90ce01d282cb",
+      "catalog_sha256": "0c2e81bad955aa74d36c165f8f859d76f397305284aeff07fd71c0df37590fb5",
+      "status": "historical_case_set_change_stage_not_rebound"
+    },
+    "catalog_consistency_validation": {
+      "run_receipt": "frontend/.local/frontend-acceptance-c2-20261027/catalog-tabs-update.json",
+      "run_receipt_sha256": "0e43bc6055fae1154f4107b5e71818a7cb759c6745326a8ca4d81fc7df1a571d",
+      "report": "frontend/.local/frontend-acceptance-c2-20261027/catalog-tabs-tests.json",
+      "report_sha256": "e78d83c4724e32a545786ead155037a9143fa73330d1852dc7dda9471bcf3993",
+      "catalog_sha256": "f583bef1ab284f6cb20530917bcf415d6f1b0c5887b9a8eabd1f0f0aa5fa5c98",
+      "route_inventory_sha256": "3388e57dc64ce633335f4916473d24e72043540581c754bdcffde20c0863d390",
+      "tests": 6,
+      "passed": 6,
+      "failed": 0,
+      "pending": 0,
+      "test_files": 1,
+      "elapsed_seconds": 1.353,
+      "exit_code": 0,
+      "scope": "Actual route, settings panel and tab catalog consistency regression only, not the 753 business acceptance cases.",
+      "checked_existing_receipts_by_document_worker": true,
+      "reexecuted_by_document_worker": false,
+      "business_case_status": "not_run",
+      "source_manifest_sha256": null
+    },
+    "checked_at_utc": "2026-10-26T19:47:55.647654+00:00",
+    "static_checks_ref": "verification.json#document_checks"
+  },
+  "retirement_c2_handoff": {
+    "handoff": "frontend/.local/bps-explicit-models-20261027/retirement-c2/HANDOFF.md",
+    "handoff_sha256": "10c0f13533631bdbf0402b4784d0a99e25c01d0086464a3aa3ae97be8d9880d2",
+    "status": "Arendt_slice_stopped_and_MAIN_verified",
+    "source_edits_stopped": true,
+    "existing_files_hashes_verified_by_MAIN": 34,
+    "deleted_files_verified_by_MAIN": 10,
+    "hash_review_repeated_by_document_worker": false,
+    "admin_settings_tabs": 10,
+    "global_bps_gateway_location": "features before image budget controls",
+    "settings_save_semantics": "existing revision CAS transaction preserved",
+    "worker_reported_validation": {
+      "tests": 390,
+      "test_files": 13,
+      "acceptance_catalog_tests_at_worker_checkpoint": 5,
+      "read_from_handoff_only": true,
+      "independently_reexecuted_by_document_worker": false
+    },
+    "later_MAIN_tab_drift_regression": {
+      "added_after_worker_handoff": true,
+      "execution_receipt_provided_to_document_worker": true,
+      "covered_by_worker_prior_tests": false,
+      "latest_validation": {
+        "run_receipt": "frontend/.local/frontend-acceptance-c2-20261027/catalog-tabs-update.json",
+        "run_receipt_sha256": "0e43bc6055fae1154f4107b5e71818a7cb759c6745326a8ca4d81fc7df1a571d",
+        "report": "frontend/.local/frontend-acceptance-c2-20261027/catalog-tabs-tests.json",
+        "report_sha256": "e78d83c4724e32a545786ead155037a9143fa73330d1852dc7dda9471bcf3993",
+        "catalog_sha256": "f583bef1ab284f6cb20530917bcf415d6f1b0c5887b9a8eabd1f0f0aa5fa5c98",
+        "route_inventory_sha256": "3388e57dc64ce633335f4916473d24e72043540581c754bdcffde20c0863d390",
+        "tests": 6,
+        "passed": 6,
+        "failed": 0,
+        "pending": 0,
+        "test_files": 1,
+        "elapsed_seconds": 1.353,
+        "exit_code": 0,
+        "scope": "Actual route, settings panel and tab catalog consistency regression only, not the 753 business acceptance cases.",
+        "checked_existing_receipts_by_document_worker": true,
+        "reexecuted_by_document_worker": false,
+        "business_case_status": "not_run",
+        "source_manifest_sha256": null
+      }
+    },
+    "final_combined_source_manifest_sha256": "e5a6080563419821daef5eb96e29a95b95f8d80c722b2f8af68dca762878277d",
+    "other_implementation_workers_and_joint_validation": "Implementation workers stopped; final frontend development evidence complete; joint backend/runtime acceptance pending."
+  },
+  "catalog_input_history": [
+    {
+      "catalog_sha256": "0c2e81bad955aa74d36c165f8f859d76f397305284aeff07fd71c0df37590fb5",
+      "catalog_update": {
+        "receipt": "frontend/.local/frontend-acceptance-c2-20261027/catalog-update.json",
+        "receipt_sha256": "50657b2c177a3a4666cf3ece28c9f99fbd5034d245de1ca23a2d90ce01d282cb",
+        "catalog_sha256": "0c2e81bad955aa74d36c165f8f859d76f397305284aeff07fd71c0df37590fb5",
+        "catalog_markdown_sha256": "3392a655a5b44ecb8a0a1cd45c1b33f1a9ce405bad86c878e7e01a993be51481",
+        "counts": {
+          "cases": 753,
+          "pages": 92,
+          "redirects": 17,
+          "aliases": 2,
+          "settings_panels": 51,
+          "by_layer": {
+            "external_e2e": 48,
+            "local_e2e": 683,
+            "manual": 19,
+            "static": 3
+          },
+          "by_priority": {
+            "P0": 461,
+            "P1": 292,
+            "P2": 0
+          }
+        },
+        "retired_case_ids": [
+          "FE-SETTING-BPSDEFAULTSPANEL-FIELDS",
+          "FE-SETTING-BPSDEFAULTSPANEL-WRITE"
+        ],
+        "added_case_ids": [
+          "FE-RES-BPS-EXPLICIT-MODELS",
+          "FE-RES-BPS-PUBLIC-RECOVERY",
+          "FE-RES-BPS-STALE-EDIT"
+        ],
+        "case_initial_status_counts": {
+          "not_run": 753
+        },
+        "status": "current_catalog_reconciled_not_executed",
+        "source_manifest_sha256": null,
+        "feature_recount": {
+          "sections": 162,
+          "by_chapter": {
+            "01-PUBLIC-IDENTITY-KEYS.md": 44,
+            "02-RESOURCES-ACCESS-CATALOG.md": 41,
+            "03-PAYMENTS-USAGE.md": 31,
+            "04-OPERATIONS-SUPPLY-SYSTEM.md": 46
+          },
+          "removed_feature_ids": [],
+          "removed_panel_rows": 1,
+          "retired_panel_was_standalone_feature": false,
+          "note": "BPSDefaultsPanel was a panel appendix entry, not a standalone FS heading. Its row and case associations are removed; section count is independently recomputed, not held at 162."
+        }
+      },
+      "note": "Pre-settings-tab correction catalog; original receipt remains bound to its recorded after_sha256."
+    }
+  ],
+  "intermediate_c2_checkpoint": {
+    "source_manifest_sha256": "d6290451d96d75cda4ca821f055a2887cedd9165169f22f08a38b36625eb3a7c",
+    "status": "intermediate_checkpoint_static_lint_failed_not_final",
+    "manifest_path": "frontend/.local/frontend-final-c2-20261027/source-manifest.json",
+    "manifest_file_sha256": "9ba6fcefde51936144dd02ce2d9ed4185835781859e756294c762b4d9a3a3f7c",
+    "manifest_files": 2009,
+    "manifest_bytes": 18901070,
+    "source_metrics_path": "frontend/.local/frontend-final-c2-20261027/source-metrics.json",
+    "source_metrics_sha256": "b55325c300aabeac1bb7551bb29bc8f7de9bc5fc76d84d1e63f68caf8d64ac2f",
+    "metrics_scope": "All source file inventory; production TS/TSX/Vue scripts excluding tests. AnyKeyword excludes templates, comments, strings and implicit any.",
+    "measured_at_utc": "2026-10-26T19:46:36.447Z",
+    "recorded_source_drift": [],
+    "source_changed_after_measurement": true,
+    "static_checks_path": "frontend/.local/frontend-final-c2-20261027/static-checks.json",
+    "static_passed": 4,
+    "static_failed": 1,
+    "failure": {
+      "log": "frontend/.local/frontend-final-c2-20261027/changed-lint.log",
+      "rule": "no-control-regex",
+      "source": "frontend/src/features/resources/model/accountRateLimitScopes.ts",
+      "exit_code": 1,
+      "log_sha256": "73bfcb81c5af3a8d0359de79a858d52fec370d9d2176fe274e853604527afbc2"
+    },
+    "fix_reported_by_MAIN": "Explicit charCode range checks replace the control-character regex; lint rule is not disabled and validation semantics are unchanged.",
+    "retest_directory": "frontend/.local/frontend-final-c2-fixed-20261027",
+    "full_test_or_build_success_claimed": false,
+    "business_acceptance": "not_run",
+    "static_checks_file_sha256": "daa6f6ff9326c6ee8b6d99dd6aa661721493ea6e7d84caef278caa8f392ba00a"
+  },
+  "latest_measured_metrics": {
+    "source_manifest_sha256": "63fe672756a98e4bd842d36dc1494181e6fb3338186872769efadb97e04972f8",
+    "status": "measurement_reused_for_e5_under_verified_production_equivalence",
+    "data": {
+      "measured_at_utc": "2026-10-26T19:51:02.451Z",
+      "source_manifest_sha256": "63fe672756a98e4bd842d36dc1494181e6fb3338186872769efadb97e04972f8",
+      "scope": "All source inventory; production TS/TSX/Vue scripts excluding tests; AnyKeyword excludes templates, comments, strings and implicit any.",
+      "source_files": 1942,
+      "root_buckets": {
+        "__tests__": 6,
+        "app": 206,
+        "assets": 6,
+        "features": 1565,
+        "global.d.ts": 1,
+        "i18n": 23,
+        "main.ts": 1,
+        "shared": 130,
+        "style.css": 1,
+        "styles": 2,
+        "vite-env.d.ts": 1
+      },
+      "production_ts_vue_files": 1197,
+      "explicit_any_keywords_in_production_scripts": 0,
+      "any_files": [],
+      "largest_vue": [
+        {
+          "path": "frontend/src/app/compositions/resource-workspace/AccountsPage.vue",
+          "lines": 2583
+        },
+        {
+          "path": "frontend/src/features/jobs/pages/BatchImageJobsPage.vue",
+          "lines": 2409
+        },
+        {
+          "path": "frontend/src/features/resources/components/CreateAccountModal.vue",
+          "lines": 2225
+        },
+        {
+          "path": "frontend/src/features/resources/components/EditAccountModal.vue",
+          "lines": 2115
+        },
+        {
+          "path": "frontend/src/features/resources/components/BulkEditAccountModal.vue",
+          "lines": 1953
+        },
+        {
+          "path": "frontend/src/app/compositions/vendor-portal/components/AccountWorkbench.vue",
+          "lines": 1857
+        },
+        {
+          "path": "frontend/src/features/resources/components/AccountUsageCell.vue",
+          "lines": 1797
+        },
+        {
+          "path": "frontend/src/app/compositions/resource-workspace/ProxiesPage.vue",
+          "lines": 1692
+        },
+        {
+          "path": "frontend/src/features/access-policy/components/RiskControlPage.vue",
+          "lines": 1619
+        },
+        {
+          "path": "frontend/src/features/identity/pages/UsersPage.vue",
+          "lines": 1452
+        }
+      ],
+      "source_drift": [],
+      "unchanged_dependency_inputs": {
+        "frontend/package.json": {
+          "equal": true,
+          "sha256": "1f3b993982393393f3a58cae50ee691f972f4b70cb770b803712cd42e14a7c4a"
+        },
+        "frontend/pnpm-lock.yaml": {
+          "equal": true,
+          "sha256": "1c8f123ebb889ffb7512c0d7821b30ca8a98a19629e8a45ad363e4d4e5c01708"
+        }
+      }
+    },
+    "reuse_proof": "frontend/.local/frontend-final-c2-fixed-20261027/production-reuse-proof.json"
+  },
+  "c2_application_followup": {
+    "status": "all_35_paths_applied_frontend_development_evidence_verified_business_pending",
+    "source_matrix": "source-review.json#maintenance_sync.pending_wave",
+    "row_status_counts": {
+      "retired_chain_applied": 7,
+      "account_or_settings_adaptation_applied_with_explicit_model_override": 6,
+      "safe_public_dto_adaptation_applied": 3,
+      "metadata_adaptation_applied_with_type_repair": 8,
+      "locale_retirement_and_safe_state_copy_applied": 11
+    },
+    "evidence": {
+      "Arendt": {
+        "handoff": "frontend/.local/bps-explicit-models-20261027/retirement-c2/HANDOFF.md",
+        "hash_receipt": "frontend/.local/bps-explicit-models-20261027/retirement-c2/file-hashes.json",
+        "existing_hashes_matched_to_d629": 34,
+        "deleted_paths_absent": 10,
+        "reported_component_tests": 390,
+        "reported_test_files": 13,
+        "build_or_business_acceptance": false,
+        "handoff_sha256": "10c0f13533631bdbf0402b4784d0a99e25c01d0086464a3aa3ae97be8d9880d2",
+        "hash_receipt_sha256": "46203b9912709d7b956e3f6b27d7ed4020183bb44dc1840396c9752bc75f2311"
+      },
+      "Meitner": {
+        "handoff": "frontend/.local/frontend-maintenance-c2-20261027/handoff.md",
+        "type_repair_handoff": "frontend/.local/frontend-maintenance-c2-20261027/type-repair/handoff.md",
+        "hash_receipt": "frontend/.local/frontend-maintenance-c2-20261027/file-hashes.json",
+        "existing_hashes_matched_to_d629": 9,
+        "type_receipt": "frontend/.local/frontend-maintenance-c2-20261027/type-repair/receipt.json",
+        "type_receipt_sha256": "6f931e172abe49b248a1d7de335fc90b79e9bb2ce2b5433949ea81a235c03a83",
+        "reported_component_tests": 190,
+        "reported_test_files": 8,
+        "joint_type_scope": {
+          "production_files": 1197,
+          "changed_specs": 4,
+          "excluded_changed_specs": 0
+        },
+        "historical_184_type_errors": "fixed; not an accepted baseline exemption",
+        "build_or_business_acceptance": false,
+        "handoff_sha256": "7e9a924d308dc402e6f81f68a7658fbb6a7b45f46f952641ebdf4bfc5db42f0c",
+        "hash_receipt_sha256": "34529fd9762864cd0a57883ef7696df9bb3e1a02d438f04c384b9863a7a55631",
+        "type_repair_handoff_sha256": "1d5ec9ce0744be9b874774ab4d200d345f63af2fed233a6f83c653d8eccd7ca8"
+      },
+      "MAIN_safe_DTO": {
+        "provenance": "MAIN handoff and prior documented reader inspection",
+        "reported_related_tests": 220,
+        "full_suite_or_business_acceptance": false
+      }
+    },
+    "source_hash_binding": "e5a6080563419821daef5eb96e29a95b95f8d80c722b2f8af68dca762878277d",
+    "binding_status": "final_frontend_source_with_scope_qualified_63fe_test_build_reuse",
+    "final_source_manifest_sha256": "e5a6080563419821daef5eb96e29a95b95f8d80c722b2f8af68dca762878277d",
+    "business_acceptance": "not_run",
+    "final_development_validation_ref": "verification.json#current_validation",
+    "prior_intermediate_source_hash_binding": "d6290451d96d75cda4ca821f055a2887cedd9165169f22f08a38b36625eb3a7c"
+  },
+  "development_checkpoint_history": [
+    {
+      "checkpoint": {
+        "status": "historical_verified_development_checkpoint_not_current_freeze",
+        "manifest_path": "frontend/.local/bps-frontend-integration-20261027/docs-f4fe-source-manifest.json",
+        "manifest_sha256": "f4fe8a8f0eba6b9ba313f24989921aaf60383ea6c0bfa6aaead45403880b83b8",
+        "manifest_file_sha256": "52cf25b47c72ae9771932b0c7d47133559418c2c338faebfce1f46dcf6eecc29",
+        "manifest_files": 2011,
+        "manifest_bytes": 18873504,
+        "manifest_algorithm": "SHA256 of sorted repo-relative-path + space + file SHA256 + newline",
+        "manifest_internal_digest_verified": true,
+        "current_source_files_rehashed": false,
+        "current_source_matches_checkpoint": null,
+        "full_vitest": {
+          "run": "frontend/.local/bps-frontend-integration-20261027/docs-f4fe-full-tests-run.json",
+          "report": "frontend/.local/bps-frontend-integration-20261027/docs-f4fe-full-tests.json",
+          "files": 597,
+          "suites": 1458,
+          "numTotalTests": 6005,
+          "numPassedTests": 6005,
+          "numFailedTests": 0,
+          "numPendingTests": 0,
+          "numTodoTests": 0,
+          "success": true,
+          "elapsed_seconds": 109.392,
+          "input_sha256": "f4fe8a8f0eba6b9ba313f24989921aaf60383ea6c0bfa6aaead45403880b83b8",
+          "output_source_sha256": "f4fe8a8f0eba6b9ba313f24989921aaf60383ea6c0bfa6aaead45403880b83b8",
+          "source_drift": []
+        },
+        "static_checks": {
+          "report": "frontend/.local/bps-frontend-integration-20261027/docs-f4fe-static-checks.json",
+          "count": 5,
+          "passed": 5,
+          "checks": [
+            {
+              "log": "production-types.log",
+              "exit_code": 0,
+              "elapsed_seconds": 18.638
+            },
+            {
+              "log": "node-types.log",
+              "exit_code": 0,
+              "elapsed_seconds": 0.982
+            },
+            {
+              "log": "changed-types.log",
+              "exit_code": 0,
+              "elapsed_seconds": 18.933
+            },
+            {
+              "log": "changed-lint.log",
+              "exit_code": 0,
+              "elapsed_seconds": 2.432
+            },
+            {
+              "log": "generated-i18n.log",
+              "exit_code": 0,
+              "elapsed_seconds": 0.542
+            }
+          ]
+        },
+        "builds": {
+          "report": "frontend/.local/bps-frontend-integration-20261027/docs-f4fe-builds.json",
+          "count": 2,
+          "passed": 2,
+          "runs": [
+            {
+              "log": "build-main.log",
+              "exit_code": 0,
+              "elapsed_seconds": 12.719,
+              "environment_overrides": {
+                "VITE_VENDOR_PORTAL": "false"
+              }
+            },
+            {
+              "log": "build-vendor.log",
+              "exit_code": 0,
+              "elapsed_seconds": 11.43,
+              "environment_overrides": {
+                "VITE_VENDOR_PORTAL": "true"
+              }
+            }
+          ]
+        },
+        "all_recorded_inputs_outputs_match_checkpoint": true,
+        "evidence_file_sha256": {
+          "frontend/.local/bps-frontend-integration-20261027/docs-f4fe-source-manifest.json": "52cf25b47c72ae9771932b0c7d47133559418c2c338faebfce1f46dcf6eecc29",
+          "frontend/.local/bps-frontend-integration-20261027/docs-f4fe-full-tests-run.json": "5588a2edc6d32550d8f1483f714f83a8271320120394f89bedd46b4ce2319569",
+          "frontend/.local/bps-frontend-integration-20261027/docs-f4fe-full-tests.json": "f8b43dd8896d2addc151064c00e4cbdc6cb389fcf2394207f6e42ed76624035b",
+          "frontend/.local/bps-frontend-integration-20261027/docs-f4fe-static-checks.json": "7677939df3d9b40251d1467b4cc2ca88613ea9d8ccf584fc670ad0996784abda",
+          "frontend/.local/bps-frontend-integration-20261027/docs-f4fe-builds.json": "e87cb6401968ce0de62ead7c93c4378d5cff7cbf27fb9fd7098e7bf9d33778a2"
+        },
+        "business_acceptance": "not_run",
+        "reexecuted_by_document_reviewer": false,
+        "note": "Source changed after this checkpoint for safe DTO consumption; final manifest and validation must come from MAIN. Existing performance and Docker evidence retain their original hashes.",
+        "original_evidence_paths": [
+          "frontend/.local/bps-frontend-integration-20261027/source-manifest.json",
+          "frontend/.local/bps-frontend-integration-20261027/full-tests-run.json",
+          "frontend/.local/bps-frontend-integration-20261027/full-tests.json",
+          "frontend/.local/bps-frontend-integration-20261027/static-checks.json",
+          "frontend/.local/bps-frontend-integration-20261027/builds.json"
+        ],
+        "preserved_evidence_note": "Byte-for-byte docs-f4fe copies preserve historical receipts; original paths may receive newer evidence."
+      },
+      "scope": "Previous f4fe full development checkpoint; original evidence and source hashes preserved."
+    }
+  ],
+  "final_development_validation_ref": "verification.json#current_validation",
+  "source_snapshot": {
+    "review_date": "2026-10-27",
+    "status": "final_frontend_source_verified_development_evidence_scoped_business_pending",
+    "finalized": true,
+    "source_frozen": true,
+    "manifest_path": "frontend/.local/frontend-final-c2-fixed-20261027/source-manifest.json",
+    "manifest_sha256": "e5a6080563419821daef5eb96e29a95b95f8d80c722b2f8af68dca762878277d",
+    "manifest_file_sha256": "b08e90e1bafb894ca01980f7d6c675319039bdc2f822c1158d14d6c228d2a34d",
+    "manifest_algorithm": "SHA256 of sorted repo-relative-path + space + file SHA256 + newline",
+    "manifest_files": 2009,
+    "manifest_bytes": 18901651,
+    "actual_source_matches_manifest": true,
+    "actual_source_verification_provenance": "MAIN integration-receipt plus documentation-worker manifest/file checks performed before this final write; no frontend edits by documentation worker.",
+    "development_validation_ref": "verification.json#current_validation",
+    "full_tests_builds_actual_input_sha256": "63fe672756a98e4bd842d36dc1494181e6fb3338186872769efadb97e04972f8",
+    "metrics_actual_input_sha256": "63fe672756a98e4bd842d36dc1494181e6fb3338186872769efadb97e04972f8",
+    "business_acceptance": "not_run",
+    "meaning": "Frontend source/development handoff only; backend, supplier DTO, stale-edit atomic contract and joint runtime acceptance are not completed."
+  },
+  "current_metrics_provenance": {
+    "measured_source_manifest_sha256": "63fe672756a98e4bd842d36dc1494181e6fb3338186872769efadb97e04972f8",
+    "applies_to_final_source_manifest_sha256": "e5a6080563419821daef5eb96e29a95b95f8d80c722b2f8af68dca762878277d",
+    "method": "Scoped reuse: production files and dependencies unchanged; all-file inventory count unchanged; only one test type annotation differs.",
+    "metrics_path": "frontend/.local/frontend-final-c2-fixed-20261027/source-metrics.json",
+    "remeasured_on_e5": false
+  },
+  "delta_from_f4fe_final": {
+    "path": "frontend/.local/frontend-final-c2-fixed-20261027/delta-final-from-f4fe.json",
+    "file_sha256": "333a97ed4143688b8d61f12cadde877b432dc091eb0793a65fb5c62a8c14ec23",
+    "from": "f4fe8a8f0eba6b9ba313f24989921aaf60383ea6c0bfa6aaead45403880b83b8",
+    "to": "e5a6080563419821daef5eb96e29a95b95f8d80c722b2f8af68dca762878277d",
+    "added": 9,
+    "removed": 11,
+    "modified": 62,
+    "scope_note": "Exact final manifest delta. Arendt 10-file retirement includes one API test created then deleted within that worker scope; do not add stage deletion counts."
+  },
+  "browser_preflight": {
+    "receipt": "frontend/.local/frontend-acceptance-c2-20261027/browser-preflight.json",
+    "receipt_sha256": "e59e202d19aeb78850d61c4544a4b2c2ebb771c6444707738ba6f6366b28839f",
+    "data": {
+      "observed_at_utc": "2026-10-26T19:39:57.933728+00:00",
+      "method": "Computer Use cua_repl getAXState, local IAB tab",
+      "url": "http://127.0.0.1:32181/web-build.json",
+      "visible_build": {
+        "version": "rebuild-20261026",
+        "commit": "673c53c130c11cf1cb55abf0722dd996bf79eded",
+        "source_sha256": "90c927992b545676e5080c936125a3c474598493999877f2615c3e282c10e539"
+      },
+      "result": "old_deployed_build_observed",
+      "acceptance_case_status_changed": false,
+      "business_actions_performed": [],
+      "temporary_tab_closed": true,
+      "note": "Docker UI has not incorporated current public BPS projection, explicit model selection, or c2 retirement. This is version preflight only, not acceptance."
+    },
+    "current_source_browser_or_business_validation": false
+  },
+  "documentation_closeout": {
+    "checked_at_utc": "2026-10-26T20:07:16.722696+00:00",
+    "status": "completed_documentation_closeout_stop_writing_after_this_batch",
+    "scope": [
+      "docs/architecture-rebuild/FRONTEND_REVIEW.md",
+      "docs/architecture-rebuild/product-spec/**"
+    ],
+    "frontend_or_shared_root_files_written": false,
+    "application_tests_or_builds_run_by_document_worker": false,
+    "source_manifest_sha256": "e5a6080563419821daef5eb96e29a95b95f8d80c722b2f8af68dca762878277d",
+    "actual_full_test_build_input_sha256": "63fe672756a98e4bd842d36dc1494181e6fb3338186872769efadb97e04972f8",
+    "business_acceptance": "not_run"
+  }
+}

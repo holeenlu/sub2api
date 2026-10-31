@@ -115,7 +115,9 @@ func (u *httpBridgeIsolationUpstream) Do(req *http.Request, _ string, _ int64, _
 	}
 	output := "[]"
 	if turn == 1 {
-		output = fmt.Sprintf(`[{"type":"function_call","id":%q,"call_id":%q,"name":"lookup","arguments":"{}","status":"completed"}]`, "fc_"+id, "call_"+id)
+		// Finish the reasoning item announced above. A dangling item correctly
+		// makes local replay incomplete; this fixture exercises complete history.
+		output = fmt.Sprintf(`[{"id":"rs_test","type":"reasoning","summary":[],"encrypted_content":"opaque"},{"type":"function_call","id":%q,"call_id":%q,"name":"lookup","arguments":"{}","status":"completed"}]`, "fc_"+id, "call_"+id)
 	}
 	suffix := fmt.Sprintf("data: {\"type\":\"response.completed\",\"response\":{\"id\":%q,\"status\":\"completed\",\"output\":%s,\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n", responseID, output)
 	headers := http.Header{"Content-Type": []string{"text/event-stream"}}
@@ -132,7 +134,6 @@ func (u *httpBridgeIsolationUpstream) DoWithTLS(req *http.Request, proxyURL stri
 }
 
 func TestOpenAIWSHTTPBridgeSessionIsolationAcrossSameSessionHash(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cfg := &config.Config{}
@@ -150,12 +151,13 @@ func TestOpenAIWSHTTPBridgeSessionIsolationAcrossSameSessionHash(t *testing.T) {
 		Credentials: map[string]any{"access_token": "test-token"},
 		Extra:       map[string]any{"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeHTTPBridge},
 		Concurrency: 2, Status: StatusActive, Schedulable: true}
-	groupID := int64(7)
+	fixture := newNativeHTTPBridgeFixture(t, svc, account)
+	groupID := *fixture.key.GroupID
 	newContext := func(r *http.Request) *gin.Context {
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
 		c.Request = r.Clone(ctx)
 		c.Request.Header.Set("session-id", "shared-session")
-		c.Set("api_key", &APIKey{ID: 11, GroupID: &groupID})
+		c.Set("api_key", fixture.key)
 		return c
 	}
 	seedHash := svc.GenerateSessionHash(newContext(httptest.NewRequest(http.MethodGet, "/v1/responses", nil)), nil)
@@ -163,7 +165,7 @@ func TestOpenAIWSHTTPBridgeSessionIsolationAcrossSameSessionHash(t *testing.T) {
 	stateStore.BindSessionConn(groupID, seedHash, "sentinel-native-conn", time.Hour)
 
 	serverResults := make(chan error, 2)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(nativeHTTPBridgeTestHandler(t, func(w http.ResponseWriter, r *http.Request) {
 		conn, err := coderws.Accept(w, r, nil)
 		if err != nil {
 			serverResults <- err
@@ -180,7 +182,7 @@ func TestOpenAIWSHTTPBridgeSessionIsolationAcrossSameSessionHash(t *testing.T) {
 		preemptCtx, cleanup, _ := svc.BeginOpenAIWSIngressSessionPreemption(ctx, c, account, firstMessage)
 		defer cleanup()
 		hooks := &OpenAIWSIngressHooks{ClientLifecycleContext: ctx}
-		serverResults <- svc.ProxyResponsesWebSocketFromClient(preemptCtx, c, conn, account, "test-token", firstMessage, hooks)
+		serverResults <- fixture.proxy(openAIWSTestAdmissionContext(preemptCtx), c, conn, account, firstMessage, hooks)
 	}))
 	var releaseOnce sync.Once
 	release := func() { releaseOnce.Do(func() { close(upstream.firstRelease) }) }
@@ -231,6 +233,7 @@ func TestOpenAIWSHTTPBridgeSessionIsolationAcrossSameSessionHash(t *testing.T) {
 		}
 	}
 
+	require.EqualValues(t, 4, fixture.transport.sends.Load())
 	upstream.mu.Lock()
 	requests := append([]httpBridgeIsolationRequest(nil), upstream.requests...)
 	upstream.mu.Unlock()

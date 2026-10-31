@@ -8,11 +8,12 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	responseswire "github.com/Wei-Shaw/sub2api/internal/gateway/protocol/responses"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
-// TestIsOpenAIWSTokenEvent_TerminalEventsExcluded 覆盖 isOpenAIWSTokenEvent 的回归用例。
+// TestIsOpenAIWSTokenEvent_TerminalEventsExcluded 覆盖 responseswire.IsTokenEvent 的回归用例。
 // 重点验证终止事件（response.completed / response.done）不再被当作 token event，
 // 否则当上游没有可识别的 delta 时，firstTokenMs 会被填到终止时刻，
 // 等于把"总耗时"误报为"首 token 延迟"（issue #2651）。
@@ -53,8 +54,8 @@ func TestIsOpenAIWSTokenEvent_TerminalEventsExcluded(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := isOpenAIWSTokenEvent(tc.eventType)
-			require.Equal(t, tc.want, got, "isOpenAIWSTokenEvent(%q)", tc.eventType)
+			got := responseswire.IsTokenEvent(tc.eventType)
+			require.Equal(t, tc.want, got, "responseswire.IsTokenEvent(%q)", tc.eventType)
 		})
 	}
 }
@@ -123,6 +124,7 @@ func TestOpenAIForwardResultSucceededForScheduling_TerminalEvents(t *testing.T) 
 		{name: "completed", result: &OpenAIForwardResult{OpenAIWSMode: true, UpstreamTerminalEvent: "response.completed"}, expected: true},
 		{name: "done", result: &OpenAIForwardResult{OpenAIWSMode: true, UpstreamTerminalEvent: "response.done"}, expected: true},
 		{name: "failed", result: &OpenAIForwardResult{OpenAIWSMode: true, UpstreamTerminalEvent: "response.failed"}, expected: false},
+		{name: "output limit", result: &OpenAIForwardResult{OpenAIWSMode: true, UpstreamTerminalEvent: "response.incomplete", UpstreamIncompleteReason: "max_output_tokens"}, expected: true},
 		{name: "incomplete", result: &OpenAIForwardResult{OpenAIWSMode: true, UpstreamTerminalEvent: "response.incomplete"}, expected: false},
 		{name: "cancelled", result: &OpenAIForwardResult{OpenAIWSMode: true, UpstreamTerminalEvent: "response.cancelled"}, expected: false},
 	}
@@ -149,16 +151,24 @@ func TestOpenAIWSTerminalEvent_ResponseFailedRecordsModelTransient(t *testing.T)
 }
 
 func TestOpenAIWSErrorEvent_ServerErrorRecordsModelTransient(t *testing.T) {
-	svc := &OpenAIGatewayService{}
-	svc.rateLimitService = NewRateLimitService(transientCooldownAccountRepo{}, nil, &config.Config{}, nil, nil)
-	account := &Account{ID: 5203, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
-	payload := []byte(`{"type":"error","error":{"code":"server_error","type":"server_error","message":"Internal error"}}`)
-
-	for range 2 {
-		svc.handleOpenAIWSErrorEventTransientFailure(context.Background(), account, "gpt-5.5", http.Header{}, payload)
+	for _, code := range []string{"server_error", "server_err"} {
+		for _, field := range []string{"code", "type"} {
+			t.Run(code+"/"+field, func(t *testing.T) {
+				svc := &OpenAIGatewayService{}
+				svc.rateLimitService = NewRateLimitService(transientCooldownAccountRepo{}, nil, &config.Config{}, nil, nil)
+				account := &Account{ID: 5203, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+				payload := []byte(`{"type":"error","error":{"` + field + `":"` + code + `","message":"Internal error"}}`)
+				require.Equal(t, http.StatusInternalServerError, openAIWSPayloadTransientStatus(payload))
+				reason, retryable := classifyOpenAIWSErrorEvent(payload)
+				require.Equal(t, "upstream_error_event", reason)
+				require.True(t, retryable)
+				for range 2 {
+					svc.handleOpenAIWSErrorEventTransientFailure(context.Background(), account, "gpt-5.5", http.Header{}, payload)
+				}
+				require.True(t, svc.isOpenAIAccountModelRuntimeBlocked(account, "gpt-5.5"))
+			})
+		}
 	}
-
-	require.True(t, svc.isOpenAIAccountModelRuntimeBlocked(account, "gpt-5.5"))
 }
 
 func TestOpenAIWSPayloadTransientStatus_Explicit529IsNotModelTransient(t *testing.T) {
@@ -189,20 +199,3 @@ func TestOpenAIWSDial5xxRecordsModelTransient(t *testing.T) {
 // TestIsOpenAIWSTokenEvent_DisjointWithTerminal 守护「token 事件集合与终止事件集合互斥」的不变量。
 // firstTokenMs 的计算依赖于 isTokenEvent && !isTerminalEvent；
 // 若两者再次出现交集，则 issue #2651 描述的 latency 误报会重现。
-func TestIsOpenAIWSTokenEvent_DisjointWithTerminal(t *testing.T) {
-	terminalEvents := []string{
-		"response.completed",
-		"response.done",
-		"response.failed",
-		"response.incomplete",
-		"response.cancelled",
-		"response.canceled",
-	}
-	for _, ev := range terminalEvents {
-		ev := ev
-		t.Run(ev, func(t *testing.T) {
-			require.True(t, isOpenAIWSTerminalEvent(ev), "expected terminal event %q to be classified as terminal", ev)
-			require.False(t, isOpenAIWSTokenEvent(ev), "terminal event %q must NOT be classified as token event (issue #2651)", ev)
-		})
-	}
-}

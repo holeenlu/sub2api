@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -20,9 +21,11 @@ type ScheduledTestRunnerService struct {
 	rateLimitSvc   *RateLimitService
 	cfg            *config.Config
 
-	cron      *cron.Cron
-	startOnce sync.Once
-	stopOnce  sync.Once
+	mu       sync.Mutex
+	cron     *cron.Cron
+	work     backgroundWork
+	closing  bool
+	stopDone chan struct{}
 }
 
 // NewScheduledTestRunnerService creates a new runner.
@@ -43,53 +46,121 @@ func NewScheduledTestRunnerService(
 }
 
 // Start begins the cron ticker (every minute).
-func (s *ScheduledTestRunnerService) Start() {
+func (s *ScheduledTestRunnerService) Start(parent context.Context) error {
 	if s == nil {
-		return
+		return nil
 	}
-	s.startOnce.Do(func() {
-		loc := time.Local
-		if s.cfg != nil {
-			if parsed, err := time.LoadLocation(s.cfg.Timezone); err == nil && parsed != nil {
-				loc = parsed
-			}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closing {
+		return errBackgroundWorkStopped
+	}
+	if err := s.work.bind(parent, s.RequestStop); err != nil {
+		return err
+	}
+	if s.cron != nil {
+		return nil
+	}
+	loc := time.Local
+	if s.cfg != nil {
+		if parsed, err := time.LoadLocation(s.cfg.Timezone); err == nil && parsed != nil {
+			loc = parsed
 		}
-
-		c := cron.New(cron.WithParser(scheduledTestCronParser), cron.WithLocation(loc))
-		_, err := c.AddFunc("* * * * *", func() { s.runScheduled() })
+	}
+	c := cron.New(cron.WithParser(scheduledTestCronParser), cron.WithLocation(loc))
+	if _, err := c.AddFunc("* * * * *", s.runScheduled); err != nil {
+		return err
+	}
+	c.Schedule(cron.Every(5*time.Second), cron.FuncJob(func() {
+		ctx, done, err := s.work.begin()
 		if err != nil {
-			logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] not started (invalid schedule): %v", err)
 			return
 		}
-		s.cron = c
-		s.cron.Start()
-		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] started (tick=every minute)")
-	})
+		defer done()
+		if s.scheduledSvc != nil {
+			s.scheduledSvc.RunPendingDiagnostics(ctx)
+		}
+	}))
+	s.cron = c
+	c.Start()
+	return nil
 }
 
-// Stop gracefully shuts down the cron scheduler.
-func (s *ScheduledTestRunnerService) Stop() {
+// RequestStop seals callback admission, cancels the owner, and retains the
+// scheduler's real completion handle for Drain/Stop to wait on.
+func (s *ScheduledTestRunnerService) RequestStop() {
 	if s == nil {
 		return
 	}
-	s.stopOnce.Do(func() {
-		if s.cron != nil {
-			ctx := s.cron.Stop()
-			select {
-			case <-ctx.Done():
-			case <-time.After(3 * time.Second):
-				logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] cron stop timed out")
-			}
+	s.mu.Lock()
+	if s.closing {
+		s.mu.Unlock()
+		return
+	}
+	s.closing = true
+	s.stopDone = make(chan struct{})
+	c, done := s.cron, s.stopDone
+	s.mu.Unlock()
+	s.work.requestStop()
+	go func() {
+		if c != nil {
+			joined := c.Stop()
+			<-joined.Done()
 		}
-	})
+		_ = s.work.join(context.Background())
+		close(done)
+	}()
 }
+func (s *ScheduledTestRunnerService) Stop(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if ctx == nil {
+		return errors.New("scheduled test stop context is nil")
+	}
+	s.RequestStop()
+	s.mu.Lock()
+	done := s.stopDone
+	s.mu.Unlock()
+	select {
+	case <-done:
+		return nil
+	default:
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	}
+}
+func (s *ScheduledTestRunnerService) Drain(ctx context.Context) error { return s.Stop(ctx) }
 
 func (s *ScheduledTestRunnerService) runScheduled() {
-	// Delay 10s so execution lands at ~:10 of each minute instead of :00.
-	time.Sleep(10 * time.Second)
+	parent, done, err := s.work.begin()
+	if err != nil {
+		return
+	}
+	defer done()
+	// Keep the existing :10 offset, but cancellation must interrupt the wait.
+	timer := time.NewTimer(10 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-parent.Done():
+		return
+	}
+	s.runDuePlans(parent)
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+// runDuePlans is the actual bounded scan/execution phase after the unchanged
+// :10 offset. Every child is joined before the admitted callback completes.
+func (s *ScheduledTestRunnerService) runDuePlans(parent context.Context) {
+	ctx, cancel := context.WithTimeout(parent, 5*time.Minute)
 	defer cancel()
+	if ctx.Err() != nil {
+		return
+	}
 
 	now := time.Now()
 	plans, err := s.planRepo.ListDue(ctx, now)
@@ -107,7 +178,16 @@ func (s *ScheduledTestRunnerService) runScheduled() {
 	var wg sync.WaitGroup
 
 	for _, plan := range plans {
-		sem <- struct{}{}
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			wg.Wait()
+			return
+		}
+		if ctx.Err() != nil {
+			<-sem
+			break
+		}
 		wg.Add(1)
 		go func(p *ScheduledTestPlan) {
 			defer wg.Done()
@@ -120,6 +200,22 @@ func (s *ScheduledTestRunnerService) runScheduled() {
 }
 
 func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *ScheduledTestPlan) {
+	if ctx.Err() != nil {
+		return
+	}
+	// Background plans do not run under the HTTP recovery middleware.
+	defer func() {
+		if recover() != nil {
+			logger.LegacyPrintf("service.scheduled_test_runner", "scheduled plan=%d account=%d panicked", plan.ID, plan.AccountID)
+		}
+	}()
+	if plan.PelicanConfig != nil {
+		// Never reinterpret a retired quality plan as a connectivity test.
+		return
+	}
+	if s.scheduledSvc == nil || s.scheduledSvc.CheckScheduledAuthorization(ctx, plan.Authorization) != nil {
+		return
+	}
 	result, err := s.accountTestSvc.RunTestBackground(ctx, plan.AccountID, plan.ModelID)
 	if err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d RunTestBackground error: %v", plan.ID, err)
@@ -131,7 +227,7 @@ func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *Sched
 	}
 
 	// Auto-recover account if test succeeded and auto_recover is enabled.
-	if result.Status == "success" && plan.AutoRecover {
+	if result.Status == "success" && plan.AutoRecover && s.scheduledSvc.CheckScheduledAuthorization(ctx, plan.Authorization) == nil {
 		s.tryRecoverAccount(ctx, plan.AccountID, plan.ID)
 	}
 

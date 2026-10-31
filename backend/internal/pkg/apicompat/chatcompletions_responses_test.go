@@ -13,6 +13,28 @@ import (
 // ChatCompletionsToResponses tests
 // ---------------------------------------------------------------------------
 
+func TestChatMessagesMapMatchesExistingConversion(t *testing.T) {
+	for _, raw := range []string{
+		`[{"role":"system","content":"rules"},{"role":"user","content":[{"type":"text","text":"hi"},{"type":"image_url","image_url":{"url":"data:image/png;base64,YWJj","detail":"high"}}]}]`,
+		`[{"role":"assistant","content":null,"function_call":{"name":"echo","arguments":"{\"n\":9007199254740993}"}},{"role":"function","name":"echo","content":"ok"}]`,
+		`[{"role":"assistant","tool_calls":[{"id":"call_cloud_1","type":"function","function":{"name":"echo","arguments":"{}"}}]},{"role":"tool","tool_call_id":"call_cloud_1","content":"ok"}]`,
+	} {
+		var messages []ChatMessage
+		require.NoError(t, json.Unmarshal([]byte(raw), &messages))
+		want, err := convertChatMessagesToResponsesInput(messages)
+		require.NoError(t, err)
+		var values []any
+		require.NoError(t, json.Unmarshal([]byte(raw), &values))
+		got, err := ChatMessagesMapToResponsesInput(values)
+		require.NoError(t, err)
+		wantJSON, err := json.Marshal(want)
+		require.NoError(t, err)
+		gotJSON, err := json.Marshal(got)
+		require.NoError(t, err)
+		require.JSONEq(t, string(wantJSON), string(gotJSON))
+	}
+}
+
 func TestChatCompletionsToResponses_BasicText(t *testing.T) {
 	req := &ChatCompletionsRequest{
 		Model: "gpt-4o",
@@ -70,6 +92,37 @@ func TestResponsesUsageNestedCacheWritePresenceOverridesTopLevelAlias(t *testing
 			payload := []byte(`{"input_tokens":20,"output_tokens":2,"cache_creation_input_tokens":19,"input_tokens_details":` + tt.nestedJSON + `}`)
 			require.NoError(t, json.Unmarshal(payload, &usage))
 			require.Equal(t, tt.want, usage.CacheCreationInputTokens)
+		})
+	}
+}
+
+func TestResponsesUsageCacheCreationInputAlias(t *testing.T) {
+	for _, tt := range []struct {
+		name, fields string
+		want, alias  int
+	}{
+		{"responses_alias", `"input_tokens_details":{"cache_creation_input_tokens":7}`, 7, 7},
+		{"chat_alias", `"prompt_tokens_details":{"cache_creation_input_tokens":7}`, 7, 7},
+		{"alias_overrides_zero", `"input_tokens_details":{"cache_write_tokens":0,"cache_creation_input_tokens":7}`, 7, 7},
+		{"other_canonical_max", `"input_tokens_details":{"cache_write_tokens":3,"cache_creation_tokens":11,"cache_creation_input_tokens":7}`, 11, 7},
+		{"other_details_max", `"input_tokens_details":{"cache_write_tokens":3,"cache_creation_input_tokens":7},"prompt_tokens_details":{"cache_creation_tokens":11}`, 11, 7},
+		{"larger_chat_alias", `"input_tokens_details":{"cache_creation_input_tokens":7},"prompt_tokens_details":{"cache_creation_input_tokens":11}`, 11, 7},
+		{"duplicates", `"input_tokens_details":{"cache_write_tokens":7,"cache_creation_tokens":7,"cache_creation_input_tokens":7},"prompt_tokens_details":{"cache_creation_input_tokens":7},"cache_creation_input_tokens":7`, 7, 7},
+		{"canonical_blocks_top_level_max", `"input_tokens_details":{"cache_write_tokens":3,"cache_creation_input_tokens":7},"cache_write_tokens":19`, 7, 7},
+		{"top_level_fallback_max", `"input_tokens_details":{"cache_creation_input_tokens":7},"cache_creation_input_tokens":19`, 19, 7},
+		{"zero_alias_preserves_canonical_zero", `"input_tokens_details":{"cache_write_tokens":0,"cache_creation_tokens":11,"cache_creation_input_tokens":0},"cache_creation_input_tokens":19`, 0, 0},
+		{"no_alias_preserves_typed_fallback", `"cache_creation_input_tokens":7,"cache_write_input_tokens":11,"cache_write_tokens":19`, 7, 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var usage ResponsesUsage
+			require.NoError(t, json.Unmarshal([]byte(`{"input_tokens":20,"output_tokens":2,`+tt.fields+`}`), &usage))
+			require.Equal(t, tt.want, usage.CacheCreationInputTokens)
+			require.Equal(t, 20, usage.InputTokens)
+			require.Equal(t, 22, usage.TotalTokens)
+			if tt.alias > 0 {
+				require.NotNil(t, usage.InputTokensDetails)
+				require.Equal(t, tt.alias, usage.InputTokensDetails.CacheCreationInputTokens)
+			}
 		})
 	}
 }
@@ -467,6 +520,26 @@ func TestChatCompletionsToResponses_ImageURL(t *testing.T) {
 	assert.Equal(t, "Describe this", parts[0].Text)
 	assert.Equal(t, "input_image", parts[1].Type)
 	assert.Equal(t, "data:image/png;base64,abc123", parts[1].ImageURL)
+	assert.Equal(t, "auto", parts[1].Detail)
+
+	for _, tc := range []struct{ input, want string }{
+		{"low", "low"}, {"high", "high"}, {"original", "original"},
+		{"auto", "auto"}, {" HIGH ", "high"}, {"bogus", "auto"},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			content, err := json.Marshal([]ChatContentPart{{Type: "image_url", ImageURL: &ChatImageURL{URL: "https://example.com/image.png", Detail: tc.input}}})
+			require.NoError(t, err)
+			converted, err := ChatCompletionsToResponses(&ChatCompletionsRequest{
+				Model: "gpt-4o", Messages: []ChatMessage{{Role: "user", Content: content}},
+			})
+			require.NoError(t, err)
+			var messages []ResponsesInputItem
+			require.NoError(t, json.Unmarshal(converted.Input, &messages))
+			var images []ResponsesContentPart
+			require.NoError(t, json.Unmarshal(messages[0].Content, &images))
+			require.Equal(t, tc.want, images[0].Detail)
+		})
+	}
 }
 
 func TestChatCompletionsToResponses_EmptyBase64ImageURLSkipped(t *testing.T) {

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"database/sql/driver"
 	"testing"
 	"time"
@@ -39,7 +40,7 @@ func TestInsertSystemMetricsNullableIntegerMetrics(t *testing.T) {
 			}
 			args[35] = tt.wantDBActive
 
-			mock.ExpectExec("INSERT INTO ops_system_metrics").
+			mock.ExpectExec(`(?s)INSERT INTO ops_system_metrics.*SELECT\s+\$1,\$2,\$3::text,\$4::bigint,.*WHERE NOT EXISTS.*created_at = \$1 AND window_minutes = \$2.*platform IS NOT DISTINCT FROM \$3::text.*group_id IS NOT DISTINCT FROM \$4::bigint`).
 				WithArgs(args...).
 				WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -55,5 +56,42 @@ func TestInsertSystemMetricsNullableIntegerMetrics(t *testing.T) {
 				t.Fatalf("unmet SQL expectations: %v", err)
 			}
 		})
+	}
+}
+
+func TestGetLatestSystemMetricsOrdersSameMinuteByID(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectQuery(`(?s)FROM ops_system_metrics.*ORDER BY created_at DESC, id DESC\s+LIMIT 1`).
+		WithArgs(1).WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	_, err = (&opsRepository{db: db}).GetLatestSystemMetrics(context.Background(), 1)
+	if err != sql.ErrNoRows {
+		t.Fatalf("expected no rows, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestListJobHeartbeatsLoadsExpectedInterval(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().UTC()
+	mock.ExpectQuery("SELECT[\\s\\S]*COALESCE\\(expected_interval_seconds, 0\\)[\\s\\S]*FROM ops_job_heartbeats").WillReturnRows(sqlmock.NewRows([]string{"job_name", "last_run_at", "last_success_at", "last_error_at", "last_error", "last_duration_ms", "last_result", "updated_at", "expected_interval_seconds"}).AddRow("ops_cleanup", now, now, nil, nil, 20, "ok", now, 86400))
+	jobs, err := (&opsRepository{db: db}).ListJobHeartbeats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 1 || jobs[0].ExpectedIntervalSeconds != 86400 {
+		t.Fatalf("daily interval not loaded: %+v", jobs)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

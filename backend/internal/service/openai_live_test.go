@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/Wei-Shaw/sub2api/internal/gateway/routing"
 	"io"
 	"net/http"
 	"strings"
@@ -95,6 +96,12 @@ func TestValidateLiveCallRequestDoesNotRequireDelegation(t *testing.T) {
 }
 
 func TestCreateUpstreamLiveCallPreservesSession(t *testing.T) {
+	t.Run("native", func(t *testing.T) { testCreateUpstreamLiveCallPreservesSession(t, false) })
+	t.Run("cloud_enabled", func(t *testing.T) { testCreateUpstreamLiveCallPreservesSession(t, true) })
+}
+
+func testCreateUpstreamLiveCallPreservesSession(t *testing.T, cloud bool) {
+	t.Helper()
 	upstream := &liveHTTPUpstreamStub{}
 	service := &OpenAIGatewayService{
 		cfg:          &config.Config{},
@@ -105,6 +112,7 @@ func TestCreateUpstreamLiveCallPreservesSession(t *testing.T) {
 		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Concurrency: 2,
+		Extra:       map[string]any{OpenAICloudEnabledKey: cloud},
 		Credentials: map[string]any{
 			"access_token":       "test-access-token",
 			"chatgpt_account_id": "acct_test",
@@ -116,10 +124,13 @@ func TestCreateUpstreamLiveCallPreservesSession(t *testing.T) {
 		"custom":{"keep":true}
 	}`)
 
+	lease, leaseErr := routing.AdoptLiveLease(t.Context(), &liveTestConcurrencyCache{}, routing.LeaseIdentity{AccountID: account.ID, UserID: 1, APIKeyID: 1, Token: "test-live-token"})
+	require.NoError(t, leaseErr)
+	t.Cleanup(func() { _ = lease.Release() })
 	created, err := service.createUpstreamLiveCall(context.Background(), account, &LiveCallRequest{
 		SDP:     "v=offer\r\n",
 		Session: session,
-	}, `{"v":1,"s":0,"t":"v1.test"}`)
+	}, `{"v":1,"s":0,"t":"v1.test"}`, lease)
 	require.NoError(t, err)
 	require.Equal(t, "call_test", created.CallID)
 	require.Equal(t, []byte("v=0\r\n"), created.SDP)

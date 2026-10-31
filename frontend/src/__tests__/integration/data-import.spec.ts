@@ -1,28 +1,28 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
-import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
+import { resourceEditorServicesKey, type ResourceEditorServices } from '@/features/resources/services'
+import ImportDataModal from '@/features/resources/components/AccountImportDataModal.vue'
 
 const showError = vi.fn()
 const showSuccess = vi.fn()
 const showWarning = vi.fn()
 
-vi.mock('@/stores/app', () => ({
-  useAppStore: () => ({
-    showError,
-    showSuccess,
-    showWarning
-  })
-}))
+const importServices = () => ({
+  scopeKey: () => 'data-import:admin:session-1',
+  access: { isSuperAdmin: true, isSimpleMode: false, canAuthorize: true },
+  notices: { showError, showSuccess, showWarning, showInfo: vi.fn() }
+}) satisfies Pick<ResourceEditorServices, 'scopeKey' | 'access' | 'notices'>
 
-vi.mock('@/api/admin', () => ({
-  adminAPI: {
-    accounts: {
+const accountsApiFixture = vi.hoisted(() => ({
       importData: vi.fn()
-    }
-  }
-}))
+    }))
+vi.mock('@/features/resources/accounts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/resources/accounts')>()
+  return { ...actual, default: accountsApiFixture }
+})
 
-vi.mock('vue-i18n', () => ({
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
     t: (key: string) => key
   })
@@ -32,6 +32,7 @@ const mountModal = () =>
   mount(ImportDataModal, {
     props: { show: true },
     global: {
+      provide: { [resourceEditorServicesKey as symbol]: importServices() },
       stubs: {
         BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' }
       }
@@ -54,12 +55,45 @@ const setInputFiles = (element: Element, files: File[]) => {
 }
 
 describe('ImportDataModal', () => {
+  it('preserves native and BPS authorizations when combining v1 and v2 backups', async () => {
+
+    vi.mocked(accountsApiFixture.importData).mockResolvedValue({proxy_created:0,proxy_reused:0,proxy_failed:0,account_created:2,account_failed:0})
+    const wrapper = mountModal()
+    const input = wrapper.find('input[type="file"]')
+    const row = {
+      name: 'portable', credentials: { refresh_token: 'codex' },
+      bps_credentials: { refresh_token: 'excel' },
+      status: 'disabled', schedulable: false,
+      groups: [{name:'paid',platform:'openai',priority:17}]
+    }
+    setInputFiles(input.element, [
+      makeJsonFile('v1.json',JSON.stringify({type:'sub2api-data',version:1,proxies:[],accounts:[{name:'old'}]})),
+      makeJsonFile('v2.json',JSON.stringify({type:'sub2api-data',version:2,proxies:[],accounts:[row]}))
+    ])
+    await input.trigger('change'); await wrapper.find('form').trigger('submit'); await flushPromises()
+    expect(accountsApiFixture.importData).toHaveBeenCalledWith({data:expect.objectContaining({version:2,accounts:[{name:'old'},row]}),skip_default_group_bind:true})
+  })
+
+  it('rejects unsupported backup versions before sending credentials', async () => {
+
+    const wrapper = mountModal()
+    const input = wrapper.find('input[type="file"]')
+    setInputFiles(input.element, [makeJsonFile('unsupported.json', JSON.stringify({
+      type: 'sub2api-data', version: 3, proxies: [], accounts: [{ name: 'a' }]
+    }))])
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(accountsApiFixture.importData).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith('admin.accounts.dataImportInvalidFile')
+  })
+
   beforeEach(async () => {
     showError.mockReset()
     showSuccess.mockReset()
     showWarning.mockReset()
-    const { adminAPI } = await import('@/api/admin')
-    vi.mocked(adminAPI.accounts.importData).mockReset()
+
+    vi.mocked(accountsApiFixture.importData).mockReset()
   })
 
   it('未选择文件时提示错误', async () => {
@@ -70,7 +104,7 @@ describe('ImportDataModal', () => {
   })
 
   it('无效 JSON 时按文件名提示解析失败', async () => {
-    const { adminAPI } = await import('@/api/admin')
+
     const wrapper = mountModal()
 
     const input = wrapper.find('input[type="file"]')
@@ -81,11 +115,11 @@ describe('ImportDataModal', () => {
     await flushPromises()
 
     expect(showError).toHaveBeenCalledWith('admin.accounts.dataImportParseFailedFile')
-    expect(adminAPI.accounts.importData).not.toHaveBeenCalled()
+    expect(accountsApiFixture.importData).not.toHaveBeenCalled()
   })
 
   it('不是导出数据的 JSON 按文件名拒绝', async () => {
-    const { adminAPI } = await import('@/api/admin')
+
     const wrapper = mountModal()
 
     const input = wrapper.find('input[type="file"]')
@@ -96,12 +130,12 @@ describe('ImportDataModal', () => {
     await flushPromises()
 
     expect(showError).toHaveBeenCalledWith('admin.accounts.dataImportInvalidFile')
-    expect(adminAPI.accounts.importData).not.toHaveBeenCalled()
+    expect(accountsApiFixture.importData).not.toHaveBeenCalled()
   })
 
   it('无有效 JSON 的选择不清空已有选择', async () => {
-    const { adminAPI } = await import('@/api/admin')
-    vi.mocked(adminAPI.accounts.importData).mockResolvedValue({
+
+    vi.mocked(accountsApiFixture.importData).mockResolvedValue({
       proxy_created: 0,
       proxy_reused: 0,
       proxy_failed: 0,
@@ -126,7 +160,7 @@ describe('ImportDataModal', () => {
     await wrapper.find('form').trigger('submit')
     await flushPromises()
 
-    expect(adminAPI.accounts.importData).toHaveBeenCalledWith({
+    expect(accountsApiFixture.importData).toHaveBeenCalledWith({
       data: expect.objectContaining({
         accounts: [{ name: 'a' }]
       }),
@@ -135,8 +169,8 @@ describe('ImportDataModal', () => {
   })
 
   it('merges multiple selected JSON files before importing', async () => {
-    const { adminAPI } = await import('@/api/admin')
-    vi.mocked(adminAPI.accounts.importData).mockResolvedValue({
+
+    vi.mocked(accountsApiFixture.importData).mockResolvedValue({
       proxy_created: 0,
       proxy_reused: 0,
       proxy_failed: 0,
@@ -165,7 +199,7 @@ describe('ImportDataModal', () => {
     await wrapper.find('form').trigger('submit')
     await flushPromises()
 
-    expect(adminAPI.accounts.importData).toHaveBeenCalledWith({
+    expect(accountsApiFixture.importData).toHaveBeenCalledWith({
       data: expect.objectContaining({
         proxies: [{ proxy_key: 'p' }],
         accounts: [{ name: 'a' }, { name: 'b' }]
@@ -176,8 +210,8 @@ describe('ImportDataModal', () => {
   })
 
   it('部分成功时关闭弹窗仍通知父组件刷新', async () => {
-    const { adminAPI } = await import('@/api/admin')
-    vi.mocked(adminAPI.accounts.importData).mockResolvedValue({
+
+    vi.mocked(accountsApiFixture.importData).mockResolvedValue({
       proxy_created: 0,
       proxy_reused: 0,
       proxy_failed: 0,

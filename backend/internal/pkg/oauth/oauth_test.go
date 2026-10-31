@@ -1,10 +1,10 @@
 package oauth
 
 import (
+	"context"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 )
 
 func TestAuthorizeURLMatchesClaudeCodeCLI(t *testing.T) {
@@ -33,36 +33,36 @@ func TestAuthorizeURLMatchesClaudeCodeCLI(t *testing.T) {
 
 func TestSessionStore_Stop_Idempotent(t *testing.T) {
 	store := NewSessionStore()
+	if err := store.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 
-	store.Stop()
-	store.Stop()
+	store.Stop(context.Background())
+	store.Stop(context.Background())
 
-	select {
-	case <-store.stopCh:
-		// ok
-	case <-time.After(time.Second):
-		t.Fatal("stopCh 未关闭")
+	if _, _, err := store.Begin(context.Background()); err == nil {
+		t.Fatal("stopped owner accepted new work")
 	}
 }
 
 func TestSessionStore_Stop_Concurrent(t *testing.T) {
 	store := NewSessionStore()
+	if err := store.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 
 	var wg sync.WaitGroup
 	for range 50 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			store.Stop()
+			store.Stop(context.Background())
 		}()
 	}
 
 	wg.Wait()
 
-	select {
-	case <-store.stopCh:
-		// ok
-	case <-time.After(time.Second):
-		t.Fatal("stopCh 未关闭")
+	if _, _, err := store.Begin(context.Background()); err == nil {
+		t.Fatal("stopped owner accepted new work")
 	}
 }

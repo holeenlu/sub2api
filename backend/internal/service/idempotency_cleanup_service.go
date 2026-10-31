@@ -16,8 +16,8 @@ type IdempotencyCleanupService struct {
 	batch    int
 
 	startOnce sync.Once
-	stopOnce  sync.Once
-	stopCh    chan struct{}
+	work      backgroundWork
+	startErr  error
 }
 
 func NewIdempotencyCleanupService(repo IdempotencyRepository, cfg *config.Config) *IdempotencyCleanupService {
@@ -35,49 +35,60 @@ func NewIdempotencyCleanupService(repo IdempotencyRepository, cfg *config.Config
 		repo:     repo,
 		interval: interval,
 		batch:    batch,
-		stopCh:   make(chan struct{}),
 	}
 }
 
-func (s *IdempotencyCleanupService) Start() {
+func (s *IdempotencyCleanupService) Start(ctx context.Context) error {
 	if s == nil || s.repo == nil {
-		return
+		return nil
 	}
-	s.startOnce.Do(func() {
-		logger.LegacyPrintf("service.idempotency_cleanup", "[IdempotencyCleanup] started interval=%s batch=%d", s.interval, s.batch)
-		go s.runLoop()
-	})
+	if err := s.work.bind(ctx, s.RequestStop); err != nil {
+		return err
+	}
+	s.startOnce.Do(func() { s.startErr = s.work.launch(s.runLoop) })
+	return s.startErr
 }
 
-func (s *IdempotencyCleanupService) Stop() {
+func (s *IdempotencyCleanupService) RequestStop() {
+	if s != nil {
+		s.work.requestStop()
+	}
+}
+func (s *IdempotencyCleanupService) Stop(ctx context.Context) error {
 	if s == nil {
-		return
+		return nil
 	}
-	s.stopOnce.Do(func() {
-		close(s.stopCh)
-		logger.LegacyPrintf("service.idempotency_cleanup", "[IdempotencyCleanup] stopped")
-	})
+	s.RequestStop()
+	return s.work.join(ctx)
 }
+func (s *IdempotencyCleanupService) Drain(ctx context.Context) error { return s.Stop(ctx) }
 
-func (s *IdempotencyCleanupService) runLoop() {
+func (s *IdempotencyCleanupService) runLoop(ctx context.Context) {
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
-
-	// 启动后先清理一轮，防止重启后积压。
-	s.cleanupOnce()
-
 	for {
-		select {
-		case <-ticker.C:
-			s.cleanupOnce()
-		case <-s.stopCh:
+		if ctx.Err() != nil {
 			return
+		}
+		s.cleanupOnceOwned(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
 		}
 	}
 }
 
 func (s *IdempotencyCleanupService) cleanupOnce() {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	parent, done, err := s.work.begin()
+	if err != nil {
+		return
+	}
+	defer done()
+	s.cleanupOnceOwned(parent)
+}
+func (s *IdempotencyCleanupService) cleanupOnceOwned(parent context.Context) {
+	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
 
 	deleted, err := s.repo.DeleteExpired(ctx, time.Now(), s.batch)

@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -89,6 +90,16 @@ func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRejectsAmbiguousErrors(t 
 			body:         []byte(`{"max_output_tokens":4096,"truncation":"auto"}`),
 			responseBody: []byte(`{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: truncation.","param":"max_output_tokens"}}`),
 		},
+		{
+			name:         "hosted search capability rejection must not remove search",
+			body:         []byte(`{"tools":[{"type":"web_search"}],"tool_choice":"auto","input":"search the web"}`),
+			responseBody: []byte(`{"error":{"message":"Hosted tool 'web_search' requires authorization and metering that are not supported by rustponsesapi.","type":"invalid_request_error","param":"tools","code":"unsupported_parameter"}}`),
+		},
+		{
+			name:         "hosted search rejection without param must not trigger item ID repair",
+			body:         []byte(`{"tools":[{"type":"web_search"}],"tool_choice":"auto","input":[{"type":"message","id":"msg_replay","role":"user","content":"search the web"}]}`),
+			responseBody: []byte(`{"error":{"code":"unsupported_parameter","message":"Hosted tool 'web_search' requires authorization and metering that are not supported by rustponsesapi.","type":"invalid_request_error"}}`),
+		},
 	}
 
 	for _, tt := range tests {
@@ -99,6 +110,177 @@ func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRejectsAmbiguousErrors(t 
 			require.Nil(t, retryBody)
 		})
 	}
+}
+
+func TestNormalizeOpenAIResponsesRejectedPersistedItemLookup(t *testing.T) {
+	const rejection = `{"error":{"code":"unsupported_parameter","type":"invalid_request_error","message":"Supplied input item IDs require persisted-item lookup that is not supported by rustponsesapi."}}`
+	const body = `{"type":"response.create","previous_response_id":"resp_keep","input":[
+		{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"hello","id":"nested_keep"}]},
+		{"type":"reasoning","id":"rs_1","encrypted_content":"cipher","summary":[]},
+		{"type":"function_call","id":"fc_1","call_id":"call_1","name":"lookup","arguments":"{}"},
+		{"type":"function_call_output","id":"fco_1","call_id":"call_1","output":"ok"},
+		{"type":"custom_tool_call","id":"ctc_1","call_id":"call_2","name":"patch","input":"patch"},
+		{"type":"custom_tool_call_output","id":"fc_2","call_id":"call_2","output":"ok"},
+		{"type":"tool_search_call","id":"tsc_1","execution":"client","call_id":"call_search","status":"completed","arguments":{"limit":9007199254740993,"query":"lookup"}},
+		{"type":"tool_search_output","id":"tso_1","execution":"client","call_id":"call_search","status":"completed","tools":[{"type":"function","name":"lookup","parameters":{"type":"object","properties":{"id":{"type":"string"}}}}]},
+		{"id":"msg_2","role":"user","content":"continue"}
+	]}`
+	for _, errorBody := range []string{rejection, `{"type":"error",` + rejection[1:], `{"type":"response.failed","response":{"error":` + gjson.Get(rejection, "error").Raw + `}}`} {
+		status := openAIWSRejectedFieldRetryHTTPStatus([]byte(errorBody))
+		require.Equal(t, http.StatusBadRequest, status)
+		retry, reason, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(status, []byte(body), []byte(errorBody))
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Equal(t, "persisted input item lookup rejection", reason)
+		// Removing only top-level item IDs must preserve every other byte's
+		// JSON value, including nested IDs, opaque content and tool pairing.
+		var original, actual map[string]any
+		require.NoError(t, decodeOpenAIJSONUseNumber([]byte(body), &original))
+		require.NoError(t, decodeOpenAIJSONUseNumber(retry, &actual))
+		for _, item := range original["input"].([]any) {
+			delete(item.(map[string]any), "id")
+		}
+		require.Equal(t, original, actual)
+		_, _, changed, err = normalizeOpenAIResponsesRejectedFieldRetryBody(status, retry, []byte(errorBody))
+		require.NoError(t, err)
+		require.False(t, changed, "must not retry unchanged bodies")
+	}
+	for _, input := range []string{
+		`[{"type":"item_reference","id":"msg_remote"}]`,
+		`[{"type":"message","id":"msg_remote"}]`,
+		`[{"type":"reasoning","id":"rs_remote","summary":[]}]`,
+		`[{"type":"future_item","id":"remote","content":"unknown"}]`,
+		`[{"type":"tool_search_call","id":"tsc_1","execution":"server","arguments":{}}]`,
+		`[{"type":"tool_search_output","id":"tso_1","execution":"server","tools":[]}]`,
+		`[{"type":"tool_search_call","id":"tsc_1","call_id":"call_search","arguments":{}}]`,
+		`[{"type":"tool_search_call","id":"tsc_1","execution":"client","call_id":"call_search","arguments":"{}"}]`,
+		`[{"type":"tool_search_call","id":"tsc_1","execution":"client","call_id":" ","arguments":{}}]`,
+		`[{"type":"tool_search_output","id":"tso_1","execution":"client","call_id":"call_search","tools":null}]`,
+		`[{"type":"function_call","id":"fc_1","name":"lookup","arguments":"{}"}]`,
+		`[{"type":"message","id":"msg_1","role":"user","content":"hi"},{"type":"item_reference","id":"remote"}]`,
+	} {
+		_, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, []byte(`{"input":`+input+`}`), []byte(rejection))
+		require.NoError(t, err)
+		require.False(t, changed, input)
+	}
+	// The identifying phrase is matched as a substring, so the repair must
+	// survive the wording drift the upstream has already shown once: a dropped
+	// trailing period, a renamed backend, or extra leading text.
+	for _, errorBody := range []string{
+		strings.Replace(rejection, "by rustponsesapi.", "by rustponsesapi", 1),
+		strings.Replace(rejection, "rustponsesapi", "some-other-backend", 1),
+		strings.Replace(rejection, "Supplied input item IDs", "Request rejected: supplied input item IDs", 1),
+	} {
+		_, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, []byte(body), []byte(errorBody))
+		require.NoError(t, err)
+		require.True(t, changed, errorBody)
+	}
+	for _, errorBody := range []string{
+		strings.Replace(rejection, "unsupported_parameter", "invalid_request_error", 1),
+		strings.Replace(rejection, `"type":"invalid_request_error"`, `"param":"tools","type":"invalid_request_error"`, 1),
+		// Dropping the identifying phrase must stop the repair even though the
+		// rest of the sentence, and the backend name, still match.
+		strings.Replace(rejection, "persisted-item lookup", "an unrelated lookup", 1),
+	} {
+		_, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, []byte(body), []byte(errorBody))
+		require.NoError(t, err)
+		require.False(t, changed, errorBody)
+	}
+	_, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusInternalServerError, []byte(body), []byte(rejection))
+	require.NoError(t, err)
+	require.False(t, changed)
+}
+
+// The decline reason is the only signal that separates "the repair was offered
+// and refused" from "the rejection never arrived"; pin its wording so the log
+// stays greppable and keeps naming the item that blocked the repair.
+func TestNormalizeOpenAIResponsesStatelessMissingItem(t *testing.T) {
+	const rejection = `{"type":"error","status":404,"error":{"code":"error","type":"invalid_request_error","message":"Item with id 'rs_MixedCase' not found. Items are not persisted when store is set to false."}}`
+	const body = `{"store":false,"input":[{"type":"reasoning","id":"rs_MixedCase","summary":[],"encrypted_content":"cipher"},{"type":"function_call","id":"fc_keep","call_id":"pair","name":"test","arguments":"{}"}]}`
+	for _, event := range []string{rejection, `{"type":"response.failed","response":{"error":` + gjson.Get(rejection, "error").Raw + `}}`} {
+		retry, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusNotFound, []byte(body), []byte(event))
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.False(t, gjson.GetBytes(retry, "input.0.id").Exists())
+		require.Equal(t, "cipher", gjson.GetBytes(retry, "input.0.encrypted_content").String())
+		require.Equal(t, "fc_keep", gjson.GetBytes(retry, "input.1.id").String(), "only the explicitly rejected item is repaired")
+		require.Equal(t, "pair", gjson.GetBytes(retry, "input.1.call_id").String())
+	}
+	for _, input := range []string{`{"type":"item_reference","id":"rs_MixedCase"}`, `{"type":"reasoning","id":"rs_MixedCase","summary":[]}`} {
+		_, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusNotFound, []byte(`{"input":[`+input+`]}`), []byte(rejection))
+		require.NoError(t, err)
+		require.False(t, changed, "missing content is not repaired by deleting history")
+	}
+	_, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusNotFound, []byte(body), []byte(`{"error":{"message":"Item with id 'rs_MixedCase' not found."}}`))
+	require.NoError(t, err)
+	require.False(t, changed, "a general 404 does not permit rewriting input")
+}
+
+func TestOpenAIResponsesAgentMessageLookupRepairPreservesCapturedHistory(t *testing.T) {
+	_, history := cloudCatalogHistoryFixture(t)
+	plain, err := json.Marshal(history["agent_message/plain"])
+	require.NoError(t, err)
+	body := []byte(`{"type":"response.create","previous_response_id":"resp_keep","input":[` + string(plain) + `]}`)
+	rejection := []byte(`{"error":{"code":"unsupported_parameter","message":"Supplied input item IDs require persisted-item lookup that is not supported."}}`)
+	for _, envelope := range [][]byte{rejection, []byte(`{"type":"response.failed","response":{"error":` + gjson.GetBytes(rejection, "error").Raw + `}}`)} {
+		retry, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, envelope)
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Equal(t, "resp_keep", gjson.GetBytes(retry, "previous_response_id").String())
+		require.False(t, gjson.GetBytes(retry, "input.0.id").Exists())
+		for _, field := range []string{"type", "author", "recipient", "content", "internal_chat_message_metadata_passthrough"} {
+			require.Equal(t, gjson.GetBytes(body, "input.0."+field).Raw, gjson.GetBytes(retry, "input.0."+field).Raw, field)
+		}
+	}
+	for _, item := range []string{
+		`{"type":"agent_message","id":"amsg_x","content":[{"type":"input_text","text":"ready"}]}`,
+		`{"type":"agent_message","id":"amsg_x","author":"worker","recipient":3,"content":[{"type":"input_text","text":"ready"}]}`,
+		`{"type":"agent_message","id":"amsg_x","author":"worker","recipient":"root","content":null}`,
+		`{"type":"agent_message","id":"amsg_x","author":"worker","recipient":"root","content":[]}`,
+		`{"type":"agent_message","id":"amsg_x","author":"worker","recipient":"root","content":[{"type":"input_text","text":4}]}`,
+		`{"type":"agent_message","id":"amsg_x","author":"worker","recipient":"root","content":[{"type":"input_text","text":"ready","file_id":"remote"}]}`,
+		`{"type":"agent_message","id":"amsg_x","author":"worker","recipient":"root","content":[{"type":"encrypted_content","encrypted_content":"task"}]}`,
+		`{"type":"agent_message","id":"amsg_x","author":"worker","recipient":"root","content":[{"type":"input_text","text":"ready"},{"type":"encrypted_content","encrypted_content":"task"}]}`,
+	} {
+		original := []byte(`{"input":[` + item + `]}`)
+		unchanged, changed, reason, err := removeOpenAIResponsesSelfContainedItemIDs(original)
+		require.NoError(t, err)
+		require.False(t, changed, item)
+		require.Contains(t, reason, "incomplete agent_message")
+		require.Equal(t, original, unchanged)
+	}
+}
+
+func TestRemoveOpenAIResponsesSelfContainedItemIDsExplainsDeclines(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		body  string
+		equal string
+	}{
+		{"item reference", `{"input":[{"type":"item_reference","id":"msg_remote"}]}`, "item_reference at input[0]"},
+		{"reference after a repairable item", `{"input":[{"type":"message","id":"msg_1","role":"user","content":"hi"},{"type":"item_reference","id":"remote"}]}`, "item_reference at input[1]"},
+		{"unsupported type", `{"input":[{"type":"web_search_call","id":"ws_1","status":"completed"}]}`, `unsupported item type "web_search_call" at input[0]`},
+		{"incomplete reasoning", `{"input":[{"type":"reasoning","id":"rs_1","summary":[]}]}`, "incomplete reasoning at input[0]"},
+		{"incomplete message", `{"input":[{"type":"message","id":"msg_1"}]}`, "incomplete message at input[0]"},
+		{"untyped incomplete message", `{"input":[{"id":"msg_1"}]}`, "incomplete message at input[0]"},
+		{"incomplete function call", `{"input":[{"type":"function_call","id":"fc_1","name":"lookup","arguments":"{}"}]}`, "incomplete function_call at input[0]"},
+		{"nothing to remove", `{"input":[{"type":"message","role":"user","content":"hi"}]}`, "no input item ids to remove"},
+		{"input is not an array", `{"input":"plain text"}`, "input is not an array"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, changed, declineReason, err := removeOpenAIResponsesSelfContainedItemIDs([]byte(tt.body))
+			require.NoError(t, err)
+			require.False(t, changed)
+			require.Equal(t, tt.equal, declineReason)
+		})
+	}
+
+	_, changed, declineReason, err := removeOpenAIResponsesSelfContainedItemIDs(
+		[]byte(`{"input":[{"type":"message","id":"msg_1","role":"user","content":"hi"}]}`),
+	)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Empty(t, declineReason, "a successful repair must not report a decline")
 }
 
 func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRepairsAutomationMissingRootType(t *testing.T) {
@@ -748,4 +930,51 @@ func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyClearsUntypedStatusAtInde
 	require.True(t, changed)
 	require.Equal(t, "keep_a", gjson.GetBytes(retryBody, "input.0.status").String())
 	require.False(t, gjson.GetBytes(retryBody, "input.1.status").Exists())
+}
+
+// The gateway's own cached-only web_search declaration (external_web_access:false)
+// is removed when the rustponsesapi backend refuses hosted-tool metering; a
+// caller-declared hosted search is never dropped silently.
+func TestNormalizeOpenAIResponsesRejectedHostedWebSearchMetering(t *testing.T) {
+	const rejection = `{"error":{"message":"Hosted tool 'web_search' requires authorization and metering that are not supported by rustponsesapi.","type":"invalid_request_error","param":"tools","code":"unsupported_parameter"}}`
+	const rejectionNoParam = `{"error":{"code":"unsupported_parameter","message":"Hosted tool 'web_search' requires authorization and metering that are not supported by rustponsesapi.","type":"invalid_request_error"}}`
+	t.Run("injected declaration alone is removed with its tool_choice pin", func(t *testing.T) {
+		body := []byte(`{"input":[{"type":"web_search_call","id":"ws_1","status":"completed"},{"role":"user","content":"again"}],"tools":[{"type":"web_search","external_web_access":false}],"tool_choice":"none"}`)
+		retryBody, reason, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, []byte(rejection), true)
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Equal(t, "hosted web_search metering rejection", reason)
+		require.False(t, gjson.GetBytes(retryBody, "tools").Exists())
+		require.False(t, gjson.GetBytes(retryBody, "tool_choice").Exists())
+		require.Equal(t, int64(2), gjson.GetBytes(retryBody, "input.#").Int(), "history is untouched")
+	})
+	t.Run("injected declaration next to caller tools keeps the caller tools", func(t *testing.T) {
+		body := []byte(`{"input":"x","tools":[{"type":"function","name":"shell","parameters":{"type":"object"}},{"type":"web_search","external_web_access":false}],"tool_choice":"auto"}`)
+		retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, []byte(rejectionNoParam), true)
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Equal(t, int64(1), gjson.GetBytes(retryBody, "tools.#").Int())
+		require.Equal(t, "shell", gjson.GetBytes(retryBody, "tools.0.name").String())
+		require.Equal(t, "auto", gjson.GetBytes(retryBody, "tool_choice").String())
+	})
+	t.Run("caller declared hosted search is not removed", func(t *testing.T) {
+		for _, body := range []string{
+			`{"input":"x","tools":[{"type":"web_search","external_web_access":false}],"tool_choice":"auto"}`,
+			`{"input":"x","tools":[{"type":"web_search"}],"tool_choice":"auto"}`,
+			`{"input":"x","tools":[{"type":"web_search","external_web_access":true}]}`,
+			`{"input":"x","tools":[{"type":"web_search_preview","search_context_size":"low"}]}`,
+		} {
+			retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, []byte(body), []byte(rejection))
+			require.NoError(t, err)
+			require.False(t, changed, body)
+			require.Nil(t, retryBody)
+		}
+	})
+	t.Run("other unsupported_parameter messages do not touch tools", func(t *testing.T) {
+		body := []byte(`{"input":"x","tools":[{"type":"web_search","external_web_access":false}]}`)
+		retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, []byte(`{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: tools[0].filters","param":"tools","type":"invalid_request_error"}}`))
+		require.NoError(t, err)
+		require.False(t, changed)
+		require.Nil(t, retryBody)
+	})
 }

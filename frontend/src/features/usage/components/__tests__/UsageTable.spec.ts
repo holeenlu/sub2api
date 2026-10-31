@@ -1,0 +1,1149 @@
+import { usageServicesKey } from '../../services'
+import { createUsageTestServices } from '../../__tests__/services'
+const ipGeoMocks = vi.hoisted(() => ({
+  getEntry: vi.fn(() => ({ status: 'idle' as const })),
+  fetchOne: vi.fn(),
+  fetchBatch: vi.fn(),
+}))
+
+const appStoreMocks = vi.hoisted(() => ({
+  showSuccess: vi.fn(),
+  showError: vi.fn(),
+}))
+
+vi.mock('@/shared/lib/ipGeoLookup', async () => {
+  const { ref } = await import('vue')
+  const scope = ref<string | null>('usage-test-scope')
+  return { useIpGeoLookup: () => ({ ...ipGeoMocks, scope }) }
+})
+vi.mock('@/app/model/app', () => ({ useAppStore: () => appStoreMocks }))
+
+import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
+
+import UsageTable from '../UsageTable.vue'
+
+const messages: Record<string, string> = {
+  'usage.outputTps': 'Output TPS',
+  'usage.latencyDetails': 'Latency details',
+  'usage.firstEvent': 'First event',
+  'usage.latencyFirstToken': '首字',
+  'usage.firstContent': 'First content',
+  'usage.firstText': 'First text',
+  'usage.legacyLatency': 'Legacy timing',
+  'usage.totalTokens': 'Total Tokens',
+  'usage.tokenDetails': 'Token Breakdown',
+  'usage.confirmedLowerBound': 'Confirmed lower bound',
+  'usage.confirmedLowerBoundHint': 'Tokens are upstream-confirmed usage from completed steps, not a complete final total.',
+  'admin.usage.inputTokens': 'Input Tokens',
+  'admin.usage.outputTokens': 'Output Tokens',
+  'admin.usage.cacheReadTokens': 'Cache Read Tokens',
+  'admin.usage.cacheCreationTokens': 'Cache Write Total',
+  'admin.usage.cacheCreation5mTokens': 'Cache Write (5m)',
+  'admin.usage.cacheCreation1hTokens': 'Cache Write (1h)',
+  'admin.usage.cacheCreation30mTokens': 'Cache Write (30m)',
+  'admin.usage.cacheCreation12hTokens': 'Cache Write (12h)',
+  'admin.usage.userDeletedBadge': 'Deleted',
+  'usage.costDetails': 'Cost Breakdown',
+  'admin.usage.inputCost': 'Input Cost',
+  'admin.usage.outputCost': 'Output Cost',
+  'admin.usage.cacheCreationCost': 'Cache Creation Cost',
+  'admin.usage.cacheReadCost': 'Cache Read Cost',
+  'usage.inputTokenPrice': 'Input price',
+  'usage.outputTokenPrice': 'Output price',
+  'usage.perMillionTokens': '/ 1M tokens',
+  'usage.serviceTier': 'Service tier',
+  'usage.serviceTierPriority': 'Fast',
+  'usage.serviceTierUltrafast': 'Ultrafast',
+  'usage.serviceTierFlex': 'Flex',
+  'usage.serviceTierStandard': 'Standard',
+  'usage.rate': 'Rate',
+  'usage.accountMultiplier': 'Account rate',
+  'usage.original': 'Original',
+  'usage.userBilled': 'User billed',
+  'usage.accountBilled': 'Account billed',
+  'usage.imageUnit': ' images',
+  'usage.imageCount': 'Image count',
+  'usage.imageBillingSize': 'Billing size',
+  'usage.imageInputSize': 'Input size',
+  'usage.imageOutputSize': 'Output size',
+  'usage.imageSizeSource': 'Size source',
+  'usage.imageSizeBreakdown': 'Size breakdown',
+  'usage.imageSizeSourceOutput': 'Upstream output',
+  'usage.imageSizeSourceInput': 'Request input',
+  'usage.imageSizeSourceDefault': 'Default billing tier',
+  'usage.imageSizeSourceLegacy': 'Legacy record',
+  'usage.imageSizeSourceMissing': 'Not recorded',
+  'usage.imageSizeNotRecorded': 'not recorded',
+  'usage.imageSizeLegacyUnstandardized': 'legacy unstandardized',
+  'usage.imageSizeUnknown': 'unknown',
+  'usage.imageUnitPrice': 'Per-image price',
+  'usage.imageTotalPrice': 'Image total price',
+  'usage.stream': 'Stream',
+  'usage.sync': 'Sync',
+  'usage.nativeCompactionV2': 'Compaction',
+  'admin.usage.billingModeToken': 'Token',
+  'admin.usage.billingModePerRequest': 'Per request',
+  'admin.usage.billingModeImage': 'Image',
+	'admin.usage.requestIdCopied': 'Request ID copied',
+	'admin.usage.upstreamRequestIdCopied': 'Upstream ID copied',
+	'keys.copied': 'Copied',
+	'keys.copyToClipboard': 'Copy to clipboard',
+	'common.copyFailed': 'Copy failed',
+	'usage.requestedModel': 'Requested',
+	'usage.sentUpstreamModel': 'Sent upstream',
+	'usage.upstreamResponseModel': 'Upstream response',
+	'usage.modelVariant': 'Possible version variant',
+	'usage.modelMismatch': 'Different model',
+}
+
+vi.mock('vue-i18n', async () => {
+  const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
+  return {
+    ...actual,
+    useI18n: () => ({
+      t: (key: string) => messages[key] ?? key,
+    }),
+  }
+})
+
+const DataTableStub = {
+  props: ['data'],
+  template: `
+    <div>
+      <div v-for="row in data" :key="row.request_id" :data-request-id="row.request_id">
+        <slot name="cell-account" :row="row" />
+        <slot name="cell-model" :row="row" :value="row.model" />
+        <slot name="cell-reasoning_effort" :row="row" :value="row.reasoning_effort" />
+        <slot name="cell-billing_mode" :row="row" />
+        <slot name="cell-tokens" :row="row" />
+        <slot name="cell-latency" :row="row" />
+        <slot name="cell-cost" :row="row" />
+        <slot name="cell-request_id" :row="row" />
+        <slot name="cell-upstream_request_id" :row="row" />
+      </div>
+    </div>
+  `,
+}
+
+const baseImageRow = {
+  request_id: 'req-admin-image',
+  model: 'gpt-image-2',
+  actual_cost: 0.4,
+  total_cost: 0.4,
+  account_rate_multiplier: 1,
+  rate_multiplier: 1,
+  service_tier: null,
+  input_cost: 0,
+  output_cost: 0,
+  cache_creation_cost: 0,
+  cache_read_cost: 0,
+  input_tokens: 0,
+  output_tokens: 0,
+  cache_creation_tokens: 0,
+  cache_read_tokens: 0,
+  cache_creation_5m_tokens: 0,
+  cache_creation_1h_tokens: 0,
+  cache_creation_30m_tokens: 0,
+  cache_creation_12h_tokens: 0,
+  cache_ttl_overridden: false,
+  billing_mode: 'image',
+  image_count: 2,
+  image_size: '2K',
+  image_input_size: null,
+  image_output_size: null,
+  image_size_source: null,
+  image_size_breakdown: null,
+}
+
+describe('UsageTable token confidence with the real DataTable', () => {
+  it.each([
+    { role: 'user', showAccountBilling: false },
+    { role: 'admin', showAccountBilling: true },
+  ])('keeps lower-bound tokens and status visible when $role hides cost', async ({ showAccountBilling }) => {
+    const row = {
+      ...baseImageRow,
+      image_count: 0,
+      billing_mode: 'token',
+      billing_status: 'lower_bound' as const,
+      actual_cost: 0,
+      input_tokens: 20,
+      output_tokens: 1000,
+      cache_creation_tokens: 50,
+      cache_read_tokens: 2000,
+      cache_creation_5m_tokens: 10,
+      cache_creation_1h_tokens: 10,
+      cache_creation_30m_tokens: 10,
+      cache_creation_12h_tokens: 20,
+      duration_ms: 20_000,
+      first_token_ms: 10_000,
+      latency_metrics: { version: 1 as const, first_event_ms: 100, first_content_ms: 2000, first_text_ms: 3000, duration_ms: 40_000 },
+    }
+    const columns = [{ key: 'tokens', label: 'Tokens' }, { key: 'cost', label: 'Cost' }, { key: 'latency', label: 'Latency' }]
+    const wrapper = mount(UsageTable, {
+      props: { data: [row], columns, showAccountBilling },
+      global: {
+        provide: { [usageServicesKey as symbol]: createUsageTestServices() },
+        stubs: { Teleport: true },
+      },
+    })
+    try {
+      expect(wrapper.find('table').exists()).toBe(true)
+      expect(wrapper.get('button[aria-label="Cost Breakdown"]').element.parentElement?.textContent).toContain('≥ $0.000000')
+      await wrapper.setProps({ columns: columns.filter(column => column.key !== 'cost') })
+      expect(wrapper.findAll('thead th').map(header => header.text())).toEqual(['Tokens', 'Latency'])
+      expect(wrapper.find('button[aria-label="Cost Breakdown"]').exists()).toBe(false)
+      const tokenCell = wrapper.get('tbody tr').findAll('td')[0]
+      expect(tokenCell.get('[data-testid="usage-lower-bound"]').text()).toBe('Confirmed lower bound')
+      expect(tokenCell.get('[data-testid="usage-input-tokens"]').text()).toBe('≥ 20')
+      expect(tokenCell.get('[data-testid="usage-output-tokens"]').text()).toBe('≥ 1,000')
+      expect(tokenCell.text()).toContain('≥ 2.0K')
+      expect(tokenCell.text()).toContain('≥ 50')
+      expect(wrapper.get('[data-testid="output-tps"]').text()).toBe('50.0 tok/s')
+      await tokenCell.get('button[aria-label="Token Breakdown"]').trigger('click')
+      const tooltip = wrapper.get('[role="tooltip"]')
+      expect(tooltip.text()).toContain(messages['usage.confirmedLowerBoundHint'])
+      for (const [label, value] of [
+        ['Input Tokens', '≥ 20'], ['Output Tokens', '≥ 1,000'], ['Cache Read Tokens', '≥ 2,000'],
+        ['Cache Write (5m)', '≥ 10'], ['Cache Write (1h)', '≥ 10'],
+        ['Cache Write (30m)', '≥ 10'], ['Cache Write (12h)', '≥ 20'],
+      ]) {
+        const detail = tooltip.findAll('div.flex.items-center.justify-between.gap-4').find(line => line.text().includes(label))
+        expect(detail?.get('span.font-medium.text-white').text()).toBe(value)
+      }
+      expect(tooltip.get('span.font-semibold.text-blue-400').text()).toBe('≥ 3,070')
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it.each([
+    { name: 'unknown', billing_status: 'unknown' as const, value: NaN, expected: '—' },
+    { name: 'known zero', billing_status: 'free' as const, value: 0, expected: '0' },
+    { name: 'lower-bound zero', billing_status: 'lower_bound' as const, value: 0, expected: '≥ 0' },
+  ])('preserves $name with only the token column visible', async ({ billing_status, value, expected }) => {
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [{ ...baseImageRow, image_count: 0, billing_mode: 'token', billing_status, input_tokens: value, output_tokens: value }],
+        columns: [{ key: 'tokens', label: 'Tokens' }],
+      },
+      global: {
+        provide: { [usageServicesKey as symbol]: createUsageTestServices() },
+        stubs: { Teleport: true },
+      },
+    })
+    try {
+      expect(wrapper.find('table').exists()).toBe(true)
+      expect(wrapper.find('button[aria-label="Cost Breakdown"]').exists()).toBe(false)
+      expect(wrapper.get('[data-testid="usage-input-tokens"]').text()).toBe(expected)
+      expect(wrapper.get('[data-testid="usage-output-tokens"]').text()).toBe(expected)
+      expect(wrapper.find('[data-testid="usage-lower-bound"]').exists()).toBe(billing_status === 'lower_bound')
+      await wrapper.get('button[aria-label="Token Breakdown"]').trigger('click')
+      expect(wrapper.get('[role="tooltip"] span.font-semibold.text-blue-400').text()).toBe(expected)
+    } finally {
+      wrapper.unmount()
+    }
+  })
+})
+
+describe('admin UsageTable tooltip', () => {
+  it.each([null, undefined, NaN])('does not fill missing token observations with zero: %s', async (unknown) => {
+    const row = { ...baseImageRow, request_id: 'unknown-tokens', image_count: 0, billing_mode: 'token',
+      input_tokens: unknown, output_tokens: unknown, cache_creation_tokens: 0, cache_read_tokens: 0 }
+    const wrapper = mount(UsageTable, {
+      props: { data: [row], loading: false, columns: [] },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices() }, stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+    expect(wrapper.findAll('[data-testid="usage-input-tokens"]').map(cell => cell.text())).toEqual(['—'])
+    expect(wrapper.findAll('[data-testid="usage-output-tokens"]').map(cell => cell.text())).toEqual(['—'])
+    await wrapper.find('.group.relative').trigger('mouseenter')
+    await nextTick()
+    expect(wrapper.get('.fixed span.font-semibold.text-blue-400').text()).toBe('—')
+    wrapper.unmount()
+  })
+
+  it('keeps observed zero tokens and does not total partially known cache usage', async () => {
+    const row = { ...baseImageRow, image_count: 0, billing_mode: 'token', cache_read_tokens: null }
+    const wrapper = mount(UsageTable, {
+      props: { data: [row], loading: false, columns: [] },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices() }, stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+    expect(wrapper.get('[data-testid="usage-input-tokens"]').text()).toBe('0')
+    expect(wrapper.get('[data-testid="usage-output-tokens"]').text()).toBe('0')
+    await wrapper.find('.group.relative').trigger('mouseenter')
+    await nextTick()
+    expect(wrapper.get('.fixed span.font-semibold.text-blue-400').text()).toBe('—')
+    wrapper.unmount()
+  })
+
+  it.each([
+    { name: 'both OpenAI TTLs', ttl: [0, 0, 13, 21] },
+    { name: '30m only', ttl: [0, 0, 34, 0] },
+    { name: '12h only', ttl: [0, 0, 0, 34] },
+    { name: 'historical unknown TTL', ttl: [0, 0, 0, 0] },
+    { name: 'existing Anthropic TTLs', ttl: [5, 29, 0, 0] },
+  ])('shows $name without counting the breakdown twice', async ({ ttl }) => {
+    const row = {
+      ...baseImageRow,
+      image_count: 0,
+      billing_mode: 'token',
+      input_tokens: 10,
+      output_tokens: 20,
+      cache_read_tokens: 7,
+      cache_creation_tokens: 34,
+      cache_creation_5m_tokens: ttl[0],
+      cache_creation_1h_tokens: ttl[1],
+      cache_creation_30m_tokens: ttl[2],
+      cache_creation_12h_tokens: ttl[3],
+    }
+    const wrapper = mount(UsageTable, {
+      props: { data: [row], loading: false, columns: [] },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) }, stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+    for (const [index, label] of ['5m', '1h', '30m', '12h'].entries()) {
+      if (index > 0) {
+        expect(wrapper.findAll('span').some(span => span.text() === label)).toBe(ttl[index] > 0)
+      }
+    }
+    await wrapper.find('.group.relative').trigger('mouseenter')
+    await nextTick()
+    const tooltip = wrapper.get('.fixed')
+    for (const [index, label] of ['5m', '1h', '30m', '12h'].entries()) {
+      const detail = tooltip.findAll('div.flex.items-center.justify-between.gap-4')
+        .find(line => line.text().includes('Cache Write (' + label + ')'))
+      if (ttl[index] > 0) {
+        expect(detail?.find('span.font-medium.text-white').text()).toBe(String(ttl[index]))
+      } else {
+        expect(detail).toBeUndefined()
+      }
+    }
+    expect(tooltip.text().includes('Cache Write Total')).toBe(ttl.every(value => value === 0))
+    expect(tooltip.get('span.font-semibold.text-blue-400').text()).toBe('71')
+    wrapper.unmount()
+  })
+
+  it('shows output TPS in the latency cell using total duration', () => {
+    const row = { ...baseImageRow, image_count: 0, billing_mode: 'token', output_tokens: 1000, duration_ms: 20_000, first_token_ms: 10_000 }
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [row, { ...row, request_id: 'no-duration', duration_ms: null }, { ...row, request_id: 'image', image_count: 1 }],
+        loading: false,
+        columns: [{ key: 'latency', label: 'Latency' }],
+      },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) }, stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+    expect(wrapper.findAll('[data-testid="output-tps"]').map(cell => cell.text())).toEqual(['50.0 tok/s', '—', '—'])
+    expect(wrapper.text()).toContain('Output TPS')
+  })
+
+  it('shows upstream first-token timing independently of diagnostic stages, TPS and cache share', async () => {
+    const row = { ...baseImageRow, image_count: 0, billing_mode: 'token', input_tokens: 200, cache_read_tokens: 500, cache_creation_tokens: 300, output_tokens: 1000, duration_ms: 20_000, first_token_ms: 10_000 }
+    const metrics = { version: 1, first_event_ms: 100, first_content_ms: 2000, first_text_ms: 3000, duration_ms: 40_000 }
+    const wrapper = mount(UsageTable, {
+      props: { data: [
+        { ...row, request_id: 'measured', latency_metrics: metrics },
+        { ...row, request_id: 'missing-event', latency_metrics: { ...metrics, first_event_ms: null } },
+        { ...row, request_id: 'legacy' },
+        { ...row, request_id: 'missing-token', first_token_ms: null, latency_metrics: metrics },
+        { ...row, request_id: 'unsupported', latency_metrics: { ...metrics, version: 2 } },
+        { ...row, request_id: 'zero-token', first_token_ms: 0, latency_metrics: metrics },
+      ], columns: [{ key: 'latency', label: 'Latency' }] },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) }, stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+    const measured = wrapper.get('[data-request-id="measured"]')
+    expect(measured.get('[data-testid="primary-latency"]').text()).toBe('10.00s')
+    expect(measured.text()).toContain('首字')
+    expect(measured.text()).not.toContain('First content')
+    expect(measured.get('[data-testid="usage-duration"]').text()).toBe('40.00s')
+    expect(measured.get('[data-testid="output-tps"]').text()).toBe('50.0 tok/s')
+    expect(measured.get('[data-testid="cache-hit-rate"]').text()).toBe('50.0%')
+    expect(measured.find('[data-testid="legacy-latency"]').exists()).toBe(false)
+    expect(wrapper.get('[data-request-id="missing-event"] [data-testid="primary-latency"]').text()).toBe('10.00s')
+    expect(wrapper.get('[data-request-id="missing-token"]').find('[data-testid="primary-latency"]').exists()).toBe(false)
+    expect(wrapper.get('[data-request-id="unsupported"] [data-testid="primary-latency"]').text()).toBe('10.00s')
+    expect(wrapper.get('[data-request-id="zero-token"] [data-testid="primary-latency"]').text()).toBe('0ms')
+    expect(wrapper.get('[data-request-id="legacy"] [data-testid="primary-latency"]').text()).toBe('10.00s')
+    expect(wrapper.get('[data-request-id="legacy"] [data-testid="legacy-latency"]').text()).toBe('Legacy timing')
+    await measured.get('button[aria-label="Latency details"]').trigger('click')
+    expect(wrapper.get('dl').text()).toContain('First event100ms')
+    expect(wrapper.get('dl').text()).toContain('First content2.00s')
+    expect(wrapper.get('dl').text()).toContain('First text3.00s')
+    expect(wrapper.get('dl').element.parentElement?.querySelectorAll('p')).toHaveLength(1)
+  })
+
+  it.each([
+    { first: 100, total: 40_000, firstColor: 'emerald', totalColor: 'emerald' },
+    { first: 63_000, total: 66_000, firstColor: 'red', totalColor: 'amber' },
+    { first: null, total: null, firstColor: null, totalColor: null },
+  ])('shares latency colors between the row and dark details: $first / $total', async ({ first, total, firstColor, totalColor }) => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ ...baseImageRow, first_token_ms: first, latency_metrics: {
+        version: 1, first_event_ms: first, first_content_ms: first, first_text_ms: first, duration_ms: total,
+      } }], columns: [{ key: 'latency', label: 'Latency' }] },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) }, stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+    await wrapper.get('button[aria-label="Latency details"]').trigger('click')
+    const details = wrapper.get('dl')
+    // The popover is always dark, including when the surrounding page is light.
+    expect(details.element.parentElement?.classList.contains('dark')).toBe(true)
+    const values = details.findAll('dd')
+    expect(values).toHaveLength(4)
+    for (const [index, value] of values.entries()) {
+      const color = index === 3 ? totalColor : firstColor
+      if (color == null) {
+        expect(value.classes()).toContain('text-gray-400')
+        expect(value.text()).toBe('-')
+      } else {
+        expect(value.classes()).toEqual(expect.arrayContaining([`text-${color}-600`, `dark:text-${color}-400`]))
+        const rowValue = wrapper.get(index === 3 ? '[data-testid="usage-duration"]' : '[data-testid="primary-latency"]')
+        expect(rowValue.classes()).toEqual(expect.arrayContaining([`text-${color}-600`, `dark:text-${color}-400`]))
+      }
+    }
+    wrapper.unmount()
+  })
+
+  beforeEach(() => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 20,
+      left: 20,
+      right: 120,
+      bottom: 40,
+      width: 100,
+      height: 20,
+      toJSON: () => ({}),
+    } as DOMRect)
+  })
+
+  it('keeps the request type badge and adds a separate badge only for native compaction rows', () => {
+    const DataTableStreamStub = {
+      props: ['data'],
+      template: `
+        <div>
+          <div v-for="row in data" :key="row.request_id">
+            <slot name="cell-stream" :row="row" />
+          </div>
+        </div>
+      `,
+    }
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [
+          {
+            ...baseImageRow,
+            request_id: 'req-compaction-stream',
+            request_type: 'stream',
+            stream: true,
+            native_compaction_v2: true,
+          },
+          {
+            ...baseImageRow,
+            request_id: 'req-historical-sync',
+            request_type: 'sync',
+            stream: false,
+            native_compaction_v2: false,
+          },
+        ],
+        loading: false,
+        columns: [],
+      },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) },
+        stubs: {
+          DataTable: DataTableStreamStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    const requestBadges = wrapper.findAll('[data-testid="request-type-badge"]')
+    expect(requestBadges).toHaveLength(2)
+    expect(requestBadges[0].text()).toBe('Stream')
+    expect(requestBadges[1].text()).toBe('Sync')
+    expect(wrapper.findAll('[data-testid="native-compaction-badge"]')).toHaveLength(1)
+    expect(wrapper.get('[data-testid="native-compaction-badge"]').text()).toBe('Compaction')
+  })
+
+  it.each([
+    [0, '0.0x'],
+    [0.5, '0.50x'],
+    [undefined, '1.00x'],
+  ])('shows the stored user rate %s in cost details', async (rate, expected) => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ ...baseImageRow, rate_multiplier: rate }], loading: false, columns: [] },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) }, stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+    const triggers = wrapper.findAll('.group.relative')
+    await triggers[triggers.length - 1].trigger('mouseenter')
+    const rateLabel = wrapper.get('.fixed').findAll('span').find(span => span.text() === 'Rate')!
+    expect(rateLabel.element.parentElement?.textContent).toContain(expected)
+    wrapper.unmount()
+  })
+
+  it('shows service tier and billing breakdown in cost tooltip', async () => {
+    const row = {
+      request_id: 'req-admin-1',
+      actual_cost: 0.092883,
+      total_cost: 0.092883,
+      account_rate_multiplier: 1,
+      rate_multiplier: 1,
+      service_tier: 'priority',
+      input_cost: 0.020285,
+      output_cost: 0.00303,
+      cache_creation_cost: 0,
+      cache_read_cost: 0.069568,
+      input_tokens: 4057,
+      output_tokens: 101,
+    }
+
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [row],
+        loading: false,
+        columns: [],
+      },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) },
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    const tooltipTriggers = wrapper.findAll('.group.relative')
+    await tooltipTriggers[tooltipTriggers.length - 1].trigger('mouseenter')
+    await nextTick()
+
+    const text = wrapper.text()
+    expect(text).toContain('Service tier')
+    expect(text).toContain('Fast')
+    expect(text).toContain('Rate')
+    expect(text).toContain('1.00x')
+    expect(text).toContain('Account rate')
+    expect(text).toContain('User billed')
+    expect(text).toContain('Account billed')
+    expect(text).toContain('$0.092883')
+    expect(text).toContain('$5.0000 / 1M tokens')
+    expect(text).toContain('$30.0000 / 1M tokens')
+    expect(text).toContain('$0.069568')
+  })
+
+  it.each(['token', 'image', 'per_request'])('keeps eight decimal places in %s cost details', async (billingMode) => {
+    const row = {
+      ...baseImageRow,
+      billing_mode: billingMode,
+      image_count: billingMode === 'image' ? 2 : 0,
+      input_cost: 0.00000001,
+      image_input_cost: 0.00000002,
+      output_cost: 0.00000003,
+      image_output_cost: 0.00000004,
+      cache_creation_cost: 0.00000005,
+      cache_read_cost: 0.00000006,
+      total_cost: 0.00000022,
+      actual_cost: 0.00000042,
+      account_stats_cost: 0.00000012,
+      account_rate_multiplier: 1.5,
+    }
+    const wrapper = mount(UsageTable, {
+      props: { data: [row], loading: false, columns: [] },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) }, stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+    const triggers = wrapper.findAll('.group.relative')
+    await triggers[triggers.length - 1].trigger('mouseenter')
+    const amounts = wrapper.get('.fixed').findAll('span').map(span => span.text())
+    expect(amounts).toEqual(expect.arrayContaining([
+      '$0.00000001', '$0.00000002', '$0.00000003', '$0.00000004',
+      '$0.00000005', '$0.00000006', '$0.00000022', '$0.00000042', '$0.00000018',
+    ]))
+    if (billingMode === 'image') expect(amounts).toContain('$0.00000011')
+    wrapper.unmount()
+  })
+
+  it('keeps missing cost values unknown rather than inventing eight-decimal zeros', async () => {
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [{ ...baseImageRow, billing_mode: 'per_request', image_count: 0, total_cost: undefined, actual_cost: undefined }],
+        loading: false,
+        columns: [],
+      },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) }, stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+    const triggers = wrapper.findAll('.group.relative')
+    await triggers[triggers.length - 1].trigger('mouseenter')
+    const amounts = wrapper.get('.fixed').findAll('span').map(span => span.text()).filter(text => text.startsWith('$'))
+    expect(amounts).toEqual([])
+    expect(wrapper.get('.fixed').text()).toContain('—')
+    wrapper.unmount()
+  })
+
+  it('shows requested and upstream models separately for admin rows', () => {
+    const row = {
+      request_id: 'req-admin-model-1',
+      model: 'claude-sonnet-4',
+      upstream_model: 'claude-sonnet-4-20250514',
+      actual_cost: 0,
+      total_cost: 0,
+      account_rate_multiplier: 1,
+      rate_multiplier: 1,
+      input_cost: 0,
+      output_cost: 0,
+      cache_creation_cost: 0,
+      cache_read_cost: 0,
+      input_tokens: 0,
+      output_tokens: 0,
+    }
+
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [row],
+        loading: false,
+        columns: [],
+      },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) },
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    const text = wrapper.text()
+    expect(text).toContain('claude-sonnet-4')
+    expect(text).toContain('claude-sonnet-4-20250514')
+  })
+
+  it('shows requested and forwarded reasoning effort separately when they differ', () => {
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [{
+          request_id: 'req-admin-effort-1',
+          model: 'gpt-5.4',
+          reasoning_effort: 'max',
+          upstream_reasoning_effort: 'xhigh',
+        }],
+        loading: false,
+        columns: [],
+      },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) },
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    const text = wrapper.text()
+    expect(text).toContain('Max')
+    expect(text).toContain('XHigh')
+    expect(text).toContain('↳')
+  })
+
+  it('shows a single reasoning effort when requested matches forwarded', () => {
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [{
+          request_id: 'req-admin-effort-2',
+          model: 'gpt-5.6-sol',
+          reasoning_effort: 'max',
+        }],
+        loading: false,
+        columns: [],
+      },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) },
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    const text = wrapper.text()
+    expect(text).toContain('Max')
+    expect(text).not.toContain('↳')
+  })
+
+  it('hides mapped reasoning effort for user rows that only have the requested value', () => {
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [{
+          request_id: 'req-user-effort-1',
+          model: 'gpt-5.4',
+          reasoning_effort: 'max',
+        }],
+        loading: false,
+        columns: [],
+      },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) },
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('Max')
+    expect(wrapper.text()).not.toContain('XHigh')
+    expect(wrapper.text()).not.toContain('↳')
+  })
+
+	it.each([
+		{
+			name: 'possible version variant',
+			responseModel: 'gpt-5.5-2026-08-01',
+			expectedBadge: 'Possible version variant',
+		},
+		{
+			name: 'different upstream model',
+			responseModel: 'gpt-5.4',
+			expectedBadge: 'Different model',
+		},
+	])('shows a compact upstream response audit marker for $name', ({ responseModel, expectedBadge }) => {
+		const wrapper = mount(UsageTable, {
+			props: {
+				data: [{
+					request_id: `req-${responseModel}`,
+					model: 'gpt-5.6-sol',
+					upstream_model: 'gpt-5.5',
+					model_mapping_chain: 'gpt-5.6-sol→gpt-5.5',
+					upstream_response_model: responseModel,
+					upstream_model_mismatch: true,
+				}],
+				loading: false,
+				columns: [],
+			},
+			global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) },
+				stubs: {
+					DataTable: DataTableStub,
+					EmptyState: true,
+					Icon: true,
+					Teleport: true,
+				},
+			},
+		})
+
+		const text = wrapper.text()
+		expect(text).toContain('gpt-5.6-sol')
+		expect(text).toContain('gpt-5.5')
+		expect(text).toContain(responseModel)
+		expect(text).toContain(expectedBadge)
+	})
+
+  it.each([
+    {
+      name: 'defaulted row',
+      row: {
+        ...baseImageRow,
+        request_id: 'req-admin-default-image',
+        image_size: '2K',
+        image_input_size: 'auto',
+        image_output_size: null,
+        image_size_source: 'default',
+      },
+      expected: ['2K', 'Default billing tier', 'auto', 'unknown'],
+    },
+    {
+      name: 'output-sourced row',
+      row: {
+        ...baseImageRow,
+        request_id: 'req-admin-output-image',
+        image_size: '4K',
+        image_input_size: '1024x1024',
+        image_output_size: '3840x2160',
+        image_size_source: 'output',
+        image_size_breakdown: { '4K': 1 },
+      },
+      expected: ['4K', 'Upstream output', '1024x1024', '3840x2160', '4K x 1'],
+    },
+    {
+      name: 'input-sourced row',
+      row: {
+        ...baseImageRow,
+        request_id: 'req-admin-input-image',
+        image_size: '1K',
+        image_input_size: '1024x1024',
+        image_output_size: null,
+        image_size_source: 'input',
+      },
+      expected: ['1K', 'Request input', '1024x1024', 'unknown'],
+    },
+    {
+      name: 'legacy unstandardized row',
+      row: {
+        ...baseImageRow,
+        request_id: 'req-admin-legacy-unstandardized-image',
+        image_size: '512x512',
+        image_input_size: null,
+        image_output_size: null,
+        image_size_source: null,
+      },
+      expected: ['legacy unstandardized: 512x512', 'Legacy record', 'unknown'],
+    },
+  ])('shows image usage metadata for $name', async ({ row, expected }) => {
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [row],
+        loading: false,
+        columns: [],
+      },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) },
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    await wrapper.find('.group.relative').trigger('mouseenter')
+    await nextTick()
+
+    const text = wrapper.text()
+    expect(text).toContain('Image count')
+    expect(text).toContain('Billing size')
+    expect(text).toContain('Size source')
+    expect(text).toContain('Input size')
+    expect(text).toContain('Output size')
+    expect(text).toContain('Per-image price')
+    expect(text).toContain('Image total price')
+    for (const value of expected) {
+      expect(text).toContain(value)
+    }
+  })
+
+  it('displays historical image rows with missing billing_mode as image usage without a 2K fallback', async () => {
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [
+          {
+            ...baseImageRow,
+            request_id: 'req-admin-legacy-missing-image',
+            billing_mode: null,
+            image_size: null,
+            image_input_size: null,
+            image_output_size: null,
+            image_size_source: null,
+            image_size_breakdown: null,
+          },
+        ],
+        loading: false,
+        columns: [],
+      },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) },
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    await wrapper.find('.group.relative').trigger('mouseenter')
+    await nextTick()
+
+    const text = wrapper.text()
+    expect(text).toContain('Image')
+    expect(text).toContain('Image count')
+    expect(text).toContain('Per-image price')
+    expect(text).toContain('not recorded')
+    expect(text).not.toContain('(2K)')
+  })
+})
+
+describe('admin UsageTable request ID column', () => {
+  beforeEach(() => {
+    appStoreMocks.showSuccess.mockReset()
+    appStoreMocks.showError.mockReset()
+  })
+
+  it('renders and copies the request ID', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [{ ...baseImageRow, request_id: 'req-admin-visible-id' }],
+        loading: false,
+        columns: [{ key: 'request_id', label: 'Request ID' }],
+      },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) },
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('req-admin-visible-id')
+    await wrapper.get('button[title="Copy to clipboard"]').trigger('click')
+
+    expect(writeText).toHaveBeenCalledWith('req-admin-visible-id')
+    expect(appStoreMocks.showSuccess).toHaveBeenCalledWith('Request ID copied')
+  })
+
+  it('renders and copies the upstream ID', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [{ ...baseImageRow, request_id: '', upstream_request_id: '20260903082826779695' }],
+        loading: false,
+        columns: [{ key: 'upstream_request_id', label: 'Upstream ID' }],
+      },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) },
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('20260903082826779695')
+    const copyButtons = wrapper.findAll('button[title="Copy to clipboard"]')
+    expect(copyButtons).toHaveLength(1)
+    await copyButtons[0].trigger('click')
+
+    expect(writeText).toHaveBeenCalledWith('20260903082826779695')
+    expect(appStoreMocks.showSuccess).toHaveBeenCalledWith('Upstream ID copied')
+  })
+})
+
+describe('admin UsageTable IP geolocation batch toolbar', () => {
+  const DataTableStubWithIp = {
+    props: ['data'],
+    template: `
+      <div>
+        <div v-for="row in data" :key="row.request_id">
+          <slot name="cell-ip_address" :row="row" />
+        </div>
+      </div>
+    `,
+  }
+
+  beforeEach(() => {
+    ipGeoMocks.getEntry.mockReset()
+    ipGeoMocks.fetchOne.mockReset()
+    ipGeoMocks.fetchBatch.mockReset()
+    ipGeoMocks.getEntry.mockReturnValue({ status: 'idle' })
+  })
+
+  it('does not render the batch toolbar when the ip_address column is not visible', () => {
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [{ request_id: 'r1', ip_address: '8.8.8.8' }],
+        loading: false,
+        columns: [],
+      },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) }, stubs: { DataTable: DataTableStubWithIp, EmptyState: true, Teleport: true } },
+    })
+    expect(wrapper.text()).not.toContain('usage.ipGeo.batchFetch')
+  })
+
+  it('renders the batch toolbar with a pending count when the ip_address column is visible', () => {
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [
+          { request_id: 'r1', ip_address: '8.8.8.8' },
+          { request_id: 'r2', ip_address: '8.8.8.8' },
+          { request_id: 'r3', ip_address: '1.1.1.1' },
+        ],
+        loading: false,
+        columns: [{ key: 'ip_address', label: 'IP' }],
+      },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) }, stubs: { DataTable: DataTableStubWithIp, EmptyState: true, Teleport: true } },
+    })
+    expect(wrapper.text()).toContain('usage.ipGeo.pending')
+    const button = wrapper.find('button')
+    expect(button.exists()).toBe(true)
+    expect((button.element as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('fetches deduplicated IPs from the current page when the batch button is clicked', async () => {
+    ipGeoMocks.fetchBatch.mockResolvedValue(true)
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [
+          { request_id: 'r1', ip_address: '8.8.8.8' },
+          { request_id: 'r2', ip_address: '8.8.8.8' },
+          { request_id: 'r3', ip_address: '1.1.1.1' },
+        ],
+        loading: false,
+        columns: [{ key: 'ip_address', label: 'IP' }],
+      },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) }, stubs: { DataTable: DataTableStubWithIp, EmptyState: true, Teleport: true } },
+    })
+    await wrapper.find('button').trigger('click')
+    expect(ipGeoMocks.fetchBatch).toHaveBeenCalledWith(['8.8.8.8', '1.1.1.1'], { signal: expect.any(AbortSignal) })
+    expect(wrapper.emitted('ipGeoBatchFailed')).toBeUndefined()
+  })
+
+  it('emits ipGeoBatchFailed when the batch request reports a network-level failure', async () => {
+    ipGeoMocks.fetchBatch.mockResolvedValue(false)
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [{ request_id: 'r1', ip_address: '8.8.8.8' }],
+        loading: false,
+        columns: [{ key: 'ip_address', label: 'IP' }],
+      },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) }, stubs: { DataTable: DataTableStubWithIp, EmptyState: true, Teleport: true } },
+    })
+    await wrapper.find('button').trigger('click')
+    expect(wrapper.emitted('ipGeoBatchFailed')).toHaveLength(1)
+  })
+
+  it('renders IpGeoCell content for ip_address cells', () => {
+    ipGeoMocks.getEntry.mockReturnValue({ status: 'success', label: 'CN · Guangdong · Shenzhen', detail: {} })
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [{ request_id: 'r1', ip_address: '121.35.47.43' }],
+        loading: false,
+        columns: [{ key: 'ip_address', label: 'IP' }],
+      },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) }, stubs: { DataTable: DataTableStubWithIp, EmptyState: true, Teleport: true } },
+    })
+    expect(wrapper.text()).toContain('121.35.47.43')
+    expect(wrapper.text()).toContain('CN · Guangdong · Shenzhen')
+  })
+})
+
+// A DataTable stub that also renders cell-user, so the deleted badge can be asserted.
+const DataTableStubWithUser = {
+  props: ['data'],
+  template: `
+    <div>
+      <div v-for="row in data" :key="row.request_id">
+        <slot name="cell-user" :row="row" />
+        <slot name="cell-model" :row="row" :value="row.model" />
+        <slot name="cell-reasoning_effort" :row="row" :value="row.reasoning_effort" />
+        <slot name="cell-billing_mode" :row="row" />
+        <slot name="cell-tokens" :row="row" />
+        <slot name="cell-cost" :row="row" />
+      </div>
+    </div>
+  `,
+}
+
+describe('admin UsageTable deleted-user badge', () => {
+  it('renders deleted badge for a soft-deleted user row', () => {
+    const row = {
+      request_id: 'req-deleted-user-1',
+      model: 'claude-3',
+      user_id: 2,
+      user: { id: 2, email: 'd@test.com', deleted_at: '2026-05-28T00:00:00Z' },
+      actual_cost: 0,
+      total_cost: 0,
+      input_cost: 0,
+      output_cost: 0,
+      rate_multiplier: 1,
+      input_tokens: 1,
+      output_tokens: 1,
+    }
+
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [row],
+        loading: false,
+        columns: [{ key: 'user', label: 'User' }],
+      },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) },
+        stubs: {
+          DataTable: DataTableStubWithUser,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('Deleted')
+    expect(wrapper.text()).toContain('d@test.com')
+  })
+
+  it('does NOT render deleted badge for an active user row', () => {
+    const row = {
+      request_id: 'req-active-user-1',
+      model: 'claude-3',
+      user_id: 3,
+      user: { id: 3, email: 'active@test.com', deleted_at: null },
+      actual_cost: 0,
+      total_cost: 0,
+      input_cost: 0,
+      output_cost: 0,
+      rate_multiplier: 1,
+      input_tokens: 1,
+      output_tokens: 1,
+    }
+
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [row],
+        loading: false,
+        columns: [{ key: 'user', label: 'User' }],
+      },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) },
+        stubs: {
+          DataTable: DataTableStubWithUser,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    expect(wrapper.text()).not.toContain('Deleted')
+    expect(wrapper.text()).toContain('active@test.com')
+  })
+})
+
+describe('amount-only cost display', () => {
+  it.each(['pending', 'pending_pricing', 'unmetered'])('does not display unknown %s charges as zero', (status) => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ ...baseImageRow, actual_cost: 0, billing_status: status }], loading: false, columns: [{ key: 'cost', label: 'Cost' }], showAccountBilling: false },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) }, stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } }
+    })
+    expect(wrapper.get('button[aria-label="Cost Breakdown"]').element.parentElement?.textContent?.trim()).toBe('—')
+    expect(wrapper.find('[data-testid="billing-status"]').exists()).toBe(false)
+    expect(wrapper.find('span.font-medium.text-green-600').exists()).toBe(false)
+  })
+
+  it.each(['free', 'settled', 'unknown', undefined])('shows only the amount for %s even with long-context pricing', (status) => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ ...baseImageRow, actual_cost: 0, billing_status: status, long_context_billing_applied: true }], loading: false, columns: [{ key: 'cost', label: 'Cost' }], showAccountBilling: false },
+      global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) }, stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } }
+    })
+    expect(wrapper.get('button[aria-label="Cost Breakdown"]').element.parentElement?.textContent?.trim()).toBe(status === 'unknown' ? '—' : '$0.000000')
+    expect(wrapper.find('[data-testid="billing-status"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="long-context-billing-marker"]').exists()).toBe(false)
+    expect(wrapper.find('button[aria-label="Cost Breakdown"]').exists()).toBe(true)
+  })
+})
+
+it('shows the account name without authorization mode copy', () => {
+  const wrapper = mount(UsageTable, {
+    props: { data: [{ ...baseImageRow, account: { id: 991, name: 'upstream-account' }, authorization_mode: 'unknown' }], columns: [{ key: 'account', label: 'Account' }], loading: false },
+    global: { provide: { [usageServicesKey as symbol]: createUsageTestServices({ notifySuccess: appStoreMocks.showSuccess, notifyError: appStoreMocks.showError, copyText: async (text, message) => { try { await navigator.clipboard.writeText(text); appStoreMocks.showSuccess(message); return true } catch { appStoreMocks.showError("common.copyFailed"); return false } } }) }, stubs: { DataTable: DataTableStub } }
+  })
+  expect(wrapper.text()).toContain('upstream-account')
+  expect(wrapper.find('[data-testid="usage-authorization-mode"]').exists()).toBe(false)
+  expect(wrapper.text()).not.toContain('vendor.authorization.')
+  wrapper.unmount()
+})

@@ -8,6 +8,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/sessionstore"
 	"log/slog"
 	"net/url"
 	"os"
@@ -55,14 +57,15 @@ var (
 
 // OAuthSession stores one PKCE OAuth flow.
 type OAuthSession struct {
-	State         string    `json:"state"`
-	CodeVerifier  string    `json:"code_verifier"`
-	CodeChallenge string    `json:"code_challenge"`
-	ClientID      string    `json:"client_id,omitempty"`
-	Scope         string    `json:"scope,omitempty"`
-	ProxyURL      string    `json:"proxy_url,omitempty"`
-	RedirectURI   string    `json:"redirect_uri"`
-	CreatedAt     time.Time `json:"created_at"`
+	Authorization *authz.Lease `json:"authorization,omitempty"`
+	State         string       `json:"state"`
+	CodeVerifier  string       `json:"code_verifier"`
+	CodeChallenge string       `json:"code_challenge"`
+	ClientID      string       `json:"client_id,omitempty"`
+	Scope         string       `json:"scope,omitempty"`
+	ProxyURL      string       `json:"proxy_url,omitempty"`
+	RedirectURI   string       `json:"redirect_uri"`
+	CreatedAt     time.Time    `json:"created_at"`
 
 	mu       sync.Mutex
 	consumed bool
@@ -83,11 +86,10 @@ func (s *OAuthSession) TryConsume() bool {
 
 // SessionStore manages xAI OAuth sessions with an optional Redis backend.
 type SessionStore struct {
+	*sessionstore.Lifecycle
 	mu        sync.RWMutex
 	sessions  map[string]*OAuthSession
 	localOnly map[string]struct{}
-	stopOnce  sync.Once
-	stopCh    chan struct{}
 	remote    *redissession.Store
 }
 
@@ -106,9 +108,8 @@ func NewSessionStore() *SessionStore {
 	store := &SessionStore{
 		sessions:  make(map[string]*OAuthSession),
 		localOnly: make(map[string]struct{}),
-		stopCh:    make(chan struct{}),
 	}
-	go store.cleanup()
+	store.Lifecycle = sessionstore.NewLifecycle(5*time.Minute, func(context.Context) { store.cleanup() })
 	return store
 }
 
@@ -120,13 +121,13 @@ func NewRedisSessionStore(rdb *redis.Client) *SessionStore {
 	return store
 }
 
-func (s *SessionStore) Set(sessionID string, session *OAuthSession) {
+func (s *SessionStore) Set(ctx context.Context, sessionID string, session *OAuthSession) {
 	if session == nil {
 		return
 	}
 	var remoteErr error
 	if s != nil && s.remote != nil {
-		remoteErr = s.remote.Set(context.Background(), sessionID, oauthSessionDTO{
+		remoteErr = s.remote.Set(ctx, sessionID, oauthSessionDTO{
 			State: session.State, CodeVerifier: session.CodeVerifier, CodeChallenge: session.CodeChallenge,
 			ClientID: session.ClientID, Scope: session.Scope, ProxyURL: session.ProxyURL,
 			RedirectURI: session.RedirectURI, CreatedAt: session.CreatedAt,
@@ -143,13 +144,13 @@ func (s *SessionStore) Set(sessionID string, session *OAuthSession) {
 	}
 }
 
-func (s *SessionStore) Get(sessionID string) (*OAuthSession, bool) {
+func (s *SessionStore) Get(ctx context.Context, sessionID string) (*OAuthSession, bool) {
 	if s.isLocalOnly(sessionID) {
 		return s.getMemory(sessionID)
 	}
 	if s != nil && s.remote != nil {
 		var dto oauthSessionDTO
-		ok, err := s.remote.Get(context.Background(), sessionID, &dto)
+		ok, err := s.remote.Get(ctx, sessionID, &dto)
 		if err != nil || !ok || time.Since(dto.CreatedAt) > SessionTTL {
 			return nil, false
 		}
@@ -179,9 +180,9 @@ func (s *SessionStore) getMemory(sessionID string) (*OAuthSession, bool) {
 	return session, true
 }
 
-func (s *SessionStore) Delete(sessionID string) {
+func (s *SessionStore) Delete(ctx context.Context, sessionID string) {
 	if s != nil && s.remote != nil {
-		_ = s.remote.Delete(context.Background(), sessionID)
+		_ = s.remote.Delete(ctx, sessionID)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -189,7 +190,7 @@ func (s *SessionStore) Delete(sessionID string) {
 	delete(s.localOnly, sessionID)
 }
 
-func (s *SessionStore) TryConsumeSession(sessionID string) bool {
+func (s *SessionStore) TryConsumeSession(ctx context.Context, sessionID string) bool {
 	if s == nil {
 		return false
 	}
@@ -197,7 +198,7 @@ func (s *SessionStore) TryConsumeSession(sessionID string) bool {
 		return s.tryConsumeMemory(sessionID)
 	}
 	if s.remote != nil {
-		ok, err := s.remote.TryConsume(context.Background(), sessionID)
+		ok, err := s.remote.TryConsume(ctx, sessionID)
 		return err == nil && ok
 	}
 	return s.tryConsumeMemory(sessionID)
@@ -215,28 +216,13 @@ func (s *SessionStore) tryConsumeMemory(sessionID string) bool {
 	return ok && session.TryConsume()
 }
 
-func (s *SessionStore) Stop() {
-	s.stopOnce.Do(func() {
-		close(s.stopCh)
-	})
-}
-
 func (s *SessionStore) cleanup() {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-s.stopCh:
-			return
-		case <-ticker.C:
-			s.mu.Lock()
-			for id, session := range s.sessions {
-				if time.Since(session.CreatedAt) > SessionTTL {
-					delete(s.sessions, id)
-					delete(s.localOnly, id)
-				}
-			}
-			s.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, session := range s.sessions {
+		if time.Since(session.CreatedAt) > SessionTTL {
+			delete(s.sessions, id)
+			delete(s.localOnly, id)
 		}
 	}
 }

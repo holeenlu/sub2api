@@ -10,18 +10,18 @@ import (
 	"strings"
 	"time"
 
+	"entgo.io/ent/dialect"
+	entsql "entgo.io/ent/dialect/sql"
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/schema/mixins"
 	"github.com/Wei-Shaw/sub2api/ent/user"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
-
-	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
-
-	"entgo.io/ent/dialect"
-	entsql "entgo.io/ent/dialect/sql"
 )
 
 type apiKeyRepository struct {
@@ -37,9 +37,9 @@ func newAPIKeyRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *apiKeyR
 	return &apiKeyRepository{client: client, sql: sqlq}
 }
 
-func (r *apiKeyRepository) activeQuery() *dbent.APIKeyQuery {
+func (r *apiKeyRepository) activeQuery(ctx context.Context) *dbent.APIKeyQuery {
 	// 默认过滤已软删除记录，避免删除后仍被查询到。
-	return r.client.APIKey.Query().Where(apikey.DeletedAtIsNil())
+	return r.client.APIKey.Query().Where(apikey.DeletedAtIsNil(), authz.ManagedUserPredicate(ctx, "user_id"))
 }
 
 func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) error {
@@ -55,7 +55,13 @@ func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) erro
 		SetNillableExpiresAt(key.ExpiresAt).
 		SetRateLimit5h(key.RateLimit5h).
 		SetRateLimit1d(key.RateLimit1d).
-		SetRateLimit7d(key.RateLimit7d)
+		SetRateLimit7d(key.RateLimit7d).
+		SetUsage5h(key.Usage5h).
+		SetUsage1d(key.Usage1d).
+		SetUsage7d(key.Usage7d).
+		SetNillableWindow5hStart(key.Window5hStart).
+		SetNillableWindow1dStart(key.Window1dStart).
+		SetNillableWindow7dStart(key.Window7dStart)
 
 	if len(key.IPWhitelist) > 0 {
 		builder.SetIPWhitelist(key.IPWhitelist)
@@ -75,9 +81,13 @@ func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) erro
 }
 
 func (r *apiKeyRepository) GetByID(ctx context.Context, id int64) (*service.APIKey, error) {
-	m, err := r.activeQuery().
+	m, err := r.activeQuery(ctx).
 		Where(apikey.IDEQ(id)).
-		WithUser().
+		WithUser(func(q *dbent.UserQuery) {
+			// Fresh dispatch revalidation needs the same canonical grants as
+			// authentication, including exclusive/restricted-public groups.
+			q.WithAllowedGroups(func(gq *dbent.GroupQuery) { gq.Select(group.FieldID) })
+		}).
 		WithGroup().
 		Only(ctx)
 	if err != nil {
@@ -95,7 +105,7 @@ func (r *apiKeyRepository) GetByID(ctx context.Context, id int64) (*service.APIK
 //   - 不加载完整的 API Key 实体及其关联数据（User、Group 等）
 //   - 适用于删除等只需 key 与用户 ID 的场景
 func (r *apiKeyRepository) GetKeyAndOwnerID(ctx context.Context, id int64) (string, int64, error) {
-	m, err := r.activeQuery().
+	m, err := r.activeQuery(ctx).
 		Where(apikey.IDEQ(id)).
 		Select(apikey.FieldKey, apikey.FieldUserID).
 		Only(ctx)
@@ -109,7 +119,7 @@ func (r *apiKeyRepository) GetKeyAndOwnerID(ctx context.Context, id int64) (stri
 }
 
 func (r *apiKeyRepository) GetByKey(ctx context.Context, key string) (*service.APIKey, error) {
-	m, err := r.activeQuery().
+	m, err := r.activeQuery(ctx).
 		Where(apikey.KeyEQ(key)).
 		WithUser(func(q *dbent.UserQuery) {
 			q.WithAllowedGroups(func(gq *dbent.GroupQuery) {
@@ -128,7 +138,7 @@ func (r *apiKeyRepository) GetByKey(ctx context.Context, key string) (*service.A
 }
 
 func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*service.APIKey, error) {
-	m, err := r.activeQuery().
+	m, err := r.activeQuery(ctx).
 		Where(apikey.KeyEQ(key)).
 		Select(
 			apikey.FieldID,
@@ -433,8 +443,28 @@ func (r *apiKeyRepository) deleteWithTombstone(ctx context.Context, exec *dbent.
 	return nil
 }
 
-func (r *apiKeyRepository) apiKeyListByUserIDQuery(userID int64, filters service.APIKeyListFilters) *dbent.APIKeyQuery {
-	q := r.activeQuery().Where(apikey.UserIDEQ(userID))
+// apiKeyManagementScope checks both live identities in the same query. Ordinary
+// users and staff retain their own-Key boundary. This is not gateway authority.
+func apiKeyManagementScope(userID int64) func(*entsql.Selector) {
+	return func(s *entsql.Selector) {
+		s.Where(entsql.Or(
+			entsql.EQ(s.C(apikey.FieldUserID), userID),
+			entsql.P(func(b *entsql.Builder) {
+				b.WriteString("EXISTS (SELECT 1 FROM users actor JOIN users owner ON owner.id=").WriteString(s.C(apikey.FieldUserID)).
+					WriteString(" WHERE actor.id=").Arg(userID).
+					WriteString(" AND actor.role='super_admin' AND actor.status='active' AND actor.deleted_at IS NULL AND owner.role='super_admin' AND owner.deleted_at IS NULL)")
+			}),
+		))
+	}
+}
+
+func (r *apiKeyRepository) apiKeyListByUserIDQuery(ctx context.Context, userID int64, filters service.APIKeyListFilters) *dbent.APIKeyQuery {
+	q := r.activeQuery(ctx)
+	if filters.IncludeSuperAdminKeys {
+		q = q.Where(apiKeyManagementScope(userID))
+	} else {
+		q = q.Where(apikey.UserIDEQ(userID))
+	}
 
 	if filters.Search != "" {
 		q = q.Where(apikey.Or(
@@ -457,7 +487,7 @@ func (r *apiKeyRepository) apiKeyListByUserIDQuery(userID int64, filters service
 }
 
 func (r *apiKeyRepository) ListByUserID(ctx context.Context, userID int64, params pagination.PaginationParams, filters service.APIKeyListFilters) ([]service.APIKey, *pagination.PaginationResult, error) {
-	q := r.apiKeyListByUserIDQuery(userID, filters)
+	q := r.apiKeyListByUserIDQuery(ctx, userID, filters)
 
 	total, err := q.Count(ctx)
 	if err != nil {
@@ -489,7 +519,7 @@ func (r *apiKeyRepository) ListByUserID(ctx context.Context, userID int64, param
 }
 
 func (r *apiKeyRepository) ListAllByUserID(ctx context.Context, userID int64, filters service.APIKeyListFilters) ([]service.APIKey, error) {
-	keys, err := r.apiKeyListByUserIDQuery(userID, filters).
+	keys, err := r.apiKeyListByUserIDQuery(ctx, userID, filters).
 		WithGroup().
 		Order(dbent.Asc(apikey.FieldID)).
 		All(ctx)
@@ -602,7 +632,7 @@ func (r *apiKeyRepository) VerifyOwnership(ctx context.Context, userID int64, ap
 	}
 
 	ids, err := r.client.APIKey.Query().
-		Where(apikey.UserIDEQ(userID), apikey.IDIn(apiKeyIDs...), apikey.DeletedAtIsNil()).
+		Where(apiKeyManagementScope(userID), apikey.IDIn(apiKeyIDs...), apikey.DeletedAtIsNil()).
 		IDs(ctx)
 	if err != nil {
 		return nil, err
@@ -611,17 +641,17 @@ func (r *apiKeyRepository) VerifyOwnership(ctx context.Context, userID int64, ap
 }
 
 func (r *apiKeyRepository) CountByUserID(ctx context.Context, userID int64) (int64, error) {
-	count, err := r.activeQuery().Where(apikey.UserIDEQ(userID)).Count(ctx)
+	count, err := r.activeQuery(ctx).Where(apikey.UserIDEQ(userID)).Count(ctx)
 	return int64(count), err
 }
 
 func (r *apiKeyRepository) ExistsByKey(ctx context.Context, key string) (bool, error) {
-	count, err := r.activeQuery().Where(apikey.KeyEQ(key)).Count(ctx)
+	count, err := r.activeQuery(ctx).Where(apikey.KeyEQ(key)).Count(ctx)
 	return count > 0, err
 }
 
 func (r *apiKeyRepository) ListByGroupID(ctx context.Context, groupID int64, params pagination.PaginationParams) ([]service.APIKey, *pagination.PaginationResult, error) {
-	q := r.activeQuery().Where(apikey.GroupIDEQ(groupID))
+	q := r.activeQuery(ctx).Where(apikey.GroupIDEQ(groupID))
 
 	total, err := q.Count(ctx)
 	if err != nil {
@@ -698,7 +728,7 @@ func apiKeyListOrder(params pagination.PaginationParams) []func(*entsql.Selector
 
 // SearchAPIKeys searches API keys by user ID and/or keyword (name)
 func (r *apiKeyRepository) SearchAPIKeys(ctx context.Context, userID int64, keyword string, limit int) ([]service.APIKey, error) {
-	q := r.activeQuery()
+	q := r.activeQuery(ctx)
 	if userID > 0 {
 		q = q.Where(apikey.UserIDEQ(userID))
 	}
@@ -740,12 +770,12 @@ func (r *apiKeyRepository) UpdateGroupIDByUserAndGroup(ctx context.Context, user
 
 // CountByGroupID 获取分组的 API Key 数量
 func (r *apiKeyRepository) CountByGroupID(ctx context.Context, groupID int64) (int64, error) {
-	count, err := r.activeQuery().Where(apikey.GroupIDEQ(groupID)).Count(ctx)
+	count, err := r.activeQuery(ctx).Where(apikey.GroupIDEQ(groupID)).Count(ctx)
 	return int64(count), err
 }
 
 func (r *apiKeyRepository) ListKeysByUserID(ctx context.Context, userID int64) ([]string, error) {
-	keys, err := r.activeQuery().
+	keys, err := r.activeQuery(ctx).
 		Where(apikey.UserIDEQ(userID)).
 		Select(apikey.FieldKey).
 		Strings(ctx)
@@ -756,7 +786,7 @@ func (r *apiKeyRepository) ListKeysByUserID(ctx context.Context, userID int64) (
 }
 
 func (r *apiKeyRepository) ListKeysByGroupID(ctx context.Context, groupID int64) ([]string, error) {
-	keys, err := r.activeQuery().
+	keys, err := r.activeQuery(ctx).
 		Where(apikey.GroupIDEQ(groupID)).
 		Select(apikey.FieldKey).
 		Strings(ctx)
@@ -769,7 +799,7 @@ func (r *apiKeyRepository) ListKeysByGroupID(ctx context.Context, groupID int64)
 // IncrementQuotaUsed 使用 Ent 原子递增 quota_used 字段并返回新值
 func (r *apiKeyRepository) IncrementQuotaUsed(ctx context.Context, id int64, amount float64) (float64, error) {
 	updated, err := r.client.APIKey.UpdateOneID(id).
-		Where(apikey.DeletedAtIsNil()).
+		Where(apikey.DeletedAtIsNil(), authz.ManagedUserPredicate(ctx, "user_id")).
 		AddQuotaUsed(amount).
 		Save(ctx)
 	if err != nil {
@@ -932,6 +962,7 @@ func userEntityToService(u *dbent.User) *service.User {
 	}
 	out := &service.User{
 		ID:                         u.ID,
+		CreatedBy:                  u.CreatedBy,
 		Email:                      u.Email,
 		Username:                   u.Username,
 		Notes:                      u.Notes,
@@ -1031,7 +1062,7 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		RequirePrivacySet:               g.RequirePrivacySet,
 		DefaultMappedModel:              g.DefaultMappedModel,
 		MessagesDispatchModelConfig:     g.MessagesDispatchModelConfig,
-		ModelAllowlist:                  service.GroupModelAllowlistFromDomain(g.ModelAllowlist),
+		ModelAllowlist:                  catalog.ModelAllowlist(g.ModelAllowlist),
 		CodexModelsManifestConfig:       g.CodexModelsManifestConfig,
 		RPMLimit:                        g.RpmLimit,
 		MaxReasoningEffort:              g.MaxReasoningEffort,

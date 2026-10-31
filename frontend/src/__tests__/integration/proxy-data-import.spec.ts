@@ -1,28 +1,29 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
-import { adminAPI } from '@/api/admin'
-import type { AdminDataImportResult } from '@/types'
-import ImportDataModal from '@/components/admin/proxy/ImportDataModal.vue'
+import { resourceEditorServicesKey, type ResourceEditorServices } from '@/features/resources/services'
+
+import type { AdminDataImportResult } from '@/features/resources/api/accountImportTypes';
+import ImportDataModal from '@/features/resources/components/ProxyImportDataModal.vue'
 
 const showError = vi.fn()
 const showSuccess = vi.fn()
 
-vi.mock('@/stores/app', () => ({
-  useAppStore: () => ({
-    showError,
-    showSuccess
-  })
-}))
+const importServices = () => ({
+  scopeKey: () => 'proxy-data-import:admin:session-1',
+  access: { isSuperAdmin: true, isSimpleMode: false, canAuthorize: true },
+  notices: { showError, showSuccess, showWarning: vi.fn(), showInfo: vi.fn() }
+}) satisfies Pick<ResourceEditorServices, 'scopeKey' | 'access' | 'notices'>
 
-vi.mock('@/api/admin', () => ({
-  adminAPI: {
-    proxies: {
+const proxiesApiFixture = vi.hoisted(() => ({
       importData: vi.fn()
-    }
-  }
-}))
+    }))
+vi.mock('@/features/resources/proxies', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/resources/proxies')>()
+  return { ...actual, default: proxiesApiFixture }
+})
 
-vi.mock('vue-i18n', () => ({
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
     t: (key: string) => key
   })
@@ -42,6 +43,7 @@ describe('Proxy ImportDataModal', () => {
     const wrapper = mount(ImportDataModal, {
       props: { show: true },
       global: {
+        provide: { [resourceEditorServicesKey as symbol]: importServices() },
         stubs: {
           BaseDialog: { template: '<div><slot /><footer><slot name="footer" /></footer></div>' }
         }
@@ -59,7 +61,7 @@ describe('Proxy ImportDataModal', () => {
     { name: 'created', proxy_created: 1, proxy_reused: 0 },
     { name: 'reused', proxy_created: 0, proxy_reused: 1 }
   ])('refreshes $name proxies when closing a partial import result', async (counts) => {
-    vi.mocked(adminAPI.proxies.importData).mockResolvedValue({ ...partialResult, ...counts })
+    vi.mocked(proxiesApiFixture.importData).mockResolvedValue({ ...partialResult, ...counts })
     const wrapper = await mountWithFile()
 
     await wrapper.find('form').trigger('submit')
@@ -81,7 +83,7 @@ describe('Proxy ImportDataModal', () => {
   })
 
   it('keeps a pending refresh when a later import entirely fails', async () => {
-    vi.mocked(adminAPI.proxies.importData)
+    vi.mocked(proxiesApiFixture.importData)
       .mockResolvedValueOnce(partialResult)
       .mockResolvedValueOnce({ ...partialResult, proxy_created: 0 })
     const wrapper = await mountWithFile()
@@ -96,7 +98,7 @@ describe('Proxy ImportDataModal', () => {
   })
 
   it('does not refresh when all imported proxies fail', async () => {
-    vi.mocked(adminAPI.proxies.importData).mockResolvedValue({ ...partialResult, proxy_created: 0 })
+    vi.mocked(proxiesApiFixture.importData).mockResolvedValue({ ...partialResult, proxy_created: 0 })
     const wrapper = await mountWithFile()
 
     await wrapper.find('form').trigger('submit')
@@ -108,7 +110,7 @@ describe('Proxy ImportDataModal', () => {
   })
 
   it('refreshes immediately after a successful retry without refreshing twice on close', async () => {
-    vi.mocked(adminAPI.proxies.importData)
+    vi.mocked(proxiesApiFixture.importData)
       .mockResolvedValueOnce(partialResult)
       .mockResolvedValueOnce({ ...partialResult, proxy_failed: 0, errors: [] })
     const wrapper = await mountWithFile()
@@ -127,13 +129,14 @@ describe('Proxy ImportDataModal', () => {
   beforeEach(() => {
     showError.mockReset()
     showSuccess.mockReset()
-    vi.mocked(adminAPI.proxies.importData).mockReset()
+    vi.mocked(proxiesApiFixture.importData).mockReset()
   })
 
   it('未选择文件时提示错误', async () => {
     const wrapper = mount(ImportDataModal, {
       props: { show: true },
       global: {
+        provide: { [resourceEditorServicesKey as symbol]: importServices() },
         stubs: {
           BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' }
         }
@@ -148,6 +151,7 @@ describe('Proxy ImportDataModal', () => {
     const wrapper = mount(ImportDataModal, {
       props: { show: true },
       global: {
+        provide: { [resourceEditorServicesKey as symbol]: importServices() },
         stubs: {
           BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' }
         }

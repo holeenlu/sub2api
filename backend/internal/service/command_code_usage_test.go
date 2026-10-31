@@ -399,7 +399,7 @@ func TestCNProviderBalanceCheckRunOnceProbesCommandCode(t *testing.T) {
 	cfg.Gateway.CNProviders.BalanceThreshold = 0.5
 	svc := &CNProviderBalanceCheckService{accountRepo: repo, quotaService: prober, cfg: cfg}
 
-	svc.runOnce()
+	svc.runOnce(t.Context())
 
 	require.ElementsMatch(t, []int64{1, 2}, prober.probed)
 	require.Equal(t, []int64{1}, repo.paused)

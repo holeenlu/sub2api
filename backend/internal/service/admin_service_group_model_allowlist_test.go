@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
@@ -19,7 +20,7 @@ func TestAdminService_CreateGroup_RejectsEmptyEnabledModelAllowlist(t *testing.T
 		Name:           "allowlist-empty-group",
 		Platform:       PlatformOpenAI,
 		RateMultiplier: 1,
-		ModelAllowlist: GroupModelAllowlist{Enabled: true},
+		ModelAllowlist: catalog.ModelAllowlist{Enabled: true},
 	})
 
 	require.Error(t, err)
@@ -37,7 +38,7 @@ func TestAdminService_CreateGroup_AcceptsInteriorAllowlistWildcard(t *testing.T)
 		Name:           "allowlist-wildcard-group",
 		Platform:       PlatformOpenAI,
 		RateMultiplier: 1,
-		ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"gpt-*-5.4"}},
+		ModelAllowlist: catalog.ModelAllowlist{Enabled: true, Models: []string{"gpt-*-5.4"}},
 	})
 
 	require.NoError(t, err)
@@ -53,7 +54,7 @@ func TestAdminService_CreateGroup_NormalizesModelAllowlist(t *testing.T) {
 		Name:           "allowlist-normalized-group",
 		Platform:       PlatformOpenAI,
 		RateMultiplier: 1,
-		ModelAllowlist: GroupModelAllowlist{
+		ModelAllowlist: catalog.ModelAllowlist{
 			Enabled: true,
 			Models:  []string{" gpt-5.4 ", "GPT-5.4", "claude-*", "  "},
 		},
@@ -71,7 +72,7 @@ func TestAdminService_UpdateGroup_RejectsEmptyEnabledModelAllowlist(t *testing.T
 	svc := &adminServiceImpl{groupRepo: repo}
 
 	_, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{
-		ModelAllowlist: &GroupModelAllowlist{Enabled: true},
+		ModelAllowlist: &catalog.ModelAllowlist{Enabled: true},
 	})
 
 	require.Error(t, err)
@@ -87,7 +88,7 @@ func TestAdminService_UpdateGroup_AcceptsInteriorAllowlistWildcard(t *testing.T)
 	svc := &adminServiceImpl{groupRepo: repo}
 
 	_, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{
-		ModelAllowlist: &GroupModelAllowlist{Enabled: true, Models: []string{"foo-*bar"}},
+		ModelAllowlist: &catalog.ModelAllowlist{Enabled: true, Models: []string{"foo-*bar"}},
 	})
 
 	require.NoError(t, err)
@@ -98,13 +99,13 @@ func TestAdminService_UpdateGroup_AcceptsInteriorAllowlistWildcard(t *testing.T)
 func TestAdminService_UpdateGroup_NormalizesAndResetsModelAllowlist(t *testing.T) {
 	existing := &Group{
 		ID: 1, Name: "existing", Platform: PlatformOpenAI, Status: StatusActive,
-		ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"gpt-5.4"}},
+		ModelAllowlist: catalog.ModelAllowlist{Enabled: true, Models: []string{"gpt-5.4"}},
 	}
 	repo := &groupRepoStubForAdmin{getByID: existing}
 	svc := &adminServiceImpl{groupRepo: repo}
 
 	// 归一化：按小写去重保序（保留首次出现的原始拼写）。
-	updated := GroupModelAllowlist{Enabled: true, Models: []string{" GPT-5.4 ", "claude-*"}}
+	updated := catalog.ModelAllowlist{Enabled: true, Models: []string{" GPT-5.4 ", "claude-*"}}
 	_, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{ModelAllowlist: &updated})
 	require.NoError(t, err)
 	require.NotNil(t, repo.updated)
@@ -112,7 +113,7 @@ func TestAdminService_UpdateGroup_NormalizesAndResetsModelAllowlist(t *testing.T
 
 	// 关闭且清空条目也应被接受（关闭白名单）。
 	repo.updated = nil
-	disabled := GroupModelAllowlist{Enabled: false}
+	disabled := catalog.ModelAllowlist{Enabled: false}
 	_, err = svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{ModelAllowlist: &disabled})
 	require.NoError(t, err)
 	require.NotNil(t, repo.updated)

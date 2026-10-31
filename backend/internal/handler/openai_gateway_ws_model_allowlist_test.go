@@ -3,6 +3,7 @@ package handler
 import (
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
@@ -10,7 +11,7 @@ func wsAllowlistGroup(enabled bool, models ...string) *service.Group {
 	return &service.Group{
 		ID:       4201,
 		Platform: service.PlatformOpenAI,
-		ModelAllowlist: service.GroupModelAllowlist{
+		ModelAllowlist: catalog.ModelAllowlist{
 			Enabled: enabled,
 			Models:  models,
 		},
@@ -40,7 +41,7 @@ func TestOpenAIResponsesWebSocket_FirstFrameModelNotAllowedCloses_NativeIngress(
 // 首帧命中白名单：连接正常建立并收到 response.completed（passthrough）。
 func TestOpenAIResponsesWebSocket_FirstFrameAllowlistedModelProceeds(t *testing.T) {
 	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-		firstPayload: `{"type":"response.create","model":"gpt-5.4","stream":false}`,
+		firstPayload: `{"type":"response.create","model":"gpt-5.4","stream":false,"input":[{"role":"user","content":"hello"}]}`,
 		group:        wsAllowlistGroup(true, "gpt-5.4"),
 	})
 	if len(got.clientEvents) != 1 {
@@ -51,8 +52,8 @@ func TestOpenAIResponsesWebSocket_FirstFrameAllowlistedModelProceeds(t *testing.
 // 后续 turn 切换到白名单外的模型：连接被 1008 关闭（passthrough relay 模式）。
 func TestOpenAIResponsesWebSocket_SubsequentTurnModelNotAllowedCloses_Passthrough(t *testing.T) {
 	runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-		firstPayload:            `{"type":"response.create","model":"gpt-5.4","stream":false}`,
-		secondPayload:           `{"type":"response.create","model":"gpt-4.1","stream":false}`,
+		firstPayload:            `{"type":"response.create","model":"gpt-5.4","stream":false,"input":[{"role":"user","content":"hello"}]}`,
+		secondPayload:           `{"type":"response.create","model":"gpt-4.1","stream":false,"input":[{"role":"user","content":"hello"}]}`,
 		group:                   wsAllowlistGroup(true, "gpt-5.4"),
 		ingressMode:             service.OpenAIWSIngressModePassthrough,
 		secondTurnCloseExpected: true,
@@ -62,8 +63,8 @@ func TestOpenAIResponsesWebSocket_SubsequentTurnModelNotAllowedCloses_Passthroug
 // 后续 turn 切换到白名单外的模型：连接被 1008 关闭（原生 ingress 模式）。
 func TestOpenAIResponsesWebSocket_SubsequentTurnModelNotAllowedCloses_NativeIngress(t *testing.T) {
 	runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-		firstPayload:            `{"type":"response.create","model":"gpt-5.4","stream":false}`,
-		secondPayload:           `{"type":"response.create","model":"gpt-4.1","stream":false}`,
+		firstPayload:            `{"type":"response.create","model":"gpt-5.4","stream":false,"input":[{"role":"user","content":"hello"}]}`,
+		secondPayload:           `{"type":"response.create","model":"gpt-4.1","stream":false,"input":[{"role":"user","content":"hello"}]}`,
 		group:                   wsAllowlistGroup(true, "gpt-5.4"),
 		ingressMode:             service.OpenAIWSIngressModeDedicated,
 		secondTurnCloseExpected: true,
@@ -73,8 +74,8 @@ func TestOpenAIResponsesWebSocket_SubsequentTurnModelNotAllowedCloses_NativeIngr
 // 后续 turn 省略 model：沿用会话初始模型，白名单校验通过。
 func TestOpenAIResponsesWebSocket_SubsequentTurnOmittedModelUsesSessionModel(t *testing.T) {
 	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-		firstPayload:  `{"type":"response.create","model":"gpt-5.4","stream":false}`,
-		secondPayload: `{"type":"response.create","stream":false}`,
+		firstPayload:  `{"type":"response.create","model":"gpt-5.4","stream":false,"input":[{"role":"user","content":"hello"}]}`,
+		secondPayload: `{"type":"response.create","stream":false,"input":"hello"}`,
 		group:         wsAllowlistGroup(true, "gpt-5.4"),
 	})
 	if len(got.clientEvents) != 2 {
@@ -88,8 +89,8 @@ func TestOpenAIResponsesWebSocket_SubsequentTurnOmittedModelUsesSessionModel(t *
 // 白名单关闭：不受任何影响。
 func TestOpenAIResponsesWebSocket_DisabledAllowlistDoesNotInterfere(t *testing.T) {
 	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-		firstPayload:  `{"type":"response.create","model":"gpt-4.1","stream":false}`,
-		secondPayload: `{"type":"response.create","model":"gpt-5.4","stream":false}`,
+		firstPayload:  `{"type":"response.create","model":"gpt-4.1","stream":false,"input":[{"role":"user","content":"hello"}]}`,
+		secondPayload: `{"type":"response.create","model":"gpt-5.4","stream":false,"input":[{"role":"user","content":"hello"}]}`,
 		group:         wsAllowlistGroup(false, "gpt-5.4"),
 	})
 	if len(got.clientEvents) != 2 {
@@ -129,26 +130,23 @@ func TestOpenAIResponsesWebSocket_SubsequentTurnDuplicateModelKeysRejected(t *te
 	for _, mode := range []string{service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeDedicated} {
 		t.Run(mode, func(t *testing.T) {
 			runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-				firstPayload:            `{"type":"response.create","model":"gpt-5.4","stream":false}`,
-				secondPayload:           `{"type":"response.create","model":"gpt-5.4","model":"gpt-4.1","stream":false}`,
+				firstPayload:            `{"type":"response.create","model":"gpt-5.4","stream":false,"input":[{"role":"user","content":"hello"}]}`,
+				secondPayload:           `{"type":"response.create","model":"gpt-5.4","model":"gpt-4.1","stream":false,"input":[{"role":"user","content":"hello"}]}`,
 				group:                   wsAllowlistGroup(true, "gpt-5.4"),
 				ingressMode:             mode,
 				secondTurnCloseExpected: true,
+				closeReason:             "ambiguous JSON field",
 			})
 		})
 	}
 }
 
-// 重复但同值的 model 键不误伤，连接正常完成两个 turn。
-func TestOpenAIResponsesWebSocket_DuplicateIdenticalModelKeysAllowed(t *testing.T) {
-	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-		firstPayload:  `{"type":"response.create","model":"gpt-5.4","model":"gpt-5.4","stream":false}`,
-		secondPayload: `{"type":"response.create","model":"gpt-5.4","stream":false}`,
-		group:         wsAllowlistGroup(true, "gpt-5.4"),
+// Sensitive envelope fields have one canonical representation, even if repeated values match.
+func TestOpenAIResponsesWebSocket_DuplicateIdenticalModelKeysRejected(t *testing.T) {
+	runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+		firstPayload: `{"type":"response.create","model":"gpt-5.4","model":"gpt-5.4","stream":false}`,
+		group:        wsAllowlistGroup(true, "gpt-5.4"), firstFrameCloseExpected: true, closeReason: "ambiguous JSON field",
 	})
-	if len(got.clientEvents) != 2 {
-		t.Fatalf("expected two completed events, got %d", len(got.clientEvents))
-	}
 }
 
 // session.update 轮换绕过：首帧用白名单内模型建立会话，session.update 把会话
@@ -156,9 +154,9 @@ func TestOpenAIResponsesWebSocket_DuplicateIdenticalModelKeysAllowed(t *testing.
 // 内）让帧内候选非空。实际生效模型（轮换后的会话模型）必须始终参与校验。
 func TestOpenAIResponsesWebSocket_SessionUpdateRotationBypassRejected(t *testing.T) {
 	runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-		firstPayload:            `{"type":"response.create","model":"gpt-5.4","stream":false}`,
+		firstPayload:            `{"type":"response.create","model":"gpt-5.4","stream":false,"input":[{"role":"user","content":"hello"}]}`,
 		midPayload:              `{"type":"session.update","session":{"model":"gpt-4.1"}}`,
-		secondPayload:           `{"type":"response.create","session":{"model":"gpt-5.4"},"stream":false}`,
+		secondPayload:           `{"type":"response.create","session":{"model":"gpt-5.4"},"stream":false,"input":"hello"}`,
 		group:                   wsAllowlistGroup(true, "gpt-5.4"),
 		ingressMode:             service.OpenAIWSIngressModePassthrough,
 		secondTurnCloseExpected: true,
@@ -168,9 +166,9 @@ func TestOpenAIResponsesWebSocket_SessionUpdateRotationBypassRejected(t *testing
 // 轮换后的会话模型本身在白名单内时，省略 model 的后续 turn 正常放行。
 func TestOpenAIResponsesWebSocket_SessionUpdateToAllowedModelStillWorks(t *testing.T) {
 	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-		firstPayload:  `{"type":"response.create","model":"gpt-5.4","stream":false}`,
+		firstPayload:  `{"type":"response.create","model":"gpt-5.4","stream":false,"input":[{"role":"user","content":"hello"}]}`,
 		midPayload:    `{"type":"session.update","session":{"model":"gpt-5.4"}}`,
-		secondPayload: `{"type":"response.create","stream":false}`,
+		secondPayload: `{"type":"response.create","stream":false,"input":"hello"}`,
 		group:         wsAllowlistGroup(true, "gpt-5.4"),
 	})
 	if len(got.clientEvents) < 2 {

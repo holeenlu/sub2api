@@ -1,0 +1,2 @@
+import type { AdminGroup } from '@/features/access-policy/api/groupTypes';
+export type GroupAccessDraft = Pick<AdminGroup, 'name' | 'description' | 'i18n' | 'platform' | 'is_exclusive' | 'status' | 'rpm_limit' | 'claude_code_only' | 'fallback_group_id' | 'fallback_group_id_on_invalid_request' | 'require_oauth_only' | 'require_privacy_set' | 'supported_model_scopes' | 'mcp_xml_inject' | 'subscription_type' | 'model_routing_enabled' | 'allow_live' | 'allow_messages_dispatch'> & { copy_accounts_from_group_ids: number[]; supported_model_scopes: string[] }

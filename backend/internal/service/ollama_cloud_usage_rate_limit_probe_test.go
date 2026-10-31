@@ -45,8 +45,12 @@ func ollamaCloudProbeFixture(t *testing.T, repo AccountRepository, upstream HTTP
 	t.Helper()
 	svc := NewOllamaCloudUsageService(repo, upstream, NewSettingService(&upstreamBillingProbeSettingRepo{}, nil), ollamaUsageTestEncryptor{}, true)
 	svc.now = func() time.Time { return fixedNow }
-	svc.Start()
-	t.Cleanup(svc.Stop)
+	svc.Start(context.Background())
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		require.NoError(t, svc.Stop(ctx))
+	})
 	return svc
 }
 
@@ -276,7 +280,7 @@ func TestOllamaCloudUsageRateLimitProbeStopCancelsInFlightAndRejectsNew(t *testi
 	// Stop cancels parentCtx; the in-flight probe's detached context is derived
 	// from it, so the gated GetByID is aborted and Stop returns promptly.
 	done := make(chan struct{})
-	go func() { svc.Stop(); close(done) }()
+	go func() { svc.Stop(context.Background()); close(done) }()
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
@@ -343,8 +347,12 @@ func TestOllamaCloudUsageRateLimitProbeSlowFetchDoesNotReportExpiredReset(t *tes
 	}}
 	svc := NewOllamaCloudUsageService(repo, upstream, NewSettingService(&upstreamBillingProbeSettingRepo{}, nil), ollamaUsageTestEncryptor{}, true)
 	svc.now = func() time.Time { mu.Lock(); defer mu.Unlock(); return cur }
-	svc.Start()
-	t.Cleanup(svc.Stop)
+	svc.Start(context.Background())
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		require.NoError(t, svc.Stop(ctx))
+	})
 
 	called := make(chan struct{}, 1)
 	require.True(t, svc.ScheduleOllamaCloudUsageRateLimitProbe(account.ID, func(int64, time.Time) {
@@ -382,8 +390,12 @@ func TestOllamaCloudUsageRateLimitProbeQueueFullStillMergesExistingAccount(t *te
 	repo.gating.Store(true)
 	svc := NewOllamaCloudUsageService(repo, &ollamaUsageHTTPStub{body: ollamaCloudProbeUsageBody(100, base.Add(time.Hour).Format(time.RFC3339))}, NewSettingService(&upstreamBillingProbeSettingRepo{}, nil), ollamaUsageTestEncryptor{}, true)
 	svc.now = func() time.Time { return base }
-	svc.Start()
-	t.Cleanup(svc.Stop)
+	svc.Start(context.Background())
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		require.NoError(t, svc.Stop(ctx))
+	})
 
 	noop := func(int64, time.Time) {}
 	// The first probe blocks the single coordinator on its gated GetByID.
@@ -492,4 +504,36 @@ func TestOllamaCloudUsageProbeNewestSuccess(t *testing.T) {
 			require.True(t, got.FetchedAt.Equal(tt.wantFetchedAt), "FetchedAt = %v, want %v", got.FetchedAt, tt.wantFetchedAt)
 		})
 	}
+}
+
+func TestOllamaCloudUsageDrainCompletesAlreadyAcceptedProbeQueue(t *testing.T) {
+	fixedNow := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	account := ollamaUsageAccount(1)
+	account.Extra[OllamaCloudUsageSessionExtraKey] = "cipher:wos-session=secret"
+	base := &ollamaUsageTestRepo{upstreamBillingProbeAccountRepo: &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: account}}}
+	repo := &ollamaCloudProbeGateRepo{ollamaUsageTestRepo: base, entered: make(chan struct{}), release: make(chan struct{})}
+	repo.gating.Store(true)
+	upstream := &ollamaUsageHTTPStub{body: ollamaCloudProbeUsageBody(100, ollamaCloudProbeReset(t, fixedNow).Format(time.RFC3339))}
+	svc := ollamaCloudProbeFixture(t, repo, upstream, fixedNow)
+	var released sync.Once
+	t.Cleanup(func() { released.Do(func() { close(repo.release) }) })
+	callbacks := make(chan int64, 2)
+	callback := func(id int64, _ time.Time) { callbacks <- id }
+	require.True(t, svc.ScheduleOllamaCloudUsageRateLimitProbe(account.ID, callback))
+	select {
+	case <-repo.entered:
+	case <-time.After(time.Second):
+		t.Fatal("first accepted probe did not start")
+	}
+	require.True(t, svc.ScheduleOllamaCloudUsageRateLimitProbe(account.ID, callback), "second accepted probe must remain owned while first is in flight")
+	short, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, svc.Drain(short), context.DeadlineExceeded)
+	require.False(t, svc.ScheduleOllamaCloudUsageRateLimitProbe(account.ID, callback), "drain closes admission atomically with queue handoff")
+	released.Do(func() { close(repo.release) })
+	join, stop := context.WithTimeout(context.Background(), time.Second)
+	defer stop()
+	require.NoError(t, svc.Drain(join))
+	require.Len(t, callbacks, 2, "graceful Drain must complete both accepted callbacks")
+	require.NoError(t, svc.Stop(join))
 }

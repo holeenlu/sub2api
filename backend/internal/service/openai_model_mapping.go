@@ -1,6 +1,10 @@
 package service
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
+)
 
 // resolveOpenAIForwardModel 解析 OpenAI 兼容转发使用的模型。
 // messagesDispatchMappedModel 是调用方已为 /v1/messages 解析的显式调度结果；
@@ -66,7 +70,7 @@ var openAIOAuthForeignModelPrefixes = []string{
 // bare k3 仅精确匹配（取 last segment 后），不使用宽泛 k3- 前缀，以免误伤
 // 自定义别名；显式 model_mapping 命中路径不经过本函数，语义不变。
 func isOpenAIOAuthServableModel(requestedModel string) bool {
-	model := strings.ToLower(lastOpenAIModelSegment(requestedModel))
+	model := strings.ToLower(catalog.LastOpenAIModelSegment(requestedModel))
 	if model == "" {
 		return true // 空模型交由上层必填校验处理
 	}

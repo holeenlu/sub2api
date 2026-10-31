@@ -35,6 +35,7 @@ func (s *openaiOAuthClientRefreshStub) RefreshTokenWithClientID(ctx context.Cont
 func TestOpenAIOAuthService_RefreshAccountToken_NoRefreshTokenUsesExistingAccessToken(t *testing.T) {
 	client := &openaiOAuthClientRefreshStub{}
 	svc := NewOpenAIOAuthService(nil, client)
+	startSessionOwnerTest(t, svc)
 	var privacyClientCalls int32
 	svc.SetPrivacyClientFactory(func(proxyURL string) (*req.Client, error) {
 		atomic.AddInt32(&privacyClientCalls, 1)
@@ -83,7 +84,7 @@ func TestOpenAIOAuthService_RefreshAccountToken_PATIgnoresStaleRefreshToken(t *t
 	defer func() { openAICodexPATWhoamiURL = originalURL }()
 
 	svc := NewOpenAIOAuthService(nil, client)
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	account := &Account{
 		ID:       77,
@@ -162,7 +163,8 @@ func TestOpenAITokenRefresher_Refresh_PATRemovesStaleOAuthFields(t *testing.T) {
 	defer func() { openAICodexPATWhoamiURL = originalURL }()
 
 	svc := NewOpenAIOAuthService(nil, nil)
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
+
 	refresher := NewOpenAITokenRefresher(svc, nil)
 
 	account := &Account{

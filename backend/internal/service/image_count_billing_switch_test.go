@@ -12,6 +12,55 @@ import (
 
 func boolPtrForImageBillingTest(v bool) *bool { return &v }
 
+func TestAdminGroupImageCountPolicyLifecycle(t *testing.T) {
+	for _, platform := range []string{PlatformOpenAI, PlatformComposite, PlatformAnthropic, PlatformGemini} {
+		t.Run(platform, func(t *testing.T) {
+			repo := &groupRepoStubForAdmin{}
+			svc := &adminServiceImpl{groupRepo: repo}
+			created, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+				Name: "image-count", Platform: platform, AllowImageGeneration: true, ImageCountBilling: true,
+			})
+			require.NoError(t, err)
+			allowed := platform == PlatformOpenAI || platform == PlatformComposite
+			require.Equal(t, allowed, created.ImageCountBilling)
+			require.Equal(t, allowed, repo.created.ImageCountBilling)
+		})
+	}
+	t.Run("omitted preserves and explicit false clears", func(t *testing.T) {
+		existing := &Group{ID: 91, Name: "image-count", Platform: PlatformOpenAI, Status: StatusActive, AllowImageGeneration: true, ImageCountBilling: true}
+		repo := &groupRepoStubForAdmin{getByID: existing}
+		svc := &adminServiceImpl{groupRepo: repo}
+		updated, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{})
+		require.NoError(t, err)
+		require.True(t, updated.ImageCountBilling)
+		updated, err = svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{ImageCountBilling: boolPtrForImageBillingTest(false)})
+		require.NoError(t, err)
+		require.False(t, updated.ImageCountBilling)
+		require.False(t, repo.updated.ImageCountBilling)
+	})
+	t.Run("disabled generation and unsupported platform clear policy", func(t *testing.T) {
+		for _, update := range []*UpdateGroupInput{
+			{AllowImageGeneration: boolPtrForImageBillingTest(false)},
+			{Platform: PlatformAnthropic},
+		} {
+			existing := &Group{ID: 91, Name: "image-count", Platform: PlatformOpenAI, Status: StatusActive, AllowImageGeneration: true, ImageCountBilling: true}
+			svc := &adminServiceImpl{groupRepo: &groupRepoStubForAdmin{getByID: existing}}
+			updated, err := svc.UpdateGroup(context.Background(), existing.ID, update)
+			require.NoError(t, err)
+			require.False(t, updated.ImageCountBilling)
+		}
+	})
+	t.Run("duplicate retains explicit setting", func(t *testing.T) {
+		for _, enabled := range []bool{false, true} {
+			source := &Group{ID: 91, Platform: PlatformOpenAI, AllowImageGeneration: true, ImageCountBilling: enabled}
+			copy := cloneGroupForDuplicate(source, "image-count-copy")
+			require.Equal(t, enabled, copy.ImageCountBilling)
+			copy.ImageCountBilling = !enabled
+			require.Equal(t, enabled, source.ImageCountBilling)
+		}
+	})
+}
+
 func TestImageCountBillingApplies(t *testing.T) {
 	enabled := &APIKey{Group: &Group{ImageCountBilling: true}}
 	disabled := &APIKey{Group: &Group{ImageCountBilling: false}}

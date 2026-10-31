@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/gateway/routing"
 	"github.com/stretchr/testify/require"
 )
 
@@ -85,7 +86,7 @@ func (c *ingressLeaseCacheForTest) ReleaseOpenAIWSIngressLease(ctx context.Conte
 }
 
 var _ ConcurrencyCache = (*stubConcurrencyCacheForTest)(nil)
-var _ OpenAIWSIngressLeaseCache = (*ingressLeaseCacheForTest)(nil)
+var _ routing.IngressLeaseStore = (*ingressLeaseCacheForTest)(nil)
 
 func (c *stubConcurrencyCacheForTest) AcquireAccountSlot(_ context.Context, _ int64, _ int, _ string) (bool, error) {
 	return c.acquireResult, c.acquireErr
@@ -367,72 +368,6 @@ func TestAcquireOpenAIWSIngressLease(t *testing.T) {
 	})
 }
 
-func TestOpenAIWSIngressLeaseRefreshLoss(t *testing.T) {
-	t.Run("missing lease is lost immediately", func(t *testing.T) {
-		cache := &ingressLeaseCacheForTest{refreshIngressResult: false}
-		lease := &OpenAIWSIngressLease{cache: cache, apiKeyID: 1, leaseID: "missing"}
-		_, lost := lease.refresh(time.Now())
-		require.True(t, lost)
-		require.Equal(t, 1, cache.refreshIngressCalls)
-	})
-
-	t.Run("persistent redis errors lose lease after ttl", func(t *testing.T) {
-		cache := &ingressLeaseCacheForTest{refreshIngressErr: errors.New("redis unavailable")}
-		lease := &OpenAIWSIngressLease{cache: cache, apiKeyID: 1, leaseID: "unconfirmed"}
-		_, lost := lease.refresh(time.Now().Add(-openAIWSIngressLeaseTTL))
-		require.True(t, lost)
-		require.Equal(t, 1, cache.refreshIngressCalls)
-	})
-}
-
-func TestOpenAIWSIngressLeaseReleaseWaitsForInFlightRefresh(t *testing.T) {
-	refreshStarted := make(chan struct{})
-	allowRefresh := make(chan struct{})
-	cache := &ingressLeaseCacheForTest{
-		refreshIngressFn: func(context.Context, int64, string) (bool, error) {
-			close(refreshStarted)
-			<-allowRefresh
-			return true, nil
-		},
-	}
-	ctx, cancel := context.WithCancelCause(context.Background())
-	lease := &OpenAIWSIngressLease{
-		ctx:         ctx,
-		cancel:      cancel,
-		cache:       cache,
-		apiKeyID:    1,
-		leaseID:     "in-flight-refresh",
-		stopCh:      make(chan struct{}),
-		refreshDone: make(chan struct{}),
-	}
-	go func() {
-		defer close(lease.refreshDone)
-		_, _ = lease.refresh(time.Now())
-	}()
-	<-refreshStarted
-
-	released := make(chan struct{})
-	go func() {
-		lease.Release()
-		close(released)
-	}()
-
-	select {
-	case <-released:
-		t.Fatal("release returned before the in-flight refresh completed")
-	case <-time.After(20 * time.Millisecond):
-	}
-	require.Zero(t, cache.releaseIngressCalls)
-
-	close(allowRefresh)
-	select {
-	case <-released:
-	case <-time.After(time.Second):
-		t.Fatal("release did not complete after the refresh returned")
-	}
-	require.Equal(t, 1, cache.releaseIngressCalls)
-}
-
 func TestGenerateRequestID_UsesStablePrefixAndMonotonicCounter(t *testing.T) {
 	id1 := generateRequestID()
 	id2 := generateRequestID()
@@ -615,4 +550,28 @@ func TestIncrementAccountWaitCount_NilCache(t *testing.T) {
 	allowed, err := svc.IncrementAccountWaitCount(context.Background(), 1, 10)
 	require.NoError(t, err)
 	require.True(t, allowed)
+}
+
+func TestLoadCacheReusesOverlappingBatchesAndCurrentCapacity(t *testing.T) {
+	cache := &stubConcurrencyCacheForTest{loadBatch: map[int64]*AccountLoadInfo{1: {AccountID: 1, CurrentConcurrency: 1, LoadRate: 10}, 2: {AccountID: 2, CurrentConcurrency: 2, LoadRate: 20}}}
+	svc := NewConcurrencyService(cache)
+	svc.SetAccountLoadBatchCacheTTL(time.Second)
+	_, err := svc.GetAccountsLoadBatch(t.Context(), []AccountWithConcurrency{{ID: 1, MaxConcurrency: 10}, {ID: 2, MaxConcurrency: 10}})
+	require.NoError(t, err)
+	loads, err := svc.GetAccountsLoadBatch(t.Context(), []AccountWithConcurrency{{ID: 2, MaxConcurrency: 2}, {ID: 1, MaxConcurrency: 1}})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), cache.loadBatchCalls.Load())
+	require.Equal(t, 100, loads[1].LoadRate)
+	require.Equal(t, 100, loads[2].LoadRate)
+	loads[1].CurrentConcurrency = 99
+	again, err := svc.GetAccountsLoadBatch(t.Context(), []AccountWithConcurrency{{ID: 1, MaxConcurrency: 1}})
+	require.NoError(t, err)
+	require.Equal(t, 1, again[1].CurrentConcurrency, "callers cannot mutate cached evidence")
+}
+
+func (s *stubConcurrencyCacheForTest) CheckCapacityLease(ctx context.Context, _ routing.CapacityRequest) (time.Duration, error) {
+	return time.Hour, ctx.Err()
+}
+func (s *stubConcurrencyCacheForTest) RefreshCapacityLease(ctx context.Context, _ routing.CapacityRequest) (time.Duration, error) {
+	return time.Hour, ctx.Err()
 }

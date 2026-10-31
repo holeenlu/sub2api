@@ -1,5 +1,7 @@
 package service
 
+import "context"
+
 // resolveBillableImageCount 决定一次图片请求按几张计费。
 //
 // 官方多图响应没有 n 字段，只以响应体 data/output 中实际返回的图片为准。
@@ -17,4 +19,13 @@ func resolveBillableImageCount(reported, requested int, fallbackToOne bool) int 
 		return requested
 	}
 	return 0
+}
+
+// Partial compatibility results retain measured usage and the ingress-owned
+// endpoint fact. A returned image by itself never proves dedicated image ingress.
+func imageEndpointForwardResult(ctx context.Context, result *ForwardResult) *ForwardResult {
+	if result != nil {
+		result.ImageEndpoint = OpenAIImagesEndpointFromContext(ctx)
+	}
+	return result
 }

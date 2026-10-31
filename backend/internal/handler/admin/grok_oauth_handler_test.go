@@ -230,7 +230,7 @@ func TestGrokOAuthHandlerValidateSSOTokenReturnsTokenInfo(t *testing.T) {
 
 	oauthClient := &grokOAuthHandlerClient{}
 	oauthService := service.NewGrokOAuthService(nil, oauthClient)
-	defer oauthService.Stop()
+	startAdminFixtureService(t, oauthService)
 	handler := NewGrokOAuthHandler(oauthService, nil, nil, nil)
 
 	router := gin.New()
@@ -252,7 +252,7 @@ func TestGrokOAuthHandlerAuthorizePasswordReturnsTokenInfoWithoutPassword(t *tes
 	cfg := &config.Config{}
 	cfg.Gateway.Grok.PasswordAuthEnabled = true
 	oauthService := service.NewGrokOAuthService(nil, oauthClient, cfg)
-	defer oauthService.Stop()
+	startAdminFixtureService(t, oauthService)
 	handler := NewGrokOAuthHandler(oauthService, nil, nil, nil)
 
 	router := gin.New()
@@ -270,7 +270,7 @@ func TestGrokOAuthHandlerAuthorizePasswordReturnsTokenInfoWithoutPassword(t *tes
 func TestGrokOAuthHandlerPasswordCapabilityDefaultsToDisabled(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	oauthService := service.NewGrokOAuthService(nil, &grokOAuthHandlerClient{})
-	defer oauthService.Stop()
+	startAdminFixtureService(t, oauthService)
 	handler := NewGrokOAuthHandler(oauthService, nil, nil, nil)
 
 	router := gin.New()

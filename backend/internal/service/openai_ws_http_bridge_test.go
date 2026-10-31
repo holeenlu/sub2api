@@ -12,7 +12,10 @@ import (
 	"testing/iotest"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/billing"
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	gatewaymodel "github.com/Wei-Shaw/sub2api/internal/gateway/model"
+	"github.com/Wei-Shaw/sub2api/internal/gateway/session"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
@@ -36,13 +39,280 @@ func TestPrepareOpenAIWSHTTPBridgeBodyStripsWSFields(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, gjson.GetBytes(body, "type").Exists())
 	require.False(t, gjson.GetBytes(body, "generate").Exists())
-	require.False(t, gjson.GetBytes(body, "previous_response_id").Exists())
+	require.Equal(t, "resp_prev", gjson.GetBytes(body, "previous_response_id").String())
 	require.Equal(t, "gpt-5", gjson.GetBytes(body, "model").String())
 	require.True(t, gjson.GetBytes(body, "stream").Bool())
 	require.Equal(t, "hi", gjson.GetBytes(body, "input").String())
 	require.Equal(t, "900719925474099312345", gjson.GetBytes(body, "sequence").Raw)
 	_, err = prepareOpenAIWSHTTPBridgeBody(nil, []byte(`{"type":"response.create"}{"trailing":true}`))
 	require.Error(t, err)
+	grokBody, err := prepareOpenAIWSHTTPBridgeBody(&Account{Platform: PlatformGrok, Type: AccountTypeOAuth}, []byte(`{"type":"response.create","model":"grok-4","reasoning":{"effort":"medium"},"input":"hi"}`))
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(grokBody, "include").Exists(), "the shared bridge must not add Codex-only reasoning options to Grok OAuth requests")
+	require.Equal(t, "medium", gjson.GetBytes(grokBody, "reasoning.effort").String())
+}
+
+// A WS warmup prepares context; converting it into HTTP inference either
+// rejects empty input or unexpectedly executes tools and incurs usage.
+func TestOpenAIWSHTTPBridgeWarmupDoesNotGenerate(t *testing.T) {
+	for _, input := range []string{"", `,"input":[]`, `,"input":[{"role":"user","content":"prepare only"}]`} {
+		t.Run(input, func(t *testing.T) {
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusBadRequest,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"One of input or previous_response_id must be provided."}}`)),
+			}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			account := &Account{ID: 5883, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+			payload := []byte(`{"type":"response.create","model":"gpt-6.1-sol","generate":false` + input + `}`)
+			var events [][]byte
+			bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+			bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, context.Background(), c, account, payload)
+			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, payload, len(payload), "gpt-6.1-sol", "", "", "", "", 1, func(event []byte) error {
+				events = append(events, append([]byte(nil), event...))
+				return nil
+			})
+			require.NoError(t, err)
+			require.Empty(t, upstream.requests, "warmup must not invoke HTTP generation")
+			require.NotNil(t, result)
+			require.NotEmpty(t, result.RequestID)
+			require.Zero(t, result.Usage.InputTokens)
+			require.Zero(t, result.Usage.OutputTokens)
+			require.False(t, result.SchedulingOutcomeKnown(), "a local acknowledgement is not an upstream health sample")
+			require.Len(t, events, 2)
+			require.Equal(t, "response.created", gjson.GetBytes(events[0], "type").String())
+			require.Equal(t, "response.completed", gjson.GetBytes(events[1], "type").String())
+			require.Equal(t, result.RequestID, gjson.GetBytes(events[1], "response.id").String())
+			require.Empty(t, gjson.GetBytes(events[1], "response.output").Array())
+		})
+	}
+}
+
+func TestOpenAIWSHTTPBridgeWarmupRetainsContextWithoutBilling(t *testing.T) {
+	for _, inputField := range []string{"", `,"input":[]`, `,"input":null`, `,"input":[{"role":"user","content":"original context"}]`} {
+		t.Run(inputField, func(t *testing.T) {
+			withInput := strings.Contains(inputField, "original context")
+			cfg := passthroughLifecycleConfig()
+			cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = true
+			cfg.Gateway.OpenAIWS.IngressModeDefault = OpenAIWSIngressModeCtxPool
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_actual\",\"output\":[],\"usage\":{\"input_tokens\":2,\"output_tokens\":1}}}\n\n")),
+			}}
+			svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream, cache: &stubGatewayCache{}, openaiWSResolver: NewOpenAIWSProtocolResolver(cfg)}
+			account := &Account{ID: 5884, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1, Credentials: map[string]any{"api_key": "test-token"}, Extra: map[string]any{"openai_apikey_responses_websockets_v2_mode": OpenAIWSIngressModeHTTPBridge}}
+			type turnResult struct {
+				result *OpenAIForwardResult
+				err    error
+			}
+			turns := make(chan turnResult, 2)
+			hooks := &OpenAIWSIngressHooks{AfterTurn: func(_ int, result *OpenAIForwardResult, err error) { turns <- turnResult{result, err} }}
+			warmup := `{"type":"response.create","model":"gpt-6.1-sol","store":false,"generate":false` + inputField + `}`
+			fixture := newNativeHTTPBridgeFixture(t, svc, account)
+			client, done := startNativeHTTPBridgeMemorySession(t, fixture, account, warmup, hooks)
+			defer client.CloseNow()
+			warmEvents := readNativeWSTestTurn(t, client)
+			require.Equal(t, "response.completed", gjson.GetBytes(warmEvents[len(warmEvents)-1], "type").String())
+			warmResult := <-turns
+			require.NoError(t, warmResult.err)
+			require.Nil(t, warmResult.result, "a local warmup must release admission without usage or scheduler reporting")
+			require.Empty(t, upstream.requests)
+			id := gjson.GetBytes(warmEvents[len(warmEvents)-1], "response.id").String()
+			payload := fmt.Sprintf(`{"type":"response.create","model":"gpt-6.1-sol","store":false,"previous_response_id":%q,"input":[{"role":"user","content":"next question"}]}`, id)
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(payload)))
+			events := readNativeWSTestTurn(t, client)
+			require.Equal(t, "resp_actual", gjson.GetBytes(events[len(events)-1], "response.id").String())
+			result := <-turns
+			require.NoError(t, result.err)
+			require.NotNil(t, result.result)
+			require.Equal(t, 1, result.result.Usage.OutputTokens)
+			require.Len(t, upstream.requests, 1)
+			require.False(t, gjson.GetBytes(upstream.lastBody, "generate").Exists())
+			require.False(t, gjson.GetBytes(upstream.lastBody, "previous_response_id").Exists(), "local warmup IDs cannot be resolved by an HTTP provider")
+			wantItems := 1
+			if withInput {
+				wantItems = 2
+				require.Equal(t, "original context", gjson.GetBytes(upstream.lastBody, "input.0.content").String())
+			}
+			require.Len(t, gjson.GetBytes(upstream.lastBody, "input").Array(), wantItems)
+			require.Equal(t, "next question", gjson.GetBytes(upstream.lastBody, fmt.Sprintf("input.%d.content", wantItems-1)).String())
+			requireNativeWSTestServerExit(t, client, done)
+		})
+	}
+}
+
+func TestOpenAIWSHTTPBridgeWarmupRejectsUnmaterializedContext(t *testing.T) {
+	for _, field := range []string{`,"previous_response_id":"resp_elsewhere"`, `,"prompt":{"id":"pmpt_saved"}`, `,"conversation":"conv_saved"`, `,"instructions":"` + strings.Repeat("x", 512) + `"`} {
+		t.Run(field[:20], func(t *testing.T) {
+			cfg := &config.Config{}
+			cfg.Gateway.OpenAIWS.ClientReadLimitBytes = 512
+			upstream := &httpUpstreamRecorder{err: errors.New("unexpected HTTP request")}
+			svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+			account := &Account{ID: 5885, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+			payload := []byte(`{"type":"response.create","model":"gpt-6.1-sol","generate":false` + field + `}`)
+			writes := 0
+			bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+			bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, context.Background(), nil, account, payload)
+			_, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, payload, len(payload), "gpt-6.1-sol", "", "", "", "", 1, func([]byte) error { writes++; return nil })
+			require.Error(t, err)
+			require.Zero(t, writes, "unsupported warmup cannot publish a fictitious usable response")
+			require.Empty(t, upstream.requests)
+		})
+	}
+}
+
+func TestOpenAIWSHTTPBridgePreservesStoredPredecessorRegardlessOfCurrentStore(t *testing.T) {
+	for _, store := range []bool{false, true} {
+		t.Run(fmt.Sprint(store), func(t *testing.T) {
+			cfg := passthroughLifecycleConfig()
+			cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = true
+			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_after_stored\",\"output\":[],\"usage\":{\"input_tokens\":2,\"output_tokens\":1}}}\n\n"))}}
+			svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream, openaiWSResolver: NewOpenAIWSProtocolResolver(cfg)}
+			account := &Account{ID: 5886, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1, Credentials: map[string]any{"api_key": "token"}, Extra: map[string]any{"openai_apikey_responses_websockets_v2_mode": OpenAIWSIngressModeHTTPBridge}}
+			payload := fmt.Sprintf(`{"type":"response.create","model":"gpt-6.1-sol","store":%v,"previous_response_id":"resp_external"}`, store)
+			fixture := newNativeHTTPBridgeFixture(t, svc, account)
+			// A stored predecessor has an authenticated owner and producer mode;
+			// the new turn's store flag cannot supply either piece of evidence.
+			require.NoError(t, svc.BindOpenAIHTTPResponseOwner(t.Context(), *fixture.key.GroupID, "resp_external", fixture.key.UserID, fixture.key.ID))
+			require.NoError(t, svc.bindResponseMode(t.Context(), *fixture.key.GroupID, "resp_external", UsageAuthorizationModeNative, time.Hour))
+			svc.getOpenAIWSStateStore().BindResponseConn("resp_external", "", time.Hour, session.ResponseScopePersisted)
+			client, done := startNativeHTTPBridgeMemorySession(t, fixture, account, payload, nil)
+			defer client.CloseNow()
+			events := readNativeWSTestTurn(t, client)
+			require.Equal(t, "resp_after_stored", gjson.GetBytes(events[len(events)-1], "response.id").String())
+			requireNativeWSTestServerExit(t, client, done)
+			require.Len(t, upstream.requests, 1)
+			require.Equal(t, "resp_external", gjson.GetBytes(upstream.lastBody, "previous_response_id").String())
+			require.Equal(t, store, gjson.GetBytes(upstream.lastBody, "store").Bool())
+		})
+	}
+}
+
+func TestOpenAIWSHTTPBridgeMissingPredecessorPreservesRecoveryCode(t *testing.T) {
+	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 400, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"previous_response_not_found","type":"invalid_request_error","param":"previous_response_id","message":"Response not found"}}`))}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{ID: 5887, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	payload := []byte(`{"type":"response.create","model":"gpt-6.1-sol","store":false,"previous_response_id":"resp_missing"}`)
+	fixture := newNativeHTTPBridgeFixture(t, svc, account)
+	ctx, c, token := fixture.turn(t, t.Context(), nil, account, payload)
+	var events [][]byte
+	_, err := svc.proxyOpenAIWSHTTPBridgeTurn(ctx, c, account, token, payload, len(payload), "gpt-6.1-sol", "", "", "", "", 1, func(event []byte) error { events = append(events, event); return nil })
+	require.Error(t, err)
+	require.EqualValues(t, 1, fixture.transport.sends.Load())
+	require.Len(t, events, 1)
+	require.Equal(t, "resp_missing", gjson.GetBytes(upstream.lastBody, "previous_response_id").String())
+	require.Equal(t, "previous_response_not_found", gjson.GetBytes(events[0], "error.code").String())
+	require.Equal(t, "invalid_request_error", gjson.GetBytes(events[0], "error.type").String())
+	require.Equal(t, "previous_response_id", gjson.GetBytes(events[0], "error.param").String())
+}
+
+func TestPrepareOpenAIWSHTTPBridgeBodyPreservesUnresolvedAnchor(t *testing.T) {
+	body, err := prepareOpenAIWSHTTPBridgeBody(&Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, []byte(`{"type":"response.create","model":"gpt-6.1-sol","store":true,"previous_response_id":"resp_persisted"}`))
+	require.NoError(t, err)
+	require.Equal(t, "resp_persisted", gjson.GetBytes(body, "previous_response_id").String(), "only the ingress owner can replace an anchor with complete local history")
+}
+
+func TestProxyOpenAIWSHTTPBridgeStatelessReasoningRepair(t *testing.T) {
+	for _, withCipher := range []bool{false, true} {
+		t.Run(fmt.Sprint(withCipher), func(t *testing.T) {
+			rejection := `{"error":{"code":"error","type":"invalid_request_error","message":"Item with id 'rs_missing' not found. Items are not persisted when ` + "`store`" + ` is set to false. Try again with ` + "`store`" + ` set to true, or remove this item from your input."}}`
+			upstream := &httpUpstreamSequenceRecorder{responses: []*http.Response{
+				{StatusCode: 404, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(rejection))},
+				{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_repaired\",\"output\":[],\"usage\":{\"input_tokens\":2,\"output_tokens\":1}}}\n\n"))},
+			}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			account := &Account{ID: 41, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 5}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+			cipher := ""
+			if withCipher {
+				cipher = `,"encrypted_content":"private-cipher"`
+			}
+			payload := []byte(`{"type":"response.create","model":"gpt-6-luna","store":false,"reasoning":{"effort":"medium"},"input":[{"type":"reasoning","id":"rs_missing","summary":[]` + cipher + `},{"role":"user","content":"private prompt"}]}`)
+			var events [][]byte
+			bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+			bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, context.Background(), c, account, payload)
+			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, payload, len(payload), "gpt-6-luna", "", "", "", "", 1, func(event []byte) error { events = append(events, append([]byte(nil), event...)); return nil })
+			require.Len(t, events, 1)
+			if withCipher {
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				require.Equal(t, 2, upstream.callCount)
+				require.False(t, gjson.GetBytes(upstream.bodies[1], "input.0.id").Exists())
+				require.Equal(t, "private-cipher", gjson.GetBytes(upstream.bodies[1], "input.0.encrypted_content").String())
+				require.Equal(t, "response.completed", gjson.GetBytes(events[0], "type").String())
+				require.Empty(t, c.GetString(OpsUpstreamErrorDetailKey), "a successful repair must not leave a false failure")
+			} else {
+				require.Error(t, err)
+				require.Nil(t, result)
+				require.Equal(t, 1, upstream.callCount, "cannot reconstruct missing reasoning by repeating the same request")
+				require.Equal(t, "rs_missing", gjson.GetBytes(upstream.bodies[0], "input.0.id").String())
+				require.Equal(t, "invalid_request_error", gjson.GetBytes(events[0], "error.type").String())
+				require.Equal(t, "input repair declined: incomplete reasoning at input[0]", c.GetString(OpsUpstreamErrorDetailKey))
+				require.NotContains(t, c.GetString(OpsUpstreamErrorDetailKey), "private")
+			}
+			require.Equal(t, "reasoning.encrypted_content", gjson.GetBytes(upstream.bodies[0], "include.0").String(), "Codex bridge must request portable reasoning just like native HTTP")
+		})
+	}
+}
+
+func TestOpenAIWSReplayCollectorKeepsCompleteReasoning(t *testing.T) {
+	for _, finalHasCipher := range []bool{false, true} {
+		t.Run(fmt.Sprint(finalHasCipher), func(t *testing.T) {
+			partial := `{"type":"reasoning","id":"rs_same","summary":[]}`
+			full := `{"type":"reasoning","id":"rs_same","summary":[],"encrypted_content":"private-cipher"}`
+			done, terminal := full, partial
+			if finalHasCipher {
+				done, terminal = partial, full
+			}
+			collector := &openAIWSToolCallReplayCollector{}
+			collector.AddEvent("response.output_item.done", []byte(`{"type":"response.output_item.done","item":`+done+`}`))
+			snapshot := collector.AllItems()
+			collector.AddEvent("response.completed", []byte(`{"type":"response.completed","response":{"id":"resp_complete","output":[`+terminal+`]}}`))
+			items := collector.AllItems()
+			require.Len(t, items, 1, "the same reasoning item must not be duplicated")
+			require.Equal(t, "private-cipher", gjson.GetBytes(items[0], "encrypted_content").String())
+			require.JSONEq(t, done, string(snapshot[0]), "upgrading the collector must preserve snapshots already handed to callers")
+		})
+	}
+}
+
+func TestOpenAIWSHTTPBridgeReplaysFinalReasoningAcrossTurns(t *testing.T) {
+	cfg := passthroughLifecycleConfig()
+	cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = true
+	upstream := &httpUpstreamSequenceRecorder{responses: []*http.Response{
+		{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(
+			"data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"reasoning\",\"id\":\"rs_final\",\"summary\":[]}}\n\n" +
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_first\",\"output\":[{\"type\":\"reasoning\",\"id\":\"rs_final\",\"summary\":[],\"encrypted_content\":\"final-cipher\"}],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"))},
+		{StatusCode: 404, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"error","type":"invalid_request_error","message":"Item with id 'rs_final' not found. Items are not persisted when store is set to false."}}`))},
+		{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_second\",\"output\":[],\"usage\":{\"input_tokens\":2,\"output_tokens\":1}}}\n\n"))},
+	}}
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream, openaiWSResolver: NewOpenAIWSProtocolResolver(cfg)}
+	account := &Account{ID: 41, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 5, Extra: map[string]any{"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeHTTPBridge}}
+	fixture := newNativeHTTPBridgeFixture(t, svc, account)
+	client, done := startNativeHTTPBridgeMemorySession(t, fixture, account, `{"type":"response.create","model":"gpt-6-luna","store":false,"reasoning":{"effort":"medium"},"input":[{"role":"user","content":"first"}]}`, nil)
+	defer client.CloseNow()
+	first := readNativeWSTestTurn(t, client)
+	require.Equal(t, "final-cipher", gjson.GetBytes(first[len(first)-1], "response.output.0.encrypted_content").String())
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-6-luna","store":false,"reasoning":{"effort":"medium"},"previous_response_id":"resp_first","input":[{"role":"user","content":"second"}]}`)))
+	second := readNativeWSTestTurn(t, client)
+	require.Equal(t, "resp_second", gjson.GetBytes(second[len(second)-1], "response.id").String())
+	requireNativeWSTestServerExit(t, client, done)
+	require.Equal(t, 3, upstream.callCount)
+	for _, body := range upstream.bodies[1:] {
+		require.Len(t, gjson.GetBytes(body, "input").Array(), 3)
+		require.Equal(t, "final-cipher", gjson.GetBytes(body, "input.1.encrypted_content").String())
+		require.Equal(t, "first", gjson.GetBytes(body, "input.0.content").String())
+		require.Equal(t, "second", gjson.GetBytes(body, "input.2.content").String())
+		require.False(t, gjson.GetBytes(body, "store").Bool())
+	}
+	require.False(t, gjson.GetBytes(upstream.bodies[2], "input.1.id").Exists())
 }
 
 func TestPrepareOpenAIWSHTTPBridgeBodyStripsNoneReasoningForCompatibleEndpoint(t *testing.T) {
@@ -71,6 +341,7 @@ func TestProxyOpenAIWSHTTPBridgeTurn_KeepsOutboundAndObservedServiceTiersSeparat
 	sse := strings.Join([]string{
 		`data: {"type":"response.completed","response":{"id":"resp_tier","model":"gpt-5.5","status":"completed","service_tier":"default","usage":{"input_tokens":1,"output_tokens":1}}}`,
 		``,
+		``,
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -87,8 +358,9 @@ func TestProxyOpenAIWSHTTPBridgeTurn_KeepsOutboundAndObservedServiceTiersSeparat
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 
-	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
-		context.Background(), c, account, "test-token", payload, len(payload),
+	bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+	bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, context.Background(), c, account, payload)
+	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, payload, len(payload),
 		"gpt-5.5", "", "", "", "", 1,
 		func([]byte) error { return nil },
 	)
@@ -109,6 +381,7 @@ func TestProxyOpenAIWSHTTPBridgeTurn_NormalizesFastWithoutLosingObservedDefault(
 	sse := strings.Join([]string{
 		`data: {"type":"response.completed","response":{"id":"resp_tier2","model":"gpt-5.5","status":"completed","service_tier":"default","usage":{"input_tokens":1,"output_tokens":1}}}`,
 		``,
+		``,
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -125,8 +398,9 @@ func TestProxyOpenAIWSHTTPBridgeTurn_NormalizesFastWithoutLosingObservedDefault(
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 
-	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
-		context.Background(), c, account, "test-token", payload, len(payload),
+	bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+	bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, context.Background(), c, account, payload)
+	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, payload, len(payload),
 		"gpt-5.5", "", "", "", "", 1,
 		func([]byte) error { return nil },
 	)
@@ -149,6 +423,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnAPIKeyAdaptsClientTools(t *testing.T) {
 		`data: {"type":"response.output_item.done","sequence_number":2,"output_index":0,"item":{"type":"function_call","id":"item_exec","call_id":"call_exec","name":"exec","arguments":"{\"input\":\"pwd\"}","status":"completed"}}`,
 		``,
 		`data: {"type":"response.completed","sequence_number":3,"response":{"id":"resp_tools","status":"completed","output":[{"type":"function_call","id":"item_exec","call_id":"call_exec","name":"exec","arguments":"{\"input\":\"pwd\"}","status":"completed"}],"usage":{"input_tokens":1,"output_tokens":1}}}`,
+		``,
 		``,
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -174,8 +449,9 @@ func TestProxyOpenAIWSHTTPBridgeTurnAPIKeyAdaptsClientTools(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 	var events [][]byte
 
-	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
-		context.Background(), c, account, "test-token", payload, len(payload),
+	bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+	bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, context.Background(), c, account, payload)
+	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, payload, len(payload),
 		"gpt-5", "", "", "", "", 2,
 		func(message []byte) error {
 			events = append(events, append([]byte(nil), message...))
@@ -223,6 +499,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnAPIKeyRestoresClientToolsInResponseDone(t *t
 		``,
 		`data: {"type":"response.done","sequence_number":2,"response":{"id":"resp_tools","status":"completed","output":[{"type":"function_call","id":"item_exec","call_id":"call_exec","name":"exec","arguments":"{\"input\":\"pwd\"}","status":"completed"}],"usage":{"input_tokens":1,"output_tokens":1}}}`,
 		``,
+		``,
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -244,8 +521,9 @@ func TestProxyOpenAIWSHTTPBridgeTurnAPIKeyRestoresClientToolsInResponseDone(t *t
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 	var events [][]byte
 
-	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
-		context.Background(), c, account, "test-token", payload, len(payload),
+	bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+	bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, context.Background(), c, account, payload)
+	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, payload, len(payload),
 		"gpt-5", "", "", "", "", 1,
 		func(message []byte) error {
 			events = append(events, append([]byte(nil), message...))
@@ -278,6 +556,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnGrokPromotesDiscoveryAndRestoresNamespaceSSE
 		`data: {"type":"response.output_item.done","sequence_number":2,"output_index":0,"item":{"type":"function_call","id":"item_spawn","call_id":"call_spawn","name":"multi_agent_v1__spawn_agent","arguments":"{\"message\":\"work\"}","status":"completed"}}`,
 		"",
 		`data: {"type":"response.completed","sequence_number":3,"response":{"id":"resp_spawn","status":"completed","output":[{"type":"function_call","id":"item_spawn","call_id":"call_spawn","name":"multi_agent_v1__spawn_agent","arguments":"{\"message\":\"work\"}","status":"completed"}],"usage":{"input_tokens":1,"output_tokens":1}}}`,
+		"",
 		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -393,14 +672,15 @@ func TestProxyOpenAIWSHTTPBridgeTurnGrokInheritsToolSearchAndPromotesFollowupDis
 }
 
 func TestOpenAIWSHTTPBridgeAPIKeyReusesClientToolMappingWhenFollowupOmitsTools(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	firstSSEBody := strings.Join([]string{
 		`data: {"type":"response.completed","response":{"id":"resp_custom_first","model":"gpt-5.6-sol","output":[{"type":"function_call","id":"fc_custom_1","call_id":"call_custom_1","name":"exec","arguments":"{\"input\":\"pwd\"}"}],"usage":{"input_tokens":9,"output_tokens":1}}}`,
 		"",
+		"",
 	}, "\n")
 	secondSSEBody := strings.Join([]string{
 		`data: {"type":"response.completed","response":{"id":"resp_custom_second","model":"gpt-5.6-sol","output":[],"usage":{"input_tokens":1,"output_tokens":1}}}`,
+		"",
 		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{
@@ -431,8 +711,9 @@ func TestOpenAIWSHTTPBridgeAPIKeyReusesClientToolMappingWhenFollowupOmitsTools(t
 		Concurrency: 1, Status: StatusActive, Schedulable: true,
 	}
 
+	fixture := newNativeHTTPBridgeFixture(t, svc, account)
 	errCh := make(chan error, 1)
-	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	wsServer := httptest.NewServer(nativeHTTPBridgeTestHandler(t, func(w http.ResponseWriter, r *http.Request) {
 		conn, err := coderws.Accept(w, r, nil)
 		if err != nil {
 			errCh <- err
@@ -449,7 +730,7 @@ func TestOpenAIWSHTTPBridgeAPIKeyReusesClientToolMappingWhenFollowupOmitsTools(t
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
 		ginCtx.Request = r.Clone(r.Context())
-		errCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "sk-test", firstMessage, nil)
+		errCh <- fixture.proxy(openAIWSTestAdmissionContext(r.Context()), ginCtx, conn, account, firstMessage, nil)
 	}))
 	defer wsServer.Close()
 
@@ -501,7 +782,7 @@ func TestOpenAIWSHTTPBridgeAPIKeyReusesClientToolMappingWhenFollowupOmitsTools(t
 	require.Equal(t, "exec", secondTools[0].Get("name").String())
 	secondInput := gjson.GetBytes(upstream.bodies[1], "input").Array()
 	require.Len(t, secondInput, 3)
-	require.Equal(t, "run pwd", secondInput[0].String())
+	require.Equal(t, "run pwd", secondInput[0].Get("content").String())
 	require.Equal(t, "function_call", secondInput[1].Get("type").String())
 	require.Equal(t, "fc_custom_1", secondInput[1].Get("id").String())
 	require.JSONEq(t, `{"input":"pwd"}`, secondInput[1].Get("arguments").String())
@@ -511,7 +792,6 @@ func TestOpenAIWSHTTPBridgeAPIKeyReusesClientToolMappingWhenFollowupOmitsTools(t
 }
 
 func TestOpenAIWSHTTPBridgeFullCustomToolHistoryWithoutPreviousResponseIDDoesNotReplay(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	completed := func(responseID string, output string) string {
 		return "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"" + responseID + "\",\"model\":\"gpt-5.1\",\"output\":" + output + ",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
@@ -543,8 +823,9 @@ func TestOpenAIWSHTTPBridgeFullCustomToolHistoryWithoutPreviousResponseIDDoesNot
 		Concurrency: 1, Status: StatusActive, Schedulable: true,
 	}
 
+	fixture := newNativeHTTPBridgeFixture(t, svc, account)
 	errCh := make(chan error, 1)
-	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	wsServer := httptest.NewServer(nativeHTTPBridgeTestHandler(t, func(w http.ResponseWriter, r *http.Request) {
 		conn, err := coderws.Accept(w, r, nil)
 		if err != nil {
 			errCh <- err
@@ -561,7 +842,7 @@ func TestOpenAIWSHTTPBridgeFullCustomToolHistoryWithoutPreviousResponseIDDoesNot
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
 		ginCtx.Request = r.Clone(r.Context())
-		errCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "test-token", firstMessage, nil)
+		errCh <- fixture.proxy(openAIWSTestAdmissionContext(r.Context()), ginCtx, conn, account, firstMessage, nil)
 	}))
 	defer wsServer.Close()
 
@@ -599,7 +880,7 @@ func TestOpenAIWSHTTPBridgeFullCustomToolHistoryWithoutPreviousResponseIDDoesNot
 	require.Len(t, upstream.bodies, 4)
 	orphanInput := gjson.GetBytes(upstream.bodies[1], "input").Array()
 	require.Len(t, orphanInput, 2)
-	require.Equal(t, "run pwd", orphanInput[0].String())
+	require.Equal(t, "run pwd", orphanInput[0].Get("content").String())
 	require.Equal(t, "user", orphanInput[1].Get("role").String())
 	for _, body := range upstream.bodies[2:] {
 		input := gjson.GetBytes(body, "input").Array()
@@ -612,7 +893,6 @@ func TestOpenAIWSHTTPBridgeFullCustomToolHistoryWithoutPreviousResponseIDDoesNot
 }
 
 func TestOpenAIWSHTTPBridgeObjectToolOutputWithoutPreviousResponseIDReplaysMatchingCall(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	completed := func(responseID string, output string) string {
 		return "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"" + responseID + "\",\"model\":\"gpt-5.1\",\"output\":" + output + ",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
@@ -642,8 +922,9 @@ func TestOpenAIWSHTTPBridgeObjectToolOutputWithoutPreviousResponseIDReplaysMatch
 		Concurrency: 1, Status: StatusActive, Schedulable: true,
 	}
 
+	fixture := newNativeHTTPBridgeFixture(t, svc, account)
 	errCh := make(chan error, 1)
-	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	wsServer := httptest.NewServer(nativeHTTPBridgeTestHandler(t, func(w http.ResponseWriter, r *http.Request) {
 		conn, err := coderws.Accept(w, r, nil)
 		if err != nil {
 			errCh <- err
@@ -660,7 +941,7 @@ func TestOpenAIWSHTTPBridgeObjectToolOutputWithoutPreviousResponseIDReplaysMatch
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
 		ginCtx.Request = r.Clone(r.Context())
-		errCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "test-token", firstMessage, nil)
+		errCh <- fixture.proxy(openAIWSTestAdmissionContext(r.Context()), ginCtx, conn, account, firstMessage, nil)
 	}))
 	defer wsServer.Close()
 
@@ -773,7 +1054,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnTransportErrorFailoverSafety(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			upstream := &httpUpstreamRecorder{err: io.EOF}
+			upstream := &nativeHTTPBridgeFailurePeer{state: gatewaymodel.SendNotSent, cause: io.EOF}
 			svc := &OpenAIGatewayService{
 				cfg:          &config.Config{},
 				httpUpstream: upstream,
@@ -791,8 +1072,9 @@ func TestProxyOpenAIWSHTTPBridgeTurnTransportErrorFailoverSafety(t *testing.T) {
 			payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi"}`)
 			var writes [][]byte
 
-			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
-				context.Background(), c, account, "sk-test", payload, len(payload),
+			bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+			bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, context.Background(), c, account, payload)
+			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, payload, len(payload),
 				"gpt-5", "", "", "", "", tt.turn,
 				func(message []byte) error {
 					writes = append(writes, append([]byte(nil), message...))
@@ -801,6 +1083,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnTransportErrorFailoverSafety(t *testing.T) {
 			)
 
 			require.Nil(t, result)
+			require.EqualValues(t, 1, upstream.calls.Load(), "exercise the permitted transport attempt")
 			var failoverErr *UpstreamFailoverError
 			if tt.wantFailover {
 				require.ErrorAs(t, err, &failoverErr)
@@ -849,8 +1132,9 @@ func TestProxyOpenAIWSHTTPBridgeTurnHTTPStatusFailoverSafety(t *testing.T) {
 			payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi"}`)
 			var writes [][]byte
 
-			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
-				context.Background(), c, account, "sk-test", payload, len(payload),
+			bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+			bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, context.Background(), c, account, payload)
+			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, payload, len(payload),
 				"gpt-5", "", "", "", "", tt.turn,
 				func(message []byte) error {
 					writes = append(writes, append([]byte(nil), message...))
@@ -893,14 +1177,14 @@ func TestProxyOpenAIWSHTTPBridgeTurnRetriesRejectedFieldBeforeClientOutput(t *te
 	}}
 	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
 	account := &Account{ID: 91, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1}
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	c, timingLogs := newWSLatencyTestContext()
+	SetOpenAIClientTransport(c, OpenAIClientTransportWS)
 	payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi","truncation":"auto"}`)
 	var writes [][]byte
 
-	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
-		context.Background(), c, account, "sk-test", payload, len(payload),
+	bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+	bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, c.Request.Context(), c, account, payload)
+	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, payload, len(payload),
 		"gpt-5", "", "", "", "", 1,
 		func(message []byte) error {
 			writes = append(writes, append([]byte(nil), message...))
@@ -916,6 +1200,12 @@ func TestProxyOpenAIWSHTTPBridgeTurnRetriesRejectedFieldBeforeClientOutput(t *te
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "truncation").Exists())
 	require.Len(t, writes, 1)
 	require.Equal(t, "response.completed", gjson.GetBytes(writes[0], "type").String())
+	summaries := wsLatencySummaries(timingLogs)
+	require.Len(t, summaries, 2)
+	require.Equal(t, int64(1), summaries[0]["attempt"])
+	require.Equal(t, int64(2), summaries[1]["attempt"])
+	require.Equal(t, "upstream_failed", summaries[0]["outcome"])
+	require.Equal(t, "completed", summaries[1]["outcome"])
 }
 
 func TestProxyOpenAIWSHTTPBridgeTurnSSEErrorFailoverSafety(t *testing.T) {
@@ -938,8 +1228,9 @@ func TestProxyOpenAIWSHTTPBridgeTurnSSEErrorFailoverSafety(t *testing.T) {
 			payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi"}`)
 			var writes [][]byte
 
-			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
-				context.Background(), c, account, "sk-test", payload, len(payload),
+			bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+			bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, context.Background(), c, account, payload)
+			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, payload, len(payload),
 				"gpt-5", "", "", "", "", turn,
 				func(message []byte) error {
 					writes = append(writes, append([]byte(nil), message...))
@@ -996,8 +1287,9 @@ func TestProxyOpenAIWSHTTPBridgeTurnRewritesCapacityShedCodeForClient(t *testing
 			payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi"}`)
 			var writes [][]byte
 
-			_, err := svc.proxyOpenAIWSHTTPBridgeTurn(
-				context.Background(), c, account, "sk-test", payload, len(payload),
+			bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+			bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, context.Background(), c, account, payload)
+			_, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, payload, len(payload),
 				"gpt-5", "", "", "", "", tt.turn,
 				func(message []byte) error {
 					writes = append(writes, append([]byte(nil), message...))
@@ -1027,6 +1319,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnBareErrorUsesAuthoritativeFailed(t *testing.
 		``,
 		`data: {"type":"response.failed","response":{"id":"resp_failed","status":"failed","usage":{"input_tokens":9,"output_tokens":2},"error":{"status_code":403,"code":"workspace_suspended","message":"workspace is suspended"}}}`,
 		``,
+		``,
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}}
 	repo := &openAIStream403AccountRepo{}
@@ -1038,7 +1331,9 @@ func TestProxyOpenAIWSHTTPBridgeTurnBareErrorUsesAuthoritativeFailed(t *testing.
 	payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi"}`)
 	var writes [][]byte
 
-	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "sk-test", payload, len(payload), "gpt-5", "", "", "", "", 2, func(message []byte) error {
+	bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+	bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, context.Background(), c, account, payload)
+	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, payload, len(payload), "gpt-5", "", "", "", "", 2, func(message []byte) error {
 		writes = append(writes, append([]byte(nil), message...))
 		return nil
 	})
@@ -1108,8 +1403,9 @@ func TestProxyOpenAIWSHTTPBridgeTurnMarksCyberPolicyForFailureShapes(t *testing.
 			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 			payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi"}`)
 
-			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
-				context.Background(), c, account, "sk-test", payload, len(payload),
+			bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+			bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, context.Background(), c, account, payload)
+			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, payload, len(payload),
 				"gpt-5", "", "", "", "", 1, func([]byte) error { return nil },
 			)
 
@@ -1126,9 +1422,48 @@ func TestProxyOpenAIWSHTTPBridgeTurnMarksCyberPolicyForFailureShapes(t *testing.
 	}
 }
 
+func TestProxyOpenAIWSHTTPBridgeTurnBareErrorDoesNotWaitForEOF(t *testing.T) {
+	for _, namedParameter := range []bool{false, true} {
+		reader, writer := io.Pipe()
+		defer reader.Close()
+		defer writer.Close()
+		errorFrame := `{"type":"error","error":{"code":"invalid_request","message":"bad request"}}`
+		idle := 1
+		if namedParameter {
+			errorFrame = `{"type":"error","error":{"code":"unsupported_parameter","type":"invalid_request_error","param":"tools","message":"bad request"}}`
+			idle = 180
+		}
+		go func() { _, _ = io.WriteString(writer, "data: "+errorFrame+"\n\n") }()
+		upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: reader}}
+		svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{StreamDataIntervalTimeout: idle}}, httpUpstream: upstream}
+		account := &Account{ID: 112, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1}
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+		payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi"}`)
+		var writes [][]byte
+		started := time.Now()
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+		bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, ctx, c, account, payload)
+		_, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, payload, len(payload), "gpt-5", "", "", "", "", 2, func(message []byte) error {
+			writes = append(writes, append([]byte(nil), message...))
+			return nil
+		})
+		require.EqualError(t, err, "bad request")
+		require.Less(t, time.Since(started), 3*time.Second)
+		require.Len(t, writes, 1)
+		require.Equal(t, "error", gjson.GetBytes(writes[0], "type").String())
+		require.Equal(t, "bad request", gjson.GetBytes(writes[0], "error.message").String())
+		opsFailure, ok := GetOpsStreamError(c)
+		require.True(t, ok)
+		require.Equal(t, "bad request", opsFailure.UpstreamMessage)
+	}
+}
+
 func TestProxyOpenAIWSHTTPBridgeTurnBareErrorEOFSynthesizesFailed(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	body := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_eof\",\"status\":\"in_progress\"}}\n\n" +
+	body := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_eof\",\"created_at\":1700000000,\"status\":\"in_progress\"}}\n\n" +
 		"data: {\"type\":\"error\",\"error\":{\"code\":\"invalid_request\",\"message\":\"bad request\"}}\n\n"
 	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}}
 	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
@@ -1139,7 +1474,9 @@ func TestProxyOpenAIWSHTTPBridgeTurnBareErrorEOFSynthesizesFailed(t *testing.T) 
 	payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi"}`)
 	var writes [][]byte
 
-	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "sk-test", payload, len(payload), "gpt-5", "", "", "", "", 2, func(message []byte) error {
+	bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+	bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, context.Background(), c, account, payload)
+	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, payload, len(payload), "gpt-5", "", "", "", "", 2, func(message []byte) error {
 		writes = append(writes, append([]byte(nil), message...))
 		return nil
 	})
@@ -1151,6 +1488,62 @@ func TestProxyOpenAIWSHTTPBridgeTurnBareErrorEOFSynthesizesFailed(t *testing.T) 
 	require.Equal(t, "response.failed", gjson.GetBytes(writes[1], "type").String())
 	require.Equal(t, "failed", gjson.GetBytes(writes[1], "response.status").String())
 	require.Equal(t, "resp_eof", gjson.GetBytes(writes[1], "response.id").String())
+	require.EqualValues(t, 1700000000, gjson.GetBytes(writes[1], "response.created_at").Int())
+}
+
+func TestProxyOpenAIWSHTTPBridgeDelayedBareErrorTerminal(t *testing.T) {
+	for _, terminal := range []string{"response.completed", "response.failed"} {
+		t.Run(terminal, func(t *testing.T) {
+			reader, writer := io.Pipe()
+			defer reader.Close()
+			defer writer.Close()
+			writesDone := make(chan error, 1)
+			go func() {
+				events := []string{
+					`{"type":"response.created","response":{"id":"resp_delayed"}}`,
+					`{"type":"error","error":{"code":"transient","message":"original provider message"}}`,
+					`{"type":"keepalive"}`,
+					`{"type":"` + terminal + `","response":{"id":"resp_delayed","status":"` + strings.TrimPrefix(terminal, "response.") + `","error":{"code":"invalid_request","message":"authoritative message"},"usage":{"input_tokens":8,"output_tokens":4}}}`,
+				}
+				if terminal == "response.completed" {
+					events = append(events[:3], append([]string{`{"type":"response.output_text.delta","delta":"recovered output"}`}, events[3:]...)...)
+				}
+				for i, event := range events {
+					if i >= 2 {
+						time.Sleep(600 * time.Millisecond)
+					}
+					if _, err := io.WriteString(writer, "data: "+event+"\n\n"); err != nil {
+						writesDone <- err
+						return
+					}
+				}
+				writesDone <- writer.Close()
+			}()
+			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: reader}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{StreamDataIntervalTimeout: 1}}, httpUpstream: upstream}
+			account := &Account{ID: 113, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+			payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi"}`)
+			var writes [][]byte
+			bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+			bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, context.Background(), c, account, payload)
+			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, payload, len(payload), "gpt-5", "", "", "", "", 2, func(message []byte) error {
+				writes = append(writes, append([]byte(nil), message...))
+				return nil
+			})
+			require.NoError(t, err)
+			require.NoError(t, <-writesDone)
+			require.Equal(t, terminal, result.UpstreamTerminalEvent)
+			require.Equal(t, 8, result.Usage.InputTokens)
+			require.Equal(t, 4, result.Usage.OutputTokens)
+			require.Equal(t, terminal, gjson.GetBytes(writes[len(writes)-1], "type").String())
+			if terminal == "response.completed" {
+				require.Len(t, writes, 3)
+				require.Equal(t, "recovered output", gjson.GetBytes(writes[1], "delta").String())
+			}
+		})
+	}
 }
 
 func TestProxyOpenAIWSHTTPBridgeTurnBareErrorFollowedByCompletedUsesCompleted(t *testing.T) {
@@ -1162,6 +1555,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnBareErrorFollowedByCompletedUsesCompleted(t 
 		``,
 		`data: {"type":"response.completed","response":{"id":"resp_recovered","status":"completed","output":[],"usage":{"input_tokens":8,"output_tokens":4}}}`,
 		``,
+		``,
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}}
 	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
@@ -1172,7 +1566,9 @@ func TestProxyOpenAIWSHTTPBridgeTurnBareErrorFollowedByCompletedUsesCompleted(t 
 	payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi"}`)
 	var writes [][]byte
 
-	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "sk-test", payload, len(payload), "gpt-5", "", "", "", "", 2, func(message []byte) error {
+	bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+	bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, context.Background(), c, account, payload)
+	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, payload, len(payload), "gpt-5", "", "", "", "", 2, func(message []byte) error {
 		writes = append(writes, append([]byte(nil), message...))
 		return nil
 	})
@@ -1235,8 +1631,9 @@ func TestProxyOpenAIWSHTTPBridgeTurnStagesMetadataAndRelaysKeepaliveBeforeCapaci
 	payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi"}`)
 	var writes [][]byte
 
-	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
-		context.Background(), c, account, "sk-test", payload, len(payload),
+	bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+	bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, context.Background(), c, account, payload)
+	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, payload, len(payload),
 		"gpt-5", "", "", "", "", 1,
 		func(message []byte) error {
 			writes = append(writes, append([]byte(nil), message...))
@@ -1272,6 +1669,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnDoesNotReplayCapacityAfterSemanticOutput(t *
 		"",
 		`data: {"type":"response.failed","response":{"id":"resp_partial","status":"failed","error":{"code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}}}`,
 		"",
+		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -1286,8 +1684,9 @@ func TestProxyOpenAIWSHTTPBridgeTurnDoesNotReplayCapacityAfterSemanticOutput(t *
 	payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi"}`)
 	var writes [][]byte
 
-	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
-		context.Background(), c, account, "sk-test", payload, len(payload),
+	bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+	bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, context.Background(), c, account, payload)
+	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, payload, len(payload),
 		"gpt-5", "", "", "", "", 1,
 		func(message []byte) error {
 			writes = append(writes, append([]byte(nil), message...))
@@ -1328,6 +1727,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnKeepaliveWriteFailure(t *testing.T) {
 				"",
 				`data: {"type":"response.completed","response":{"id":"resp_disconnect","usage":{"input_tokens":3,"output_tokens":2}}}`,
 				"",
+				"",
 			}, "\n")
 			upstream := &httpUpstreamRecorder{resp: &http.Response{
 				StatusCode: http.StatusOK,
@@ -1342,8 +1742,9 @@ func TestProxyOpenAIWSHTTPBridgeTurnKeepaliveWriteFailure(t *testing.T) {
 			payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi"}`)
 			var writes [][]byte
 
-			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
-				context.Background(), c, account, "sk-test", payload, len(payload),
+			bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+			bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, context.Background(), c, account, payload)
+			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, payload, len(payload),
 				"gpt-5", "", "", "", "", 1,
 				func(message []byte) error {
 					writes = append(writes, append([]byte(nil), message...))
@@ -1410,8 +1811,9 @@ func TestProxyOpenAIWSHTTPBridgeTurnDisconnectedBeforeOutputDoesNotFailOver(t *t
 			payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi"}`)
 			var writes [][]byte
 
-			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
-				context.Background(), c, account, "sk-test", payload, len(payload),
+			bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+			bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, context.Background(), c, account, payload)
+			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, payload, len(payload),
 				"gpt-5", "", "", "", "", 1,
 				func(message []byte) error {
 					writes = append(writes, append([]byte(nil), message...))
@@ -1449,17 +1851,14 @@ func TestProxyOpenAIWSHTTPBridgeTurnRequiresTerminalEvent(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
-		name         string
-		body         string
-		wantFailover bool
-		wantWrites   int
+		name string
+		body string
 	}{
-		{name: "done_without_events_fails_over", body: "data: [DONE]\n\n", wantFailover: true},
+		{name: "done_without_events_stays_unknown", body: "data: [DONE]\n\n"},
 		{
-			name: "created_then_done_fails_over_before_semantic_output",
+			name: "created_then_done_is_not_replay_permission",
 			body: "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_truncated\"}}\n\n" +
 				"data: [DONE]\n\n",
-			wantFailover: true,
 		},
 	}
 	for _, tt := range tests {
@@ -1477,8 +1876,9 @@ func TestProxyOpenAIWSHTTPBridgeTurnRequiresTerminalEvent(t *testing.T) {
 			payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi"}`)
 			var writes [][]byte
 
-			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
-				context.Background(), c, account, "sk-test", payload, len(payload),
+			bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+			bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, context.Background(), c, account, payload)
+			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, payload, len(payload),
 				"gpt-5", "", "", "", "", 1,
 				func(message []byte) error {
 					writes = append(writes, append([]byte(nil), message...))
@@ -1486,22 +1886,46 @@ func TestProxyOpenAIWSHTTPBridgeTurnRequiresTerminalEvent(t *testing.T) {
 				},
 			)
 
+			// A Native HTTP response proves this generation was sent. EOF/[DONE]
+			// without a terminal is unknown, even before any semantic delivery;
+			// it cannot authorize a new generation or a zero-usage settlement.
+			require.ErrorContains(t, err, "before terminal event")
+			require.NotNil(t, result, "retain observed response identity without claiming success")
+			require.Empty(t, result.UpstreamTerminalEvent)
 			var failoverErr *UpstreamFailoverError
-			if tt.wantFailover {
-				require.Nil(t, result)
-				require.ErrorAs(t, err, &failoverErr)
-			} else {
-				require.NotNil(t, result)
-				require.Error(t, err)
-				require.False(t, errors.As(err, &failoverErr))
-			}
-			require.Len(t, writes, tt.wantWrites)
+			require.False(t, errors.As(err, &failoverErr))
+			require.Empty(t, writes, "staged metadata must not become fabricated successful output")
+			require.EqualValues(t, 1, bridgeFixture.transport.sends.Load())
+			snapshot := nativeHTTPFromContext(bridgeCtx).core.Snapshot()
+			require.Len(t, snapshot.Attempts, 1)
+			attempt := snapshot.Attempts[0]
+			require.Equal(t, gatewaymodel.SendSent, attempt.Send)
+			require.Equal(t, gatewaymodel.TerminalUnknown, attempt.Terminal)
+			require.True(t, attempt.Closed)
+			require.Nil(t, attempt.Usage, "no usage measurement was present in these frames")
+			require.False(t, snapshot.Delivery.BusinessCommitted)
+			handled, finalizeErr := svc.FinalizeNativeWSUsage(bridgeCtx, &OpenAIRecordUsageInput{
+				Result: result, APIKey: bridgeFixture.key, User: bridgeFixture.key.User,
+				Account: account, APIKeyService: bridgeFixture.keys,
+			}, err)
+			require.True(t, handled)
+			require.NoError(t, finalizeErr)
+			require.ErrorContains(t, FinishNativeWSOperation(bridgeCtx, err), "before terminal event")
+			journal := svc.usageBillingRepo.(*nativeApplicationJournal)
+			require.NotNil(t, journal.input)
+			require.Equal(t, billing.NativeUsageUnknown, journal.input.Evidence.Confidence)
+			require.Nil(t, journal.input.Evidence.Usage)
+			require.Nil(t, journal.input.SettlementUsage)
+			require.Nil(t, journal.input.Settlement)
+			require.Zero(t, journal.old, "unknown usage cannot call the monetary Apply port")
+			finished := nativeHTTPFromContext(bridgeCtx).core.Snapshot()
+			require.Equal(t, gatewaymodel.OperationFailed, finished.State)
+			require.Equal(t, gatewaymodel.BillingPendingUsage, finished.Billing.Disposition)
 		})
 	}
 }
 
 func TestOpenAIWSHTTPBridgeRelaysSSEFramesAsWebSocketMessages(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	sseBody := strings.Join([]string{
 		`data: {"type":"response.created","response":{"id":"resp_bridge","model":"gpt-5"}}`,
@@ -1509,6 +1933,7 @@ func TestOpenAIWSHTTPBridgeRelaysSSEFramesAsWebSocketMessages(t *testing.T) {
 		`data: {"type":"response.output_text.delta","response":{"id":"resp_bridge"},"delta":"ok"}`,
 		"",
 		`data: {"type":"response.completed","response":{"id":"resp_bridge","model":"gpt-5","usage":{"input_tokens":3,"output_tokens":2}}}`,
+		"",
 		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -1542,12 +1967,16 @@ func TestOpenAIWSHTTPBridgeRelaysSSEFramesAsWebSocketMessages(t *testing.T) {
 	}
 	payload := []byte(`{"type":"response.create","generate":true,"model":"gpt-5","stream":true,"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":"true"},"input":"hi","parallel_tool_calls":true}`)
 
+	fixture := newNativeHTTPBridgeFixture(t, svc, account)
+	ctx, ginCtx, token := fixture.turn(t, t.Context(), nil, account, payload)
+	joined := make(chan struct{})
 	type bridgeResult struct {
 		result *OpenAIForwardResult
 		err    error
 	}
 	resultCh := make(chan bridgeResult, 1)
-	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	wsServer := httptest.NewServer(nativeHTTPBridgeTestHandler(t, func(w http.ResponseWriter, r *http.Request) {
+		defer close(joined)
 		conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{CompressionMode: coderws.CompressionContextTakeover})
 		if err != nil {
 			resultCh <- bridgeResult{err: err}
@@ -1555,9 +1984,7 @@ func TestOpenAIWSHTTPBridgeRelaysSSEFramesAsWebSocketMessages(t *testing.T) {
 		}
 		defer func() { _ = conn.CloseNow() }()
 
-		rec := httptest.NewRecorder()
-		ginCtx, _ := gin.CreateTestContext(rec)
-		req := r.Clone(r.Context())
+		req := r.Clone(ctx)
 		req.Header = req.Header.Clone()
 		ginCtx.Request = req
 
@@ -1567,10 +1994,10 @@ func TestOpenAIWSHTTPBridgeRelaysSSEFramesAsWebSocketMessages(t *testing.T) {
 			return conn.Write(writeCtx, coderws.MessageText, message)
 		}
 		result, bridgeErr := svc.proxyOpenAIWSHTTPBridgeTurn(
-			r.Context(),
+			ctx,
 			ginCtx,
 			account,
-			"sk-test",
+			token,
 			payload,
 			len(payload),
 			"gpt-5",
@@ -1584,6 +2011,13 @@ func TestOpenAIWSHTTPBridgeRelaysSSEFramesAsWebSocketMessages(t *testing.T) {
 		resultCh <- bridgeResult{result: result, err: bridgeErr}
 	}))
 	defer wsServer.Close()
+	t.Cleanup(func() {
+		select {
+		case <-joined:
+		case <-time.After(3 * time.Second):
+			t.Error("HTTP bridge relay handler did not join")
+		}
+	})
 
 	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
 	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(wsServer.URL, "http"), nil)
@@ -1620,6 +2054,7 @@ func TestOpenAIWSHTTPBridgeRelaysSSEFramesAsWebSocketMessages(t *testing.T) {
 		t.Fatal("timed out waiting for bridge result")
 	}
 
+	require.EqualValues(t, 1, fixture.transport.sends.Load())
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, http.MethodPost, upstream.lastReq.Method)
 	require.Equal(t, "true", upstream.lastReq.Header.Get(responsesLiteHeader))
@@ -1640,6 +2075,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnForGrokDefaultsEmptyModelTo45(t *testing.T) 
 			`data: {"type":"response.created","response":{"id":"resp_grok_default","model":"grok-4.5"}}`,
 			"",
 			`data: {"type":"response.completed","response":{"id":"resp_grok_default","model":"grok-4.5","usage":{"input_tokens":1,"output_tokens":1}}}`,
+			"",
 			"",
 		}, "\n"))),
 	}}
@@ -1685,6 +2121,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnPromotesCodexAdditionalToolsForMixedCache(t 
 			`data: {"type":"response.created","response":{"id":"resp_grok_codex_lite","model":"grok-4.5"}}`,
 			"",
 			`data: {"type":"response.completed","response":{"id":"resp_grok_codex_lite","model":"grok-4.5","usage":{"input_tokens":4,"output_tokens":1}}}`,
+			"",
 			"",
 		}, "\n"))),
 	}}
@@ -1760,6 +2197,7 @@ func TestProxyResponsesWebSocketFromClientForGrokUsesXAIHTTPBridgeAndPreservesMa
 			"",
 			`data: {"type":"response.completed","response":{"id":"` + responseID + `","model":"grok-4.3","usage":{"input_tokens":4,"output_tokens":2,"input_tokens_details":{"cached_tokens":` + fmt.Sprintf("%d", cachedTokens) + `}}}}`,
 			"",
+			"",
 		}, "\n")
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -1796,7 +2234,7 @@ func TestProxyResponsesWebSocketFromClientForGrokUsesXAIHTTPBridgeAndPreservesMa
 	}
 
 	errCh := make(chan error, 1)
-	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	wsServer := httptest.NewServer(nativeHTTPBridgeTestHandler(t, func(w http.ResponseWriter, r *http.Request) {
 		conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{CompressionMode: coderws.CompressionContextTakeover})
 		if err != nil {
 			errCh <- err
@@ -1823,7 +2261,7 @@ func TestProxyResponsesWebSocketFromClientForGrokUsesXAIHTTPBridgeAndPreservesMa
 		ginCtx.Request = req
 		ginCtx.Set("api_key", &APIKey{ID: 7101})
 
-		errCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "access-token", firstMessage, &OpenAIWSIngressHooks{
+		errCh <- svc.ProxyResponsesWebSocketFromClient(openAIWSTestAdmissionContext(r.Context()), ginCtx, conn, account, "access-token", firstMessage, &OpenAIWSIngressHooks{
 			MapRequestModel: func(_ int, originalModel string) (string, error) {
 				if originalModel == "channel-alias" {
 					return "grok-4.3", nil
@@ -1927,12 +2365,12 @@ func TestProxyResponsesWebSocketFromClientForGrokUsesXAIHTTPBridgeAndPreservesMa
 }
 
 func TestOpenAIWSHTTPBridgeAcceptsFirstFrameAboveLegacy16MiB(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	sseBody := strings.Join([]string{
 		`data: {"type":"response.created","response":{"id":"resp_large_bridge","model":"gpt-5"}}`,
 		"",
 		`data: {"type":"response.completed","response":{"id":"resp_large_bridge","model":"gpt-5","usage":{"input_tokens":9,"output_tokens":1}}}`,
+		"",
 		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -1998,8 +2436,9 @@ func TestOpenAIWSHTTPBridgeAcceptsFirstFrameAboveLegacy16MiB(t *testing.T) {
 		},
 	}
 
+	fixture := newNativeHTTPBridgeFixture(t, svc, account)
 	errCh := make(chan error, 1)
-	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	wsServer := httptest.NewServer(nativeHTTPBridgeTestHandler(t, func(w http.ResponseWriter, r *http.Request) {
 		conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{CompressionMode: coderws.CompressionContextTakeover})
 		if err != nil {
 			errCh <- err
@@ -2029,7 +2468,7 @@ func TestOpenAIWSHTTPBridgeAcceptsFirstFrameAboveLegacy16MiB(t *testing.T) {
 
 		proxyCtx, cancelProxy := context.WithTimeout(r.Context(), 20*time.Second)
 		defer cancelProxy()
-		errCh <- svc.ProxyResponsesWebSocketFromClient(proxyCtx, ginCtx, conn, account, "sk-test", firstMessage, hooks)
+		errCh <- fixture.proxy(openAIWSTestAdmissionContext(proxyCtx), ginCtx, conn, account, firstMessage, hooks)
 	}))
 	defer wsServer.Close()
 
@@ -2094,14 +2533,15 @@ func TestOpenAIWSHTTPBridgeAcceptsFirstFrameAboveLegacy16MiB(t *testing.T) {
 }
 
 func TestOpenAIWSHTTPBridgeKeepsContinuationFramesOnHTTPWithoutPreviousResponseID(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	firstSSEBody := strings.Join([]string{
 		`data: {"type":"response.completed","response":{"id":"resp_bridge_first","model":"gpt-5.1","output":[{"type":"function_call","id":"fc_bridge_1","call_id":"call_bridge_1","name":"shell","arguments":"{}"}],"usage":{"input_tokens":9,"output_tokens":1}}}`,
 		"",
+		"",
 	}, "\n")
 	secondSSEBody := strings.Join([]string{
 		`data: {"type":"response.completed","response":{"id":"resp_bridge_second","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`,
+		"",
 		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{
@@ -2164,8 +2604,9 @@ func TestOpenAIWSHTTPBridgeKeepsContinuationFramesOnHTTPWithoutPreviousResponseI
 		Schedulable: true,
 	}
 
+	fixture := newNativeHTTPBridgeFixture(t, svc, account)
 	errCh := make(chan error, 1)
-	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	wsServer := httptest.NewServer(nativeHTTPBridgeTestHandler(t, func(w http.ResponseWriter, r *http.Request) {
 		conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{CompressionMode: coderws.CompressionContextTakeover})
 		if err != nil {
 			errCh <- err
@@ -2192,7 +2633,7 @@ func TestOpenAIWSHTTPBridgeKeepsContinuationFramesOnHTTPWithoutPreviousResponseI
 		req.Header.Set("User-Agent", "codex_cli_rs/0.135.0")
 		ginCtx.Request = req
 
-		errCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "sk-test", firstMessage, nil)
+		errCh <- fixture.proxy(openAIWSTestAdmissionContext(r.Context()), ginCtx, conn, account, firstMessage, nil)
 	}))
 	defer wsServer.Close()
 
@@ -2239,7 +2680,7 @@ func TestOpenAIWSHTTPBridgeKeepsContinuationFramesOnHTTPWithoutPreviousResponseI
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "previous_response_id").Exists())
 	secondInput := gjson.GetBytes(upstream.bodies[1], "input").Array()
 	require.Len(t, secondInput, 3)
-	require.Equal(t, "first", secondInput[0].String())
+	require.Equal(t, "first", secondInput[0].Get("content").String())
 	require.Equal(t, "function_call", secondInput[1].Get("type").String())
 	require.Equal(t, "call_bridge_1", secondInput[1].Get("call_id").String())
 	require.Equal(t, "function_call_output", secondInput[2].Get("type").String())
@@ -2249,10 +2690,10 @@ func TestOpenAIWSHTTPBridgeKeepsContinuationFramesOnHTTPWithoutPreviousResponseI
 }
 
 func TestOpenAIWSHTTPBridge_IdleTimeoutClosesClientSession(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	sseBody := strings.Join([]string{
 		`data: {"type":"response.completed","response":{"id":"resp_bridge_idle","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`,
+		"",
 		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -2293,8 +2734,9 @@ func TestOpenAIWSHTTPBridge_IdleTimeoutClosesClientSession(t *testing.T) {
 		Schedulable: true,
 	}
 
+	fixture := newNativeHTTPBridgeFixture(t, svc, account)
 	errCh := make(chan error, 1)
-	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	wsServer := httptest.NewServer(nativeHTTPBridgeTestHandler(t, func(w http.ResponseWriter, r *http.Request) {
 		conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{CompressionMode: coderws.CompressionContextTakeover})
 		if err != nil {
 			errCh <- err
@@ -2312,7 +2754,7 @@ func TestOpenAIWSHTTPBridge_IdleTimeoutClosesClientSession(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
 		ginCtx.Request = r.Clone(r.Context())
-		errCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "sk-test", firstMessage, nil)
+		errCh <- fixture.proxy(openAIWSTestAdmissionContext(r.Context()), ginCtx, conn, account, firstMessage, nil)
 	}))
 	defer wsServer.Close()
 
@@ -2351,4 +2793,172 @@ func TestOpenAIWSHTTPBridge_IdleTimeoutClosesClientSession(t *testing.T) {
 		t.Fatal("timed out waiting for idle HTTP bridge session to close")
 	}
 	require.Len(t, upstream.bodies, 1, "an idle client must not leave a continuation request running")
+}
+
+func TestProxyOpenAIWSHTTPBridgeHostedToolSendEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		state gatewaymodel.SendState
+	}{
+		{"unknown", gatewaymodel.SendUnknown},
+		{"not_sent", gatewaymodel.SendNotSent},
+		{"sent", gatewaymodel.SendSent},
+		{"ambiguous", gatewaymodel.SendAmbiguous},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			unsent := tc.state == gatewaymodel.SendNotSent
+			upstream := &nativeHTTPBridgeFailurePeer{state: tc.state, cause: errors.New("dial tcp: i/o timeout")}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			account := &Account{ID: 112, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+			payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi","tools":[{"type":"code_interpreter","container":{"type":"auto"}}]}`)
+			var writes [][]byte
+			bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+			bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, context.Background(), c, account, payload)
+			_, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, payload, len(payload), "gpt-5", "", "", "", "", 1, func(b []byte) error { writes = append(writes, b); return nil })
+			require.EqualValues(t, 1, upstream.calls.Load(), "exercise the permitted transport attempt")
+			var failover *UpstreamFailoverError
+			require.Equal(t, unsent, errors.As(err, &failover))
+			if unsent {
+				require.True(t, failover.RequestNotSent)
+				require.Empty(t, writes)
+			} else {
+				require.Len(t, writes, 1)
+				require.Equal(t, "error", gjson.GetBytes(writes[0], "type").String())
+			}
+		})
+	}
+}
+
+func TestProxyOpenAIWSHTTPBridgeHeaderTimeoutSendEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		state gatewaymodel.SendState
+	}{
+		{"unknown_zero", gatewaymodel.SendUnknown}, {"not_sent", gatewaymodel.SendNotSent},
+		{"sent", gatewaymodel.SendSent}, {"ambiguous", gatewaymodel.SendAmbiguous},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := &nativeHTTPBridgeFailurePeer{state: tc.state, waitForCancel: true}
+			cfg := &config.Config{}
+			cfg.Gateway.OpenAIFirstOutputTimeoutSeconds = 1
+			svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+			account := &Account{ID: 112, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1}
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil).WithContext(ctx)
+			payload := []byte("{\"type\":\"response.create\",\"model\":\"gpt-5\",\"input\":\"hi\",\"tools\":[{\"type\":\"code_interpreter\",\"container\":{\"type\":\"auto\"}}]}")
+			var writes [][]byte
+			bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+			bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, ctx, c, account, payload)
+			_, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, payload, len(payload), "gpt-5", "", "", "", "", 1, func(b []byte) error { writes = append(writes, b); return nil })
+			require.EqualValues(t, 1, upstream.calls.Load(), "exercise the permitted transport attempt")
+			require.NoError(t, ctx.Err(), "the operation must outlive the header-only guard")
+			if tc.state == gatewaymodel.SendNotSent {
+				require.ErrorIs(t, err, ErrOpenAIWSFirstOutputBudgetExhausted)
+				require.Empty(t, writes)
+			} else {
+				require.Error(t, err)
+				require.NotErrorIs(t, err, ErrOpenAIWSFirstOutputBudgetExhausted)
+				require.Len(t, writes, 1)
+				require.Equal(t, "error", gjson.GetBytes(writes[0], "type").String())
+			}
+		})
+	}
+}
+
+func TestOpenAIWSHTTPBridgeKeepsRequestEnvelopeOutOfHTTP(t *testing.T) {
+	for _, status := range []int{200, 400} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			data := `{"error":{"code":"invalid_request_error","type":"invalid_request_error","message":"invalid input"}}`
+			if status == 200 {
+				data = "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_lane\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
+			}
+			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: status, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(data))}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			payload := []byte(`{"type":"response.create","model":"gpt-6-luna","stream_id":"lane_a","event_id":"evt_create","input":"hello"}`)
+			account := &Account{ID: 41, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+			fixture := newNativeHTTPBridgeFixture(t, svc, account)
+			ctx, c, token := fixture.turn(t, t.Context(), nil, account, payload)
+			var events [][]byte
+			_, err := svc.proxyOpenAIWSHTTPBridgeTurn(ctx, c, account, token, payload, len(payload), "gpt-6-luna", "", "", "", "", 1, func(event []byte) error { events = append(events, event); return nil })
+			if status == 200 {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+			require.EqualValues(t, 1, fixture.transport.sends.Load())
+			require.False(t, gjson.GetBytes(upstream.lastBody, "stream_id").Exists())
+			require.False(t, gjson.GetBytes(upstream.lastBody, "event_id").Exists())
+			require.Len(t, events, 1)
+			require.Equal(t, "lane_a", gjson.GetBytes(events[0], "stream_id").String())
+			if status == 400 {
+				require.Equal(t, "evt_create", gjson.GetBytes(events[0], "event_id").String())
+			}
+		})
+	}
+}
+
+func TestProxyOpenAIWSHTTPBridgeTurn_TransportTimingCompleteFrames(t *testing.T) {
+	for _, tc := range []struct {
+		name, event                    string
+		writeFail, wantText, wantError bool
+	}{
+		{name: "multiline_crlf", event: "event: response.output_text.delta\r\ndata: {\"delta\":\r\ndata: \"private-text\"}\r\n\r\n", wantText: true},
+		{name: "metadata_empty_delta", event: "data: {\"type\":\"codex.response.metadata\"}\n\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"\"}\n\n"},
+		{name: "failed_downstream", event: "data: {\"type\":\"response.output_text.delta\",\"delta\":\"text\"}\n\n", writeFail: true, wantText: true, wantError: true},
+		{name: "truncated_text_frame", event: "data: {\"type\":\"response.output_text.delta\",\"delta\":\"text\"}\n", wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stream := tc.event
+			if tc.name != "truncated_text_frame" {
+				stream += "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_timing\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
+			}
+			upstream := &httpUpstreamSequenceRecorder{responses: []*http.Response{{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(stream))}}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			account := &Account{ID: 91, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1}
+			c, logs := newWSLatencyTestContext()
+			SetOpenAIClientTransport(c, OpenAIClientTransportWS)
+			body := []byte(`{"type":"response.create","model":"gpt-5","input":"hello"}`)
+			bridgeFixture := newNativeHTTPBridgeFixture(t, svc, account)
+			bridgeCtx, bridgeContext, bridgeToken := bridgeFixture.turn(t, c.Request.Context(), c, account, body)
+			owner := nativeHTTPFromContext(bridgeCtx)
+			// Install the request clock on the bound owner, preserving its logger.
+			BeginOpenAIRequestTiming(bridgeContext, time.Now().Add(-time.Second))
+			bridgeCtx = bridgeContext.Request.Context()
+			require.Same(t, owner, nativeHTTPFromContext(bridgeCtx))
+			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(bridgeCtx, bridgeContext, account, bridgeToken, body, len(body), "gpt-5", "", "", "", "", 1, func([]byte) error {
+				if tc.writeFail {
+					return errors.New("private-write-failure")
+				}
+				return nil
+			})
+			if tc.wantError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			if result != nil {
+				require.NotNil(t, result.LatencyMetrics)
+				require.GreaterOrEqual(t, result.LatencyMetrics.DurationMs, 1000)
+				require.Equal(t, tc.wantText, result.LatencyMetrics.FirstTextMs != nil)
+				if result.LatencyMetrics.FirstTextMs != nil {
+					require.GreaterOrEqual(t, *result.LatencyMetrics.FirstTextMs, 1000)
+				}
+			}
+			summaries := wsLatencySummaries(logs)
+			require.Len(t, summaries, 1)
+			require.Equal(t, "http_bridge", summaries[0]["transport"])
+			stages := summaries[0]["stages_ms"].(map[string]int64)
+			_, observed := stages["first_text"]
+			_, flushed := stages["first_text_flush"]
+			require.Equal(t, tc.wantText, observed)
+			require.Equal(t, tc.wantText && !tc.writeFail, flushed)
+			for _, entry := range logs.All() {
+				require.NotContains(t, fmt.Sprint(entry.ContextMap()), "private-")
+			}
+		})
+	}
 }

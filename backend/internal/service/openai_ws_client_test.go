@@ -1,13 +1,53 @@
 package service
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	native "github.com/Wei-Shaw/sub2api/internal/providers/openai"
+	coderws "github.com/coder/websocket"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCoderOpenAIWSClientConnEncodedPayload(t *testing.T) {
+	received := make(chan []byte, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.CloseNow()
+		_, body, err := conn.Read(r.Context())
+		if err == nil {
+			received <- body
+		}
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, _, err := newDefaultOpenAIWSClientDialer().Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil, "")
+	require.NoError(t, err)
+	client := conn.(*coderOpenAIWSClientConn)
+	defer client.CloseNow()
+	require.Error(t, client.WriteJSON(ctx, json.RawMessage(`{"incomplete":`)))
+	raw := json.RawMessage(`{"type":"response.create","input":[9007199254740993],"unknown":"<中文>","model":"gpt-5.1"}`)
+	require.ErrorIs(t, client.WriteJSON(ctx, raw), native.ErrInvalidWSPreparation)
+	prepared, permit := nativeWSGatePreparation(t, ctx, client, "ws"+strings.TrimPrefix(server.URL, "http"), &nativeWSGateAuthority{}, 1, raw)
+	_, err = native.OpenWS(ctx, prepared, permit)
+	require.NoError(t, err)
+	select {
+	case body := <-received:
+		require.Equal(t, []byte(raw), body, "只发送有效最终字节，保留顺序、精度和未知字段")
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+}
 
 func TestCoderOpenAIWSClientDialer_ProxyHTTPClientReuse(t *testing.T) {
 	dialer := newDefaultOpenAIWSClientDialer()
@@ -31,6 +71,18 @@ func TestCoderOpenAIWSClientDialer_ProxyHTTPClientInvalidURL(t *testing.T) {
 	require.True(t, ok)
 
 	_, err := impl.proxyHTTPClient("://bad")
+	require.Error(t, err)
+	for _, scheme := range []string{"http", "https", "socks5", "socks5h"} {
+		client, err := impl.proxyHTTPClient(scheme + "://127.0.0.1:1080")
+		require.NoError(t, err)
+		transport := client.Transport.(*http.Transport)
+		request, _ := http.NewRequest("GET", "https://api.openai.com/v1/responses", nil)
+		proxy, err := transport.Proxy(request)
+		require.NoError(t, err)
+		require.NotNil(t, proxy)
+		require.Equal(t, "127.0.0.1:1080", proxy.Host)
+	}
+	_, err = impl.proxyHTTPClient("ftp://127.0.0.1:1080")
 	require.Error(t, err)
 }
 

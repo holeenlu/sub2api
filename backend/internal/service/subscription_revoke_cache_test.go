@@ -60,7 +60,8 @@ func TestRevokeSubscription_InvalidatesL1CacheSynchronously(t *testing.T) {
 			L1TTLSeconds: 60,
 		},
 	})
-	t.Cleanup(svc.Stop)
+	require.NoError(t, svc.Start(context.Background()))
+	t.Cleanup(func() { _ = svc.Stop(context.Background()) })
 
 	_, err := svc.GetActiveSubscription(context.Background(), 10, 20)
 	require.NoError(t, err)
@@ -122,7 +123,8 @@ func TestRestoreSubscription_ExpiredActiveRestoresAsExpired(t *testing.T) {
 		},
 	}
 	svc := NewSubscriptionService(groupRepoNoop{}, repo, nil, nil, nil)
-	t.Cleanup(svc.Stop)
+	require.NoError(t, svc.Start(context.Background()))
+	t.Cleanup(func() { _ = svc.Stop(context.Background()) })
 
 	restored, err := svc.RestoreSubscription(context.Background(), 1)
 	require.NoError(t, err)
@@ -143,7 +145,8 @@ func TestRestoreSubscription_NotRevokedReturnsConflict(t *testing.T) {
 		},
 	}
 	svc := NewSubscriptionService(groupRepoNoop{}, repo, nil, nil, nil)
-	t.Cleanup(svc.Stop)
+	require.NoError(t, svc.Start(context.Background()))
+	t.Cleanup(func() { _ = svc.Stop(context.Background()) })
 
 	_, err := svc.RestoreSubscription(context.Background(), 1)
 	require.ErrorIs(t, err, ErrSubscriptionNotRevoked)
@@ -164,7 +167,8 @@ func TestRestoreSubscription_LiveSubscriptionConflict(t *testing.T) {
 		},
 	}
 	svc := NewSubscriptionService(groupRepoNoop{}, repo, nil, nil, nil)
-	t.Cleanup(svc.Stop)
+	require.NoError(t, svc.Start(context.Background()))
+	t.Cleanup(func() { _ = svc.Stop(context.Background()) })
 
 	_, err := svc.RestoreSubscription(context.Background(), 1)
 	require.ErrorIs(t, err, ErrSubscriptionRestoreConflict)

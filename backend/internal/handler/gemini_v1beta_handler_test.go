@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -17,7 +18,7 @@ import (
 
 func TestGeminiV1BetaListModels_AllowlistFiltersNativeResponse(t *testing.T) {
 	body := []byte(`{"models":[{"name":"models/gemini-2.5-pro"},{"name":"models/gemini-2.5-flash"}],"nextPageToken":"next"}`)
-	filtered, dropped, ok := filterUpstreamGeminiModelsBody(body, service.GroupModelAllowlist{Enabled: true, Models: []string{"gemini-2.5-pro"}})
+	filtered, dropped, ok := filterUpstreamGeminiModelsBody(body, catalog.ModelAllowlist{Enabled: true, Models: []string{"gemini-2.5-pro"}})
 	require.True(t, ok)
 	require.True(t, dropped)
 	require.JSONEq(t, `{"models":[{"name":"models/gemini-2.5-pro"}],"nextPageToken":"next"}`, string(filtered))
@@ -31,7 +32,7 @@ func TestGeminiV1BetaListModels_ForcedAntigravityAppliesAllowlist(t *testing.T) 
 	c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
 		Group: &service.Group{
 			Platform: service.PlatformGemini,
-			ModelAllowlist: service.GroupModelAllowlist{
+			ModelAllowlist: catalog.ModelAllowlist{
 				Enabled: true,
 				Models:  []string{"gemini-custom"},
 			},
@@ -53,7 +54,7 @@ func TestGeminiV1BetaListModels_ForcedAntigravityAppliesAllowlist(t *testing.T) 
 
 func TestGeminiModelAllowlist_DisabledPreservesNativeResponse(t *testing.T) {
 	body := []byte(`{"models":[{"name":"models/gemini-2.5-pro"}]}`)
-	filtered, dropped, ok := filterUpstreamGeminiModelsBody(body, service.GroupModelAllowlist{Enabled: false, Models: []string{"other"}})
+	filtered, dropped, ok := filterUpstreamGeminiModelsBody(body, catalog.ModelAllowlist{Enabled: false, Models: []string{"other"}})
 	require.True(t, ok)
 	require.False(t, dropped)
 	require.Equal(t, body, filtered)

@@ -63,31 +63,14 @@ func TestEnforceStepUpRejectsAdminAPIKey(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "STEP_UP_ADMIN_API_KEY_FORBIDDEN")
 }
 
-func TestEnforceStepUpRejectsMachineCredentialsEvenWithUserGrant(t *testing.T) {
-	for method, reason := range map[string]string{
-		service.AuditAuthMethodMCPOAuth: "STEP_UP_MCP_OAUTH_FORBIDDEN",
-		// Unknown credential types are denied by default, not silently allowed.
-		"future_machine_token": "STEP_UP_MACHINE_CREDENTIAL_FORBIDDEN",
-	} {
-		c, rec := newStepUpTestContext(t)
-		c.Set("auth_method", method)
-		c.Set(string(ContextKeyUser), AuthSubject{UserID: 1})
-		ok := enforceStepUp(c, stubStepUpGrantChecker{granted: true}, stubStepUpUserReader{user: &service.User{TotpEnabled: true}}, stepUpEnabled)
-		require.False(t, ok, method)
-		require.Equal(t, http.StatusForbidden, rec.Code, method)
-		require.Contains(t, rec.Body.String(), reason, method)
-	}
-}
-
-func TestMachineCredentialReasonAllowlistsBrowserSessions(t *testing.T) {
-	for method, want := range map[string]bool{
-		"": false, service.AuditAuthMethodJWT: false,
-		service.AuditAuthMethodAdminAPIKey: true, service.AuditAuthMethodMCPOAuth: true, "unknown": true,
-	} {
+func TestAdministratorStepUpRespectsSwitchButAlwaysTierDoesNot(t *testing.T) {
+	for _, role := range []string{service.RoleAdmin, service.RoleSuperAdmin} {
 		c, _ := newStepUpTestContext(t)
-		c.Set("auth_method", method)
-		_, machine := MachineCredentialReason(c)
-		require.Equal(t, want, machine, method)
+		c.Set(string(ContextKeyUserRole), role)
+		c.Set(string(ContextKeyUser), AuthSubject{UserID: 1})
+		reader := stubStepUpUserReader{user: &service.User{ID: 1, Role: role}}
+		require.True(t, enforceStepUp(c, stubStepUpGrantChecker{}, reader, stubStepUpSettingReader{enabled: false}))
+		require.False(t, enforceStepUp(c, stubStepUpGrantChecker{}, reader, nil), "unconditional tier must require TOTP even with site switch off")
 	}
 }
 
