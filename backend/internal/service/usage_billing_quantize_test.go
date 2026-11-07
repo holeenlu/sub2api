@@ -36,13 +36,46 @@ func TestUsageBillingCommandQuantizesBalanceAndQuotaIdentically(t *testing.T) {
 		AccountID:       3,
 		BalanceCost:     actualCost,
 		APIKeyQuotaCost: actualCost,
+		UsageLog:        &UsageLog{ActualCost: actualCost, TotalCost: actualCost},
 	}
 	cmd.Normalize()
 
 	require.Equal(t, cmd.BalanceCost, cmd.APIKeyQuotaCost,
 		"余额扣减与 API Key 配额累加必须使用同一个规范金额")
+	require.Equal(t, cmd.BalanceCost, cmd.UsageLog.ActualCost)
+	require.Equal(t, actualCost, cmd.UsageLog.TotalCost, "theoretical quote must retain its precision")
 	require.LessOrEqual(t, decimalPlaces(cmd.BalanceCost), int32(UsageBillingMonetaryScale),
 		"金额超过 NUMERIC(20,8) 刻度时 PostgreSQL 仍会在存储阶段舍入")
+}
+
+func TestUsageBillingCommandSplitAmountsConserveRoundedDebit(t *testing.T) {
+	for _, amount := range []float64{0.000078125, 0.00000002, -0.000078125, -0.00000002} {
+		rows := []*UsageLog{{InputTokens: 1}, {InputTokens: 1}, {InputTokens: 1}, {InputTokens: 1}, {}}
+		cmd := &UsageBillingCommand{BalanceCost: amount, APIKeyQuotaCost: amount,
+			UsageLog: &UsageLog{ActualCost: amount, TotalCost: amount}, UsageLogs: rows}
+		cmd.Normalize()
+		first := make([]float64, len(rows))
+		total := decimal.Zero
+		for i, row := range rows {
+			first[i] = row.ActualCost
+			total = total.Add(decimal.NewFromFloat(row.ActualCost))
+			require.LessOrEqual(t, decimalPlaces(row.ActualCost), int32(UsageBillingMonetaryScale))
+			if amount > 0 {
+				require.GreaterOrEqual(t, row.ActualCost, 0.0, "rounding must not create a negative remainder")
+			} else {
+				require.LessOrEqual(t, row.ActualCost, 0.0)
+			}
+		}
+		require.True(t, total.Equal(decimal.NewFromFloat(cmd.BalanceCost)))
+		require.Zero(t, rows[len(rows)-1].ActualCost, "zero-usage final attempts stay cost-free")
+		require.Equal(t, amount, cmd.UsageLog.TotalCost)
+		cmd.Normalize()
+		for i, row := range rows {
+			require.Equal(t, first[i], row.ActualCost, "normalization must be idempotent")
+		}
+		cmd.UsageLogs = append(cmd.UsageLogs, nil)
+		require.NotPanics(t, cmd.Normalize, "the settlement repository allows absent supply rows")
+	}
 }
 
 // 第 9 位 half 边界的表驱动覆盖。

@@ -7,7 +7,8 @@ import (
 	"log"
 	"math/rand/v2"
 	"strconv"
-	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -23,10 +24,6 @@ const (
 	billingCacheJitter        = 30 * time.Second
 	rateLimitCacheTTL         = 7 * 24 * time.Hour // 7 days matches the longest window
 
-	// Rate limit window durations — must match service.RateLimitWindow* constants.
-	rateLimitWindow5h = 5 * time.Hour
-	rateLimitWindow1d = 24 * time.Hour
-	rateLimitWindow7d = 7 * 24 * time.Hour
 )
 
 // jitteredTTL 返回带随机抖动的 TTL，防止缓存雪崩
@@ -72,70 +69,6 @@ const (
 	rateLimitFieldWindow7d = "window_7d"
 )
 
-var (
-	deductBalanceScript = redis.NewScript(`
-		local current = redis.call('GET', KEYS[1])
-		if current == false then
-			return 0
-		end
-		local newVal = tonumber(current) - tonumber(ARGV[1])
-		redis.call('SET', KEYS[1], newVal)
-		redis.call('EXPIRE', KEYS[1], ARGV[2])
-		return 1
-	`)
-
-	updateSubUsageScript = redis.NewScript(`
-		local exists = redis.call('EXISTS', KEYS[1])
-		if exists == 0 then
-			return 0
-		end
-		local cost = tonumber(ARGV[1])
-		redis.call('HINCRBYFLOAT', KEYS[1], 'daily_usage', cost)
-		redis.call('HINCRBYFLOAT', KEYS[1], 'weekly_usage', cost)
-		redis.call('HINCRBYFLOAT', KEYS[1], 'monthly_usage', cost)
-		redis.call('EXPIRE', KEYS[1], ARGV[2])
-		return 1
-	`)
-
-	// updateRateLimitUsageScript atomically increments all three rate limit usage counters
-	// with window expiration checking. If a window has expired, its usage is reset to cost
-	// (instead of accumulated) and the window timestamp is updated, matching the DB-side
-	// IncrementRateLimitUsage semantics.
-	//
-	// ARGV: [1]=cost, [2]=ttl_seconds, [3]=now_unix, [4]=window_5h_seconds, [5]=window_1d_seconds, [6]=window_7d_seconds
-	updateRateLimitUsageScript = redis.NewScript(`
-		local exists = redis.call('EXISTS', KEYS[1])
-		if exists == 0 then
-			return 0
-		end
-		local cost = tonumber(ARGV[1])
-		local now = tonumber(ARGV[3])
-		local win5h = tonumber(ARGV[4])
-		local win1d = tonumber(ARGV[5])
-		local win7d = tonumber(ARGV[6])
-
-		-- Helper: check if window is expired and update usage + window accordingly
-		-- Returns nothing, modifies the hash in-place.
-		local function update_window(usage_field, window_field, window_duration)
-			local w = tonumber(redis.call('HGET', KEYS[1], window_field) or 0)
-			if w == 0 or (now - w) >= window_duration then
-				-- Window expired or never started: reset usage to cost, start new window
-				redis.call('HSET', KEYS[1], usage_field, tostring(cost))
-				redis.call('HSET', KEYS[1], window_field, tostring(now))
-			else
-				-- Window still valid: accumulate
-				redis.call('HINCRBYFLOAT', KEYS[1], usage_field, cost)
-			end
-		end
-
-		update_window('usage_5h', 'window_5h', win5h)
-		update_window('usage_1d', 'window_1d', win1d)
-		update_window('usage_7d', 'window_7d', win7d)
-		redis.call('EXPIRE', KEYS[1], ARGV[2])
-		return 1
-	`)
-)
-
 type billingCache struct {
 	rdb *redis.Client
 }
@@ -156,16 +89,6 @@ func (c *billingCache) GetUserBalance(ctx context.Context, userID int64) (float6
 func (c *billingCache) SetUserBalance(ctx context.Context, userID int64, balance float64) error {
 	key := billingBalanceKey(userID)
 	return c.rdb.Set(ctx, key, balance, jitteredTTL()).Err()
-}
-
-func (c *billingCache) DeductUserBalance(ctx context.Context, userID int64, amount float64) error {
-	key := billingBalanceKey(userID)
-	_, err := deductBalanceScript.Run(ctx, c.rdb, []string{key}, amount, int(jitteredTTL().Seconds())).Result()
-	if err != nil && !errors.Is(err, redis.Nil) {
-		log.Printf("Warning: deduct balance cache failed for user %d: %v", userID, err)
-		return err
-	}
-	return nil
 }
 
 func (c *billingCache) InvalidateUserBalance(ctx context.Context, userID int64) error {
@@ -242,16 +165,6 @@ func (c *billingCache) SetSubscriptionCache(ctx context.Context, userID, groupID
 	return err
 }
 
-func (c *billingCache) UpdateSubscriptionUsage(ctx context.Context, userID, groupID int64, cost float64) error {
-	key := billingSubKey(userID, groupID)
-	_, err := updateSubUsageScript.Run(ctx, c.rdb, []string{key}, cost, int(jitteredTTL().Seconds())).Result()
-	if err != nil && !errors.Is(err, redis.Nil) {
-		log.Printf("Warning: update subscription usage cache failed for user %d group %d: %v", userID, groupID, err)
-		return err
-	}
-	return nil
-}
-
 func (c *billingCache) InvalidateSubscriptionCache(ctx context.Context, userID, groupID int64) error {
 	key := billingSubKey(userID, groupID)
 	return c.rdb.Del(ctx, key).Err()
@@ -261,40 +174,140 @@ func (c *billingCache) PublishSubscriptionCacheInvalidation(ctx context.Context,
 	return c.rdb.Publish(ctx, subCacheInvalidateChannel, cacheKey).Err()
 }
 
-func (c *billingCache) SubscribeSubscriptionCacheInvalidation(ctx context.Context, handler func(cacheKey string)) error {
-	pubsub := c.rdb.Subscribe(ctx, subCacheInvalidateChannel)
-
-	_, err := pubsub.Receive(ctx)
-	if err != nil {
-		_ = pubsub.Close()
-		return fmt.Errorf("subscribe to subscription cache invalidation: %w", err)
+func (c *billingCache) SubscribeSubscriptionCacheInvalidation(ctx context.Context, handler func(context.Context, string)) (service.SubscriptionCacheSubscription, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-
+	if handler == nil {
+		return nil, errors.New("subscription invalidation callback is required")
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	pubsub := c.rdb.Subscribe(runCtx, subCacheInvalidateChannel)
+	if _, err := pubsub.Receive(runCtx); err != nil {
+		cancel()
+		_ = pubsub.Close()
+		return nil, fmt.Errorf("subscribe to subscription cache invalidation: %w", err)
+	}
+	h := &billingCacheSubscription{pubsub: pubsub, ctx: runCtx, cancel: cancel, receiveDone: make(chan struct{}), cancelDone: make(chan struct{}), healthDone: make(chan struct{}), activity: make(chan struct{}, 1)}
 	go func() {
-		defer func() {
-			if err := pubsub.Close(); err != nil {
-				log.Printf("Warning: failed to close subscription cache invalidation pubsub: %v", err)
-			}
-		}()
-
-		ch := pubsub.Channel()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case msg, ok := <-ch:
-				if !ok {
-					return
-				}
-				if msg != nil {
-					handler(msg.Payload)
-				}
-			}
+		defer close(h.cancelDone)
+		<-runCtx.Done()
+		h.closing.Store(true)
+		h.closeErr = pubsub.Close()
+		if errors.Is(h.closeErr, redis.ErrClosed) {
+			h.closeErr = nil
 		}
 	}()
+	go h.heartbeat()
+	go h.receive(handler)
+	return h, nil
+}
 
+// One explicit receiver avoids PubSub.Channel's hidden receive/ping goroutines.
+// The cancellation watcher closes the socket even when ReceiveMessage is blocked.
+type billingCacheSubscription struct {
+	pubsub      *redis.PubSub
+	ctx         context.Context
+	cancel      context.CancelFunc
+	closeOnce   sync.Once
+	closing     atomic.Bool
+	closeErr    error
+	runErr      error // receiver writes; Wait reads only after receiveDone closes
+	receiveDone chan struct{}
+	cancelDone  chan struct{}
+	healthDone  chan struct{}
+	activity    chan struct{}
+}
+
+// Close requests cancellation without waiting on a possibly busy Redis lock.
+// The owned cancellation watcher closes the socket; Wait reports its error.
+func (h *billingCacheSubscription) Close() error {
+	h.closeOnce.Do(func() { h.closing.Store(true); h.cancel() })
 	return nil
 }
+
+func (h *billingCacheSubscription) Wait(ctx context.Context) error {
+	for _, done := range []<-chan struct{}{h.receiveDone, h.healthDone, h.cancelDone} {
+		select {
+		case <-done:
+			continue
+		default:
+		}
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return errors.Join(h.runErr, h.closeErr)
+}
+
+func (h *billingCacheSubscription) receive(handler func(context.Context, string)) {
+	defer func() {
+		if recover() != nil {
+			h.runErr = errors.New("subscription invalidation callback panicked")
+		}
+		h.cancel()
+		close(h.receiveDone)
+	}()
+	for h.ctx.Err() == nil {
+		msg, err := h.pubsub.ReceiveMessage(h.ctx)
+		if err != nil {
+			if h.ctx.Err() != nil || errors.Is(err, redis.ErrClosed) {
+				return
+			}
+			// Retain reconnect behavior without spinning while Redis is unavailable.
+			timer := time.NewTimer(100 * time.Millisecond)
+			select {
+			case <-h.ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			continue
+		}
+		// Admission is before Close's closing.Store; already admitted callbacks
+		// receive the canceled context and are joined by Wait before L1 is closed.
+		if msg != nil && !h.closing.Load() && h.ctx.Err() == nil {
+			select {
+			case h.activity <- struct{}{}:
+			default:
+			}
+			handler(h.ctx, msg.Payload)
+		}
+	}
+}
+
+// Preserve go-redis Channel's idle health cadence and ping budget, but own
+// and join the heartbeat explicitly. Ping itself reconnects failed connections.
+func (h *billingCacheSubscription) heartbeat() {
+	defer close(h.healthDone)
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case <-h.ctx.Done():
+			return
+		case <-h.activity:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+		case <-timer.C:
+			if h.ctx.Err() != nil {
+				return
+			}
+			ctx, cancel := context.WithTimeout(h.ctx, 5*time.Second)
+			_ = h.pubsub.Ping(ctx)
+			cancel()
+		}
+		timer.Reset(3 * time.Second)
+	}
+}
+
+var _ service.SubscriptionCacheSubscription = (*billingCacheSubscription)(nil)
 
 func (c *billingCache) GetAPIKeyRateLimit(ctx context.Context, keyID int64) (*service.APIKeyRateLimitCacheData, error) {
 	key := billingRateLimitKey(keyID)
@@ -345,24 +358,6 @@ func (c *billingCache) SetAPIKeyRateLimit(ctx context.Context, keyID int64, data
 	pipe.Expire(ctx, key, rateLimitCacheTTL)
 	_, err := pipe.Exec(ctx)
 	return err
-}
-
-func (c *billingCache) UpdateAPIKeyRateLimitUsage(ctx context.Context, keyID int64, cost float64) error {
-	key := billingRateLimitKey(keyID)
-	now := time.Now().Unix()
-	_, err := updateRateLimitUsageScript.Run(ctx, c.rdb, []string{key},
-		cost,
-		int(rateLimitCacheTTL.Seconds()),
-		now,
-		int(rateLimitWindow5h.Seconds()),
-		int(rateLimitWindow1d.Seconds()),
-		int(rateLimitWindow7d.Seconds()),
-	).Result()
-	if err != nil && !errors.Is(err, redis.Nil) {
-		log.Printf("Warning: update rate limit usage cache failed for api key %d: %v", keyID, err)
-		return err
-	}
-	return nil
 }
 
 func (c *billingCache) InvalidateAPIKeyRateLimit(ctx context.Context, keyID int64) error {
@@ -493,151 +488,4 @@ func (c *billingCache) SetUserPlatformQuotaCache(ctx context.Context, userID int
 
 func (c *billingCache) DeleteUserPlatformQuotaCache(ctx context.Context, userID int64, platform string) error {
 	return c.rdb.Del(ctx, userPlatformQuotaCacheKey(userID, platform)).Err()
-}
-
-// updateUserPlatformQuotaUsageScript 缓存累加：EXISTS + schema_version 双重守卫。
-// 旧版 entry（schema_version != ARGV[3]，包括缺字段的 0 值）不参与累加，由上层走 DB fallback 后
-// SetCache 重建为新版 entry —— 若此处仍累加，上层覆盖时会丢失这部分增量，导致 Redis usage 比真实偏小。
-// key 不存在同样跳过（由下次 SetCache 重建）。
-// KEYS[1] = hash key
-// KEYS[2] = 脏集 key（dirty set）
-// ARGV[1] = cost (string float)
-// ARGV[2] = ttl seconds
-// ARGV[3] = expected schema_version (Go 侧 UserPlatformQuotaCacheSchemaV1)
-// ARGV[4] = dirty set member（空串则不 SADD）
-// ARGV[5] = 脏集兜底 TTL 秒
-const updateUserPlatformQuotaUsageScript = `
-if redis.call("EXISTS", KEYS[1]) == 0 then
-    return 0
-end
-local ver = redis.call("HGET", KEYS[1], "schema_version")
-if ver == false or tonumber(ver) ~= tonumber(ARGV[3]) then
-    return 0
-end
-redis.call("HINCRBYFLOAT", KEYS[1], "daily_usage", ARGV[1])
-redis.call("HINCRBYFLOAT", KEYS[1], "weekly_usage", ARGV[1])
-redis.call("HINCRBYFLOAT", KEYS[1], "monthly_usage", ARGV[1])
-redis.call("HINCRBY", KEYS[1], "version", 1)
-redis.call("EXPIRE", KEYS[1], ARGV[2])
-if ARGV[4] ~= "" then
-    redis.call("SADD", KEYS[2], ARGV[4])
-    redis.call("EXPIRE", KEYS[2], ARGV[5])
-end
-return 1
-`
-
-// userPlatformQuotaDirtySetKey 返回脏集（dirty set）的 Redis key。
-// 使用与 userPlatformQuotaCacheKey 相同的前缀 "billing:"。
-func userPlatformQuotaDirtySetKey() string { return "billing:" + "upq:dirty" }
-
-// userPlatformQuotaDirtyTTLSeconds 脏集兜底 TTL（秒）：初始 SADD（Lua）与 Readd 共用，
-// 确保 flusher 长期停摆时脏集最终过期；正常运行因持续 SADD 不断续期。
-const userPlatformQuotaDirtyTTLSeconds = 86400
-
-// userPlatformQuotaDirtyMember 构造脏集成员字符串 "userID:platform"。
-func userPlatformQuotaDirtyMember(userID int64, platform string) string {
-	return strconv.FormatInt(userID, 10) + ":" + platform
-}
-
-func (c *billingCache) IncrUserPlatformQuotaUsageCache(ctx context.Context, userID int64, platform string, cost float64, ttl time.Duration, markDirty bool) error {
-	member := ""
-	if markDirty {
-		member = userPlatformQuotaDirtyMember(userID, platform)
-	}
-	_, err := c.rdb.Eval(ctx, updateUserPlatformQuotaUsageScript,
-		[]string{userPlatformQuotaCacheKey(userID, platform), userPlatformQuotaDirtySetKey()},
-		strconv.FormatFloat(cost, 'f', -1, 64),
-		int(ttl.Seconds()),
-		service.UserPlatformQuotaCacheSchemaV1,
-		member,
-		userPlatformQuotaDirtyTTLSeconds,
-	).Result()
-	if err != nil && !errors.Is(err, redis.Nil) {
-		return err
-	}
-	return nil
-}
-
-// parseUserPlatformQuotaDirtyMember 将脏集成员字符串 "userID:platform" 解析为
-// service.UserPlatformQuotaKey。解析失败返回 ok=false。
-func parseUserPlatformQuotaDirtyMember(m string) (service.UserPlatformQuotaKey, bool) {
-	parts := strings.SplitN(m, ":", 2)
-	if len(parts) != 2 {
-		return service.UserPlatformQuotaKey{}, false
-	}
-	uid, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil {
-		return service.UserPlatformQuotaKey{}, false
-	}
-	return service.UserPlatformQuotaKey{UserID: uid, Platform: parts[1]}, true
-}
-
-// PopDirtyUserPlatformQuotaKeys 从脏集随机弹出最多 n 个 key。
-// 脏集为空时返回 (nil, nil)。
-func (c *billingCache) PopDirtyUserPlatformQuotaKeys(ctx context.Context, n int) ([]service.UserPlatformQuotaKey, error) {
-	members, err := c.rdb.SPopN(ctx, userPlatformQuotaDirtySetKey(), int64(n)).Result()
-	if err != nil {
-		if errors.Is(err, redis.Nil) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	keys := make([]service.UserPlatformQuotaKey, 0, len(members))
-	for _, m := range members {
-		k, ok := parseUserPlatformQuotaDirtyMember(m)
-		if !ok {
-			log.Printf("billing_cache: skipping invalid dirty member %q", m)
-			continue
-		}
-		keys = append(keys, k)
-	}
-	return keys, nil
-}
-
-// ReaddDirtyUserPlatformQuotaKeys 将 keys 重新加入脏集（flush 失败时回填）。
-// 通过 pipeline 同时执行 SAdd + Expire，确保 Readd 后脏集具有兜底 TTL。
-// 空切片时直接返回 nil。
-func (c *billingCache) ReaddDirtyUserPlatformQuotaKeys(ctx context.Context, keys []service.UserPlatformQuotaKey) error {
-	if len(keys) == 0 {
-		return nil
-	}
-	dirtyKey := userPlatformQuotaDirtySetKey()
-	members := make([]any, len(keys))
-	for i, k := range keys {
-		members[i] = userPlatformQuotaDirtyMember(k.UserID, k.Platform)
-	}
-	pipe := c.rdb.Pipeline()
-	pipe.SAdd(ctx, dirtyKey, members...)
-	pipe.Expire(ctx, dirtyKey, userPlatformQuotaDirtyTTLSeconds*time.Second)
-	_, err := pipe.Exec(ctx)
-	return err
-}
-
-// BatchGetUserPlatformQuotaCache 通过 Pipeline 批量 HGETALL 获取多个 user×platform 的
-// quota cache。返回切片与 keys 顺序、长度对齐；MISS 或解析失败位置返回 nil。
-func (c *billingCache) BatchGetUserPlatformQuotaCache(ctx context.Context, keys []service.UserPlatformQuotaKey) ([]*service.UserPlatformQuotaCacheEntry, error) {
-	if len(keys) == 0 {
-		return nil, nil
-	}
-	pipe := c.rdb.Pipeline()
-	cmds := make([]*redis.MapStringStringCmd, len(keys))
-	for i, k := range keys {
-		cmds[i] = pipe.HGetAll(ctx, userPlatformQuotaCacheKey(k.UserID, k.Platform))
-	}
-	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
-		return nil, err
-	}
-	results := make([]*service.UserPlatformQuotaCacheEntry, len(keys))
-	for i, cmd := range cmds {
-		m, err := cmd.Result()
-		if err != nil {
-			if !errors.Is(err, redis.Nil) {
-				log.Printf("billing_cache: BatchGet HGETALL cmd[%d] failed: %v (skip, self-heal)", i, err)
-			}
-			// 单个命令失败 → 对应位置 nil，继续
-			continue
-		}
-		results[i] = parseUserPlatformQuotaHash(m)
-	}
-	return results, nil
 }

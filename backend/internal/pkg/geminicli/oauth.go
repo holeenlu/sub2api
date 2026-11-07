@@ -1,11 +1,14 @@
 package geminicli
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/sessionstore"
 	"net/http"
 	"net/url"
 	"os"
@@ -23,11 +26,12 @@ type OAuthConfig struct {
 }
 
 type OAuthSession struct {
-	State        string `json:"state"`
-	CodeVerifier string `json:"code_verifier"`
-	ProxyURL     string `json:"proxy_url,omitempty"`
-	RedirectURI  string `json:"redirect_uri"`
-	ProjectID    string `json:"project_id,omitempty"`
+	Authorization *authz.Lease `json:"authorization,omitempty"`
+	State         string       `json:"state"`
+	CodeVerifier  string       `json:"code_verifier"`
+	ProxyURL      string       `json:"proxy_url,omitempty"`
+	RedirectURI   string       `json:"redirect_uri"`
+	ProjectID     string       `json:"project_id,omitempty"`
 	// TierID is a user-selected fallback tier.
 	// For oauth types that support auto detection (google_one/code_assist), the server will prefer
 	// the detected tier and fall back to TierID when detection fails.
@@ -37,17 +41,16 @@ type OAuthSession struct {
 }
 
 type SessionStore struct {
+	*sessionstore.Lifecycle
 	mu       sync.RWMutex
 	sessions map[string]*OAuthSession
-	stopCh   chan struct{}
 }
 
 func NewSessionStore() *SessionStore {
 	store := &SessionStore{
 		sessions: make(map[string]*OAuthSession),
-		stopCh:   make(chan struct{}),
 	}
-	go store.cleanup()
+	store.Lifecycle = sessionstore.NewLifecycle(5*time.Minute, func(context.Context) { store.cleanup() })
 	return store
 }
 
@@ -76,30 +79,12 @@ func (s *SessionStore) Delete(sessionID string) {
 	delete(s.sessions, sessionID)
 }
 
-func (s *SessionStore) Stop() {
-	select {
-	case <-s.stopCh:
-		return
-	default:
-		close(s.stopCh)
-	}
-}
-
 func (s *SessionStore) cleanup() {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-s.stopCh:
-			return
-		case <-ticker.C:
-			s.mu.Lock()
-			for id, session := range s.sessions {
-				if time.Since(session.CreatedAt) > SessionTTL {
-					delete(s.sessions, id)
-				}
-			}
-			s.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, session := range s.sessions {
+		if time.Since(session.CreatedAt) > SessionTTL {
+			delete(s.sessions, id)
 		}
 	}
 }

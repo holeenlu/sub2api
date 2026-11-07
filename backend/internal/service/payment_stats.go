@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/authz"
+
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
@@ -26,7 +28,7 @@ func (s *PaymentService) GetDashboardStats(ctx context.Context, days int) (*Dash
 
 	paidStatuses := []string{OrderStatusCompleted, OrderStatusPaid, OrderStatusRecharging}
 
-	orders, err := s.entClient.PaymentOrder.Query().
+	orders, err := s.entClient.PaymentOrder.Query().Where(authz.ManagedUserPredicate(ctx, "user_id")).
 		Where(
 			paymentorder.StatusIn(paidStatuses...),
 			paymentorder.PaidAtGTE(since),
@@ -39,7 +41,7 @@ func (s *PaymentService) GetDashboardStats(ctx context.Context, days int) (*Dash
 	st := &DashboardStats{}
 	computeBasicStats(st, orders, todayStart)
 
-	st.PendingOrders, err = s.entClient.PaymentOrder.Query().
+	st.PendingOrders, err = s.entClient.PaymentOrder.Query().Where(authz.ManagedUserPredicate(ctx, "user_id")).
 		Where(paymentorder.StatusEQ(OrderStatusPending)).
 		Count(ctx)
 	if err != nil {

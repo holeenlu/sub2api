@@ -4,12 +4,13 @@ import (
 	"context"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 )
 
 // ScopedAdminUpdateGroupModels 仅更新模型白名单；仓储在锁内重新验证分组和平台。
-func (s *adminServiceImpl) ScopedAdminUpdateGroupModels(ctx context.Context, id int64, cfg GroupModelAllowlist) (*Group, error) {
+func (s *adminServiceImpl) ScopedAdminUpdateGroupModels(ctx context.Context, id int64, cfg catalog.ModelAllowlist) (*Group, error) {
 	if err := s.ValidateSimpleModeGroupOperation(AdminGroupOperationCompositeRoute); err != nil {
 		return nil, err
 	}
@@ -22,14 +23,14 @@ func (s *adminServiceImpl) ScopedAdminUpdateGroupModels(ctx context.Context, id 
 		}
 	}
 	repo, ok := s.groupRepo.(interface {
-		ScopedAdminUpdateGroupModels(context.Context, int64, GroupModelAllowlist) (*Group, error)
+		ScopedAdminUpdateGroupModels(context.Context, int64, catalog.ModelAllowlist) (*Group, error)
 	})
 	if !ok {
 		return nil, infraerrors.ServiceUnavailable("SCOPED_GROUP_MODELS_UNAVAILABLE", "受限分组模型服务不可用")
 	}
-	normalized, err := normalizeGroupModelAllowlist(cfg)
+	normalized, err := catalog.NormalizeModelAllowlist(cfg)
 	if err != nil {
-		return nil, err
+		return nil, infraerrors.BadRequest("INVALID_MODEL_ALLOWLIST", err.Error())
 	}
 	updated, err := repo.ScopedAdminUpdateGroupModels(ctx, id, normalized)
 	if err != nil {

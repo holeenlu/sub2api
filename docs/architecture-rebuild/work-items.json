@@ -1,0 +1,4283 @@
+{
+  "schema_version": 1,
+  "contract_version": "0.4",
+  "planning_baseline": "750d4a16c7adaf558cf2c6ce7101975602832d7b",
+  "scope": "independent_rebuild_branch",
+  "code_development_started": true,
+  "execution_note": "User explicitly requires multi-agent completion of all 36 work packages, then local Docker and page acceptance. No intermediate commit/push. Owners work in non-overlapping write scopes; integrator owns contracts, cross-domain consumers, docs and Git. Accepted slices are not full parent completion.",
+  "status_vocabulary": [
+    "planned",
+    "ready",
+    "in_progress",
+    "review",
+    "accepted",
+    "blocked"
+  ],
+  "shared_file_owner": "integrator_or_explicit_contract_owner",
+  "tasks": [
+    {
+      "id": "WP-00",
+      "title": "实施基线与合同证据冻结",
+      "role": "integrator",
+      "depends_on": [],
+      "status": "accepted",
+      "assignee": "integrator",
+      "claimed_base": "6f48d6ab6fcc29763af84410690530aeaa957403",
+      "contract_version": "0.4",
+      "write_paths": [
+        "docs/architecture-rebuild/BASELINE.md",
+        "docs/architecture-rebuild/source-inventory.json",
+        "docs/architecture-rebuild/READINESS.md"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/server/routes/gateway.go",
+        "docs/GATEWAY_PROTOCOL_LIMITS.md"
+      ],
+      "integration_paths": [],
+      "requirements": [
+        "REQ-01",
+        "REQ-13",
+        "REQ-16",
+        "REQ-17",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-04"
+      ],
+      "outcome": "核对开始实施时的代码、有效客户端合同、夹具来源和数据读者，标明真实证据缺口，不伪造live验收。",
+      "retirement_acceptance": "保留已交付Cloud等修复；不附带上游升级。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "source_verified",
+      "implementation_note": "Reviewed b7b6a440..6f48d6ab release-source changes; no runtime gateway delta. Existing protocol and data evidence gaps remain explicit. Independent branch and frontend ownership recorded in AGENTS."
+    },
+    {
+      "id": "WP-01",
+      "title": "共享值对象与可编译合同",
+      "role": "contract_owner",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "in_progress",
+      "assignee": "integrator",
+      "claimed_base": "6f48d6ab6fcc29763af84410690530aeaa957403",
+      "contract_version": "0.4",
+      "write_paths": [
+        "backend/internal/gateway/model/**",
+        "docs/architecture-rebuild/CONTRACTS.md"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/domain/platforms.go",
+        "backend/internal/service/openai_first_output_timeout.go"
+      ],
+      "integration_paths": [],
+      "requirements": [
+        "REQ-02",
+        "REQ-09",
+        "REQ-18",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-02",
+        "CT-03",
+        "CT-04",
+        "CT-05",
+        "CT-06",
+        "CT-07",
+        "CT-08",
+        "CT-09",
+        "CT-10",
+        "CT-11"
+      ],
+      "outcome": "将CT设计落实为最小Go类型与消费端口，明确零值、单位、资源寿命和依赖，禁止平台分支进入核心。",
+      "retirement_acceptance": "删除本切片被取代的重复类型；不保留v2平行合同。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "first_wave_slices_accepted_parent_incomplete",
+      "implementation_note": "Accepted only explicit first-wave slices; the full package remains in_progress. See IMPLEMENTATION.md for validation and remaining dependencies."
+    },
+    {
+      "id": "WP-02",
+      "title": "纯协议与wire事实",
+      "role": "protocol_worker",
+      "depends_on": [
+        "WP-01"
+      ],
+      "status": "in_progress",
+      "assignee": "protocol_worker",
+      "claimed_base": "6f48d6ab6fcc29763af84410690530aeaa957403",
+      "contract_version": "0.4",
+      "write_paths": [
+        "backend/internal/gateway/protocol/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/pkg/apicompat/**",
+        "backend/internal/pkg/sse/**",
+        "backend/internal/service/openai_cloud_protocol.go"
+      ],
+      "integration_paths": [
+        "backend/internal/pkg/apicompat/**",
+        "backend/internal/pkg/sse/**"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-03",
+        "REQ-07",
+        "REQ-13"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-04"
+      ],
+      "outcome": "原文与facts分离；纯解码/转换及诊断，无网络/存储/token；扩展现有夹具。",
+      "retirement_acceptance": "迁完同一转换规则即删旧解释器，保留有效公开协议。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "first_wave_slices_accepted_parent_incomplete",
+      "implementation_note": "Accepted only explicit first-wave slices; the full package remains in_progress. See IMPLEMENTATION.md for validation and remaining dependencies."
+    },
+    {
+      "id": "WP-03",
+      "title": "授权范围与发送前复核",
+      "role": "access_worker",
+      "depends_on": [
+        "WP-01"
+      ],
+      "status": "in_progress",
+      "assignee": "Nietzsche",
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "backend/internal/access/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/authz/**",
+        "backend/internal/server/middleware/**",
+        "backend/internal/service/scheduler_snapshot_service.go"
+      ],
+      "integration_paths": [
+        "backend/internal/server/middleware/**",
+        "backend/internal/service/scheduler_snapshot_service.go"
+      ],
+      "requirements": [
+        "REQ-04",
+        "REQ-09",
+        "REQ-10",
+        "REQ-13"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-05",
+        "CT-08",
+        "CT-11"
+      ],
+      "outcome": "复用现有身份/RBAC，建立窄scope与撤销校验，排队后变更不能扩大授权。",
+      "retirement_acceptance": "删除重复scope解释；既有authz保留且不复制第二套认证。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支",
+        "按CT-02 bps-failure-recovery-20261027保留Excel授权失败的可信原因：有限刷新、确定缺失/撤销、主授权与独立grant、刷新/存储依赖故障分别处理。新授权不能被旧停用或probe覆盖；与WP-18共同验证TC-ACCESS-04，公共旧service/repository由集成者单写。"
+      ],
+      "evidence_status": "dispatch_and_group_slices_accepted_parent_incomplete",
+      "implementation_note": "Live supplier dispatch plus existing group authorization now consumed from access. Full principal scope, revocation epochs, capacity leases and all asynchronous handoffs still incomplete."
+    },
+    {
+      "id": "WP-04",
+      "title": "调度资格与容量租约",
+      "role": "routing_worker",
+      "depends_on": [
+        "WP-01",
+        "WP-03"
+      ],
+      "status": "in_progress",
+      "assignee": "Nietzsche",
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "backend/internal/gateway/routing/**",
+        "backend/internal/storage/routing/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/service/openai_account_scheduler.go",
+        "backend/internal/service/scheduler_snapshot*",
+        "backend/internal/service/concurrency*"
+      ],
+      "integration_paths": [
+        "backend/internal/service/openai_account_scheduler.go",
+        "backend/internal/service/scheduler_snapshot*",
+        "backend/internal/service/concurrency*"
+      ],
+      "requirements": [
+        "REQ-02",
+        "REQ-04",
+        "REQ-06",
+        "REQ-09",
+        "REQ-15"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-05",
+        "CT-08"
+      ],
+      "outcome": "迁移现有调度策略和资格；亲和、硬绑定、容量租约区分；续期失败与幂等释放明确。",
+      "retirement_acceptance": "旧选号/容量重复决策随入口切换删除，不新设评分算法。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支",
+        "按CT-02 BPS故障分类消费实际账号/模型/端点/共享配额scope；冷却不等于关闭开关，BPS池耗尽不批量停用。有效Retry-After/重置期限不被fallback上限截短，多实例/重启不绕过；覆盖TC-EXEC-02与TC-CONTROL-04。"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-05",
+      "title": "会话归属与owner状态",
+      "role": "session_worker",
+      "depends_on": [
+        "WP-01",
+        "WP-03"
+      ],
+      "status": "in_progress",
+      "assignee": "Aristotle",
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "backend/internal/gateway/session/**",
+        "backend/internal/storage/session/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/service/openai_ws_state_store.go",
+        "backend/internal/service/openai_cloud_session.go",
+        "backend/internal/service/openai_cloud_session_store.go",
+        "backend/internal/pkg/redissession/**"
+      ],
+      "integration_paths": [
+        "backend/internal/service/openai_ws_state_store.go",
+        "backend/internal/service/openai_cloud_session.go",
+        "backend/internal/service/openai_cloud_session_store.go"
+      ],
+      "requirements": [
+        "REQ-04",
+        "REQ-05",
+        "REQ-06",
+        "REQ-13",
+        "REQ-16"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-05",
+        "CT-06"
+      ],
+      "outcome": "显式绑定身份、grant、mode和owner epoch；定义Redis与本地socket边界、跨轮和迟到命令。",
+      "retirement_acceptance": "移除被替代session索引解释；历史读者退出后再决定数据处置。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run",
+      "implementation_note": "Only explicit second-wave slices in progress; full parent contract and dependencies remain incomplete."
+    },
+    {
+      "id": "WP-06",
+      "title": "账务用例与幂等恢复",
+      "role": "billing_worker",
+      "depends_on": [
+        "WP-01"
+      ],
+      "status": "in_progress",
+      "assignee": "Huygens",
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "backend/internal/billing/**",
+        "backend/internal/storage/billing/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/repository/usage_billing*",
+        "backend/internal/service/gateway_usage_billing.go",
+        "backend/internal/service/usage_record_worker_pool.go",
+        "backend/internal/service/openai_gateway_usage.go"
+      ],
+      "integration_paths": [
+        "backend/internal/repository/usage_billing*",
+        "backend/internal/service/gateway_usage_billing.go",
+        "backend/internal/service/usage_record_worker_pool.go"
+      ],
+      "requirements": [
+        "REQ-03",
+        "REQ-08",
+        "REQ-09",
+        "REQ-16"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-07"
+      ],
+      "outcome": "保留PG事务与旧幂等键，明确usage累计/增量、unknown/价格待定、预留/释放和双边费用。",
+      "retirement_acceptance": "旧补扣/并行结算包装清理，不能降低现有持久化保证。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run",
+      "implementation_note": "Reservation lifetime slice only; settlement, durable recovery and all CT-07 invariants remain incomplete."
+    },
+    {
+      "id": "WP-07",
+      "title": "能力与配置快照编译",
+      "role": "catalog_worker",
+      "depends_on": [
+        "WP-01"
+      ],
+      "status": "in_progress",
+      "assignee": "integrator",
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "backend/internal/catalog/**",
+        "backend/internal/storage/catalog/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/domain/platforms.go",
+        "backend/internal/service/openai_cloud_capabilities.go",
+        "backend/internal/service/setting_service.go"
+      ],
+      "integration_paths": [
+        "backend/internal/domain/platforms.go",
+        "backend/internal/service/setting_service.go"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-09",
+        "REQ-15",
+        "REQ-18",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-08"
+      ],
+      "outcome": "以单一平台注册和现有规则编译模式/模型/定价计划，revision并发保存与撤销分离。",
+      "retirement_acceptance": "旧重复能力/价格解释器随消费者迁移退出。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "model_allowlist_slice_accepted_parent_incomplete",
+      "implementation_note": "One catalog owner for existing model allowlist, Codex alias/effort/image identity rules; 401 earlier tests/subcases passed. The previously skipped scoped-admin PostgreSQL case subsequently passed on isolated PG18; see .local/rebuild-wave4/scoped-postgres-test.json. Full immutable policy snapshots, capabilities and configuration revocation remain incomplete."
+    },
+    {
+      "id": "WP-08",
+      "title": "统一执行与恢复引擎",
+      "role": "execution_worker",
+      "depends_on": [
+        "WP-01",
+        "WP-03",
+        "WP-04",
+        "WP-05",
+        "WP-06",
+        "WP-07"
+      ],
+      "status": "in_progress",
+      "assignee": "integrator",
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "backend/internal/gateway/execution/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/handler/failover_loop.go",
+        "backend/internal/service/gateway_turn_recovery.go",
+        "backend/internal/service/openai_first_output_timeout.go"
+      ],
+      "integration_paths": [
+        "backend/internal/handler/failover_loop.go",
+        "backend/internal/service/gateway_turn_recovery.go",
+        "backend/internal/service/openai_first_output_timeout.go"
+      ],
+      "requirements": [
+        "REQ-02",
+        "REQ-03",
+        "REQ-04",
+        "REQ-05",
+        "REQ-06",
+        "REQ-08",
+        "REQ-18"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-02",
+        "CT-03",
+        "CT-05",
+        "CT-06",
+        "CT-07",
+        "CT-08"
+      ],
+      "outcome": "落实中央预算、prepare/permit/open、三轴状态、取消排空和唯一恢复决策；保持平台无关。",
+      "retirement_acceptance": "原有预算账号/BPS/健康耦合字段和重复循环随切片删除。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run",
+      "implementation_note": "Only explicit second-wave slices in progress; full parent contract and dependencies remain incomplete."
+    },
+    {
+      "id": "WP-09",
+      "title": "原生OpenAI单次尝试",
+      "role": "native_worker",
+      "depends_on": [
+        "WP-01",
+        "WP-02",
+        "WP-07"
+      ],
+      "status": "in_progress",
+      "assignee": "integrator/Nietzsche/Aristotle",
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "backend/internal/providers/openai/native/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/service/openai_gateway_forward.go",
+        "backend/internal/service/openai_ws_forwarder*",
+        "backend/internal/service/openai_ws_http_bridge.go"
+      ],
+      "integration_paths": [
+        "backend/internal/service/openai_gateway_forward.go",
+        "backend/internal/service/openai_ws_forwarder*",
+        "backend/internal/service/openai_ws_http_bridge.go"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-02",
+        "REQ-03",
+        "REQ-05",
+        "REQ-07",
+        "REQ-13"
+      ],
+      "contracts": [
+        "CT-03",
+        "CT-04",
+        "CT-06"
+      ],
+      "outcome": "支持现有原生HTTP/SSE/WS/bridge语义，一次调用一个grant一次生成发送，不暗含业务failover。 包括其既有Chat/Messages转换、Responses compact/input_tokens、Embeddings与alpha/search；能力由真实路由/账号合同限制。",
+      "retirement_acceptance": "迁移真实转发能力；旧native外壳和重复模式判断同切片删除。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run",
+      "implementation_note": "Native single-attempt adapter and strict prepared/send contract under implementation; not yet integrated or accepted."
+    },
+    {
+      "id": "WP-10",
+      "title": "原生Responses完整切片集成",
+      "role": "integrator",
+      "depends_on": [
+        "WP-08",
+        "WP-09"
+      ],
+      "status": "in_progress",
+      "assignee": "integrator",
+      "claimed_base": "673c53c130c11cf1cb55abf0722dd996bf79eded",
+      "contract_version": "0.4",
+      "write_paths": [
+        "backend/internal/ingress/openai/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/handler/openai_gateway_handler.go",
+        "backend/internal/server/routes/gateway.go"
+      ],
+      "integration_paths": [
+        "backend/internal/handler/openai_gateway_handler.go",
+        "backend/internal/server/routes/gateway.go",
+        "backend/cmd/server/wire.go",
+        "backend/internal/service/wire.go",
+        "backend/internal/handler/wire.go"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-02",
+        "REQ-03",
+        "REQ-04",
+        "REQ-05",
+        "REQ-06",
+        "REQ-07",
+        "REQ-08",
+        "REQ-13",
+        "REQ-18"
+      ],
+      "contracts": [
+        "CT-02",
+        "CT-03",
+        "CT-04",
+        "CT-05",
+        "CT-06",
+        "CT-07"
+      ],
+      "outcome": "将HTTP/SSE/客户端WS首轮及工具后续轮全部接入新主链，单写路径与失败结算同时验收。",
+      "retirement_acceptance": "删除本切片旧执行循环、context键和临时注册，不留第二个原生引擎。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "http_native_dispatch_integration_in_progress",
+      "implementation_note": "Responses/Messages/ChatCompletions HTTP roots now preserve original principal/model/security IP, real acquired user/account capacity, shared budget, sealed native Prepare/Admit/Open, and explicit same-budget pre-request TLS recovery. Targeted consumer validation is pending; WS, opaque modes, full execution-state integration and end-to-end acceptance remain incomplete."
+    },
+    {
+      "id": "WP-11",
+      "title": "BPS模式适配",
+      "role": "bps_worker",
+      "depends_on": [
+        "WP-02",
+        "WP-05",
+        "WP-06",
+        "WP-10"
+      ],
+      "status": "in_progress",
+      "assignee": "Halley/integrator",
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "backend/internal/providers/openai/bps/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/service/openai_excel_bps*",
+        "backend/internal/service/basispoints/**",
+        "docs/bps/REQUIREMENTS.md"
+      ],
+      "integration_paths": [
+        "backend/internal/service/openai_excel_bps*",
+        "backend/internal/service/basispoints/**"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-03",
+        "REQ-05",
+        "REQ-07",
+        "REQ-08",
+        "REQ-13"
+      ],
+      "contracts": [
+        "CT-03",
+        "CT-04",
+        "CT-06",
+        "CT-07",
+        "CT-02",
+        "CT-05",
+        "CT-08",
+        "CT-10"
+      ],
+      "outcome": "保留Excel-only、工具目录/图片附件阶段和历史；按2026-10-27用户修订取消同一BPS执行中的原生回退，统一账号故障停用、授权有限刷新/重新授权、429按scope冷却及条件恢复，转换与执行边界分开。",
+      "retirement_acceptance": "删除重复授权/预算/结算包装及BPS到Native的单请求/候选耗尽兜底、专属状态和失效断言；保留403持久停用与条件恢复，不恢复退役worker。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支",
+        "按CONTRACTS.md#bps-routing-20261027覆盖TC-EXEC-02/TC-SESSION-04：当前BPS请求不回退原生，403仍关闭开关，后续独立请求按更新配置路由，旧续接不自动迁移；实现与验收未完成前不得标accepted。",
+        "按CONTRACTS.md#bps-failure-recovery-20261027在生成/上传/压缩/repair/probe实际消费者统一失败事实；账号403、授权失效、429局部冷却、请求拒绝/模型权限和池耗尽分开，adapter不私自处罚账号或开启第二恢复循环。"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-12",
+      "title": "Cloud模式适配",
+      "role": "cloud_worker",
+      "depends_on": [
+        "WP-02",
+        "WP-05",
+        "WP-06",
+        "WP-10"
+      ],
+      "status": "in_progress",
+      "assignee": "Huygens/integrator",
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "backend/internal/providers/openai/cloud/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/service/openai_cloud*",
+        "backend/internal/service/openai_ws_cloud_bridge.go"
+      ],
+      "integration_paths": [
+        "backend/internal/service/openai_cloud*",
+        "backend/internal/service/openai_ws_cloud_bridge.go"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-03",
+        "REQ-05",
+        "REQ-07",
+        "REQ-08",
+        "REQ-13",
+        "REQ-16"
+      ],
+      "contracts": [
+        "CT-03",
+        "CT-04",
+        "CT-06",
+        "CT-07"
+      ],
+      "outcome": "迁移最新parser/ingress/capability plan、thread/turn、owner、工具轮、usage archive/ACK，沿用原生OAuth权威。",
+      "retirement_acceptance": "移除Cloud内部总调度和重复控制，不回退本轮之前的解析器。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-13",
+      "title": "Anthropic与TypeSafe适配",
+      "role": "anthropic_worker",
+      "depends_on": [
+        "WP-02",
+        "WP-10"
+      ],
+      "status": "in_progress",
+      "assignee": "main_integrator/Rawls",
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "backend/internal/providers/anthropic/**",
+        "backend/internal/providers/typesafe/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/service/gateway_service.go",
+        "backend/internal/handler/gateway_handler.go"
+      ],
+      "integration_paths": [
+        "backend/internal/service/gateway_service.go",
+        "backend/internal/handler/gateway_handler.go"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-02",
+        "REQ-03",
+        "REQ-07",
+        "REQ-08",
+        "REQ-13"
+      ],
+      "contracts": [
+        "CT-03",
+        "CT-04",
+        "CT-07"
+      ],
+      "outcome": "保留Messages/systemone真实能力、指纹和既有降智/Fable安全语义，共用中央执行。",
+      "retirement_acceptance": "旧平台handler执行循环在集成后删除，协议能力不凭名称归并。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "actual_migration_audit_completed; implementation_pending_validation",
+      "latest_verified_remaining_scope": [
+        "Anthropic Messages and CC/Responses handlers still own selection/forward/usage loops; SystemOne is separately verified."
+      ]
+    },
+    {
+      "id": "WP-14",
+      "title": "Gemini与Antigravity适配",
+      "role": "gemini_worker",
+      "depends_on": [
+        "WP-02",
+        "WP-10"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "backend/internal/providers/gemini/**",
+        "backend/internal/providers/antigravity/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/service/gemini*",
+        "backend/internal/service/antigravity*",
+        "backend/internal/handler/gemini*"
+      ],
+      "integration_paths": [
+        "backend/internal/service/gemini*",
+        "backend/internal/service/antigravity*",
+        "backend/internal/handler/gemini*"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-03",
+        "REQ-05",
+        "REQ-07",
+        "REQ-08",
+        "REQ-14"
+      ],
+      "contracts": [
+        "CT-03",
+        "CT-04",
+        "CT-06",
+        "CT-07",
+        "CT-09"
+      ],
+      "outcome": "保留两族实际模型、生成、缓存/续接等支持面，能力差异明确，不硬塞OpenAI DTO。",
+      "retirement_acceptance": "旧局部调度和重复转换按能力逐条退出。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run",
+      "latest_verified_remaining_scope": [
+        "Gemini generate/streamGenerate and compatibility service still have nested retry loops.",
+        "Antigravity retry loop and handler failover not yet replaced.",
+        "cachedContents create/patch/delete retain handler-owned mutation and billing."
+      ]
+    },
+    {
+      "id": "WP-15",
+      "title": "其余OpenAI兼容供给适配",
+      "role": "compatible_worker",
+      "depends_on": [
+        "WP-02",
+        "WP-10"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "backend/internal/providers/grok/http/**",
+        "backend/internal/providers/kimi/**",
+        "backend/internal/providers/zhipu/**",
+        "backend/internal/providers/deepseek/**",
+        "backend/internal/providers/minimax/**",
+        "backend/internal/providers/opencode/**",
+        "backend/internal/providers/commandcode/**",
+        "backend/internal/providers/cline/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/service/openai_gateway_forward.go",
+        "backend/internal/domain/platforms.go"
+      ],
+      "integration_paths": [
+        "backend/internal/service/openai_gateway_forward.go",
+        "backend/internal/domain/platforms.go"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-02",
+        "REQ-07",
+        "REQ-08",
+        "REQ-09",
+        "REQ-13"
+      ],
+      "contracts": [
+        "CT-03",
+        "CT-04",
+        "CT-07",
+        "CT-08"
+      ],
+      "outcome": "逐供给保存真实授权/模型/价格/协议差异，普通平台新增不进入执行内核分支。",
+      "retirement_acceptance": "原大service中的对应平台特判随能力迁出删除。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run",
+      "latest_verified_remaining_scope": [
+        "Non-OpenAI text platforms bypass bindNativeHTTPDispatch; callback loop still serves Grok/Kimi/Zhipu/DeepSeek/MiniMax/OpenCode/CommandCode/Cline."
+      ]
+    },
+    {
+      "id": "WP-16",
+      "title": "媒体 文件与异步作业",
+      "role": "jobs_worker",
+      "depends_on": [
+        "WP-02",
+        "WP-06",
+        "WP-10"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "backend/internal/gateway/jobs/**",
+        "backend/internal/providers/media_jobs/**",
+        "backend/internal/storage/jobs/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/server/routes/gateway.go",
+        "docs/ASYNC_IMAGE_TASKS.md",
+        "backend/internal/service/image_task.go",
+        "backend/internal/handler/image_task_handler.go",
+        "backend/internal/service/seedance.go",
+        "backend/internal/handler/seedance.go",
+        "backend/internal/service/batch_image_provider.go"
+      ],
+      "integration_paths": [
+        "backend/internal/server/routes/gateway.go",
+        "backend/internal/service/batch_image*",
+        "backend/internal/handler/openai_image*",
+        "backend/internal/service/image_task.go",
+        "backend/internal/handler/image_task_handler.go",
+        "backend/internal/service/seedance.go",
+        "backend/internal/handler/seedance.go",
+        "backend/internal/service/batch_image_provider.go"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-03",
+        "REQ-08",
+        "REQ-13",
+        "REQ-14",
+        "REQ-16"
+      ],
+      "contracts": [
+        "CT-03",
+        "CT-04",
+        "CT-07",
+        "CT-09"
+      ],
+      "outcome": "区分提交/轮询/取消/取产物授权，图片视频batch和文件归属/出口保护，费用按任务事实结算。",
+      "retirement_acceptance": "旧作业副作用路径逐项退出，禁止父子任务重复计费。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run",
+      "latest_verified_remaining_scope": [
+        "Synchronous Images handler controls retries and usage.",
+        "Async image run uses copied Gin context and httptest recorder; job ownership not yet unified.",
+        "Batch/file/video/Seedance need operation-specific authorization, cancel and billing ownership integration."
+      ]
+    },
+    {
+      "id": "WP-17",
+      "title": "双向实时与语音",
+      "role": "realtime_worker",
+      "depends_on": [
+        "WP-03",
+        "WP-04",
+        "WP-05",
+        "WP-06",
+        "WP-10"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "backend/internal/gateway/realtime/**",
+        "backend/internal/providers/grok/realtime/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/server/routes/gateway.go",
+        "backend/internal/service/openai_live*",
+        "backend/internal/service/grok_audio*",
+        "backend/internal/handler/grok_audio*",
+        "backend/internal/handler/openai_live.go"
+      ],
+      "integration_paths": [
+        "backend/internal/server/routes/gateway.go",
+        "backend/internal/service/openai_live*",
+        "backend/internal/service/grok_audio*",
+        "backend/internal/handler/grok_audio*",
+        "backend/internal/handler/openai_live.go"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-03",
+        "REQ-04",
+        "REQ-05",
+        "REQ-06",
+        "REQ-08",
+        "REQ-13",
+        "REQ-14"
+      ],
+      "contracts": [
+        "CT-02",
+        "CT-05",
+        "CT-06",
+        "CT-07",
+        "CT-09"
+      ],
+      "outcome": "连接与turn分离，用户并发、voice归属、双向背压、取消排空与真实usage明确。",
+      "retirement_acceptance": "旧实时独立容量/权限解释器随切换删除。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run",
+      "latest_verified_remaining_scope": [
+        "Grok Voice/Realtime and Codex Live retain dedicated loops and lifecycle; shared capacity alone is not completion."
+      ]
+    },
+    {
+      "id": "WP-18",
+      "title": "BPS Cloud垂直切片集成",
+      "role": "integrator",
+      "depends_on": [
+        "WP-11",
+        "WP-12"
+      ],
+      "status": "in_progress",
+      "assignee": "main_integrator",
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "backend/internal/ingress/modes/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/handler/openai_gateway_handler.go",
+        "backend/internal/service/openai_gateway_forward.go"
+      ],
+      "integration_paths": [
+        "backend/internal/handler/openai_gateway_handler.go",
+        "backend/internal/service/openai_gateway_forward.go",
+        "backend/internal/server/routes/gateway.go",
+        "backend/cmd/server/wire.go",
+        "backend/internal/service/wire.go",
+        "backend/internal/service/openai_excel_oauth.go",
+        "backend/internal/service/account_excel_bps_403_marker.go",
+        "backend/internal/repository/account_repo_excel_bps.go",
+        "backend/internal/repository/account_repo_excel_bps_recovery.go",
+        "backend/internal/repository/account_repo_excel_credentials.go"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-02",
+        "REQ-03",
+        "REQ-04",
+        "REQ-05",
+        "REQ-06",
+        "REQ-07",
+        "REQ-08",
+        "REQ-13",
+        "REQ-18"
+      ],
+      "contracts": [
+        "CT-02",
+        "CT-03",
+        "CT-04",
+        "CT-05",
+        "CT-06",
+        "CT-07",
+        "CT-08",
+        "CT-10",
+        "CT-11"
+      ],
+      "outcome": "与native同一引擎集成两模式，覆盖工具后续轮/断流/图片/ACK/跨实例归属。",
+      "retirement_acceptance": "模式选择由唯一计划负责；按2026-10-27合同删除同一BPS执行转Native的全部入口和候选边，保留403停用后的独立新请求路由及条件恢复；删除旧重试和临时模式开关。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支",
+        "HTTP JSON/SSE、WS和实际BPS兼容消费者共用禁止当前执行原生回退的规则；重新选号、重读已停用开关或改传输不得绕过；403停用后的新请求及旧续接分别按CT-02修订验收。",
+        "集成故障状态的条件写入与发布：关闭账号BPS、需重新授权、局部冷却分别表达，复用原存储/host。覆盖独立Excel grant与分组变化、系统关闭后管理员再次关闭、确认丢失读回、多实例claim及长Retry-After；TC-EXEC-02/ACCESS-04/CONTROL-04/HOST-06尚无本轮运行证据。"
+      ],
+      "evidence_status": "repaired_slices_passed_on_deployed_snapshot; subsequent_bridge_changes_pending",
+      "completion_audit_note": "2026-10-27: shared plan, stale BPS editing, OAuth transaction, seven-shape handler cases, Cloud numeric/publication and Native/WS rejection fixes passed scoped validation and deployed as 3a0638612e05. Other chat actively owns later cross-flow/mode-index/Cloud budget transfer; not complete parent acceptance."
+    },
+    {
+      "id": "WP-19",
+      "title": "其他平台与操作完整集成",
+      "role": "integrator",
+      "depends_on": [
+        "WP-13",
+        "WP-14",
+        "WP-15",
+        "WP-16",
+        "WP-17",
+        "WP-18"
+      ],
+      "status": "in_progress",
+      "assignee": "main_integrator/Rawls",
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "backend/internal/ingress/providers/**",
+        "backend/internal/ingress/jobs/**",
+        "backend/internal/ingress/realtime/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/server/routes/gateway.go",
+        "backend/internal/handler/wire.go"
+      ],
+      "integration_paths": [
+        "backend/internal/server/routes/gateway.go",
+        "backend/internal/handler/wire.go",
+        "backend/internal/service/wire.go",
+        "backend/cmd/server/wire.go"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-02",
+        "REQ-03",
+        "REQ-04",
+        "REQ-06",
+        "REQ-07",
+        "REQ-08",
+        "REQ-13",
+        "REQ-14",
+        "REQ-18"
+      ],
+      "contracts": [
+        "CT-02",
+        "CT-03",
+        "CT-04",
+        "CT-05",
+        "CT-07",
+        "CT-09"
+      ],
+      "outcome": "逐项核对全部已登记操作与控制入口，确认唯一有副作用执行路径。",
+      "retirement_acceptance": "删除对应旧路由执行者和过渡注册，保留必要外部路径本身。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "actual_migration_audit_completed; implementation_pending_validation",
+      "latest_verified_remaining_scope": [
+        "Embeddings and Alpha Search retain independent handler loops and usage submission.",
+        "Integrate WP13-18 real consumers before deleting common FailoverState adapters."
+      ]
+    },
+    {
+      "id": "WP-20",
+      "title": "控制面与领域配置",
+      "role": "control_worker",
+      "depends_on": [
+        "WP-03",
+        "WP-06",
+        "WP-07"
+      ],
+      "status": "in_progress",
+      "assignee": "integrator/Aristotle",
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "backend/internal/control/**",
+        "backend/internal/storage/control/**"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/server/routes/admin.go",
+        "backend/internal/server/routes/user.go",
+        "backend/internal/server/routes/vendor.go",
+        "backend/internal/payment/**",
+        "backend/internal/service/setting_service.go",
+        "backend/internal/service/brand.go",
+        "backend/internal/handler/dto/settings.go"
+      ],
+      "integration_paths": [
+        "backend/internal/server/routes/admin.go",
+        "backend/internal/server/routes/user.go",
+        "backend/internal/server/routes/vendor.go",
+        "backend/internal/service/setting_service.go",
+        "backend/internal/service/brand.go",
+        "backend/internal/handler/dto/settings.go"
+      ],
+      "requirements": [
+        "REQ-04",
+        "REQ-09",
+        "REQ-10",
+        "REQ-11",
+        "REQ-15",
+        "REQ-16",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-05",
+        "CT-07",
+        "CT-08",
+        "CT-11"
+      ],
+      "outcome": "复用authz/payment/现有用户体系，类型化管理/供应商命令、revision与权威校验，保持外部API。 复用site_name/site_logo/api_base_url等字段，区分公开品牌与部署/管理/上游地址，迁移旧有效fallback。",
+      "retirement_acceptance": "删除重复Group/Account解释器，未受影响模块保持。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支",
+        "按CT-02 BPS故障分类与FRONTEND_HANDOFF定义唯一服务端状态投影，区分自动停用/需重新授权/局部冷却/探测中；管理员在系统已关闭后明确关闭必须撤回旧恢复资格。只扩展有真实消费者的现有配置/DTO，不预建平行状态服务。"
+      ],
+      "evidence_status": "not_run",
+      "latest_verified_remaining_scope": [
+        "Unified model-management APIs, CAS, runtime consumers and local functional tests completed in WP-20-UNIFIED-MODEL-MANAGEMENT-20261028. Other control-plane scope remains governed by its own work items."
+      ]
+    },
+    {
+      "id": "WP-21",
+      "title": "前端跨域装配与最终收敛",
+      "role": "frontend_worker",
+      "depends_on": [
+        "WP-20",
+        "WP-28",
+        "WP-29",
+        "WP-30",
+        "WP-31",
+        "WP-32",
+        "WP-33",
+        "WP-34",
+        "WP-35"
+      ],
+      "status": "in_progress",
+      "assignee": "frontend_session",
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "frontend/src/app/**"
+      ],
+      "legacy_read_paths": [
+        "frontend/src/api/**",
+        "frontend/src/types/**",
+        "frontend/src/router/**",
+        "frontend/src/config/**",
+        "frontend/src/config/brand.ts",
+        "frontend/index.html",
+        "frontend/vite.config.ts",
+        "frontend/public/logo.svg"
+      ],
+      "integration_paths": [
+        "frontend/src/main.ts",
+        "frontend/src/App.vue",
+        "frontend/src/router/**",
+        "frontend/src/api/**",
+        "frontend/src/types/**",
+        "frontend/src/views/**",
+        "frontend/src/components/**",
+        "frontend/src/stores/**",
+        "frontend/src/composables/**",
+        "frontend/src/utils/**",
+        "frontend/src/constants/**",
+        "frontend/src/i18n/**",
+        "frontend/src/config/**",
+        "frontend/src/content/**",
+        "frontend/src/style.css",
+        "frontend/src/styles/**",
+        "frontend/index.html",
+        "frontend/vite.config.ts",
+        "frontend/public/logo.svg",
+        "frontend/.eslintrc.cjs",
+        "frontend/package.json",
+        "frontend/pnpm-lock.yaml"
+      ],
+      "requirements": [
+        "REQ-10",
+        "REQ-11",
+        "REQ-13",
+        "REQ-17",
+        "REQ-18",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-08",
+        "CT-11"
+      ],
+      "outcome": "按FRONTEND_ARCHITECTURE完成Account/Group/Settings/dashboard/vendor跨域组合、route/nav与所有消费者收敛；WP-28至35各切片先接入并清理，WP-21负责最终跨域验收而非延迟第一次接线。",
+      "retirement_acceptance": "同步清理旧表单状态、props、API、locale；共享业务不分裂为三套。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支",
+        "按用户2026-10-25要求，在本机Docker的前后端环境逐页执行实际操作验收，记录route/角色/镜像及证据；未具备外部依赖或人工确认的页面保持blocked/not_run，不以测试或单页冒烟替代。"
+      ],
+      "evidence_status": "9f7b1da_source_built_and_deployed; owner_new_fixes_and_full_page_acceptance_in_progress",
+      "implementation_note": "Frontend implementation and test source frozen at d4d7bfae71c4ccbca8d36302cf9d709c1bd06a1544e8ff95579d6315be7809f5; MAIN verified all 1948 files and both UI images. Code review/development checks complete; 752 real-page/system cases remain not_run pending backend freeze. See FRONTEND_IMPLEMENTATION.md for full-run-plus-targeted-repair evidence. 2026-10-26 read-only review reopened FR-01 actual vendor guard wiring ; FR-04 role-inventory finding was subsequently withdrawn after the original frozen input proved roles were already correct. Source freeze is not implementation acceptance; frontend owner retains frontend/**.",
+      "deliverables": [
+        "Account/Group/Settings/dashboard/vendor跨领域组合与统一导航",
+        "根桶/旧API/store/locale最终消费者和删除核验"
+      ],
+      "evidence_refs": [
+        "AT-19",
+        "AT-20",
+        "AT-30",
+        "AT-31",
+        "AT-38",
+        "AT-39",
+        "AT-42",
+        "AT-43",
+        "AT-44",
+        "AT-45",
+        "AT-46",
+        "AT-47",
+        "AT-48",
+        "AT-49",
+        "AT-50",
+        "AT-51",
+        "AT-52",
+        "AT-53",
+        "AT-54",
+        "AT-55"
+      ],
+      "implementation_ready": false,
+      "frontend_source_sha256": "d4d7bfae71c4ccbca8d36302cf9d709c1bd06a1544e8ff95579d6315be7809f5",
+      "verification_record": "frontend/.local/rebuild-validation.json",
+      "runtime_acceptance": "not_run",
+      "development_evidence_reference": "frontend/.local/rebuild-validation.json",
+      "maintenance_sync": "pending_owner_current_main_comparison",
+      "completion_audit_note": "2026-10-27: owner2018-file 9f7b1da manifest verified; single full Vitest6401 passed, five static checks and both builds passed. UI images deployed with Docker source4563951d. Owner resumed UI fixes; 753-case/92-page/51-panel full computer acceptance incomplete. Main login smoke does not mark complete catalog cases passed."
+    },
+    {
+      "id": "WP-22",
+      "title": "Host与观测边界",
+      "role": "host_worker",
+      "depends_on": [
+        "WP-01"
+      ],
+      "status": "in_progress",
+      "assignee": "Sagan",
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "backend/internal/host/**",
+        "backend/internal/observability/**"
+      ],
+      "legacy_read_paths": [
+        "backend/cmd/server/wire.go",
+        "backend/internal/service/wire.go",
+        "backend/internal/securityaudit/**"
+      ],
+      "integration_paths": [
+        "backend/cmd/server/wire.go",
+        "backend/internal/service/wire.go"
+      ],
+      "requirements": [
+        "REQ-03",
+        "REQ-08",
+        "REQ-12",
+        "REQ-13",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-10"
+      ],
+      "outcome": "显式Start/Drain/Stop与worker/插件/连接池生命周期，区分可丢观测和必须持久化事实。",
+      "retirement_acceptance": "消除目标构造器隐式Start，不删有效安全审计能力。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支",
+        "BPS恢复沿现有host持久claim+有界probe，统一故障事实保留Retry-After，有限退避/并发/截止与Stop/Join；需重新授权不自动生成probe，200/EOF不算完整成功，探测费用有明确归属且不重放用户请求。TC-HOST-06及跨实例TC-CONTROL-04验证。"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-23",
+      "title": "生命周期及控制装配集成",
+      "role": "integrator",
+      "depends_on": [
+        "WP-19",
+        "WP-20",
+        "WP-22",
+        "WP-27"
+      ],
+      "status": "in_progress",
+      "assignee": "host_worker",
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [],
+      "legacy_read_paths": [
+        "backend/cmd/server/wire.go",
+        "backend/internal/server/router.go"
+      ],
+      "integration_paths": [
+        "backend/cmd/server/wire.go",
+        "backend/internal/server/router.go",
+        "backend/internal/handler/wire.go",
+        "backend/internal/service/wire.go"
+      ],
+      "requirements": [
+        "REQ-03",
+        "REQ-10",
+        "REQ-12",
+        "REQ-13",
+        "REQ-15",
+        "REQ-18",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-08",
+        "CT-10",
+        "CT-11"
+      ],
+      "outcome": "按依赖顺序装配控制与运行模块，生成Wire并核对shutdown、错误处理和全部注册。 整合中性项目身份、网站设置与部署参数，复核旧有效配置/挂载，不保留品牌源码分叉。",
+      "retirement_acceptance": "删除旧隐式启动和不再使用的provider set，不保留空壳。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "root_lifetime_integration_in_progress",
+      "implementation_note": "Root Wire/Application lifecycle integration is owned by Sagan. Subscription callback now consumes the context-aware returned handle. Cloud actor/RPC and native WS pool drain/join work runs in disjoint delegated slices; full ordered shutdown and final generated Wire remain pending acceptance.",
+      "latest_verified_remaining_scope": [
+        "Application Lifetime and payment/balance fixes are present; final job/realtime producer integration and shutdown matrix remain."
+      ]
+    },
+    {
+      "id": "WP-24",
+      "title": "全功能旧路径与数据读者收敛",
+      "role": "integrator",
+      "depends_on": [
+        "WP-19",
+        "WP-21",
+        "WP-23"
+      ],
+      "status": "in_progress",
+      "assignee": "integrator",
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "docs/architecture-rebuild/retirement-record.md"
+      ],
+      "legacy_read_paths": [],
+      "integration_paths": [
+        "backend/internal/service/**",
+        "backend/internal/handler/**",
+        "frontend/src/**",
+        "backend/.golangci.yml"
+      ],
+      "requirements": [
+        "REQ-01",
+        "REQ-13",
+        "REQ-16",
+        "REQ-18",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-02",
+        "CT-03",
+        "CT-04",
+        "CT-05",
+        "CT-06",
+        "CT-07",
+        "CT-08",
+        "CT-09",
+        "CT-10",
+        "CT-11"
+      ],
+      "outcome": "按功能核对旧新名称、注册、调用、持久化读者与schema，证明无重复执行核心；保留项有依据和退出条件。",
+      "retirement_acceptance": "退休清单覆盖源码、配置、数据读者、UI和测试；不擅删生产数据或历史迁移。 核对广告/赞助、品牌编译fallback和专属资产，不删除LICENSE/NOTICE或必要来源。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run",
+      "implementation_note": "User explicitly requested deletion of unused legacy files/code. Only enumerated early retirement slices are active; remaining live modules wait for their replacement and full package dependencies remain."
+    },
+    {
+      "id": "WP-25",
+      "title": "整体风险与真实证据验收",
+      "role": "reviewer",
+      "depends_on": [
+        "WP-24"
+      ],
+      "status": "in_progress",
+      "assignee": "integrator",
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "docs/architecture-rebuild/READINESS.md",
+        "docs/architecture-rebuild/evidence/**"
+      ],
+      "legacy_read_paths": [
+        "docs/architecture-rebuild/VALIDATION.md",
+        "docs/architecture-rebuild/TEST_CASES.md",
+        "docs/architecture-rebuild/test-cases.json",
+        "frontend/tests/acceptance/README.md"
+      ],
+      "integration_paths": [],
+      "requirements": [
+        "REQ-01",
+        "REQ-02",
+        "REQ-03",
+        "REQ-04",
+        "REQ-05",
+        "REQ-06",
+        "REQ-07",
+        "REQ-08",
+        "REQ-09",
+        "REQ-10",
+        "REQ-11",
+        "REQ-12",
+        "REQ-13",
+        "REQ-14",
+        "REQ-15",
+        "REQ-16",
+        "REQ-17",
+        "REQ-18",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-02",
+        "CT-03",
+        "CT-04",
+        "CT-05",
+        "CT-06",
+        "CT-07",
+        "CT-08",
+        "CT-09",
+        "CT-10",
+        "CT-11"
+      ],
+      "outcome": "按受影响风险补验真实DB/Redis/多实例/协议，区分单测mock与真实上游；记录性能比较和剩余验收限制。",
+      "retirement_acceptance": "不新增验证平台，不拿生产未验收冒充整体通过。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支",
+        "按用户2026-10-25要求，在本机Docker的前后端环境逐页执行实际操作验收，记录route/角色/镜像及证据；未具备外部依赖或人工确认的页面保持blocked/not_run，不以测试或单页冒烟替代。",
+        "2026-10-25新增测试准备：以TEST_CASES/test-cases.json及前端tests/acceptance唯一目录执行；开发期仅定向回归，全部开发完成且源/镜像冻结后再整套测试。用例编写不代表本父WP的完整用例已执行或验收通过。",
+        "用户最新要求：全部开发完成并部署同源本机Docker后，使用电脑工具按系统与前端用例实际测试；生成报告，依据缺陷自行修复、更新受影响镜像、复测与影响回归，直到可执行必需用例完成且已发现缺陷闭环。不得把blocked/not_run计passed，不逐轮等待用户再次授权修复。",
+        "用户点名四会话已发布修复逐项对照固定main实际行为；遗漏补齐并经当前重构源码/镜像复验，维护分支通过数不得直接转记",
+        "以四维护会话为切入点逐边界复核全部后端gateway，区分维护遗漏/计划未完成/新缺陷；每项有触发、真实消费者、副作用、处理及有效回归"
+      ],
+      "evidence_status": "scoped_protocol_storage_and_docker_api_passed; full_joint_acceptance_pending",
+      "test_case_catalog": [
+        "docs/architecture-rebuild/TEST_CASES.md",
+        "docs/architecture-rebuild/test-cases.json",
+        "frontend/tests/acceptance/README.md"
+      ],
+      "test_report": "docs/architecture-rebuild/TEST_REPORT.md",
+      "execution_tool": "user-specified Computer Use / cua_repl",
+      "maintenance_fix_audit": "docs/architecture-rebuild/MAINTENANCE_FIX_AUDIT.md",
+      "gateway_review": "docs/architecture-rebuild/GATEWAY_REVIEW.md",
+      "completion_audit_note": "2026-10-27: affected final gateway436, final plan/readmission37, storage31/1/14 groups passed in recorded boundaries; no overlap sums. Deployed exact API13/13 passed; actual computer login rejection/redirect smoke recorded. Subsequent active backend/frontend inputs and full page/external acceptance remain open; no final acceptance or Git publication.",
+      "latest_verified_remaining_scope": [
+        "Full protocol/cross-instance acceptance and frontend page matrix not complete; per-slice passes remain scoped."
+      ]
+    },
+    {
+      "id": "WP-26",
+      "title": "独立重构分支交付与开发收尾",
+      "role": "release_integrator",
+      "depends_on": [
+        "WP-25"
+      ],
+      "status": "planned",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "docs/architecture-rebuild/IMPLEMENTATION.md",
+        "docs/architecture-rebuild/FRONTEND_HANDOFF.md"
+      ],
+      "legacy_read_paths": [
+        "docs/CHANGE_DELIVERY.md"
+      ],
+      "integration_paths": [],
+      "requirements": [
+        "REQ-16",
+        "REQ-17",
+        "REQ-18",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-10",
+        "CT-11"
+      ],
+      "outcome": "After all frontend/backend development and local Docker/per-page acceptance, consolidate and publish one joint rebuild commit. No interim commits/pushes, maintenance-brand propagation, releases or production deployment.",
+      "retirement_acceptance": "清理本任务临时资源，保留必要交付恢复与精简证据，保护并行工作。",
+      "acceptance": [
+        "本任务涉及的CONTRACTS语义和VALIDATION需求场景有实际结果；未运行项明确标记",
+        "检查依赖方向、退出资源释放、旧路径清理和有效外部/数据合同",
+        "提交templates/HANDOFF.md要求的实际diff、增删统计与证据，禁止自行发布正式分支"
+      ],
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-27",
+      "title": "统一项目身份与部署品牌参数",
+      "role": "deployment_worker",
+      "depends_on": [
+        "WP-01",
+        "WP-20",
+        "WP-21",
+        "WP-22"
+      ],
+      "status": "in_progress",
+      "assignee": "deployment_worker",
+      "claimed_base": "6f48d6ab6fcc29763af84410690530aeaa957403",
+      "contract_version": "0.4",
+      "write_paths": [
+        "deploy/api/**",
+        "Dockerfile",
+        ".dockerignore"
+      ],
+      "legacy_read_paths": [
+        "backend/internal/service/brand.go",
+        "frontend/src/config/brand.ts",
+        "deploy/docker-compose.yml",
+        "scripts/release/channels.json",
+        "scripts/release/plan.py"
+      ],
+      "integration_paths": [
+        "backend/internal/service/brand.go",
+        "frontend/src/shared/config/project.ts",
+        "frontend/index.html",
+        "frontend/vite.config.ts"
+      ],
+      "requirements": [
+        "REQ-09",
+        "REQ-11",
+        "REQ-13",
+        "REQ-15",
+        "REQ-16",
+        "REQ-17",
+        "REQ-18",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-01",
+        "CT-08",
+        "CT-10",
+        "CT-11"
+      ],
+      "outcome": "按BRANDING统一项目名sub2api，将镜像/容器/项目等部署输入中性化并复用网站设置；保留有效设置和卷挂载，验证同角色同版本制品可用于两个独立品牌配置。独立制品通过重新构建部署更新，不恢复已删除的维护版自更新来源。",
+      "retirement_acceptance": "替换既有模板而非另建平行部署器；旧品牌变量/fallback/硬编码与广告专属内容有退出证据，许可/来源、持久身份及当前发布权限保留。",
+      "acceptance": [
+        "AT-38至AT-43的静态、设置、制品和部署风险有分级证据，未运行项明确标记",
+        "公共身份/构建/渠道由集成者串行接入WP-23，之后才进入WP-24/25验收，不在WP-26发布后补代码",
+        "按HANDOFF提交实际diff、CS规则证据、旧变量和挂载迁移记录；不自行发镜像、部署或迁移生产数据"
+      ],
+      "evidence_status": "first_wave_slices_accepted_parent_incomplete",
+      "implementation_note": "Accepted only explicit first-wave slices; the full package remains in_progress. See IMPLEMENTATION.md for validation and remaining dependencies.",
+      "latest_verified_remaining_scope": [
+        "Same-role same-version two-brand profile runtime acceptance remains; main/vendor roles are not two brands."
+      ]
+    },
+    {
+      "id": "WP-28",
+      "title": "前端基础合同与技术机制",
+      "role": "frontend_foundation_worker",
+      "depends_on": [
+        "WP-01"
+      ],
+      "status": "review",
+      "assignee": "frontend_session",
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "frontend/src/shared/**"
+      ],
+      "legacy_read_paths": [
+        "frontend/src/api/client.ts",
+        "frontend/src/api/tokenRefresh.ts",
+        "frontend/src/api/adminUIRequest.ts",
+        "frontend/src/stores/app.ts",
+        "frontend/src/main.ts",
+        "frontend/src/App.vue"
+      ],
+      "integration_paths": [
+        "frontend/src/main.ts",
+        "frontend/src/App.vue",
+        "frontend/src/router/**",
+        "frontend/.eslintrc.cjs",
+        "frontend/src/i18n/index.ts",
+        "frontend/src/style.css"
+      ],
+      "requirements": [
+        "REQ-10",
+        "REQ-11",
+        "REQ-13",
+        "REQ-18",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-08",
+        "CT-11"
+      ],
+      "outcome": "产出可编译的共享HTTP/旋转令牌协调机制、session读取合同、PublicSettings投影与UI/i18n基础；只迁移已存在技术行为，不要求身份业务提前实现。作为基础依赖可在定向验证后accepted；运行入口切换与WP-29身份纵向切片一起完成，不单独发布未接入的新架构。",
+      "retirement_acceptance": "按FRONTEND_ARCHITECTURE迁移表列出旧文件/字段/状态/locale/测试读者；单域路由由集成者接入即清理，跨域共享旧文件在最后消费者退出时统一删除，不长期保留双路径。",
+      "acceptance": [
+        "对应FR/AT、CT-11与CS规则有实际证据，未运行项明确标记",
+        "基础包按可编译接口及定向行为证据accepted，不等于运行切换；app/身份接线归WP-29集成者完成且删除被替代旧技术入口，WP-21核对最终无遗留。",
+        "交接公开出口、route/locale贡献、依赖消费者、实际增删、删除清单和资源记录；不自行推送正式分支"
+      ],
+      "evidence_status": "not_run",
+      "deliverables": [
+        "可编译shared HTTP/session/config/UI/i18n技术机制与公开合同",
+        "定向机制证据及与WP-29共同运行切换的接线清单"
+      ],
+      "evidence_refs": [
+        "AT-44",
+        "AT-45",
+        "AT-46",
+        "AT-52",
+        "AT-53",
+        "AT-54"
+      ],
+      "reviewer": null,
+      "review_mode": null,
+      "handoff_record": null,
+      "implementation_note": "Frontend implementation and test source frozen at d4d7bfae71c4ccbca8d36302cf9d709c1bd06a1544e8ff95579d6315be7809f5; MAIN verified all 1948 files and both UI images. Code review/development checks complete; 752 real-page/system cases remain not_run pending backend freeze. See FRONTEND_IMPLEMENTATION.md for full-run-plus-targeted-repair evidence.",
+      "implementation_ready": true,
+      "frontend_source_sha256": "d4d7bfae71c4ccbca8d36302cf9d709c1bd06a1544e8ff95579d6315be7809f5",
+      "verification_record": "frontend/.local/rebuild-validation.json",
+      "runtime_acceptance": "not_run",
+      "development_evidence_reference": "frontend/.local/rebuild-validation.json",
+      "maintenance_sync": "pending_owner_current_main_comparison"
+    },
+    {
+      "id": "WP-29",
+      "title": "身份安全与API Key切片",
+      "role": "frontend_identity_worker",
+      "depends_on": [
+        "WP-20",
+        "WP-28"
+      ],
+      "status": "review",
+      "assignee": "frontend_session",
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "frontend/src/features/identity/**",
+        "frontend/src/features/keys/**"
+      ],
+      "legacy_read_paths": [
+        "frontend/src/stores/auth.ts",
+        "frontend/src/api/auth.ts",
+        "frontend/src/api/keys.ts",
+        "frontend/src/views/auth/**",
+        "frontend/src/components/auth/**",
+        "frontend/src/components/keys/**"
+      ],
+      "integration_paths": [
+        "frontend/src/app/bootstrap.ts",
+        "frontend/src/app/lifecycle/**",
+        "frontend/src/app/router/**",
+        "frontend/src/stores/auth.ts",
+        "frontend/src/api/auth.ts",
+        "frontend/src/api/keys.ts",
+        "frontend/src/views/auth/**",
+        "frontend/src/components/auth/**",
+        "frontend/src/components/keys/**"
+      ],
+      "requirements": [
+        "REQ-10",
+        "REQ-11",
+        "REQ-13",
+        "REQ-18"
+      ],
+      "contracts": [
+        "CT-08",
+        "CT-11"
+      ],
+      "outcome": "保留session/多tab刷新、登录/MFA/passkey/OAuth、RBAC字段与step-up、Key完整切片；登录动作经app注入共享设施，旧身份路径同次替换。",
+      "retirement_acceptance": "按FRONTEND_ARCHITECTURE迁移表列出旧文件/字段/状态/locale/测试读者；单域路由由集成者接入即清理，跨域共享旧文件在最后消费者退出时统一删除，不长期保留双路径。",
+      "acceptance": [
+        "对应FR/AT、CT-11与CS规则有实际证据，未运行项明确标记",
+        "worker只写分配领域；共享接线/旧路径删除由指定integrator串行处理并属于本包完成条件，未接入不能accepted",
+        "交接公开出口、route/locale贡献、依赖消费者、实际增删、删除清单和资源记录；不自行推送正式分支"
+      ],
+      "evidence_status": "not_run",
+      "deliverables": [
+        "身份安全/Key领域API、页面、状态及公开出口",
+        "首次运行切片、旧身份/刷新入口删除与session隔离证据"
+      ],
+      "evidence_refs": [
+        "AT-45",
+        "AT-46",
+        "AT-48",
+        "AT-51",
+        "AT-55"
+      ],
+      "reviewer": null,
+      "review_mode": null,
+      "handoff_record": null,
+      "implementation_note": "Frontend implementation and test source frozen at d4d7bfae71c4ccbca8d36302cf9d709c1bd06a1544e8ff95579d6315be7809f5; MAIN verified all 1948 files and both UI images. Code review/development checks complete; 752 real-page/system cases remain not_run pending backend freeze. See FRONTEND_IMPLEMENTATION.md for full-run-plus-targeted-repair evidence.",
+      "implementation_ready": true,
+      "frontend_source_sha256": "d4d7bfae71c4ccbca8d36302cf9d709c1bd06a1544e8ff95579d6315be7809f5",
+      "verification_record": "frontend/.local/rebuild-validation.json",
+      "runtime_acceptance": "not_run",
+      "development_evidence_reference": "frontend/.local/rebuild-validation.json",
+      "maintenance_sync": "pending_owner_current_main_comparison"
+    },
+    {
+      "id": "WP-30",
+      "title": "资源凭据与访问策略切片",
+      "role": "frontend_resources_worker",
+      "depends_on": [
+        "WP-20",
+        "WP-28"
+      ],
+      "status": "review",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "frontend/src/features/resources/**",
+        "frontend/src/features/access-policy/**"
+      ],
+      "legacy_read_paths": [
+        "frontend/src/components/account/**",
+        "frontend/src/views/admin/AccountsView.vue",
+        "frontend/src/views/admin/GroupsView.vue",
+        "frontend/src/views/admin/ProxiesView.vue",
+        "frontend/src/views/admin/RiskControlView.vue",
+        "frontend/src/api/admin/accounts.ts"
+      ],
+      "integration_paths": [
+        "frontend/src/app/compositions/account-editor/**",
+        "frontend/src/app/compositions/group-editor/**",
+        "frontend/src/app/router/**",
+        "frontend/src/components/account/**",
+        "frontend/src/views/admin/AccountsView.vue",
+        "frontend/src/views/admin/GroupsView.vue"
+      ],
+      "requirements": [
+        "REQ-09",
+        "REQ-10",
+        "REQ-11",
+        "REQ-13",
+        "REQ-18"
+      ],
+      "contracts": [
+        "CT-08",
+        "CT-11"
+      ],
+      "outcome": "账号/凭据/出口和准入范围独立owner；交付窄面板及单域切片，Group组合待WP-31面板到位再由集成者原子接线；无浏览器调度器。",
+      "retirement_acceptance": "按FRONTEND_ARCHITECTURE迁移表列出旧文件/字段/状态/locale/测试读者；单域路由由集成者接入即清理，跨域共享旧文件在最后消费者退出时统一删除，不长期保留双路径。",
+      "acceptance": [
+        "对应FR/AT、CT-11与CS规则有实际证据，未运行项明确标记",
+        "worker只写分配领域；共享接线/旧路径删除由指定integrator串行处理并属于本包完成条件，未接入不能accepted",
+        "交接公开出口、route/locale贡献、依赖消费者、实际增删、删除清单和资源记录；不自行推送正式分支"
+      ],
+      "evidence_status": "not_run",
+      "deliverables": [
+        "资源凭据/访问策略领域页面与窄组合面板",
+        "六维配置、supplier scope和旧巨型表单消费者清单"
+      ],
+      "evidence_refs": [
+        "AT-44",
+        "AT-45",
+        "AT-47",
+        "AT-48",
+        "AT-50",
+        "AT-51",
+        "AT-55"
+      ],
+      "reviewer": null,
+      "review_mode": null,
+      "handoff_record": null,
+      "implementation_ready": true,
+      "frontend_source_sha256": "d4d7bfae71c4ccbca8d36302cf9d709c1bd06a1544e8ff95579d6315be7809f5",
+      "verification_record": "frontend/.local/rebuild-validation.json",
+      "runtime_acceptance": "not_run",
+      "development_evidence_reference": "frontend/.local/rebuild-validation.json",
+      "implementation_note": "Frontend implementation and test source frozen at d4d7bfae71c4ccbca8d36302cf9d709c1bd06a1544e8ff95579d6315be7809f5; MAIN verified all 1948 files and both UI images. Code review/development checks complete; 752 real-page/system cases remain not_run pending backend freeze. See FRONTEND_IMPLEMENTATION.md for full-run-plus-targeted-repair evidence.",
+      "maintenance_sync": "pending_owner_current_main_comparison"
+    },
+    {
+      "id": "WP-31",
+      "title": "目录定价与订阅切片",
+      "role": "frontend_catalog_billing_worker",
+      "depends_on": [
+        "WP-20",
+        "WP-28"
+      ],
+      "status": "review",
+      "assignee": "frontend_catalog_billing_worker",
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "frontend/src/features/catalog/**",
+        "frontend/src/features/pricing/**",
+        "frontend/src/features/subscriptions/**"
+      ],
+      "legacy_read_paths": [
+        "frontend/src/constants/platformCatalog.ts",
+        "frontend/src/views/ModelPlazaView.vue",
+        "frontend/src/views/admin/ChannelsView.vue",
+        "frontend/src/stores/subscriptions.ts"
+      ],
+      "integration_paths": [
+        "frontend/src/app/compositions/group-editor/**",
+        "frontend/src/app/router/**",
+        "frontend/src/constants/platformCatalog.ts",
+        "frontend/src/stores/subscriptions.ts",
+        "frontend/src/views/ModelPlazaView.vue"
+      ],
+      "requirements": [
+        "REQ-08",
+        "REQ-09",
+        "REQ-11",
+        "REQ-15",
+        "REQ-18"
+      ],
+      "contracts": [
+        "CT-08",
+        "CT-11"
+      ],
+      "outcome": "按CT-08展示六维能力与unknown，价格/订阅只消费服务端权威语义；公开组合面板，禁止重写计价或模型权限。",
+      "retirement_acceptance": "按FRONTEND_ARCHITECTURE迁移表列出旧文件/字段/状态/locale/测试读者；单域路由由集成者接入即清理，跨域共享旧文件在最后消费者退出时统一删除，不长期保留双路径。",
+      "acceptance": [
+        "对应FR/AT、CT-11与CS规则有实际证据，未运行项明确标记",
+        "worker只写分配领域；共享接线/旧路径删除由指定integrator串行处理并属于本包完成条件，未接入不能accepted",
+        "交接公开出口、route/locale贡献、依赖消费者、实际增删、删除清单和资源记录；不自行推送正式分支"
+      ],
+      "evidence_status": "not_run",
+      "deliverables": [
+        "目录/价格/订阅领域查询、命令与组合面板",
+        "unknown展示、原子Group提交和服务端权威语义证据"
+      ],
+      "evidence_refs": [
+        "AT-44",
+        "AT-47",
+        "AT-50",
+        "AT-51",
+        "AT-55"
+      ],
+      "reviewer": null,
+      "review_mode": null,
+      "handoff_record": null,
+      "implementation_note": "Frontend implementation and test source frozen at d4d7bfae71c4ccbca8d36302cf9d709c1bd06a1544e8ff95579d6315be7809f5; MAIN verified all 1948 files and both UI images. Code review/development checks complete; 752 real-page/system cases remain not_run pending backend freeze. See FRONTEND_IMPLEMENTATION.md for full-run-plus-targeted-repair evidence.",
+      "implementation_ready": true,
+      "frontend_source_sha256": "d4d7bfae71c4ccbca8d36302cf9d709c1bd06a1544e8ff95579d6315be7809f5",
+      "verification_record": "frontend/.local/rebuild-validation.json",
+      "runtime_acceptance": "not_run",
+      "development_evidence_reference": "frontend/.local/rebuild-validation.json",
+      "maintenance_sync": "pending_owner_current_main_comparison"
+    },
+    {
+      "id": "WP-32",
+      "title": "支付订单与使用量切片",
+      "role": "frontend_payments_usage_worker",
+      "depends_on": [
+        "WP-20",
+        "WP-28"
+      ],
+      "status": "review",
+      "assignee": "frontend_payments_usage_worker",
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "frontend/src/features/payments/**",
+        "frontend/src/features/usage/**"
+      ],
+      "legacy_read_paths": [
+        "frontend/src/stores/payment.ts",
+        "frontend/src/api/payment.ts",
+        "frontend/src/api/usage.ts",
+        "frontend/src/api/usageExport.ts",
+        "frontend/src/views/user/PaymentView.vue",
+        "frontend/src/utils/usageMetrics.ts"
+      ],
+      "integration_paths": [
+        "frontend/src/app/router/**",
+        "frontend/src/stores/payment.ts",
+        "frontend/src/views/user/PaymentView.vue",
+        "frontend/src/api/payment.ts",
+        "frontend/src/api/usage.ts",
+        "frontend/src/api/usageExport.ts"
+      ],
+      "requirements": [
+        "REQ-08",
+        "REQ-10",
+        "REQ-11",
+        "REQ-13",
+        "REQ-18"
+      ],
+      "contracts": [
+        "CT-08",
+        "CT-11"
+      ],
+      "outcome": "支付回跳/轮询有独立owner，未知提交不重放；usage保留金额单位、TPS及lower_bound/unknown，用户/admin/vendor读模型作用域明确。",
+      "retirement_acceptance": "按FRONTEND_ARCHITECTURE迁移表列出旧文件/字段/状态/locale/测试读者；单域路由由集成者接入即清理，跨域共享旧文件在最后消费者退出时统一删除，不长期保留双路径。",
+      "acceptance": [
+        "对应FR/AT、CT-11与CS规则有实际证据，未运行项明确标记",
+        "worker只写分配领域；共享接线/旧路径删除由指定integrator串行处理并属于本包完成条件，未接入不能accepted",
+        "交接公开出口、route/locale贡献、依赖消费者、实际增删、删除清单和资源记录；不自行推送正式分支"
+      ],
+      "evidence_status": "not_run",
+      "deliverables": [
+        "支付/订单/usage领域流程和作用域查询",
+        "支付回跳、未知提交、指标/精度与旧轮询退出证据"
+      ],
+      "evidence_refs": [
+        "AT-45",
+        "AT-49",
+        "AT-50",
+        "AT-51",
+        "AT-55"
+      ],
+      "reviewer": null,
+      "review_mode": null,
+      "handoff_record": null,
+      "implementation_note": "Frontend implementation and test source frozen at d4d7bfae71c4ccbca8d36302cf9d709c1bd06a1544e8ff95579d6315be7809f5; MAIN verified all 1948 files and both UI images. Code review/development checks complete; 752 real-page/system cases remain not_run pending backend freeze. See FRONTEND_IMPLEMENTATION.md for full-run-plus-targeted-repair evidence.",
+      "implementation_ready": true,
+      "frontend_source_sha256": "d4d7bfae71c4ccbca8d36302cf9d709c1bd06a1544e8ff95579d6315be7809f5",
+      "verification_record": "frontend/.local/rebuild-validation.json",
+      "runtime_acceptance": "not_run",
+      "development_evidence_reference": "frontend/.local/rebuild-validation.json",
+      "maintenance_sync": "pending_owner_current_main_comparison"
+    },
+    {
+      "id": "WP-33",
+      "title": "运行观测与异步作业切片",
+      "role": "frontend_operations_jobs_worker",
+      "depends_on": [
+        "WP-20",
+        "WP-28"
+      ],
+      "status": "review",
+      "assignee": "frontend_operations_jobs_worker",
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "frontend/src/features/operations/**",
+        "frontend/src/features/jobs/**"
+      ],
+      "legacy_read_paths": [
+        "frontend/src/views/admin/ops/**",
+        "frontend/src/features/prompt-audit/**",
+        "frontend/src/features/channel-monitor-v2/**",
+        "frontend/src/views/user/BatchImageGuideView.vue",
+        "frontend/src/api/batchImage.ts"
+      ],
+      "integration_paths": [
+        "frontend/src/app/router/**",
+        "frontend/src/features/prompt-audit/**",
+        "frontend/src/features/channel-monitor-v2/**",
+        "frontend/src/views/admin/ops/**",
+        "frontend/src/views/user/BatchImageGuideView.vue"
+      ],
+      "requirements": [
+        "REQ-03",
+        "REQ-08",
+        "REQ-11",
+        "REQ-12",
+        "REQ-13",
+        "REQ-14",
+        "REQ-18"
+      ],
+      "contracts": [
+        "CT-08",
+        "CT-11"
+      ],
+      "outcome": "监控/审计/提示审查与作业状态分别建模；operation/attempt/usage事实只读，订阅取消不伪装服务端任务终止。",
+      "retirement_acceptance": "按FRONTEND_ARCHITECTURE迁移表列出旧文件/字段/状态/locale/测试读者；单域路由由集成者接入即清理，跨域共享旧文件在最后消费者退出时统一删除，不长期保留双路径。",
+      "acceptance": [
+        "对应FR/AT、CT-11与CS规则有实际证据，未运行项明确标记",
+        "worker只写分配领域；共享接线/旧路径删除由指定integrator串行处理并属于本包完成条件，未接入不能accepted",
+        "交接公开出口、route/locale贡献、依赖消费者、实际增删、删除清单和资源记录；不自行推送正式分支"
+      ],
+      "evidence_status": "not_run",
+      "deliverables": [
+        "观测/审计/提示审查和异步作业领域页面",
+        "执行事实投影、轮询取消、动态注册与旧monitor收敛证据"
+      ],
+      "evidence_refs": [
+        "AT-45",
+        "AT-50",
+        "AT-51",
+        "AT-54",
+        "AT-55"
+      ],
+      "reviewer": null,
+      "review_mode": null,
+      "handoff_record": null,
+      "implementation_note": "Frontend implementation and test source frozen at d4d7bfae71c4ccbca8d36302cf9d709c1bd06a1544e8ff95579d6315be7809f5; MAIN verified all 1948 files and both UI images. Code review/development checks complete; 752 real-page/system cases remain not_run pending backend freeze. See FRONTEND_IMPLEMENTATION.md for full-run-plus-targeted-repair evidence.",
+      "implementation_ready": true,
+      "frontend_source_sha256": "d4d7bfae71c4ccbca8d36302cf9d709c1bd06a1544e8ff95579d6315be7809f5",
+      "verification_record": "frontend/.local/rebuild-validation.json",
+      "runtime_acceptance": "not_run",
+      "development_evidence_reference": "frontend/.local/rebuild-validation.json",
+      "maintenance_sync": "pending_owner_current_main_comparison"
+    },
+    {
+      "id": "WP-34",
+      "title": "供应商关系与结算切片",
+      "role": "frontend_supply_worker",
+      "depends_on": [
+        "WP-20",
+        "WP-28"
+      ],
+      "status": "review",
+      "assignee": null,
+      "claimed_base": null,
+      "contract_version": "0.4",
+      "write_paths": [
+        "frontend/src/features/supply/**"
+      ],
+      "legacy_read_paths": [
+        "frontend/src/features/vendor/**",
+        "frontend/src/views/vendor/**"
+      ],
+      "integration_paths": [
+        "frontend/src/app/compositions/vendor-portal/**",
+        "frontend/src/app/router/**",
+        "frontend/src/features/vendor/**",
+        "frontend/src/views/vendor/**"
+      ],
+      "requirements": [
+        "REQ-08",
+        "REQ-10",
+        "REQ-11",
+        "REQ-13",
+        "REQ-18"
+      ],
+      "contracts": [
+        "CT-08",
+        "CT-11"
+      ],
+      "outcome": "保留供应商层级、aggregate/children/readOnly和双边结算；本包交付供应商独有关系/结算切片，复用资源/usage的最终门户装配由WP-21依赖所有公开出口后完成。",
+      "retirement_acceptance": "按FRONTEND_ARCHITECTURE迁移表列出旧文件/字段/状态/locale/测试读者；单域路由由集成者接入即清理，跨域共享旧文件在最后消费者退出时统一删除，不长期保留双路径。",
+      "acceptance": [
+        "对应FR/AT、CT-11与CS规则有实际证据，未运行项明确标记",
+        "worker只写分配领域；共享接线/旧路径删除由指定integrator串行处理并属于本包完成条件，未接入不能accepted",
+        "交接公开出口、route/locale贡献、依赖消费者、实际增删、删除清单和资源记录；不自行推送正式分支"
+      ],
+      "evidence_status": "not_run",
+      "deliverables": [
+        "供应商关系/授权/往来结算独有领域切片",
+        "上下级/aggregate/children/readOnly与后续门户装配合同"
+      ],
+      "evidence_refs": [
+        "AT-45",
+        "AT-48",
+        "AT-51",
+        "AT-55"
+      ],
+      "reviewer": null,
+      "review_mode": null,
+      "handoff_record": null,
+      "implementation_ready": true,
+      "frontend_source_sha256": "d4d7bfae71c4ccbca8d36302cf9d709c1bd06a1544e8ff95579d6315be7809f5",
+      "verification_record": "frontend/.local/rebuild-validation.json",
+      "runtime_acceptance": "not_run",
+      "development_evidence_reference": "frontend/.local/rebuild-validation.json",
+      "implementation_note": "Frontend implementation and test source frozen at d4d7bfae71c4ccbca8d36302cf9d709c1bd06a1544e8ff95579d6315be7809f5; MAIN verified all 1948 files and both UI images. Code review/development checks complete; 752 real-page/system cases remain not_run pending backend freeze. See FRONTEND_IMPLEMENTATION.md for full-run-plus-targeted-repair evidence.",
+      "maintenance_sync": "pending_owner_current_main_comparison"
+    },
+    {
+      "id": "WP-35",
+      "title": "网站品牌与系统设置切片",
+      "role": "frontend_site_system_worker",
+      "depends_on": [
+        "WP-20",
+        "WP-28"
+      ],
+      "status": "review",
+      "assignee": "frontend_site_system_worker",
+      "claimed_base": "shared codex/sub2api-rebuild worktree",
+      "contract_version": "0.4",
+      "write_paths": [
+        "frontend/src/features/site/**",
+        "frontend/src/features/system/**"
+      ],
+      "legacy_read_paths": [
+        "frontend/src/views/admin/SettingsView.vue",
+        "frontend/src/views/setup/**",
+        "frontend/src/components/home/**",
+        "frontend/src/content/docs/**",
+        "frontend/src/config/brand.ts"
+      ],
+      "integration_paths": [
+        "frontend/src/app/compositions/settings/**",
+        "frontend/src/app/router/**",
+        "frontend/src/config/brand.ts",
+        "frontend/src/i18n/**",
+        "frontend/src/content/docs/**",
+        "frontend/src/views/admin/SettingsView.vue",
+        "frontend/public/logo.svg",
+        "frontend/index.html"
+      ],
+      "requirements": [
+        "REQ-10",
+        "REQ-11",
+        "REQ-15",
+        "REQ-17",
+        "REQ-18",
+        "REQ-19"
+      ],
+      "contracts": [
+        "CT-08",
+        "CT-11"
+      ],
+      "outcome": "网站设置复用PublicSettings，首页/公告/文档/法律/系统分属领域；设置分段保存有冲突语义，广告与专属文案资产退出，来源许可保留。",
+      "retirement_acceptance": "按FRONTEND_ARCHITECTURE迁移表列出旧文件/字段/状态/locale/测试读者；单域路由由集成者接入即清理，跨域共享旧文件在最后消费者退出时统一删除，不长期保留双路径。",
+      "acceptance": [
+        "对应FR/AT、CT-11与CS规则有实际证据，未运行项明确标记",
+        "worker只写分配领域；共享接线/旧路径删除由指定integrator串行处理并属于本包完成条件，未接入不能accepted",
+        "交接公开出口、route/locale贡献、依赖消费者、实际增删、删除清单和资源记录；不自行推送正式分支"
+      ],
+      "evidence_status": "not_run",
+      "deliverables": [
+        "网站内容/品牌/系统设置领域切片与设置面板",
+        "首屏/URL隔离/并发保存/广告资产退出与许可保留证据"
+      ],
+      "evidence_refs": [
+        "AT-47",
+        "AT-51",
+        "AT-52",
+        "AT-53",
+        "AT-55"
+      ],
+      "reviewer": null,
+      "review_mode": null,
+      "handoff_record": null,
+      "implementation_note": "Frontend implementation and test source frozen at d4d7bfae71c4ccbca8d36302cf9d709c1bd06a1544e8ff95579d6315be7809f5; MAIN verified all 1948 files and both UI images. Code review/development checks complete; 752 real-page/system cases remain not_run pending backend freeze. See FRONTEND_IMPLEMENTATION.md for full-run-plus-targeted-repair evidence.",
+      "claim_thread": "01a1724c-fb82-7522-99e2-5afff24bbaf6",
+      "implementation_ready": true,
+      "frontend_source_sha256": "d4d7bfae71c4ccbca8d36302cf9d709c1bd06a1544e8ff95579d6315be7809f5",
+      "verification_record": "frontend/.local/rebuild-validation.json",
+      "runtime_acceptance": "not_run",
+      "development_evidence_reference": "frontend/.local/rebuild-validation.json",
+      "maintenance_sync": "pending_owner_current_main_comparison"
+    }
+  ],
+  "runtime_behavior_revision": "ce58a16ee67305575a704cef304b9c2b1959cb75",
+  "coding_standard": {
+    "version": "1.3",
+    "document": "CODING_STANDARDS.md",
+    "scope": "new and actually modified code; no unrelated repository-wide rewrite",
+    "review": "record applicable CS rules, checks and narrowly justified exceptions in HANDOFF"
+  },
+  "required_reading": [
+    "REQUIREMENTS.md",
+    "CONTRACTS.md",
+    "CODING_STANDARDS.md",
+    "COLLABORATION.md",
+    "BRANDING.md"
+  ],
+  "brand_contract": {
+    "document": "BRANDING.md",
+    "project_name": "sub2api",
+    "target": "single codebase and role artifact; deployment parameters plus runtime site settings",
+    "implementation_status": "planned",
+    "current_branch_policy": "single independent rebuild branch; maintenance branches remain separate"
+  },
+  "implementation_baseline": "6f48d6ab6fcc29763af84410690530aeaa957403",
+  "development_branch": "NewAPI",
+  "frontend_handoff": {
+    "owner": "frontend_session",
+    "branch": "NewAPI",
+    "write_paths": [
+      "frontend/**"
+    ],
+    "status": "owner_checkpoint_deployed; subsequent_fixes_and_page_acceptance_in_progress",
+    "integration_rule": "One project in the common worktree; frontend owner provides explicit source/evidence handoff. Git index is integrator-owned; do not stage or publish until complete joint development, Docker tests and every-page interaction acceptance.",
+    "evidence_note": "Owner 7c67dd 2068-file ops-node checkpoint; MAIN independently verified manifest/actual role image IDs and live-first browser refresh. Full page and model-management backend acceptance incomplete.",
+    "active_worktree": "/Users/luhonglin/.codex/worktrees/architecture-rebuild/sub2api",
+    "git_index_owner": "backend_integrator",
+    "previous_staging_worktree": "/Users/luhonglin/.codex/worktrees/b889/sub2api",
+    "active_work_packages": [
+      "WP-28",
+      "WP-29",
+      "WP-31",
+      "WP-32",
+      "WP-33",
+      "WP-35"
+    ],
+    "pending_review_note": "Clean manual acceptance Docker environment, fresh admin only; old fixtures and their runtime verification are historical. User is reviewing this frozen checkpoint; do not replace running images during manual acceptance.",
+    "runtime_acceptance": "User requires local Docker frontend+backend and per-page real interaction acceptance; synthetic frontend-only API checks are insufficient.",
+    "historical_first_wave": {
+      "source_commit": "737fd177d30679a573995f6ad9b9314467ccb3f4",
+      "integration_commit": "18853316238485e373a1113feee782549169bd03",
+      "verified_frontend_tree": "d786178e800e85b0dd7e3d36540e25625bf17d89",
+      "code_checkpoint": "2d32cd0ea6c7c3defdaf866ef8a58701ee4adc93"
+    },
+    "current_handoff": "frontend/.local/ops-node-priority-20261027/HANDOFF.md",
+    "current_docker_receipt": ".local/manual-acceptance-20261027/smoke-report.json"
+  },
+  "work_slices": [
+    {
+      "id": "WP-01-BUDGET",
+      "parent": "WP-01",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "accepted",
+      "assignee": "integrator",
+      "write_paths": [
+        "backend/internal/gateway/model/**",
+        "backend/internal/gateway/execution/**",
+        "backend/internal/service/openai_first_output_timeout.go",
+        "backend/internal/service/gateway_turn_recovery.go",
+        "backend/internal/service/openai_account_scheduler.go",
+        "backend/internal/service/ops_upstream_context.go",
+        "backend/internal/service/*_test.go",
+        "backend/.golangci.yml",
+        "backend/internal/service/scheduler_health_cohort.go"
+      ],
+      "scope": "Extract actual attempt counters and immutable recovery target identities; integrate consumers and remove replaced counters. Not the full execution engine.",
+      "note": "Only exact affected budget assertions in test files; unrelated tests and other worker update/brand tests excluded.",
+      "evidence": "IMPLEMENTATION.md#验证证据",
+      "reviewer": "Linnaeus (static review of budget extraction and consumers)"
+    },
+    {
+      "id": "WP-02-SSE",
+      "parent": "WP-02",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "accepted",
+      "assignee": "Harvey",
+      "write_paths": [
+        "backend/internal/gateway/protocol/sse/**",
+        "backend/internal/pkg/sse/**"
+      ],
+      "scope": "Move existing pure SSE implementation and tests without semantic change. Existing SSE API supplies this independent slice contract; integrator changes imports.",
+      "evidence": "IMPLEMENTATION.md#验证证据"
+    },
+    {
+      "id": "WP-27-API",
+      "parent": "WP-27",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "accepted",
+      "assignee": "Pascal",
+      "write_paths": [
+        "Dockerfile",
+        ".dockerignore",
+        "deploy/api/**"
+      ],
+      "scope": "Standalone API binary image and isolated compose from this branch. Does not claim full branding, control or UI completion.",
+      "evidence": "IMPLEMENTATION.md#验证证据"
+    },
+    {
+      "id": "WP-27-IDENTITY",
+      "parent": "WP-27",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "accepted",
+      "assignee": "Archimedes",
+      "write_paths": [
+        "backend/internal/service/brand.go",
+        "backend/internal/service/brand_test.go",
+        "backend/internal/service/update_service.go",
+        "backend/internal/service/update_service_test.go",
+        "backend/internal/service/update_service_rebuild_test.go",
+        "backend/internal/service/setting_public.go",
+        "backend/internal/service/setting_features.go",
+        "backend/internal/service/update_release_channel_test.go",
+        "backend/internal/projectinfo/**",
+        "backend/internal/pkg/logger/options.go",
+        "backend/internal/pkg/logger/options_test.go",
+        "backend/internal/config/config.go",
+        "backend/internal/config/config_test.go"
+      ],
+      "scope": "Neutral backend defaults and development-build update isolation; preserves persisted website settings.",
+      "evidence": "IMPLEMENTATION.md#验证证据",
+      "integration_owner": "integrator"
+    },
+    {
+      "id": "WP-24-UPDATE",
+      "parent": "WP-24",
+      "depends_on": [
+        "WP-27-IDENTITY"
+      ],
+      "status": "accepted",
+      "assignee": "Hubble",
+      "scope": "Remove dormant self-update/rollback/Compose updater code and exclusive cache/routes/tests; preserve version-sync shared GitHub facilities and readable build metadata.",
+      "integration_owner": "integrator",
+      "integration_paths": [
+        "backend/internal/authz/routes.go",
+        "backend/internal/pkg/adminaccess/catalog.go",
+        "backend/internal/server/middleware/vendor_origin_test.go",
+        "backend/internal/handler/admin/openai_oauth_handler.go",
+        "backend/internal/config/config.go",
+        "backend/cmd/server/wire_gen.go"
+      ],
+      "evidence": "IMPLEMENTATION.md"
+    },
+    {
+      "id": "WP-24-PACKAGING",
+      "parent": "WP-24",
+      "depends_on": [
+        "WP-27-API"
+      ],
+      "status": "accepted",
+      "assignee": "Popper",
+      "scope": "One root API Dockerfile and deploy/api; remove obsolete maintenance-brand packaging, release and updater scripts plus exclusive tests/docs; preserve active vendor portal.",
+      "integration_owner": "integrator",
+      "worker_note": "Worker froze partial implementation; integrator completed deployment tests, retired updater proxy blocks, and remaining active references.",
+      "evidence": "IMPLEMENTATION.md"
+    },
+    {
+      "id": "WP-24-DOCS",
+      "parent": "WP-24",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "accepted",
+      "assignee": "integrator",
+      "scope": "Replace maintenance-only project entry/delivery rules, remove orphaned root branding/promotion assets, and synchronize documentation/frontend handoff. Keep source/legal evidence with real purpose.",
+      "evidence": "IMPLEMENTATION.md"
+    },
+    {
+      "id": "WP-28-TRANSPORT",
+      "parent": "WP-28",
+      "depends_on": [
+        "WP-00"
+      ],
+      "title": "共享HTTP/session真实接线",
+      "status": "accepted",
+      "assignee": "frontend_session",
+      "integration_owner": "integrator",
+      "evidence": "FRONTEND_IMPLEMENTATION.md",
+      "source_commit": "737fd177d30679a573995f6ad9b9314467ccb3f4"
+    },
+    {
+      "id": "WP-28-PUBLIC-CONFIG",
+      "parent": "WP-28",
+      "depends_on": [
+        "WP-00"
+      ],
+      "title": "公共设置唯一owner",
+      "status": "accepted",
+      "assignee": "frontend_session",
+      "integration_owner": "integrator",
+      "evidence": "FRONTEND_IMPLEMENTATION.md",
+      "source_commit": "737fd177d30679a573995f6ad9b9314467ccb3f4"
+    },
+    {
+      "id": "WP-28-APP",
+      "parent": "WP-28",
+      "depends_on": [
+        "WP-00"
+      ],
+      "title": "应用启动与会话副作用",
+      "status": "accepted",
+      "assignee": "frontend_session",
+      "integration_owner": "integrator",
+      "evidence": "FRONTEND_IMPLEMENTATION.md",
+      "source_commit": "737fd177d30679a573995f6ad9b9314467ccb3f4"
+    },
+    {
+      "id": "WP-28-BRANDING",
+      "parent": "WP-28",
+      "depends_on": [
+        "WP-00"
+      ],
+      "title": "运行品牌与版本只读展示",
+      "status": "accepted",
+      "assignee": "frontend_session",
+      "integration_owner": "integrator",
+      "evidence": "FRONTEND_IMPLEMENTATION.md",
+      "source_commit": "737fd177d30679a573995f6ad9b9314467ccb3f4"
+    },
+    {
+      "id": "WP-21-CLEANUP-01",
+      "parent": "WP-21",
+      "depends_on": [
+        "WP-00"
+      ],
+      "title": "无消费者前端代码/截图删除",
+      "status": "accepted",
+      "assignee": "frontend_session",
+      "integration_owner": "integrator",
+      "evidence": "FRONTEND_IMPLEMENTATION.md",
+      "source_commit": "737fd177d30679a573995f6ad9b9314467ccb3f4"
+    },
+    {
+      "id": "WP-08-FIRST-OUTPUT",
+      "parent": "WP-08",
+      "depends_on": [
+        "WP-01-BUDGET"
+      ],
+      "status": "accepted",
+      "assignee": "integrator",
+      "write_paths": [
+        "backend/internal/gateway/execution/first_output*.go",
+        "backend/internal/service/openai_first_output_timeout*.go",
+        "backend/internal/service/gateway_turn_recovery*.go",
+        "backend/internal/service/scheduler_retry_guard.go",
+        "backend/internal/service/ops_upstream_context.go"
+      ],
+      "scope": "Move existing absolute deadline, bounded preparation pause and irreversible delivery fence into execution and replace actual service consumers. Not the full executor/SendPermit.",
+      "evidence": "IMPLEMENTATION.md#第二批后端领域接线",
+      "reviewer": "integrator",
+      "acceptance_boundary": "Only this integrated slice is accepted. Parent work package and full rebuild remain incomplete."
+    },
+    {
+      "id": "WP-05-EXECUTION-SCOPE",
+      "parent": "WP-05",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "accepted",
+      "assignee": "Jason",
+      "write_paths": [
+        "backend/internal/gateway/session/**",
+        "backend/internal/gateway/protocol/codex/**",
+        "backend/internal/service/openai_ws_execution_scope.go",
+        "backend/internal/service/openai_ws_execution_scope_test.go"
+      ],
+      "scope": "Extract existing pure thread/lane/session identity rules with unchanged keys and real ingress consumers; not owner leasing or authorization completion.",
+      "evidence": "IMPLEMENTATION.md#第二批后端领域接线",
+      "reviewer": "integrator",
+      "acceptance_boundary": "Only this integrated slice is accepted. Parent work package and full rebuild remain incomplete."
+    },
+    {
+      "id": "WP-28-HTTP-DECOUPLING",
+      "parent": "WP-28",
+      "depends_on": [
+        "WP-28-TRANSPORT"
+      ],
+      "status": "in_progress",
+      "assignee": "frontend_session",
+      "write_paths": [
+        "frontend/src/shared/http/**",
+        "frontend/src/app/**"
+      ],
+      "scope": "Frontend owner removes remaining identity dependencies from shared HTTP while integrating identity/key domains; new files require explicit verified handoff."
+    },
+    {
+      "id": "WP-06-RESERVATION-LIFETIME",
+      "parent": "WP-06",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "accepted",
+      "assignee": "Descartes",
+      "write_paths": [
+        "backend/internal/billing/reservation/**",
+        "backend/internal/service/billing_inflight_reservation.go",
+        "backend/internal/service/billing_inflight_reservation_test.go"
+      ],
+      "integration_owner": "integrator",
+      "scope": "Migrate actual inflight reservation handle, asynchronous references, bounded renewal/release and narrow cache ports; preserve existing cache atomicity and pricing/eligibility policies. Exact type/import consumers included in reviewed handoff.",
+      "evidence": "IMPLEMENTATION.md#第二批后端领域接线",
+      "reviewer": "integrator",
+      "acceptance_boundary": "Only this integrated slice is accepted. Parent work package and full rebuild remain incomplete."
+    },
+    {
+      "id": "WP-24-REDEEM-TIMING",
+      "parent": "WP-24",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "accepted",
+      "assignee": "integrator",
+      "write_paths": [
+        "backend/internal/server/middleware/server_timing.go",
+        "backend/internal/server/middleware/server_timing_test.go",
+        "backend/internal/server/middleware/audit_log_test.go"
+      ],
+      "scope": "Remove the retired user redeem timing allowance and obsolete audit test example. Preserve Claude reset-credit redeem, invitation records and active balance-history readers; no historical schema/data deletion.",
+      "evidence": "IMPLEMENTATION.md#第二批后端领域接线",
+      "reviewer": "integrator",
+      "acceptance_boundary": "Only this integrated slice is accepted. Parent work package and full rebuild remain incomplete."
+    },
+    {
+      "id": "WP-27-LOCAL-FULLSTACK",
+      "parent": "WP-27",
+      "depends_on": [
+        "WP-27-API"
+      ],
+      "status": "in_progress",
+      "assignee": "integrator",
+      "write_paths": [
+        "deploy/web/**",
+        "deploy/local/**",
+        "deploy/vendor-portal/**",
+        "deploy/tests/**"
+      ],
+      "scope": "Consolidate frontend image builds, preserve vendor proxy isolation, and deploy main/vendor UI beside isolated API for actual page-by-page interaction acceptance. Frontend source remains owned by its separate user session.",
+      "implementation_note": "Frozen main/vendor images built and deployed; actual browser TLS verified in dedicated Chrome Profile 9 with hostname negative and unchanged OS trust. API image remains earlier source; 752 business cases not_run until backend freeze.",
+      "evidence": "IMPLEMENTATION.md#第三批授权与本机部署",
+      "runtime_evidence": [
+        ".local/rebuild-integration/ui-build/receipt.json",
+        ".local/rebuild-integration/ui-runtime.json",
+        ".local/rebuild-integration/browser-tls-verification.json"
+      ]
+    },
+    {
+      "id": "WP-20-SETTINGS-CONTRACT",
+      "parent": "WP-20",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "accepted",
+      "assignee": "integrator",
+      "write_paths": [
+        "docs/architecture-rebuild/FRONTEND_HANDOFF.md",
+        "docs/architecture-rebuild/CONTRACTS.md"
+      ],
+      "scope": "Verify inherited sparse PUT + revision settings contract at baseline 6f48, correct stale handoff, and run 7 existing handler tests/subtests. No new control API or six-dimensional capability DTO implemented.",
+      "evidence": "FRONTEND_HANDOFF.md#wp-20--ct-11-当前真实控制面合同2026-10-25核实",
+      "acceptance_boundary": "Contract verification slice only; full WP-20 remains planned."
+    },
+    {
+      "id": "WP-03-DISPATCH-REVALIDATION",
+      "parent": "WP-03",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "accepted",
+      "assignee": "Locke",
+      "write_paths": [
+        "backend/internal/access/**",
+        "backend/internal/service/scheduler_snapshot_service.go",
+        "backend/internal/service/scheduler_snapshot_vendor_test.go",
+        "backend/internal/service/vendor_authorization_dispatch_test.go",
+        "backend/internal/service/openai_excel_bps_transport.go"
+      ],
+      "scope": "Extract actual supplier/mode dispatch authorization into narrow authority ports with current consumers; preserve live ownership, fail-closed supplier guards and accepted-stream behavior. No new public DTO.",
+      "reviewer": "integrator",
+      "evidence": "IMPLEMENTATION.md#第三批授权与本机部署",
+      "acceptance_boundary": "Only supplier/mode live dispatch extraction; not full access authority or the full CT-05 contract."
+    },
+    {
+      "id": "WP-03-GROUP-ACCESS",
+      "parent": "WP-03",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "accepted",
+      "assignee": "Copernicus",
+      "write_paths": [
+        "backend/internal/access/group*.go",
+        "backend/internal/service/user.go",
+        "backend/internal/server/middleware/api_key_auth*.go"
+      ],
+      "scope": "Move existing user group-binding and key group eligibility into pure access; consume from actual HTTP/Google/WS continuation without changing authentication or billing.",
+      "reviewer": "integrator",
+      "evidence": "IMPLEMENTATION.md#分组授权与模型目录规则接线",
+      "acceptance_boundary": "Only this integrated behavior-preserving slice is accepted. Full authority/revocation, immutable policy snapshots, all parent packages and full rebuild remain incomplete."
+    },
+    {
+      "id": "WP-07-MODEL-ALLOWLIST",
+      "parent": "WP-07",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "accepted",
+      "assignee": "integrator",
+      "write_paths": [
+        "backend/.golangci.yml",
+        "backend/internal/catalog/model_allowlist.go",
+        "backend/internal/catalog/model_allowlist_test.go",
+        "backend/internal/catalog/openai_models.go",
+        "backend/internal/catalog/openai_models_test.go",
+        "backend/internal/handler/admin/codex_diagnostic_handler_test.go",
+        "backend/internal/handler/admin/custom_admin_key_group_models.go",
+        "backend/internal/handler/admin/group_handler.go",
+        "backend/internal/handler/batch_image_handler.go",
+        "backend/internal/handler/dto/types.go",
+        "backend/internal/handler/gateway_handler_chat_completions.go",
+        "backend/internal/handler/gateway_model_allowlist_listing_test.go",
+        "backend/internal/handler/gateway_models_retrieve_test.go",
+        "backend/internal/handler/gateway_models_test.go",
+        "backend/internal/handler/gemini_mixed_models_test.go",
+        "backend/internal/handler/gemini_v1beta_handler.go",
+        "backend/internal/handler/gemini_v1beta_handler_test.go",
+        "backend/internal/handler/openai_chat_completions.go",
+        "backend/internal/handler/openai_codex_models_handler_test.go",
+        "backend/internal/handler/openai_gateway_count_tokens.go",
+        "backend/internal/handler/openai_gateway_handler.go",
+        "backend/internal/handler/openai_gateway_ws_model_allowlist_test.go",
+        "backend/internal/handler/openai_models_handler_test.go",
+        "backend/internal/handler/ops_error_logger_test.go",
+        "backend/internal/repository/api_key_repo.go",
+        "backend/internal/repository/api_key_repo_model_allowlist_projection_integration_test.go",
+        "backend/internal/repository/custom_admin_key_group_models.go",
+        "backend/internal/repository/custom_admin_key_group_models_test.go",
+        "backend/internal/repository/fixtures_integration_test.go",
+        "backend/internal/repository/group_repo.go",
+        "backend/internal/server/middleware/group_model_allowlist_test.go",
+        "backend/internal/server/routes/custom_admin_key_group_models_test.go",
+        "backend/internal/server/routes/gateway_model_allowlist_test.go",
+        "backend/internal/service/account_test_service.go",
+        "backend/internal/service/admin_group.go",
+        "backend/internal/service/admin_group_duplicate.go",
+        "backend/internal/service/admin_group_duplicate_test.go",
+        "backend/internal/service/admin_service.go",
+        "backend/internal/service/admin_service_group_model_allowlist_test.go",
+        "backend/internal/service/api_key_auth_cache.go",
+        "backend/internal/service/billing_service.go",
+        "backend/internal/service/billing_service_test.go",
+        "backend/internal/service/codex_diagnostic_gateway_policy_test.go",
+        "backend/internal/service/custom_admin_key_group_models.go",
+        "backend/internal/service/custom_admin_key_group_models_test.go",
+        "backend/internal/service/group.go",
+        "backend/internal/service/group_model_allowlist.go",
+        "backend/internal/service/group_model_allowlist_test.go",
+        "backend/internal/service/group_model_catalog.go",
+        "backend/internal/service/image_generation_intent.go",
+        "backend/internal/service/model_plaza_service.go",
+        "backend/internal/service/model_plaza_service_test.go",
+        "backend/internal/service/model_pricing_resolver.go",
+        "backend/internal/service/model_rate_limit.go",
+        "backend/internal/service/openai_apikey_responses_probe.go",
+        "backend/internal/service/openai_cloud_routing_policy_test.go",
+        "backend/internal/service/openai_codex_models_service.go",
+        "backend/internal/service/openai_codex_models_service_test.go",
+        "backend/internal/service/openai_codex_transform.go",
+        "backend/internal/service/openai_codex_transform_test.go",
+        "backend/internal/service/openai_compat_model.go",
+        "backend/internal/service/openai_compat_model_test.go",
+        "backend/internal/service/openai_compat_prompt_cache_key.go",
+        "backend/internal/service/openai_excel_bps_model_access_test.go",
+        "backend/internal/service/openai_gateway_grok.go",
+        "backend/internal/service/openai_gateway_grok_test.go",
+        "backend/internal/service/openai_gateway_prepare.go",
+        "backend/internal/service/openai_gateway_request_body.go",
+        "backend/internal/service/openai_images.go",
+        "backend/internal/service/openai_images_compatible_test.go",
+        "backend/internal/service/openai_messages_dispatch.go",
+        "backend/internal/service/openai_model_alias.go",
+        "backend/internal/service/openai_model_alias_test.go",
+        "backend/internal/service/openai_model_mapping.go",
+        "backend/internal/service/openai_model_mapping_test.go",
+        "backend/internal/service/openai_model_retirement.go",
+        "backend/internal/service/openai_model_retirement_test.go",
+        "backend/internal/service/openai_models_list.go",
+        "backend/internal/service/openai_models_list_test.go",
+        "backend/internal/service/openai_reasoning_effort_candidates_test.go",
+        "backend/internal/service/pricing_service.go",
+        "backend/internal/service/ratelimit_service.go",
+        "backend/internal/service/scheduled_test_diagnostic.go",
+        "backend/internal/service/shadow_routing.go",
+        "backend/internal/service/shadow_routing_test.go"
+      ],
+      "scope": "Give existing model allowlist normalization/matching/list projection one catalog owner, retain exact protocol model normalization and persistent DTO contracts; replace all actual type consumers without a service alias.",
+      "reviewer": "integrator",
+      "evidence": "IMPLEMENTATION.md#分组授权与模型目录规则接线",
+      "acceptance_boundary": "Only this integrated behavior-preserving slice is accepted. Full authority/revocation, immutable policy snapshots, all parent packages and full rebuild remain incomplete."
+    },
+    {
+      "id": "WP-02-RESPONSES-FACTS",
+      "parent": "WP-02",
+      "depends_on": [
+        "WP-02-SSE"
+      ],
+      "status": "in_progress",
+      "assignee": "integrator",
+      "write_paths": [
+        "backend/internal/gateway/protocol/responses/**"
+      ],
+      "scope": "Single pure Responses terminal/metadata/token/visible-output facts used by existing HTTP/SSE/WS/BPS/Cloud paths; retry policy stays with execution/service boundary until full cutover.",
+      "evidence": ".local/rebuild-wave4/responses-facts-tests.json"
+    },
+    {
+      "id": "WP-08-RECOVERY-OWNER",
+      "parent": "WP-08",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "in_progress",
+      "assignee": "integrator",
+      "scope": "Recovery state and four primary ingress paths now share execution owner;81 core race and211 handler checks from Euler, pending final shared-tree integration."
+    },
+    {
+      "id": "WP-01-DISPATCH-PERMIT",
+      "parent": "WP-01",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "in_progress",
+      "assignee": "integrator",
+      "scope": "Concrete one-shot SendPermit and strict prepared identity/live authority integrated into three NativeHTTP ingress paths. Current fresh owner headers, full SendState and multi-hop budget handling are integrating; synchronous actual-write fence and complete Operation/WS are not yet accepted."
+    },
+    {
+      "id": "WP-09-NATIVE-HTTP",
+      "parent": "WP-09",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "in_progress",
+      "assignee": "Fermat",
+      "scope": "Sealed native HTTP preparation/single-open resource owner;79 race checks pass; controlled repo sender111 checks pass; live root authority and retry wiring not yet complete."
+    },
+    {
+      "id": "WP-05-OWNER-HISTORY",
+      "parent": "WP-05",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "in_progress",
+      "assignee": "integrator",
+      "scope": "State/owner/multiplex history integrated,41 service race and5 realRedis checks; prewarm protection applied by integrator; final runtime drain still pending."
+    },
+    {
+      "id": "WP-06-LEDGER-ATOMIC",
+      "parent": "WP-06",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "in_progress",
+      "assignee": "Huygens",
+      "scope": "Atomic ledger and durable recovery sole production path after removal of non-atomic fallback;5 realPG cases pass; shared fixtures/lifecycle still being completed."
+    },
+    {
+      "id": "WP-22-HOST-PRODUCERS",
+      "parent": "WP-22",
+      "depends_on": [
+        "WP-00"
+      ],
+      "status": "in_progress",
+      "assignee": "Sagan",
+      "scope": "Host usage queue and five explicit producer lifecycles implemented; root startup/order/WSjoin and dependency shutdown still under active integration."
+    },
+    {
+      "id": "WP-08-NATIVE-OPERATION",
+      "parent": "WP-08",
+      "depends_on": [
+        "WP-01-DISPATCH-PERMIT",
+        "WP-09-NATIVE-HTTP"
+      ],
+      "status": "in_progress",
+      "assignee": "Nietzsche",
+      "scope": "Three Native HTTP roots now use the shared operation/observed Next/real delivery receipt; billing failure blocks retries. MAIN concrete finalizer reuses original billing builder and journal; 280 affected U/S race entries passed. Actual adapter-to-PG and complete production integration still pending; BPS/Cloud/WS/plugin are not claimed covered.",
+      "evidence": [
+        ".local/rebuild-operation-owner/http-finalization-stop-race-final.json",
+        ".local/rebuild-wave4/native-billing-adapter.json"
+      ]
+    },
+    {
+      "id": "WP-09-NATIVE-WRITE-FENCE",
+      "parent": "WP-09",
+      "depends_on": [
+        "WP-01-DISPATCH-PERMIT"
+      ],
+      "status": "in_progress",
+      "assignee": "Fermat",
+      "scope": "Fix independently reproduced post-revocation network writes in controlled HTTP transport; synchronous HTTP1/H2 request boundary, no shared H2 connection cancellation. MAIN fresh owner header/send-state fixes plus real regression tests are integrating; final write-fence acceptance pending."
+    },
+    {
+      "id": "WP-09-NATIVE-WS",
+      "parent": "WP-09",
+      "depends_on": [
+        "WP-01-DISPATCH-PERMIT"
+      ],
+      "status": "in_progress",
+      "assignee": "Aristotle",
+      "scope": "Verified shared purpose/binding and real handler first/followup context patches applied by MAIN; 23 shared dispatch race entries passed. WS owner has 31 scoped actual consumer entries; complete fact/terminal/remaining recovery integration still in progress."
+    },
+    {
+      "id": "WP-06-NATIVE-PENDING-USAGE",
+      "parent": "WP-06",
+      "depends_on": [
+        "WP-06-LEDGER-ATOMIC"
+      ],
+      "status": "in_progress",
+      "assignee": "Huygens",
+      "scope": "Existing journal owner persists Native unknown usage facts and returns real pending/recorded disposition to Operation finalizer; no fabricated tokens/upstream ID or parallel ledger, preserve full lower_bound semantics."
+    },
+    {
+      "id": "WP-23-REMAINING-LIFETIME",
+      "parent": "WP-23",
+      "depends_on": [
+        "WP-22-HOST-PRODUCERS"
+      ],
+      "status": "in_progress",
+      "assignee": "integrator/Sagan",
+      "scope": "Remove duplicate/implicit starts, cancel CN/payment actual IO and retain completion, prompt repeated-shutdown join, gateway debug file close. CN/payment nine test entries passed in actual service race batch; overall batch still had independent followup assertions pending correction."
+    },
+    {
+      "id": "WP-09-MAINTENANCE-FIXES",
+      "parent": "WP-09",
+      "depends_on": [],
+      "status": "in_progress",
+      "assignee": "integrator/Nietzsche/Aristotle",
+      "scope": "Fixed main 11ad379874ae35712a6dcfa386463f7730b2c63d native input/item ID/replay and CPR continuation repair; metered WS errors, image measurements and independent lane billing identities. Component tests pending final integration."
+    },
+    {
+      "id": "WP-11-MAINTENANCE-FIXES",
+      "parent": "WP-11",
+      "depends_on": [],
+      "status": "in_progress",
+      "assignee": "Halley/integrator",
+      "scope": "Fixed main BPS audit M01-M16: opaque attachment fresh upload, continuation publication and fixed retention, tool repair/namespace, trusted local dependency provenance and usage. Shared consumers must be connected before acceptance."
+    },
+    {
+      "id": "WP-12-MAINTENANCE-FIXES",
+      "parent": "WP-12",
+      "depends_on": [],
+      "status": "in_progress",
+      "assignee": "Huygens/integrator",
+      "scope": "Fixed main Cloud F1-F9, D1-D8 retained behavior, RPC batching/deadline/owner/cancellation, shared terminal and billing policy, v1 writer/v1-v2 reader. Preserve rebuild-owned Cancel+Join."
+    },
+    {
+      "id": "WP-23-REQUEST-BUDGET",
+      "parent": "WP-23",
+      "depends_on": [],
+      "status": "in_progress",
+      "assignee": "integrator",
+      "scope": "CPR-thread maintenance request body route/wire/decode/preread/normalization budget and zstd resource/encoder ownership. Actual httputil race 150 entries passed; ingress/repository and sealed transport combination pending."
+    },
+    {
+      "id": "WP-25-MAINTENANCE-AUDIT",
+      "parent": "WP-25",
+      "depends_on": [],
+      "status": "in_progress",
+      "assignee": "integrator/Schrodinger",
+      "scope": "Four user-named maintenance threads mapped to immutable main source and actual rebuild consumers; confirmed gaps, patches and evidence in MAINTENANCE_FIX_AUDIT. All complete scenario results remain not_run until execution. User expanded to whole backend gateway review: ingress/normalization/authorization/routing/preparation/send/recovery/delivery/usage/teardown, actual path evidence and defect classification in GATEWAY_REVIEW."
+    },
+    {
+      "id": "WP-06-NATIVE-INTENT-INTEGRATION",
+      "parent": "WP-06",
+      "depends_on": [
+        "WP-06-NATIVE-PENDING-USAGE"
+      ],
+      "status": "in_progress",
+      "assignee": "integrator",
+      "write_paths": [
+        "backend/internal/billing/native_intent*.go",
+        "backend/internal/service/native_billing_intent*.go",
+        "backend/internal/repository/usage_billing_event*.go",
+        "backend/migrations/299_usage_billing_native_intent.sql"
+      ],
+      "integration_owner": "integrator",
+      "scope": "Technical intent lifecycle and original money identity binding. Repository and calculator components exist, but before-send capture/persistence, actual billing/image model handoff, final facts without preparation, canonical identity and original worker recovery must switch coherently. No isolated I1 enablement. MAIN owns integration and shared contracts; previous worker runtime attempt was reversed precisely and is not active.",
+      "runtime_assignee": "integrator",
+      "runtime_write_paths": [
+        "backend/internal/service/native_operation*.go",
+        "backend/internal/service/native_dispatch_operation.go",
+        "backend/internal/service/native_dispatch_ws_operation.go",
+        "backend/internal/handler/openai_http_operation.go",
+        "backend/internal/handler/openai_native_dispatch.go",
+        "backend/internal/handler/openai_chat_completions.go",
+        "backend/internal/handler/openai_messages_http.go",
+        "backend/internal/handler/openai_responses*.go",
+        "backend/internal/handler/openai_gateway_handler.go",
+        "backend/internal/service/openai_gateway_service.go (fields/constructor only)",
+        "backend/cmd/server/wire.go (integration only)"
+      ],
+      "implementation_note": "2026-10-26 audit: Capture/PreserveBeforeSend/Materialize have no runtime call sites; production still FreezeNativeUsagePricing(nil,nil,exempt), then prepareOpenAIUsage before recorder.Record. Finalization provider is not in startup assembly. Runtime worker ended; original 11 existing files restored, added runtime file removed, protected components unchanged. Latest unit evidence does not cover I2 PG changes or integrated restart windows. MAIN is closing the final-facts-without-preparation contract first, with service validation and original SQL recovery regression; production runtime activation remains pending.",
+      "runtime_checkpoint": ".local/rebuild-wave4/native-runtime-incomplete.json",
+      "evidence_status": "components_partly_verified_runtime_not_integrated"
+    },
+    {
+      "id": "WP-06-NATIVE-PRICING-VIEW",
+      "parent": "WP-06",
+      "depends_on": [
+        "WP-06-NATIVE-INTENT-INTEGRATION"
+      ],
+      "status": "in_progress",
+      "assignee": "integrator",
+      "write_paths": [
+        "backend/internal/service/model_pricing_view*.go",
+        "backend/internal/service/model_pricing_resolver.go",
+        "backend/internal/service/pricing_service.go",
+        "backend/internal/service/channel_service.go",
+        "backend/internal/service/billing_service.go",
+        "backend/internal/service/native_intent_pricing*.go"
+      ],
+      "scope": "Halley partial patch interrupted by rate limit; MAIN completes and reviews immutable in-process view using existing resolver, detached values, shared publications, explicit Resolved consumer, actual Native price capture. No persistent history lookup or whole Native financial acceptance is claimed. 2026-10-26 MAIN Pin/Resolved/hot-reload tests passed in 203-entry combined check; Cloud actual snapshot now consumes view. Pascal owns only new native_intent_pricing.go/_test.go for request/attempt capture; MAIN integrates roots/finalizer, Huygens owns I2 storage/recovery. Pascal now additionally owns native_intent_settlement.go and original openai_gateway_usage prepare/cost integration, gateway_usage_billing frozen-funding predicates, necessary tier helper; MAIN owns actual root/dispatch/finalizer enablement and public evidence, Huygens owns persistence DTO/recovery. Compile window follows source checkpoints.",
+      "implementation_note": "2026-10-26 audit: prior workers ended. Request/attempt capture, immutable view and settlement components remain; selected component tests passed within ec-contracts-stable, but the whole batch failed and runtime has no Capture/Materialize consumer. MAIN retains production handoff integration."
+    },
+    {
+      "id": "WP-06-LIVE-OBSERVATION-BOUNDARY",
+      "parent": "WP-06",
+      "depends_on": [
+        "WP-06-NATIVE-PENDING-USAGE"
+      ],
+      "status": "review",
+      "assignee": "integrator",
+      "write_paths": [
+        "backend/internal/service/openai_gateway_usage.go",
+        "backend/internal/service/native_operation_finalize.go",
+        "backend/internal/service/native_billing_observation_boundary_test.go"
+      ],
+      "scope": "Move scheduling cache tokens and 403 reset out of repeatable billing preparation. Native real completion observes once; Cloud worker replay does not affect live health. Cloud live terminal observation handoff remains pending. Cloud actual live terminal policy now rechecks current grant and observes only once, covered by combined203; original host callback behavior preserved. No full financial acceptance.",
+      "evidence": [
+        ".local/rebuild-wave4/native-live-observation-boundary.json"
+      ]
+    },
+    {
+      "id": "WP-03-SHADOW-PARENT-DISPATCH",
+      "parent": "WP-03",
+      "depends_on": [
+        "WP-01-DISPATCH-PERMIT"
+      ],
+      "status": "in_progress",
+      "assignee": "integrator",
+      "write_paths": [
+        "backend/internal/service/native_dispatch_authority.go",
+        "backend/internal/service/native_dispatch_shadow_parent_test.go",
+        "backend/internal/repository/account_parent_projection_integration_test.go"
+      ],
+      "scope": "Verify existing shadow parent credential-usability at final dispatch, preserve independent manual scheduling/global rate quota, include parent account expiry in HTTP permit deadline; prove provider sends and authoritative DB projection.",
+      "evidence": [
+        ".local/rebuild-wave4/native-shadow-parent-repro2.json",
+        ".local/rebuild-wave4/gateway-reviewed-consumers-combined.json",
+        ".local/rebuild-wave4/native-shadow-logonly-postgres.json"
+      ]
+    },
+    {
+      "id": "WP-20-MAINTENANCE-SUPPLIER",
+      "parent": "WP-20",
+      "depends_on": [],
+      "status": "in_progress",
+      "assignee": "Aristotle",
+      "write_paths": [
+        "backend/internal/service/vendor.go",
+        "backend/internal/service/vendor_account.go",
+        "backend/internal/service/vendor_account_overview.go",
+        "backend/internal/service/vendor_hierarchy.go",
+        "backend/internal/repository/account_repo_vendor.go"
+      ],
+      "scope": "Adapt fixed cd1 composite supplier-group authorization and live platform-admin assignment/atomic grants/outbox, plus redacted supplier health DTO. MAIN verifies shared contracts with active frontend owner; no blind source overwrite or permission expansion beyond reviewed maintenance contract."
+    },
+    {
+      "id": "WP-23-MAINTENANCE-OPS-NODES",
+      "parent": "WP-23",
+      "depends_on": [],
+      "status": "in_progress",
+      "assignee": "Gauss",
+      "write_paths": [
+        "backend/internal/service/ops_node_metrics*.go",
+        "backend/internal/service/ops_metrics_collector*.go",
+        "backend/internal/service/ops_dashboard*.go",
+        "backend/internal/service/ops_health_score*.go",
+        "backend/internal/service/ops_service.go",
+        "backend/internal/repository/ops_repo_metrics*.go"
+      ],
+      "integration_owner": "integrator",
+      "scope": "Fixed cd1 node metrics, stale/unknown and cluster health projection, retain existing host attach/Drain/Join; config/Wire only by MAIN. Excludes ops_upstream_context/errors/cleanup/aggregation to protect concurrent rebuild owners.",
+      "integration_note": "MAIN wired OpsConfig, original sampleResources parent+publish and service factory/current wire_gen call, removed systemStats field/store. Wire generator not run: its dependencies are not in repository go.sum; must validate production composition via existing local build before accepted."
+    },
+    {
+      "id": "WP-16-MAINTENANCE-IMAGE-COUNT",
+      "parent": "WP-16",
+      "depends_on": [],
+      "status": "in_progress",
+      "assignee": "integrator/Halley",
+      "scope": "Halley owns group schema/generated/CRUD/DTO propagation for fixed cd1 dedicated-image actual-count billing; MAIN owns shared gateway/openai usage calculators and media helper integration. 301 reserved for Native intent I2; new302 for count flag, existing248 untouched. Mixed Responses/Chat/WS remain token-billed. No stage/commit/push.",
+      "write_paths": [
+        "backend/ent/schema/group.go",
+        "backend/ent/group*.go",
+        "backend/ent/group/**",
+        "backend/internal/handler/admin/group_handler.go",
+        "backend/internal/repository/group_repo*.go",
+        "backend/internal/repository/group_image_count_billing_test.go",
+        "backend/internal/service/group.go",
+        "backend/internal/service/group_service.go",
+        "backend/internal/service/admin_group*.go",
+        "backend/migrations/302_group_image_count_billing.sql"
+      ]
+    },
+    {
+      "id": "WP-12-EC-CLOUD",
+      "parent": "WP-12",
+      "depends_on": [],
+      "status": "in_progress",
+      "assignee": "Bernoulli",
+      "write_paths": [
+        "backend/internal/service/openai_cloud*.go"
+      ],
+      "scope": "Complete the interrupted ec Cloud maintenance slice and adapt ec0222-to-ce3ecf lifecycle behavior in the same actor/transport. Fix Telemetry fixture lifecycle, preserve existing Cancel/Join and ledger owner, use ordered drain only on peer close and hard-fence tool handoff. No new parser or runtime billing/Wire changes. Main serializes package tests.",
+      "implementation_note": "Fix actual host-admission/actor-cancel fixtures, preserve Cancel+Join and adapt reviewed Cloud maintenance through local origin/main 34c8ab3e40479874dcd236481f96f76d5635a903. Shared gateway fields and billing consumer are integrator-owned.",
+      "agent_id": "01a178ed-b4c3-7e91-9754-14a6e80903c0"
+    },
+    {
+      "id": "WP-20-EC-ACCOUNT-PROJECTION",
+      "parent": "WP-20",
+      "depends_on": [],
+      "status": "in_progress",
+      "assignee": "integrator",
+      "write_paths": [
+        "backend/internal/handler/admin/account_handler*.go",
+        "backend/internal/handler/dto/types.go",
+        "backend/internal/handler/dto/mappers.go",
+        "backend/internal/service/vendor_account.go"
+      ],
+      "scope": "Adapt ec0222 authorized admin full/lite authorization_modes and supplier auth_mode/whitelisted extra. Read-only metadata, preserve scoped authorization and avoid N+1. No frontend, schema, Git or Docker changes.",
+      "implementation_note": "2026-10-26 audit: worker source handed off. Selected admin/repository tests passed, but VendorAccountProjection and AccountAuthorizationModes service tests did not execute before Cloud panic. Service and real-PG verification remain pending."
+    },
+    {
+      "id": "WP-08-EC-429-RECOVERY",
+      "parent": "WP-08",
+      "depends_on": [],
+      "status": "in_progress",
+      "assignee": "integrator",
+      "write_paths": [
+        "backend/internal/gateway/execution/recovery.go",
+        "backend/internal/gateway/execution/recovery_test.go"
+      ],
+      "scope": "Adapt reviewed ec0222 portable 429 recovery after exhausted same-account wait into existing execution owner; retain cancellation, output and switch gates.",
+      "implementation_note": "2026-10-26 audit: execution recovery tests passed in ec-contracts-stable; follow-on WS semantic429 and HTTP bridge credential-reprepare source has no completed consumer-test receipt. Prior worker ended. Full parent remains incomplete. Execution core remains MAIN-owned; follow-on WS source review delegated as a disjoint new slice."
+    },
+    {
+      "id": "WP-11-WS-ADMISSION-MAINTENANCE",
+      "parent": "WP-11",
+      "depends_on": [],
+      "status": "in_progress",
+      "assignee": "Copernicus",
+      "write_paths": [
+        "backend/internal/handler/openai_gateway_handler.go",
+        "backend/internal/handler/openai_gateway_ws_admission_maintenance_test.go",
+        "backend/internal/service/openai_account_scheduler.go",
+        "backend/internal/service/openai_account_continuation_wait_test.go",
+        "backend/internal/service/openai_ws_forwarder_ingress.go",
+        "backend/internal/handler/openai_ws_native_fixture_test.go"
+      ],
+      "scope": "Adapt reviewed main BPS-only bounded WS continuation wait and post-acquisition recheck; retain original Native turn finalization/release owner. Restore JSON content type before noncommitted error responses and local admission Ops cause in this handler. No Native billing/root/transport edits or build/test until main serializes.",
+      "implementation_note": "Actual BPS-mode queue, cancellation during BeforeTurn wait, error provenance, real lease-authority fixtures; no separate reader or fabricated usage.",
+      "agent_id": "01a178ee-0c6b-7162-93ac-7a23c9dac43b"
+    },
+    {
+      "id": "WP-09-WS-RECOVERY-CONSUMERS",
+      "parent": "WP-09",
+      "depends_on": [],
+      "status": "in_progress",
+      "assignee": "Aristotle",
+      "write_paths": [
+        "backend/internal/service/openai_ws_forwarder_v2.go",
+        "backend/internal/service/openai_ws_forwarder_support.go",
+        "backend/internal/service/openai_ws_forwarder_support_test.go",
+        "backend/internal/service/openai_ws_http_bridge.go",
+        "backend/internal/service/openai_ws_http_bridge_credential_test.go"
+      ],
+      "scope": "Review interrupted semantic429 and HTTP bridge credential reprepare patch, complete actual consumer regressions using original operation/budget and no duplicate generation. Do not touch handler, Cloud, runtime Native intent, shared contracts or Wire. Main runs serialized tests.",
+      "implementation_note": "Complete interrupted semantic429 and credential-reprepare consumers; coordinate Native runtime producer interface through integrator. Main runs serialized tests.",
+      "agent_id": "01a178fa-8f31-7880-b2d0-b2872f06cec4"
+    },
+    {
+      "id": "WP-10-NATIVE-RUNTIME-INTEGRATION",
+      "parent": "WP-10",
+      "depends_on": [],
+      "status": "in_progress",
+      "assignee": "Bohr",
+      "write_paths": [
+        "backend/internal/service/native_operation*.go",
+        "backend/internal/service/native_dispatch_operation.go",
+        "backend/internal/service/native_dispatch_ws_operation.go",
+        "backend/internal/service/native_intent_runtime*.go",
+        "backend/internal/service/wire.go",
+        "backend/internal/service/usage_record_worker_pool.go",
+        "backend/internal/service/openai_gateway_prepare.go",
+        "backend/internal/service/openai_gateway_forward.go",
+        "backend/internal/service/openai_gateway_passthrough.go",
+        "backend/internal/handler/openai_http_operation.go",
+        "backend/internal/handler/openai_native_dispatch.go",
+        "backend/internal/handler/openai_chat_completions.go",
+        "backend/internal/handler/openai_messages_http.go",
+        "backend/internal/handler/openai_responses*.go"
+      ],
+      "scope": "Connect actual request/attempt pricing, durable before-send intent, final facts and original recovery worker. Coordinate handler and WS shared callsites after worker freeze. Facts-only component change is not a runtime completion claim.",
+      "integration_owner": "integrator",
+      "implementation_note": "Connect real request/attempt policies, durable before-send intent, finalization and original worker. Integrator owns missing-scope closure contracts, actual image pricing consumer and shared integration callsites.",
+      "agent_id": "01a178ef-961d-7d11-923f-198a258e5ab9"
+    },
+    {
+      "id": "WP-20-B22-MAINTENANCE",
+      "parent": "WP-20",
+      "depends_on": [],
+      "status": "in_progress",
+      "assignee": "integrator",
+      "write_paths": [
+        "backend/internal/handler/admin/setting_handler_update.go",
+        "backend/internal/handler/admin/setting_handler_codex_whitelist_test.go",
+        "backend/internal/service/openai_gateway_response_handling.go",
+        "backend/internal/service/openai_gateway_passthrough_flush_test.go",
+        "backend/internal/service/openai_responses_created_at_test.go"
+      ],
+      "scope": "Reviewed ce3ecf6a to b22bef10a Unicode menu length and client Retry-After projection; WS bridge callsites delegated to existing sole owner. Frontend delta delegated to frontend owner."
+    },
+    {
+      "id": "WP-06-IMAGE-CANDIDATE-CAPTURE",
+      "parent": "WP-06",
+      "depends_on": [],
+      "status": "in_progress",
+      "assignee": "integrator",
+      "write_paths": [
+        "backend/internal/service/native_intent_pricing.go",
+        "backend/internal/service/native_intent_pricing_test.go",
+        "backend/internal/service/native_intent_settlement_test.go"
+      ],
+      "scope": "Capture actual producer imageBillingModel as finite before-send price/hosted candidate without changing text-only baseline; pending is not zero. Freeze for integrator service tests.",
+      "implementation_note": "Prior worker closed. Integrator retains source and completes affected consumer fixes and verification; no acceptance claimed."
+    },
+    {
+      "id": "WP-18-BPS-INDEPENDENT-REVIEW-20261027",
+      "parent": "WP-18",
+      "depends_on": [],
+      "status": "in_progress",
+      "assignee": "integrator",
+      "write_paths": [
+        "backend/internal/service/native_dispatch_ws_lifecycle_test.go",
+        "backend/internal/service/native_dispatch_operation_test.go",
+        "backend/internal/service/native_dispatch_operation_followup_test.go",
+        "backend/internal/service/native_operation_finalize_test.go",
+        "backend/internal/repository/account_repo_excel_bps_cooldown_review_integration_test.go",
+        "backend/internal/repository/openai_oauth_service.go",
+        "backend/internal/repository/openai_excel_oauth_refresh_review_test.go",
+        "backend/internal/service/native_operation_billing.go",
+        "backend/internal/service/openai_ws_native_audit_test.go",
+        "backend/internal/handler/openai_ws_native_consumers_test.go",
+        "backend/internal/handler/openai_gateway_ws_admission_maintenance_test.go",
+        "backend/internal/service/openai_excel_bps_ratelimit.go",
+        "backend/internal/service/openai_excel_bps_ratelimit_test.go",
+        "backend/internal/service/openai_excel_bps_model_cooldown.go",
+        "backend/internal/service/openai_excel_bps.go",
+        "backend/internal/service/openai_excel_bps_images.go",
+        "backend/internal/service/openai_excel_bps_cooldown_dependency_review_test.go",
+        "backend/internal/service/openai_ws_native_consumers_test.go",
+        "backend/internal/service/openai_compact_sse_keepalive.go",
+        "backend/internal/service/native_operation_reasoning_ws_test.go"
+      ],
+      "scope": "独立审查分析统一协议桥接方案在同工作树的BPS路由/授权恢复/429交付；不重叠其活动写集。先完成旧Native测试双回执及发送前意图fixture迁移以解除全包编译/测试阻塞，再对明确交付快照做定向race、真实存储和二次复核。共享运行文件待对方交付后再集成。",
+      "evidence_status": "not_run",
+      "implementation_note": "主集成者机械删除两处编译器确认的未使用import（openai_excel_bps_ratelimit_test.go:gjson；openai_ws_bps_admission_cancel_test.go:coderws），未改这些BPS活动写集的测试行为。Native测试端口已修，真实PG冷却并发/回滚独立回归已新增，均待稳定源码验证。"
+    },
+    {
+      "id": "WP-18-NATIVE-INTENT-TEST-CONSUMERS-20261027",
+      "parent": "WP-18",
+      "depends_on": [],
+      "status": "review",
+      "assignee": "Parfit",
+      "agent_id": "01a17943-898f-7c42-9267-1c3ab1ebfe80",
+      "write_paths": [
+        "backend/internal/service/native_operation_closure_test.go",
+        "backend/internal/service/native_dispatch_ws_integration_test.go",
+        "backend/internal/service/native_operation_reasoning_ws_test.go",
+        "backend/internal/service/native_billing_image_scope_test.go",
+        "backend/internal/service/native_operation_billing_test.go"
+      ],
+      "scope": "Only migrate actual Native consumer fixtures to before-send intent and technical/canonical receipts. Preserve meaningful protocol, cancellation, billing and release assertions; runtime defects reported to integrator.",
+      "evidence_status": "not_run",
+      "implementation_note": "五个测试消费者已迁移实际intent/finalization端口并gofmt，22个原测试保留；worker已关闭。尚未通过主代理完整编译/运行复验，ctx_pool/passthrough producer接线由Gibbs/集成者处理。"
+    },
+    {
+      "id": "WP-18-NATIVE-WS-INDEPENDENT-AUDIT-20261027",
+      "parent": "WP-18",
+      "depends_on": [],
+      "status": "review",
+      "assignee": "Gibbs",
+      "agent_id": "01a17940-75d8-7773-961f-dc744f79a06b",
+      "write_paths": [
+        "backend/internal/service/native_dispatch_ws.go",
+        "backend/internal/service/native_dispatch_ws_pricing_test.go",
+        "backend/internal/handler/openai_gateway_handler.go",
+        "backend/internal/handler/openai_ws_native_intent_binding_test.go",
+        "backend/internal/service/openai_ws_v2_passthrough_adapter.go"
+      ],
+      "scope": "独立审查已确认WS请求pricing未绑定、prepared attempt漏模型事实及Native随机canonical。Gibbs单写Native handler计价与passthrough producer接线及新回归；桥接会话已表示避开本会话Native计价写集。openai_ws_forwarder_ingress.go仍由桥接会话持有，Native sendAndRelay hunk先交精确patch供主集成者后续应用。",
+      "evidence_status": "not_run",
+      "implementation_note": "主集成者在桥接线程已声明避开Native计价写集后，以git apply --check+单个上下文hunk接入ctx_pool sendAndRelay的真实Model/ImageBillingModel投影；未覆盖其他路由改动。handler/passthrough及sealed WS事实已落盘，实际消费者回归待完成。"
+    },
+    {
+      "id": "WP-18-NATIVE-HANDLER-INTENT-FIXTURE-20261027",
+      "parent": "WP-18",
+      "depends_on": [],
+      "status": "review",
+      "assignee": "Heisenberg",
+      "agent_id": "01a17947-f94e-7110-be36-9a5fc7dabf13",
+      "write_paths": [
+        "backend/internal/handler/openai_ws_native_fixture_test.go",
+        "backend/internal/handler/openai_ws_native_intent_fixture_test.go"
+      ],
+      "scope": "Migrate only explicit handler in-memory journal fixture to actual before-send intent and technical/canonical finalization ports, preserving capacity and log-only transaction evidence. No runtime edits or claims of PG durability.",
+      "evidence_status": "not_run",
+      "implementation_note": "Heisenberg已迁两个handler内存journal文件并新增7个定向测试，worker已关闭；仅gofmt/空白检查，运行证据待主集成者完成。旧partial/unknown测试应读技术intent，不能再依赖随机canonical。"
+    },
+    {
+      "id": "WP-18-BPS-COOLDOWN-SECOND-REVIEW-20261027",
+      "parent": "WP-18",
+      "depends_on": [],
+      "status": "review",
+      "assignee": "Franklin",
+      "agent_id": "01a1795f-2a94-7af3-ae07-5cc42fb73135",
+      "write_paths": [
+        "backend/internal/service/ratelimit_service.go",
+        "backend/internal/service/ratelimit_service_clear_test.go",
+        "backend/internal/service/scheduled_test_runner_service.go",
+        "backend/internal/repository/account_repo_bps_cooldown_recovery.go",
+        "backend/internal/repository/account_repo_bps_cooldown_recovery_test.go",
+        "backend/internal/repository/account_repo_bps_cooldown_recovery_integration_test.go"
+      ],
+      "scope": "独立复核确认自动测试成功清除其他BPS冷却、DB错误伪装429两个缺陷。Franklin只修前者及实际consumer/SQL测试；后者主集成者负责。独立Images原格式fallback是本轮Responses范围外保留项，不能标为缺陷或误删。",
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-18-NATIVE-PG-ADAPTER-TEST-MIGRATION-20261027",
+      "parent": "WP-18",
+      "depends_on": [],
+      "status": "review",
+      "assignee": "Parfit",
+      "agent_id": "01a17943-898f-7c42-9267-1c3ab1ebfe80",
+      "write_paths": [
+        "backend/internal/repository/usage_billing_event_native_adapter_integration_test.go"
+      ],
+      "scope": "迁移整包PG编译阻塞的旧public billing adapter测试，真实保存intent并读取技术/货币回执，保留单次扣款/日志/幂等及unknown不造账；显式合成冻结输入不冒称真实发送前producer覆盖。",
+      "evidence_status": "R: passed",
+      "implementation_note": "真实PG修复后25个测试/子测试事件通过，其中包含本切片3个public adapter根场景；0fail/skip。只有不编入repository的service测试文件漂移，实际2236个编译/embed输入审计无变化；不是实际Native发送producer或整站验收。",
+      "evidence": [
+        ".local/bps-independent-review-20261027/postgres-state-and-ledger-final3.json"
+      ]
+    },
+    {
+      "id": "WP-18-NATIVE-SERVICE-FIXTURE-RACE-20261027",
+      "parent": "WP-18",
+      "depends_on": [],
+      "status": "review",
+      "assignee": "Parfit",
+      "agent_id": "01a17943-898f-7c42-9267-1c3ab1ebfe80",
+      "write_paths": [
+        "backend/internal/service/native_intent_runtime_test.go",
+        "backend/internal/service/native_operation_billing_test.go",
+        "backend/internal/service/openai_ws_account_change_lifecycle_test.go",
+        "backend/internal/service/openai_ws_turn_release_lifecycle_test.go"
+      ],
+      "scope": "真实race报告定位到内存journal并发map/counters；仅修fixture同步与新WS root pricing绑定，保留生产恢复/释放/原root断言；不修改生产代码。",
+      "evidence_status": "targeted race passed; combined recheck pending",
+      "implementation_note": "native-fixture-race-followup中本切片相关fixture/多lane/账号变化/晚完成均通过；该整组另有reasoning失败，单独修正passthrough模型/allowlist后10项通过。并发生产文件变化使最终冻结组合复验仍待执行。",
+      "evidence": [
+        ".local/bps-independent-review-20261027/native-fixture-race-followup.json",
+        ".local/bps-independent-review-20261027/native-reasoning-priced-passthrough.json"
+      ]
+    },
+    {
+      "id": "WP-12-CLOUD-ADMISSION-CAPS-RETIREMENT-20261027",
+      "parent": "WP-12",
+      "depends_on": [],
+      "status": "review",
+      "assignee": "Dirac",
+      "write_paths": [
+        "backend/internal/service/openai_cloud_session_store.go",
+        "backend/internal/service/openai_cloud_session.go",
+        "backend/internal/service/openai_cloud_billing.go",
+        "backend/internal/repository/gateway_cache_cloud.go"
+      ],
+      "scope": "移植已确认维护合同：取消旧8/16/128会话/actor/待结算/holds额外准入及容量压力回收。保留正常并发/字节/队列/生命周期/owner fencing/账务；扫描批次单独命名。共享Cloud网关error映射仅交精确patch供集成者合入。",
+      "evidence_status": "unit and real Redis passed; full gateway acceptance pending",
+      "agent_id": "01a17981-e2d8-7830-acf7-4cd5ff778340",
+      "evidence": [
+        ".local/bps-independent-review-20261027/cloud-admission-native-frozen-unit.json",
+        ".local/bps-independent-review-20261027/cloud-admission-real-redis.json"
+      ],
+      "implementation_note": "worker写集冻结，主集成完成recovery/error接线。固定快照unit/race153pass；真实Redis跨客户端超旧阈值准入和重复session fencing2pass，0fail/skip；Redis组源码前后一致。Cloud网关残余无生产者错误码字符串仍待单写协调删除；并非完整Cloud适配或Docker验收。 已随共用事件writer接线删除Cloud gateway无生产者的旧capacity错误码字符串。"
+    },
+    {
+      "id": "WP-18-BPS-EXPLICIT-MODEL-SELECTION-20261027",
+      "parent": "WP-18",
+      "depends_on": [],
+      "status": "review",
+      "assignee": "main_integrator",
+      "write_paths": [
+        "backend/internal/service/account.go",
+        "backend/internal/service/openai_excel_bps_model_access.go",
+        "backend/internal/service/openai_excel_bps_models_test.go",
+        "backend/internal/service/openai_excel_bps_test.go",
+        "backend/internal/service/openai_excel_bps_images_test.go",
+        "backend/internal/service/openai_excel_bps_ratelimit_test.go",
+        "backend/internal/service/openai_excel_bps_explicit_selection_review_test.go",
+        "backend/internal/service/openai_excel_bps_recovery.go",
+        "backend/internal/service/openai_excel_bps_recovery_test.go",
+        "backend/internal/service/openai_excel_bps_model_access_test.go",
+        "backend/internal/service/openai_codex_models_service.go"
+      ],
+      "scope": "补齐用户只走勾选模型要求：删除缺失列表=全模型的旧分支；空/缺失/畸形列表不选BPS，保持Cloud优先、最终映射匹配、原生独立能力、Excel-only拒绝Native；目录不因未选择模型发BPS探测。禁止自动填全部模型或更改历史数据。",
+      "evidence_status": "unit race and independent source review passed; Docker integration pending",
+      "implementation_note": "原授权恢复worker已冻结，主集成删除缺失列表默认模型探测，扩展原拒绝探测测试；正式独立Images格式回退未改。",
+      "review_findings": [
+        "已修复并从公共入口验证clientVersion原值透传。",
+        "已修复BPS目录失败隔离：Native只保留未勾选的真实条目，Excel-only/无可用条目/取消仍错误。独立只读复核未发现新的可操作缺陷。"
+      ],
+      "evidence": [
+        ".local/bps-independent-review-20261027/bps-explicit-selection-recheck.json",
+        ".local/bps-independent-review-20261027/bps-manifest-independent-review-fixes.json"
+      ]
+    },
+    {
+      "id": "WP-10-NATIVE-HANDLER-LEGACY-CONSUMERS-20261027",
+      "parent": "WP-10",
+      "depends_on": [],
+      "status": "in_progress",
+      "assignee": "Heisenberg",
+      "agent_id": "01a17947-f94e-7110-be36-9a5fc7dabf13",
+      "write_paths": [
+        "backend/internal/handler/openai_gateway_handler_test.go",
+        "backend/internal/handler/openai_gateway_ws_group_pricing_test.go",
+        "backend/internal/service/native_intent_finalization.go",
+        "backend/internal/service/native_intent_settlement.go",
+        "backend/internal/service/native_intent_runtime.go",
+        "backend/internal/service/native_intent_finalization_test.go",
+        "backend/internal/repository/usage_billing_event_native_adapter_integration_test.go"
+      ],
+      "scope": "根据实际handler定向32pass/9fail回执修复旧消费者测试/共享fixture的pricing/terminal/technical receipt消费；若发现生产遗漏交主集成，不改真实用量/准入/重试/幂等策略。",
+      "evidence_status": "failed; repair in progress",
+      "implementation_note": "worker测试集已冻结；主集成修复实际metadata丢失：UserAgent/IPAddress为既有用量日志标量、omitempty保持旧空字段序列化形状；禁止原始header/令牌/正文白名单负例保留。wire effort复用既有解析/后缀/归一化。待真实消费者复测。"
+    },
+    {
+      "id": "WP-10-C2A-WS-FAILURE-PROVENANCE-20261027",
+      "parent": "WP-10",
+      "depends_on": [],
+      "status": "review",
+      "assignee": "Gibbs",
+      "agent_id": "01a17940-75d8-7773-961f-dc744f79a06b",
+      "write_paths": [
+        "backend/internal/service/openai_ws_forwarder_logutil.go",
+        "backend/internal/service/openai_ws_forwarder_support.go",
+        "backend/internal/service/openai_ws_multiplex.go",
+        "backend/internal/service/openai_ws_pool.go",
+        "backend/internal/service/openai_ws_v2_passthrough_adapter.go",
+        "backend/internal/service/openai_ws_maintenance_provenance_review_test.go",
+        "backend/internal/handler/openai_gateway_handler.go",
+        "backend/internal/service/openai_gateway_service.go"
+      ],
+      "scope": "精确复核/移植维护main@c2a10f2aa相对025945a52的WS首帧故障归因和403握手来源分类；保留Native新执行/授权/租约/账务链。handler消费仅交主集成patch；HTTPbridge并发写区域仅审查不写。",
+      "evidence_status": "not_run",
+      "implementation_note": "生产写集冻结；主集成已应用handler物理首帧/lane安全日志及HTTP fallback Ops有界握手原因接线；待集中race。"
+    },
+    {
+      "id": "WP-12-C2A-CLOUD-CONTEXT-ISOLATION-20261027",
+      "parent": "WP-12",
+      "depends_on": [],
+      "status": "in_progress",
+      "assignee": "main_integrator",
+      "write_paths": [
+        "backend/internal/service/openai_cloud_protocol.go",
+        "backend/internal/service/openai_cloud_context_isolation_review_test.go"
+      ],
+      "scope": "移植已发布维护合同：不把Cloud宿主的权限/环境提示注入客户端模型上下文，实际Cloud sandbox/approval约束与客户端原消息保持；补直接协议参数和消息保真测试。",
+      "evidence_status": "not_run"
+    },
+    {
+      "id": "WP-18-BPS-DIRECT-RESPONSES-EVENTS-20261027",
+      "parent": "WP-18",
+      "depends_on": [],
+      "status": "in_progress",
+      "assignee": "main_integrator",
+      "write_paths": [
+        "backend/internal/service/openai_cloud_boundaries_test.go",
+        "backend/internal/service/openai_cloud_gateway.go",
+        "backend/internal/service/openai_compact_stream_bridge.go",
+        "backend/internal/service/openai_excel_bps.go",
+        "backend/internal/service/openai_excel_bps_compat.go",
+        "backend/internal/service/openai_excel_bps_reliability_test.go",
+        "backend/internal/service/openai_responses_event_writer.go",
+        "backend/internal/service/openai_ws_bps_direct_event_review_test.go",
+        "backend/internal/service/openai_ws_cloud_bridge.go",
+        "backend/internal/service/openai_ws_cloud_direct_event_test.go",
+        "backend/internal/service/openai_ws_excel_bps_bridge.go",
+        "backend/internal/service/openai_responses_event_writer_test.go"
+      ],
+      "scope": "BPS规范化响应直接消费现有WriteResponseEvent输出边界，去除WS/兼容输出的末端SSE编码/解析往返；保持HTTP原SSE帧、生命周期首输出暂存、失败终态、用量和续接发布；未证明无消费者的旧错误兼容decoder不盲删。",
+      "evidence_status": "not_run",
+      "implementation_note": "普通/终态直接事件与既有消费者先分别通过60/92项；进一步迁移共享流错误出口并移除末端SSE解析器、改名共用responsesEventWriter。此退休阶段待复测，保留的Write仅收集真实预流JSON错误体。"
+    },
+    {
+      "id": "WP-10-NATIVE-HTTP-BRIDGE-SSE-REPAIR-20261027",
+      "parent": "WP-10",
+      "depends_on": [],
+      "status": "review",
+      "assignee": "Gibbs",
+      "agent_id": "01a17940-75d8-7773-961f-dc744f79a06b",
+      "write_paths": [
+        "backend/internal/service/openai_ws_http_bridge.go",
+        "backend/internal/service/openai_ws_http_bridge_sse_repair_review_test.go"
+      ],
+      "scope": "按main@c2a10f2aa真实HTTP-200/SSE rejected-field修复例外，融入现有Native单operation/attempt owner；保留同一预算、定价和first-output deadline及无输出/用量/尾部/续接等guard，不复制维护版外层重试循环。",
+      "evidence_status": "not_run",
+      "implementation_note": "主集成已核对精确源hash、读取新运行逻辑及真实发送/保留/owner/lease/预算负例断言，应用2文件补丁。未增加维护版外层循环，待集中实际编译/race。"
+    },
+    {
+      "id": "WP-18-CLOSEOUT-PLAN-20261027",
+      "parent": "WP-18",
+      "status": "accepted",
+      "assignee": "main_integrator",
+      "depends_on": [],
+      "write_paths": [
+        "backend/internal/service/openai_response_mode.go",
+        "backend/internal/service/openai_gateway_forward.go",
+        "backend/internal/service/openai_ws_forwarder_ingress.go",
+        "backend/internal/service/openai_ws_http_bridge.go",
+        "backend/internal/service/openai_ws_forwarder_support.go"
+      ],
+      "scope": "HTTP/WS逐轮、候选与续接统一消费responseExecutionPlan；删除旧responseModeForAccount，最终模型匹配、BPS执行pin与次轮passthrough映射均有真实消费者。",
+      "evidence_status": "passed_for_deployed_slice; full_parent_acceptance_pending",
+      "acceptance_scope": "Only the explicit repaired slice in deployed immutable backend source 3a0638612e059de48e7f4fcb665ba1b66175e58c61e16a669e26698ac61ed2ea; not complete parent WP, new concurrent source or real upstream acceptance.",
+      "integration_owner": "main_integrator",
+      "backend_source_sha256": "3a0638612e059de48e7f4fcb665ba1b66175e58c61e16a669e26698ac61ed2ea",
+      "deployment_receipt": ".local/rebuild-integration/api-unified-20261027/deploy-receipt.json",
+      "agents_closed": true,
+      "implementation_note": "HTTP/WS逐轮、候选与续接统一消费responseExecutionPlan；删除旧responseModeForAccount，最终模型匹配、BPS执行pin与次轮passthrough映射均有真实消费者。",
+      "evidence": [
+        ".local/bps-independent-review-20261027/closeout-gateway-final.json",
+        ".local/bps-independent-review-20261027/closeout-mode-plan-complete.json",
+        ".local/unified-closeout-20261027/validation-build-alignment.json"
+      ],
+      "accepted_at": "2026-10-27T01:00:45.025038+00:00",
+      "current_tree_revalidation_required": true
+    },
+    {
+      "id": "WP-18-CLOSEOUT-CLOUD-20261027",
+      "parent": "WP-18",
+      "status": "accepted",
+      "assignee": "Dewey",
+      "depends_on": [],
+      "write_paths": [
+        "backend/internal/service/openai_cloud*",
+        "backend/internal/gateway/protocol/cloud/**"
+      ],
+      "scope": "独立审核既有Cloud稳定交付，确认有效续接/缓存回放/公开用量与root账务；发现整数参数及请求错误归因遗漏后由CLOUD-BUDGET/主集成修复并实际复验。Dewey提供只读发现，不代报其编译或实现。",
+      "evidence_status": "passed_for_deployed_slice; full_parent_acceptance_pending",
+      "acceptance_scope": "Only the explicit repaired slice in deployed immutable backend source 3a0638612e059de48e7f4fcb665ba1b66175e58c61e16a669e26698ac61ed2ea; not complete parent WP, new concurrent source or real upstream acceptance.",
+      "integration_owner": "main_integrator",
+      "backend_source_sha256": "3a0638612e059de48e7f4fcb665ba1b66175e58c61e16a669e26698ac61ed2ea",
+      "deployment_receipt": ".local/rebuild-integration/api-unified-20261027/deploy-receipt.json",
+      "agents_closed": true,
+      "implementation_note": "独立审核既有Cloud稳定交付，确认有效续接/缓存回放/公开用量与root账务；发现整数参数及请求错误归因遗漏后由CLOUD-BUDGET/主集成修复并实际复验。Dewey提供只读发现，不代报其编译或实现。",
+      "evidence": [
+        ".local/bps-independent-review-20261027/closeout-gateway-final.json",
+        ".local/bps-independent-review-20261027/closeout-mode-plan-complete.json",
+        ".local/bps-independent-review-20261027/closeout-control-cloud-final.json",
+        ".local/unified-closeout-20261027/validation-build-alignment.json",
+        ".local/cloud-retention-20261027/changes.patch",
+        ".local/cloud-retention-20261027/verification.json",
+        ".local/cloud-retention-20261027/green-v4.json"
+      ],
+      "accepted_at": "2026-10-27T01:00:45.029739+00:00",
+      "completion_note": "Specific stable delivery independently reviewed; its repeat-poll heartbeat deleted. Newer bridge changes remain under active owner.",
+      "current_tree_revalidation_required": true
+    },
+    {
+      "id": "WP-18-CLOSEOUT-BPS-RECOVERY-20261027",
+      "parent": "WP-18",
+      "status": "accepted",
+      "assignee": "Popper",
+      "depends_on": [],
+      "write_paths": [
+        "backend/internal/service/openai_excel_bps_recovery.go",
+        "backend/internal/service/openai_account_runtime_block_fastpath.go"
+      ],
+      "scope": "恢复probe、运行冷却和scheduler/sticky/previous-response真实消费者按能力隔离，独立Native能力不被BPS冷却阻断；系统停用恢复条件与PG原子发布/跨客户端claim复测。",
+      "evidence_status": "passed_for_deployed_slice; full_parent_acceptance_pending",
+      "acceptance_scope": "Only the explicit repaired slice in deployed immutable backend source 3a0638612e059de48e7f4fcb665ba1b66175e58c61e16a669e26698ac61ed2ea; not complete parent WP, new concurrent source or real upstream acceptance.",
+      "integration_owner": "main_integrator",
+      "backend_source_sha256": "3a0638612e059de48e7f4fcb665ba1b66175e58c61e16a669e26698ac61ed2ea",
+      "deployment_receipt": ".local/rebuild-integration/api-unified-20261027/deploy-receipt.json",
+      "agents_closed": true,
+      "implementation_note": "恢复probe、运行冷却和scheduler/sticky/previous-response真实消费者按能力隔离，独立Native能力不被BPS冷却阻断；系统停用恢复条件与PG原子发布/跨客户端claim复测。",
+      "evidence": [
+        ".local/bps-independent-review-20261027/unified-plan-recovery.json",
+        ".local/bps-independent-review-20261027/closeout-control-postgres.json",
+        ".local/bps-independent-review-20261027/closeout-cross-instance-storage.json",
+        ".local/unified-closeout-20261027/validation-build-alignment.json"
+      ],
+      "accepted_at": "2026-10-27T01:00:45.032228+00:00",
+      "completion_note": "155-event frozen run had unrelated source drift; deployed runtime-block, scheduling, recovery and previous-response consumers and recovery tests retain the exact hashes. Real PG recovery/claim checks also passed. Later owner recovery edits not included.",
+      "current_tree_revalidation_required": true
+    },
+    {
+      "id": "WP-18-CLOSEOUT-CONTROL-20261027",
+      "parent": "WP-18",
+      "status": "accepted",
+      "assignee": "Rawls",
+      "depends_on": [],
+      "write_paths": [
+        "backend/internal/service/vendor_account*",
+        "backend/internal/service/admin_service.go",
+        "backend/internal/repository/account_repo_excel_bps_settings.go",
+        "backend/internal/service/account_excel_bps_settings.go"
+      ],
+      "scope": "管理员full/Extra/bulk、供应商事务、安全恢复DTO及停用条件接线完成；旧bps_all_models拒绝，旧true草稿不能覆盖系统停用。",
+      "evidence_status": "passed_for_deployed_slice; full_parent_acceptance_pending",
+      "acceptance_scope": "Only the explicit repaired slice in deployed immutable backend source 3a0638612e059de48e7f4fcb665ba1b66175e58c61e16a669e26698ac61ed2ea; not complete parent WP, new concurrent source or real upstream acceptance.",
+      "integration_owner": "main_integrator",
+      "backend_source_sha256": "3a0638612e059de48e7f4fcb665ba1b66175e58c61e16a669e26698ac61ed2ea",
+      "deployment_receipt": ".local/rebuild-integration/api-unified-20261027/deploy-receipt.json",
+      "agents_closed": true,
+      "implementation_note": "管理员full/Extra/bulk、供应商事务、安全恢复DTO及停用条件接线完成；旧bps_all_models拒绝，旧true草稿不能覆盖系统停用。",
+      "evidence": [
+        ".local/bps-independent-review-20261027/closeout-control-postgres.json",
+        ".local/bps-independent-review-20261027/closeout-vendor-postgres.json",
+        ".local/bps-independent-review-20261027/closeout-control-cloud-final.json",
+        ".local/unified-closeout-20261027/validation-build-alignment.json"
+      ],
+      "accepted_at": "2026-10-27T01:00:45.034721+00:00",
+      "current_tree_revalidation_required": true
+    },
+    {
+      "id": "WP-18-CLOSEOUT-HANDLER-MATRIX-20261027",
+      "parent": "WP-18",
+      "status": "accepted",
+      "assignee": "James",
+      "depends_on": [],
+      "write_paths": [
+        "backend/internal/handler/openai_excel_bps*_test.go"
+      ],
+      "scope": "七种入口/返回形态的32个BPS核心叶子场景实际执行，修复host admission夹具和BPS长Retry-After输出；保留原生零派发、真实协议终态、用量及单次结算断言。",
+      "evidence_status": "passed_for_deployed_slice; full_parent_acceptance_pending",
+      "acceptance_scope": "Only the explicit repaired slice in deployed immutable backend source 3a0638612e059de48e7f4fcb665ba1b66175e58c61e16a669e26698ac61ed2ea; not complete parent WP, new concurrent source or real upstream acceptance.",
+      "integration_owner": "main_integrator",
+      "backend_source_sha256": "3a0638612e059de48e7f4fcb665ba1b66175e58c61e16a669e26698ac61ed2ea",
+      "deployment_receipt": ".local/rebuild-integration/api-unified-20261027/deploy-receipt.json",
+      "agents_closed": true,
+      "implementation_note": "七种入口/返回形态的32个BPS核心叶子场景实际执行，修复host admission夹具和BPS长Retry-After输出；保留原生零派发、真实协议终态、用量及单次结算断言。",
+      "evidence": [
+        ".local/bps-independent-review-20261027/closeout-handler-matrix-v3.json",
+        ".local/bps-independent-review-20261027/closeout-ws-readmission.json",
+        ".local/unified-closeout-20261027/validation-build-alignment.json"
+      ],
+      "accepted_at": "2026-10-27T01:00:45.036261+00:00",
+      "current_tree_revalidation_required": false
+    },
+    {
+      "id": "WP-18-CLOSEOUT-OAUTH-APPLY-20261027",
+      "parent": "WP-18",
+      "status": "accepted",
+      "assignee": "Dirac",
+      "depends_on": [],
+      "write_paths": [
+        "backend/internal/handler/admin/account_handler.go",
+        "backend/internal/service/admin_account.go"
+      ],
+      "scope": "OAuth应用凭据与Extra在原Ent事务和权限/supply身份边界中提交，409冲突整体回滚；保留token失效和提交确认不明处理。",
+      "evidence_status": "passed_for_deployed_slice; full_parent_acceptance_pending",
+      "acceptance_scope": "Only the explicit repaired slice in deployed immutable backend source 3a0638612e059de48e7f4fcb665ba1b66175e58c61e16a669e26698ac61ed2ea; not complete parent WP, new concurrent source or real upstream acceptance.",
+      "integration_owner": "main_integrator",
+      "backend_source_sha256": "3a0638612e059de48e7f4fcb665ba1b66175e58c61e16a669e26698ac61ed2ea",
+      "deployment_receipt": ".local/rebuild-integration/api-unified-20261027/deploy-receipt.json",
+      "agents_closed": true,
+      "implementation_note": "OAuth应用凭据与Extra在原Ent事务和权限/supply身份边界中提交，409冲突整体回滚；保留token失效和提交确认不明处理。",
+      "evidence": [
+        ".local/bps-independent-review-20261027/closeout-control-oauth-unit.json",
+        ".local/bps-independent-review-20261027/closeout-control-cloud-final.json",
+        ".local/unified-closeout-20261027/validation-build-alignment.json"
+      ],
+      "accepted_at": "2026-10-27T01:00:45.038998+00:00",
+      "completion_note": "Original combined command exited 1 at unrelated service test compile; executed admin28/dto1/repository14 pass and missing service coverage completed by final98 group. Not claiming the failed command passed or sqlmock proves PG commit.",
+      "current_tree_revalidation_required": false
+    },
+    {
+      "id": "WP-18-CLOSEOUT-CLOUD-BUDGET-20261027",
+      "parent": "WP-18",
+      "status": "accepted",
+      "assignee": "Noether",
+      "depends_on": [],
+      "write_paths": [
+        "backend/internal/service/openai_cloud_tool_arguments.go",
+        "backend/internal/service/openai_cloud_tool_arguments_test.go"
+      ],
+      "scope": "严格整数字节投影及完整工具publication大小预算已接真实发送/回放边界；保持custom/fraction/大数、归属和root账务，扩展request-scoped分类。",
+      "evidence_status": "passed_for_deployed_slice; full_parent_acceptance_pending",
+      "acceptance_scope": "Only the explicit repaired slice in deployed immutable backend source 3a0638612e059de48e7f4fcb665ba1b66175e58c61e16a669e26698ac61ed2ea; not complete parent WP, new concurrent source or real upstream acceptance.",
+      "integration_owner": "main_integrator",
+      "backend_source_sha256": "3a0638612e059de48e7f4fcb665ba1b66175e58c61e16a669e26698ac61ed2ea",
+      "deployment_receipt": ".local/rebuild-integration/api-unified-20261027/deploy-receipt.json",
+      "agents_closed": true,
+      "implementation_note": "严格整数字节投影及完整工具publication大小预算已接真实发送/回放边界；保持custom/fraction/大数、归属和root账务，扩展request-scoped分类。",
+      "evidence": [
+        ".local/bps-independent-review-20261027/closeout-control-cloud-final.json",
+        ".local/bps-independent-review-20261027/closeout-gateway-final.json",
+        ".local/unified-closeout-20261027/validation-build-alignment.json"
+      ],
+      "accepted_at": "2026-10-27T01:00:45.041955+00:00",
+      "current_tree_revalidation_required": false
+    },
+    {
+      "id": "WP-18-CLOSEOUT-NATIVE-FIXTURES-20261027",
+      "parent": "WP-18",
+      "status": "accepted",
+      "assignee": "Turing",
+      "depends_on": [],
+      "write_paths": [
+        "backend/internal/service/openai_ws_http_bridge*_test.go"
+      ],
+      "scope": "既有Native bridge/capture/strict/lifecycle场景迁到真实authority、permit、pricing、capacity与finalizer；保留断言并修复已发现的in-stream401重放与端点遗漏。",
+      "evidence_status": "passed_for_deployed_slice; full_parent_acceptance_pending",
+      "acceptance_scope": "Only the explicit repaired slice in deployed immutable backend source 3a0638612e059de48e7f4fcb665ba1b66175e58c61e16a669e26698ac61ed2ea; not complete parent WP, new concurrent source or real upstream acceptance.",
+      "integration_owner": "main_integrator",
+      "backend_source_sha256": "3a0638612e059de48e7f4fcb665ba1b66175e58c61e16a669e26698ac61ed2ea",
+      "deployment_receipt": ".local/rebuild-integration/api-unified-20261027/deploy-receipt.json",
+      "agents_closed": true,
+      "implementation_note": "既有Native bridge/capture/strict/lifecycle场景迁到真实authority、permit、pricing、capacity与finalizer；保留断言并修复已发现的in-stream401重放与端点遗漏。",
+      "evidence": [
+        ".local/bps-independent-review-20261027/closeout-gateway-final.json",
+        ".local/unified-closeout-20261027/validation-build-alignment.json"
+      ],
+      "accepted_at": "2026-10-27T01:00:45.044743+00:00",
+      "current_tree_revalidation_required": false
+    },
+    {
+      "id": "WP-18-CLOSEOUT-WS-REJECTION-20261027",
+      "parent": "WP-18",
+      "status": "accepted",
+      "assignee": "Volta",
+      "depends_on": [],
+      "write_paths": [
+        "backend/internal/service/openai_ws_forwarder_ingress.go",
+        "backend/internal/handler/openai_gateway_handler.go"
+      ],
+      "scope": "ctx_pool/http_bridge/passthrough本地输入拒绝回到原handler结束本轮，再重新授权/映射/预算/定价/slots；修复passthrough出站映射和次轮BPS规划。",
+      "evidence_status": "passed_for_deployed_slice; full_parent_acceptance_pending",
+      "acceptance_scope": "Only the explicit repaired slice in deployed immutable backend source 3a0638612e059de48e7f4fcb665ba1b66175e58c61e16a669e26698ac61ed2ea; not complete parent WP, new concurrent source or real upstream acceptance.",
+      "integration_owner": "main_integrator",
+      "backend_source_sha256": "3a0638612e059de48e7f4fcb665ba1b66175e58c61e16a669e26698ac61ed2ea",
+      "deployment_receipt": ".local/rebuild-integration/api-unified-20261027/deploy-receipt.json",
+      "agents_closed": true,
+      "implementation_note": "ctx_pool/http_bridge/passthrough本地输入拒绝回到原handler结束本轮，再重新授权/映射/预算/定价/slots；修复passthrough出站映射和次轮BPS规划。",
+      "evidence": [
+        ".local/bps-independent-review-20261027/closeout-ws-readmission.json",
+        ".local/bps-independent-review-20261027/closeout-passthrough-final.json",
+        ".local/bps-independent-review-20261027/closeout-mode-plan-complete.json",
+        ".local/unified-closeout-20261027/validation-build-alignment.json"
+      ],
+      "accepted_at": "2026-10-27T01:00:45.047800+00:00",
+      "current_tree_revalidation_required": true
+    },
+    {
+      "id": "WP-23-LIFECYCLE-AUDIT-20261027",
+      "parent": "WP-23",
+      "status": "accepted",
+      "assignee": "lifecycle_audit_worker",
+      "depends_on": [],
+      "scope": "只读核对非活动网关worker的真实生命周期与装配，不修改Cloud/WS活动写集。",
+      "write_paths": [
+        ".local/remaining-closeout-20261027/lifecycle-audit.md"
+      ],
+      "evidence_status": "source audit complete; two findings assigned for repair, not runtime acceptance",
+      "evidence": [
+        ".local/remaining-closeout-20261027/lifecycle-audit.md"
+      ]
+    },
+    {
+      "id": "WP-19-PROVIDER-MIGRATION-AUDIT-20261027",
+      "parent": "WP-19",
+      "status": "accepted",
+      "assignee": "provider_audit_worker",
+      "depends_on": [],
+      "scope": "逐供给核对计划状态与实际唯一执行路径，选独立可迁移切片，不用wrapper充当完成。",
+      "write_paths": [
+        ".local/remaining-closeout-20261027/provider-migration-audit.md"
+      ],
+      "evidence_status": "source audit complete; actual missing migrations retained",
+      "evidence": [
+        ".local/remaining-closeout-20261027/provider-migration-audit.md"
+      ]
+    },
+    {
+      "id": "WP-25-DOCKER-BPS-CONTROL-20261027",
+      "parent": "WP-25",
+      "status": "accepted",
+      "assignee": "main_integrator",
+      "depends_on": [],
+      "scope": "在当前已部署本机快照验证BPS条件更新/旧草稿409/回滚/显式停用，使用任务独立合成资源，不触真实上游。",
+      "write_paths": [
+        "tools/tests/rebuild_bps_control_acceptance.py"
+      ],
+      "evidence_status": "13/13 real local HTTP/PG subset passed:10 basic plus3 two-gateway conditional-write/read cases",
+      "evidence": [
+        ".local/remaining-closeout-20261027/bps-docker-control-v3.json",
+        ".local/remaining-closeout-20261027/bps-two-gateway-control.json",
+        ".local/remaining-closeout-20261027/replica-runtime.json"
+      ],
+      "acceptance_scope": "Exact deployed3a063861 image; actual two Docker processes for CAS/read visibility, seeded system state. Recovery probes/Cloud transfer/real OAuth remain separate."
+    },
+    {
+      "id": "WP-23-BALANCE-INVALIDATION-JOIN-20261027",
+      "parent": "WP-23",
+      "status": "review",
+      "assignee": "Anscombe",
+      "depends_on": [],
+      "scope": "余额更新不再放出未归属缓存失效，测试真实调用返回与取消边界。",
+      "write_paths": [
+        "backend/internal/service/admin_user.go",
+        "backend/internal/service/admin_service_update_balance_test.go"
+      ],
+      "evidence_status": "36 unit/race events and independent source review passed; updated Docker acceptance pending",
+      "review_note": "Second review: ensure committed mutation invalidation also executes when GetByID after the write fails. Fix and actual test pending.",
+      "evidence": [
+        ".local/remaining-closeout-20261027/lifecycle-result-summary.json",
+        ".local/remaining-closeout-20261027/wire-regeneration-v2.json",
+        ".local/remaining-closeout-20261027/payment-independent-review.md"
+      ],
+      "implementation_note": "No production migration, no global dependency changes, no billing result weakening. Final lifecycle command138.467s exit0; unrelated active BPS files drifted."
+    },
+    {
+      "id": "WP-23-PAYMENT-NOTIFICATION-JOIN-20261027",
+      "parent": "WP-23",
+      "status": "review",
+      "assignee": "main_integrator",
+      "depends_on": [],
+      "scope": "支付通知复用现有任务owner，原支付扫描后、订阅和存储前排空，保留既有通知去重/支付幂等。",
+      "write_paths": [
+        "backend/internal/service/payment_service.go",
+        "backend/internal/service/payment_fulfillment.go",
+        "backend/internal/service/payment_notification_lifecycle.go",
+        "backend/internal/service/payment_notification_lifecycle_test.go",
+        "backend/internal/service/wire.go",
+        "backend/cmd/server/wire_gen.go"
+      ],
+      "evidence_status": "36 unit/race events and independent source review passed; updated Docker acceptance pending",
+      "evidence": [
+        ".local/remaining-closeout-20261027/lifecycle-result-summary.json",
+        ".local/remaining-closeout-20261027/wire-regeneration-v2.json",
+        ".local/remaining-closeout-20261027/payment-independent-review.md"
+      ],
+      "implementation_note": "No production migration, no global dependency changes, no billing result weakening. Final lifecycle command138.467s exit0; unrelated active BPS files drifted."
+    },
+    {
+      "id": "WP-13-SYSTEMONE-VERTICAL-20261027",
+      "parent": "WP-13",
+      "status": "review",
+      "assignee": "MAIN; Peirce owns consumer-test files",
+      "depends_on": [],
+      "scope": "TypeSafe真实单次发送/统一控制/精确用量/原账务接管，删除旧执行链；共享账务注册由MAIN集成，不覆盖Native恢复callback。",
+      "write_paths": [
+        "backend/internal/handler/gateway_systemone.go",
+        "backend/internal/handler/gateway_systemone_test.go",
+        "backend/internal/service/gateway_systemone.go",
+        "backend/internal/service/gateway_systemone_test.go",
+        "backend/internal/service/systemone_*.go",
+        "backend/internal/providers/typesafe/**",
+        "backend/internal/pkg/typesafe/client.go",
+        "backend/internal/pkg/typesafe/*test.go",
+        "backend/internal/gateway/model/protocol_systemone.go"
+      ],
+      "evidence_status": "legacy_forward_handler_queue_removed_service_and_local_docker_pass",
+      "evidence": [
+        ".local/systemone-closeout-20261027/receipt.json",
+        ".local/systemone-closeout-20261027/systemone-http-result.json"
+      ],
+      "retired_paths": [
+        "GatewayService.ForwardSystemOne",
+        "SystemOneForwardResult",
+        "GatewayHandler.recordSystemOneUsage",
+        "GatewayService.SystemOneExecutionReady",
+        "backend/internal/service/gateway_systemone.go"
+      ]
+    },
+    {
+      "id": "WP-13-SYSTEMONE-JOURNAL-20261027",
+      "parent": "WP-13",
+      "status": "accepted",
+      "assignee": "MAIN",
+      "depends_on": [],
+      "scope": "原intent/journal/money恢复单owner接入SystemOne投影；shared修改以精确patch交MAIN，不改活动BPS/Cloud路径。",
+      "write_paths": [
+        "backend/internal/service/systemone_finalization*.go",
+        "backend/internal/service/native_*finalization*.go",
+        "backend/internal/service/native_usage_evidence.go",
+        "backend/internal/repository/usage_billing_event_intent_finalization.go",
+        "backend/internal/repository/usage_billing_event_native.go",
+        "backend/internal/repository/usage_billing_systemone*.go",
+        "backend/internal/service/usage_record_worker_pool.go",
+        "backend/internal/repository/usage_billing_events.go",
+        "backend/internal/repository/usage_billing_repo.go"
+      ],
+      "evidence_status": "shared_finalizer_pg_race_and_docker_http_pass",
+      "evidence": [
+        ".local/systemone-closeout-20261027/test-evidence.json",
+        ".local/systemone-closeout-20261027/systemone-http-result.json"
+      ],
+      "acceptance_limit": "Local layered service, real PG/race and Docker HTTP with synthetic upstream; no real TypeSafe upstream."
+    },
+    {
+      "id": "WP-22-OPS-METRICS-SQL-20261027",
+      "parent": "WP-22",
+      "status": "accepted",
+      "assignee": "McClintock",
+      "depends_on": [],
+      "scope": "Fix PostgreSQL parameter inference in the real metrics writer; unit and PG scope tests passed; runtime image refresh pending.",
+      "write_paths": [
+        "backend/internal/repository/ops_repo_metrics*.go"
+      ],
+      "evidence_status": "unit_pg_and_actual_docker_browser_pass",
+      "evidence": [
+        ".local/systemone-closeout-20261027/deploy-receipt.json",
+        ".local/systemone-closeout-20261027/ops-browser-ax.txt"
+      ]
+    },
+    {
+      "id": "WP-06-MIXED-IMAGE-TOKEN-20261027",
+      "parent": "WP-06",
+      "status": "review",
+      "assignee": "Meitner",
+      "depends_on": [],
+      "scope": "Review and repair catalog token pricing for non-frozen mixed image output; preserve dedicated image endpoint semantics.",
+      "write_paths": [
+        "backend/internal/service/openai_gateway_usage.go",
+        "backend/internal/service/native_intent_settlement_test.go"
+      ],
+      "evidence_status": "unit_pass_in_frozen_image",
+      "evidence": [
+        ".local/systemone-closeout-20261027/receipt.json"
+      ]
+    },
+    {
+      "id": "WP-18-PUBLIC-MODE-CLOSEOUT-20261027",
+      "parent": "WP-18",
+      "status": "review",
+      "assignee": "Noether",
+      "depends_on": [],
+      "scope": "Recheck public Native/BPS/Cloud mode consumer history failures against current source, retain endpoint/continuation/cancel/authorization contracts.",
+      "write_paths": [
+        "backend/internal/service/*test.go",
+        "backend/internal/handler/*test.go"
+      ],
+      "evidence_status": "68_stable_public_events_and_144_scoped_historical_events_passed_final_full_matrix_not_accepted",
+      "evidence": [
+        ".local/responses-completion-20261027/public-consumers-current-20261027T181806/receipt.json",
+        ".local/responses-completion-20261027/public-consumers-current-20261027T181806/closure.json",
+        ".local/responses-completion-20261027/historical-consumers-20261027T182131/closure.json",
+        ".local/responses-completion-20261027/historical-consumers-20261027T182131/test-fixture-fixes.patch"
+      ],
+      "review_note": "MAIN reviewed exact three-file test patch; retained cooldown/status, per-turn admission/release and unique billing roots. Repair run overlapped newer Cloud sources, so no stable whole-backend acceptance."
+    },
+    {
+      "id": "WP-20-UNIFIED-MODEL-MANAGEMENT-BACKEND-20261027",
+      "parent": "WP-20",
+      "status": "accepted",
+      "assignee": "MAIN",
+      "depends_on": [],
+      "scope": "Integrate frontend/docs/UNIFIED_MODEL_MANAGEMENT_HANDOFF.md backend policy/catalog/source/mapping/pricing/allowlist API and runtime consumers; frontend route waits for actual contract.",
+      "evidence_status": "superseded_and_fulfilled_by_20261028_integration",
+      "source_reference": "7771bc4b98327e185fb212274a3a40a8ec7eb3ef",
+      "write_paths": [
+        "backend/**"
+      ],
+      "integration_note": "Fulfilled and verified by WP-20-UNIFIED-MODEL-MANAGEMENT-20261028; no separate duplicate implementation."
+    },
+    {
+      "id": "WP-08-CPR-PLAN-20261028",
+      "parent": "WP-08",
+      "status": "accepted",
+      "assignee": "MAIN",
+      "depends_on": [],
+      "write_paths": [
+        "backend/internal/service/openai_response_mode.go",
+        "backend/internal/service/native_dispatch*.go",
+        "backend/internal/service/authority_ws.go",
+        "backend/internal/service/native_operation.go",
+        "backend/internal/service/*cpr*test.go",
+        "backend/internal/service/native_intent_runtime.go",
+        "backend/internal/service/openai_gateway_messages.go",
+        "backend/internal/service/openai_gateway_chat_completions.go",
+        "backend/internal/service/native_operation_*test.go",
+        "backend/internal/service/native_billing_observation_boundary_test.go",
+        "backend/internal/handler/native_http_*test.go",
+        "backend/internal/service/openai_ws_pool.go",
+        "backend/internal/service/openai_ws_forwarder_v2.go",
+        "backend/internal/service/openai_ws_forwarder_ingress.go",
+        "backend/internal/service/openai_ws_*test.go"
+      ],
+      "scope": "Freeze admitted per-turn candidate plans and use one live resource read within each dispatch validation",
+      "technical_plan": "CPR_INTEGRATION.md",
+      "evidence_status": "accepted_scoped_backend_local_snapshot",
+      "integration_note": "Consumer review found actual Messages/Chat encoder-to-intent missing facts and untrusted GetBody pricing projection; repaired production paths and migrated stale fixture setup to preserve before-send policy. No live authority bypass.",
+      "acceptance_scope": "Only adopted CPR slice; not parent/full rebuild/frontend/external upstream acceptance",
+      "evidence": [
+        ".local/cpr-integration-20261028/verification.json",
+        ".local/cpr-integration-20261028/docker-smoke.json"
+      ],
+      "verified_source_sha256": "04b36ed10bd01e6cd0ed2802ed6ed480b4341692584d13b02cf963035693a636"
+    },
+    {
+      "id": "WP-07-CPR-CATALOG-20261028",
+      "parent": "WP-07",
+      "status": "accepted",
+      "assignee": "MAIN",
+      "depends_on": [],
+      "write_paths": [
+        "backend/internal/service/openai_codex_models_service.go",
+        "backend/internal/service/openai_codex_catalog_*.go",
+        "backend/internal/service/openai_codex_models_service_test.go",
+        "backend/internal/catalog/**",
+        "backend/internal/service/openai_codex_model_metadata.go",
+        "backend/internal/service/openai_excel_bps_model_access.go",
+        "backend/internal/handler/openai_codex_models_handler_test.go"
+      ],
+      "scope": "Existing catalog owner scope/generation and authenticated invalidation",
+      "technical_plan": "CPR_INTEGRATION.md",
+      "evidence_status": "accepted_scoped_backend_local_snapshot",
+      "acceptance_scope": "Only adopted CPR slice; not parent/full rebuild/frontend/external upstream acceptance",
+      "evidence": [
+        ".local/cpr-integration-20261028/verification.json",
+        ".local/cpr-integration-20261028/docker-smoke.json"
+      ],
+      "verified_source_sha256": "04b36ed10bd01e6cd0ed2802ed6ed480b4341692584d13b02cf963035693a636"
+    },
+    {
+      "id": "WP-04-CPR-WAIT-20261028",
+      "parent": "WP-04",
+      "status": "accepted",
+      "assignee": "MAIN",
+      "depends_on": [],
+      "write_paths": [
+        "backend/internal/repository/concurrency_cache*.go",
+        "backend/internal/repository/concurrency_wait_observation*.go",
+        "backend/internal/service/concurrency_service*.go",
+        "backend/internal/service/scheduler_wait_observation.go",
+        "backend/internal/gateway/routing/wait_ticket*.go",
+        "backend/internal/handler/gateway_helper.go",
+        "backend/internal/handler/gateway_helper_*test.go",
+        "backend/internal/gateway/routing/capacity.go",
+        "backend/internal/gateway/routing/capacity_scope.go",
+        "backend/internal/service/concurrency_service_wait.go",
+        "backend/internal/gateway/routing/wait_ticket_test.go"
+      ],
+      "scope": "Existing Redis queue cancellation/fairness/deadline contract",
+      "technical_plan": "CPR_INTEGRATION.md",
+      "evidence_status": "accepted_scoped_backend_local_snapshot",
+      "acceptance_scope": "Only adopted CPR slice; not parent/full rebuild/frontend/external upstream acceptance",
+      "evidence": [
+        ".local/cpr-integration-20261028/verification.json",
+        ".local/cpr-integration-20261028/docker-smoke.json"
+      ],
+      "verified_source_sha256": "04b36ed10bd01e6cd0ed2802ed6ed480b4341692584d13b02cf963035693a636"
+    },
+    {
+      "id": "WP-22-CPR-OBSERVABILITY-20261028",
+      "parent": "WP-22",
+      "status": "accepted",
+      "assignee": "MAIN",
+      "depends_on": [],
+      "write_paths": [
+        "backend/internal/service/scheduling_trace*.go",
+        "backend/internal/repository/ops_repo*.go",
+        "backend/internal/service/ops_*.go",
+        "backend/internal/repository/ops_ingress_reject_repo.go",
+        "backend/internal/service/scheduler_runtime_metrics*.go",
+        "backend/internal/service/ops_metrics_collector.go"
+      ],
+      "scope": "Query capacity lifecycle and truthful bounded trace completeness",
+      "technical_plan": "CPR_INTEGRATION.md",
+      "evidence_status": "accepted_scoped_backend_local_snapshot",
+      "acceptance_scope": "Only adopted CPR slice; not parent/full rebuild/frontend/external upstream acceptance",
+      "evidence": [
+        ".local/cpr-integration-20261028/verification.json",
+        ".local/cpr-integration-20261028/docker-smoke.json"
+      ],
+      "verified_source_sha256": "04b36ed10bd01e6cd0ed2802ed6ed480b4341692584d13b02cf963035693a636"
+    },
+    {
+      "id": "WP-20-UNIFIED-MODEL-MANAGEMENT-20261028",
+      "parent": "WP-20",
+      "status": "accepted",
+      "assignee": "frontend-main/Ramanujan/Russell/Dirac/Singer/Kuhn",
+      "depends_on": [
+        "WP-07"
+      ],
+      "write_paths": [
+        "frontend/src/app/compositions/model-management/**",
+        "frontend/src/app/router/**",
+        "frontend/src/app/navigation/**",
+        "frontend/src/features/catalog/**",
+        "frontend/src/features/pricing/model-management/**",
+        "frontend/src/features/resources/**",
+        "frontend/src/features/access-policy/**",
+        "frontend/tests/acceptance/**",
+        "backend/internal/service/model_management*.go",
+        "backend/internal/service/modelmanagement/**",
+        "backend/internal/service/*model*",
+        "backend/internal/service/account*.go",
+        "backend/internal/repository/account_model_references.go",
+        "backend/internal/repository/model_management.go",
+        "backend/internal/handler/admin/model_management_handler.go",
+        "backend/internal/authz/**",
+        "backend/internal/server/routes/admin.go",
+        "backend/cmd/server/wire*.go",
+        "backend/migrations/306_account_model_references.sql"
+      ],
+      "scope": "用户要求完整接入统一模型管理、保留disabled同步状态和排除不可用账号默认模型，并同步管理员供应商账号测试授权修复；对接真实API、持久CAS、运行目录与价格读取，正式路由和本机Docker/浏览器验收。",
+      "evidence_status": "local_functional_acceptance_passed_external_and_mobile_not_run",
+      "acceptance_scope": "12 management APIs, persistent CAS, actual runtime/price consumers, account/group references, two maintenance model fixes and supplier interactive diagnostic authorization; local functional acceptance only, not full rebuild or external upstream/mobile matrix",
+      "evidence": [
+        "frontend/docs/UNIFIED_MODEL_MANAGEMENT_HANDOFF.md",
+        ".local/model-management-integration-20261028/validation-summary.json",
+        ".local/model-management-integration-20261028/browser-verification.json",
+        ".local/model-management-integration-20261028/runtime-results.json",
+        "frontend/.local/model-management-integration-20261028/source-manifest.json"
+      ],
+      "limitations": [
+        "3 existing scheduler parent-test failures reproduced against exact HEAD b572e1f with all this-task backend Go changes removed by readonly overlay",
+        "No real-provider generation or mobile-browser acceptance claimed",
+        "93-page / 762-case whole-site acceptance remains incomplete; WP-20 parent remains in_progress"
+      ]
+    },
+    {
+      "id": "WP-21-OPS-ACTIVE-NODES-20261028",
+      "parent": "WP-21",
+      "status": "accepted",
+      "assignee": "frontend-main/Euclid",
+      "depends_on": [],
+      "write_paths": [
+        "frontend/src/features/operations/dashboard/components/OpsNodeMetrics.vue",
+        "frontend/src/features/operations/dashboard/components/__tests__/OpsNodeMetrics.spec.ts",
+        "frontend/src/features/operations/dashboard/components/__tests__/OpsDashboardHeader.spec.ts",
+        "frontend/src/features/operations/locales/**"
+      ],
+      "scope": "默认最多3个活跃上报节点，历史不补位；0在线空态、全部历史可查及明确统计",
+      "evidence_status": "42_targeted_passed_types_lint_two_docker_roles_and_actual_browser_passed",
+      "evidence": [
+        ".local/ops-active-nodes-20261028/HANDOFF.md",
+        ".local/ops-active-nodes-20261028/browser.json",
+        "frontend/.local/ops-active-nodes-20261028/tests.json"
+      ]
+    },
+    {
+      "id": "WP-21-ACCOUNT-INFO-DESIGN-20261028",
+      "parent": "WP-21",
+      "status": "accepted",
+      "assignee": "frontend-main",
+      "depends_on": [],
+      "write_paths": [
+        "frontend/docs/ACCOUNT_INFO_DESIGN.md"
+      ],
+      "scope": "用户已确定双排内容与精简悬浮卡，正式组件及两侧调用方实施通过",
+      "evidence_status": "user_selected_compact_and_two_rows_implemented_local_verified",
+      "evidence": [
+        "frontend/docs/ACCOUNT_INFO_DESIGN.md"
+      ],
+      "implementation_note": "参见WP-21-ACCOUNT-INFO-TWO-ROW-20261028；无新增抓取、DTO或授权。"
+    },
+    {
+      "id": "WP-21-ACCOUNT-INFO-TWO-ROW-20261028",
+      "parent": "WP-21",
+      "status": "accepted",
+      "assignee": "frontend-main/Franklin",
+      "depends_on": [],
+      "write_paths": [
+        "frontend/src/app/compositions/resource-workspace/components/AccountInfoCell.vue",
+        "frontend/src/app/compositions/resource-workspace/model/accountInfo.ts",
+        "frontend/src/app/compositions/resource-workspace/AccountsPage.vue",
+        "frontend/src/app/compositions/vendor-portal/components/AccountWorkbench.vue",
+        "frontend/src/app/compositions/resource-workspace/**/__tests__/**",
+        "frontend/src/app/compositions/vendor-portal/__tests__/AccountWorkbench.spec.ts",
+        "frontend/src/features/resources/locales/**",
+        "frontend/docs/ACCOUNT_INFO_DESIGN.md"
+      ],
+      "scope": "双排：套餐/支付订阅方式/访问凭据有效期；精简卡显示身份、套餐原始档位、实际授权、完整日期",
+      "evidence_status": "local_targeted_tests_two_docker_roles_and_actual_browser_passed",
+      "evidence": [
+        ".local/account-info-two-row-20261028/HANDOFF.md",
+        ".local/account-info-two-row-20261028/browser.json",
+        "frontend/.local/account-info-two-row-20261028/affected-tests.json",
+        "frontend/.local/account-info-two-row-20261028/vitest-results.json"
+      ],
+      "limitations": [
+        "虚构停用账号用于UI验收，非真实上游证明",
+        "供应商完整测试为组件集成，未冒称供应商全站实际操作",
+        "全站及手机设备矩阵未完成"
+      ]
+    }
+  ],
+  "last_completed_phase": "backend_closeout_slices_and_joint_docker_snapshot_2026-10-27",
+  "current_phase": "66f4ada前端修复镜像已部署，双网关BPS控制面13项通过；后端生命周期复测及TypeSafe执行/账务迁移、并行桥接/页面验收进行中",
+  "retired_implementation_inputs": [
+    "deploy/docker-compose.yml",
+    "scripts/release/channels.json",
+    "scripts/release/plan.py"
+  ],
+  "frontend_planning_source": "72dc16b8659f24319ac86e816c7900aa159261b4",
+  "delivery_policy": {
+    "mode": "single_joint_final_commit",
+    "intermediate_commits": false,
+    "intermediate_pushes": false,
+    "target_ref": "refs/heads/NewAPI",
+    "conditions": [
+      "all frontend and backend work completed",
+      "local Docker validation passed",
+      "every implemented page actually operated and accepted"
+    ],
+    "existing_checkpoints": "local recovery refs only; replace the temporary root after complete first-version acceptance",
+    "existing_commits_consolidated_on_user_request": "673c53c130c11cf1cb55abf0722dd996bf79eded",
+    "history_mode": "independent_parentless_root",
+    "first_accepted_version_becomes_future_parent": true,
+    "finalize_first_version": "replace_root_do_not_append_to_development_checkpoint"
+  },
+  "existing_commit_consolidation": {
+    "commit": "673c53c130c11cf1cb55abf0722dd996bf79eded",
+    "base": null,
+    "parents": [],
+    "previous_head": "ea2faa08c3c7517e84d09553b4c2741f0872571b",
+    "historical_source": "6f48d6ab6fcc29763af84410690530aeaa957403",
+    "current_commit_count": 1,
+    "source_tree": "5cdc27e895292f1554f94231d3d5544b64c4a04e",
+    "same_tree": true,
+    "working_changes_included": false,
+    "first_version_accepted": false,
+    "pushed": false,
+    "previous_consolidation_receipt": ".local/rebuild-history/20261025-185332/receipt.json",
+    "receipt": ".local/rebuild-history/20261025-201243-root/receipt.json",
+    "status": "historical_temporary_root_replaced_by_explicit_20261028_consolidation",
+    "current_branch": "NewAPI"
+  },
+  "frontend_source_freeze": {
+    "status": "owner_checkpoint_recreated_in_clean_manual_acceptance_environment",
+    "sha256": "7c67dd244109eb0c1f4175ae47b8874ce66f36f76d8c8efb1f13d77056dff478",
+    "verified_files": 2068,
+    "manifest": "frontend/.local/ops-node-priority-20261027/source-manifest.json",
+    "handoff": "frontend/.local/ops-node-priority-20261027/HANDOFF.md",
+    "deployed_snapshot": {
+      "web": {
+        "image": "sub2api-web:ops-node-7c67dd244109",
+        "image_id": "sha256:2aa674fe3a48d20f677edc7502c3856f06a4b4613053cf490fd4a5c315626ba4",
+        "container_id": "f4d50d1f9d45b7cc020db18953a660404f937d50c2af0372b8886a7b530517ad",
+        "health": "healthy"
+      },
+      "vendor-portal": {
+        "image": "sub2api-vendor:ops-node-7c67dd244109",
+        "image_id": "sha256:3c11eefba989fb042be906cf081d9ac5851f7d9f56d4b6163fc009feaf45fbf8",
+        "container_id": "aa9b16b80f96a244d1c52e8c36366ff566e69b7b67ea397bad1cdb88cce73ee3",
+        "health": "healthy"
+      }
+    },
+    "full_page_acceptance": "not_complete",
+    "previous_snapshot": {
+      "status": "final_v2_source_deployed_for_owner_runtime_acceptance",
+      "sha256": "66f4ada428b498fec87e7bf67d072e8dc629f3740221a87641940b895882e5d1",
+      "verified_files": 2026,
+      "manifest": "frontend/.local/frontend-runtime-acceptance-20261027/final-v2/source-manifest.json",
+      "handoff": "frontend/.local/frontend-runtime-acceptance-20261027/final-v2/HANDOFF.md",
+      "deployed_snapshot": {
+        "sha256": "66f4ada428b498fec87e7bf67d072e8dc629f3740221a87641940b895882e5d1",
+        "docker_context_sha256": "1bae0522affeb33825ba0d3d742f444ceeea876c02fcf587e92665ba2c157d2d",
+        "docker_build_receipt": ".local/remaining-closeout-20261027/ui-66f4-build.json",
+        "runtime_receipt": ".local/remaining-closeout-20261027/ui-66f4-deploy.json"
+      },
+      "full_page_acceptance": "in_progress_not_complete",
+      "previous_snapshot": {
+        "sha256": "9f7b1da1938a4e376d227ff027ccf1a4b78f3bbd2fab98cd723aeec8e33073e4",
+        "manifest": "frontend/.local/frontend-final-ready-20261027/source-manifest.json",
+        "deployed_snapshot": {
+          "sha256": "9f7b1da1938a4e376d227ff027ccf1a4b78f3bbd2fab98cd723aeec8e33073e4",
+          "verified_files": 2018,
+          "docker_context_sha256": "4563951d97961fea0847850f9bdc27fed17505445dfbbceae17fe94353c9f8dd",
+          "docker_build_receipt": ".local/unified-closeout-20261027/ui-final-build.json",
+          "runtime_receipt": ".local/unified-closeout-20261027/ui-runtime.json",
+          "full_page_acceptance": "in_progress_not_complete"
+        }
+      }
+    },
+    "runtime_receipt": ".local/manual-acceptance-20261027/smoke-report.json"
+  },
+  "frontend_maintenance_sync": {
+    "requested_at": "2026-10-26",
+    "assignee": "frontend_session",
+    "status": "in_progress",
+    "latest_observed_main": "ce3ecf6a1c9c6bac9d4614db174d1fef0599942c",
+    "basis": "User explicitly requested ongoing frontend maintenance changes be synchronized by its owner. Sent authorized prompt to existing frontend thread 01a171ab-53ee-7772-a290-346a110036cd. Recheck original adopted baseline through latest fixed main, including actual runtime consumers and contracts.",
+    "write_boundary": "frontend/** and owner existing FRONTEND_REVIEW/product-spec only; MAIN keeps shared roots, Docker integration and Git.",
+    "prior_freeze": "748782a3af429e29765bb6fd90a1c66385f2191623521ee5119ac4e195438ff4 is the latest historical 1963-file handoff, not current frozen source; deployed UI still comes from the earlier d4d7bfae/90c92799 snapshot.",
+    "acceptance": "Affected UI images rebuild; actual Computer Use per-page positive/negative role operations. No stage/commit/push until joint final acceptance.",
+    "remote_freshness": "not_independently_verified_this_audit",
+    "last_handoff_main": "ec0222f3494a8def8427e969bce4f6eea7fa2e78",
+    "current_scope": "Owner resumed settings cancel/step-up replay, delegated-admin draft/409 handling, lower_bound tokens, peakRate ownership, unused components and identity exports. MAIN also sent the 9 frontend paths changed between ec0222 and ce3ecf to the authorized existing frontend thread.",
+    "branch": "NewAPI"
+  },
+  "backend_deployed_snapshot": {
+    "source_sha256": "4cb8cac3be34dd4cb40f530865a4705398afe051c1b78dcee6933a08220f79ce",
+    "head": "673c53c130c11cf1cb55abf0722dd996bf79eded",
+    "image_id": "sha256:6698fe2f6dab9f2b089633b054f7d81370d62cc187edbf4f71f71cf1a9d9e24d",
+    "image": "sub2api:rebuild-api-4cb8cac3be34",
+    "build_receipt": ".local/manual-acceptance-20261027/receipt.json",
+    "deploy_receipt": ".local/manual-acceptance-20261027/environment.json",
+    "project": "sub2api-rebuild-acceptance-20261027",
+    "latest_snapshot_test_events": 344,
+    "deployment_smoke_checks_passed": 10,
+    "healthy_containers": 6,
+    "current_shared_tree_equivalent": true,
+    "post_build_source_changes": [],
+    "full_acceptance": "not_complete_pending_user_manual_acceptance",
+    "fresh_database": {
+      "users": 1,
+      "accounts": 0,
+      "usage_logs": 0,
+      "api_keys": 0,
+      "vendors": 0
+    },
+    "previous_deployed_snapshot": {
+      "source_sha256": "597456181362b3642814e6ec0e1253cc3d3fbdd311df1cf388f9f32c89c7f07a",
+      "head": "673c53c130c11cf1cb55abf0722dd996bf79eded",
+      "image_id": "sha256:73fe0c5bf78884643d8882fe6a910947558a55b77c858ee248a6de6aab64240a",
+      "build_receipt": ".local/systemone-closeout-20261027/receipt.json",
+      "deploy_receipt": ".local/systemone-closeout-20261027/deploy-receipt.json",
+      "latest_snapshot_test_events": 344,
+      "api_passed": 13,
+      "bps_control_passed": 10,
+      "systemone_http_known_unknown_passed": 2,
+      "systemone_http_receipt": ".local/systemone-closeout-20261027/systemone-http-result.json",
+      "current_shared_tree_equivalent": false,
+      "full_acceptance": "not_complete",
+      "followup_owner_thread": "01a17902-4afb-7ce1-925b-78c2a6f0211c",
+      "post_build_source_changes": [
+        "backend/.dockerignore",
+        "backend/Dockerfile",
+        "backend/internal/handler/openai_excel_bps_failover_test.go",
+        "backend/internal/service/openai_bulk_account_settings.go",
+        "backend/internal/service/openai_cloud_authorization.go",
+        "backend/internal/service/openai_cloud_capabilities_test.go",
+        "backend/internal/service/openai_cloud_gateway.go",
+        "backend/internal/service/openai_cloud_gateway_request_scope_test.go",
+        "backend/internal/service/openai_cloud_gateway_test.go",
+        "backend/internal/service/openai_cloud_hosted.go",
+        "backend/internal/service/openai_cloud_observation.go",
+        "backend/internal/service/openai_cloud_owner_validation_test.go",
+        "backend/internal/service/openai_cloud_parser_plan_test.go",
+        "backend/internal/service/openai_cloud_protocol.go",
+        "backend/internal/service/openai_cloud_routing_policy_test.go",
+        "backend/internal/service/openai_cloud_session.go",
+        "backend/internal/service/openai_cloud_session_store.go",
+        "backend/internal/service/openai_excel_bps_auto_disable_test.go",
+        "backend/internal/service/openai_ws_bps_ingress_test.go",
+        "backend/internal/service/openai_ws_cloud_direct_event_test.go",
+        "backend/internal/service/ops_errors.go"
+      ],
+      "post_build_change_note": "Own unused builder removal/comment plus later active BPS/Cloud owner changes; those later changes are not in the 597456 runtime acceptance. See .local/systemone-closeout-20261027/post-build-drift.json."
+    }
+  },
+  "backend_candidate_snapshot": {
+    "purpose": "CPR isolated candidate; manual deployment retained",
+    "source_sha256": "04b36ed10bd01e6cd0ed2802ed6ed480b4341692584d13b02cf963035693a636",
+    "image": "sub2api:cpr-review-04b36ed10bd0",
+    "image_id": "sha256:617cf758a569c5f7015772a04a263e7b2a1449cddfd37bd80e7e82b118e56599",
+    "verification": ".local/cpr-integration-20261028/verification.json",
+    "docker_smoke": ".local/cpr-integration-20261028/docker-smoke.json",
+    "runtime_replacement": false,
+    "full_project_acceptance": "not_complete"
+  },
+  "current_code_consolidation": {
+    "date": "2026-10-28",
+    "authorization": "Explicit user request to combine all frontend/backend code into one commit",
+    "branch": "NewAPI",
+    "history": "one local parentless root replacing temporary snapshot",
+    "previous_head": "673c53c130c11cf1cb55abf0722dd996bf79eded",
+    "frontend_files": 2070,
+    "frontend_manifest_sha256": "4fae964027134792cfcfaa67fa108be5d4485bdf934fca2772c44e3424cf5192",
+    "frontend_source_records": [
+      "frontend/.local/ops-node-priority-20261027/source-manifest.json",
+      ".local/maintenance-review-20261028/frontend/bps-verification.json",
+      ".local/maintenance-review-20261028/frontend/sampling-verification.json"
+    ],
+    "backend_verified_source_sha256": "04b36ed10bd01e6cd0ed2802ed6ed480b4341692584d13b02cf963035693a636",
+    "acceptance": "development_snapshot; full reconstruction/page/upstream acceptance incomplete",
+    "receipt": ".local/rebuild-history/20261028-101354-all-code/receipt.json",
+    "pushed": false
+  },
+  "newapi_branch_identity": {
+    "branch": "NewAPI",
+    "repository": "holeenlu/sub2api",
+    "technical_project_identity": "sub2api",
+    "reason": "Keep database, Redis, billing, migration and API identities stable while publishing the independent rebuild branch under the requested name.",
+    "main_branches_untouched": [
+      "main",
+      "TapModels",
+      "tokensavy"
+    ]
+  }
+}

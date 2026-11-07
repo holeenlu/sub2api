@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -15,7 +16,9 @@ func TestUserFromServiceAdmin_MapsActivityTimestamps(t *testing.T) {
 	lastActiveAt := lastLoginAt.Add(15 * time.Minute)
 	lastUsedAt := lastLoginAt.Add(45 * time.Minute)
 
-	out := UserFromServiceAdmin(&service.User{
+	creator := int64(4)
+	user := &service.User{
+		CreatedBy: &creator, CreatedByName: "holeen",
 		ID:           42,
 		Email:        "admin@example.com",
 		Username:     "admin",
@@ -23,9 +26,15 @@ func TestUserFromServiceAdmin_MapsActivityTimestamps(t *testing.T) {
 		Status:       service.StatusActive,
 		LastActiveAt: &lastActiveAt,
 		LastUsedAt:   &lastUsedAt,
-	})
+	}
+	out := UserFromServiceAdmin(user)
 
 	require.NotNil(t, out)
+	require.Equal(t, "holeen", out.CreatedByName)
+	require.Equal(t, &creator, out.CreatedBy)
+	public, err := json.Marshal(UserFromService(user))
+	require.NoError(t, err)
+	require.NotContains(t, string(public), "created_by")
 	require.NotNil(t, out.LastActiveAt)
 	require.NotNil(t, out.LastUsedAt)
 	require.WithinDuration(t, lastActiveAt, *out.LastActiveAt, time.Second)

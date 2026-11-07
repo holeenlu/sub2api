@@ -747,7 +747,7 @@ func TestGetRequestCredentialMapsTransientAndProviderFailuresSeparately(t *testi
 		repo.accountsByID = map[int64]*Account{account.ID: account}
 		cache := &grokTokenCacheForProviderTest{lockResult: true}
 		oauthSvc := NewGrokOAuthService(&grokCredentialProxyRepoStub{err: errors.New("database temporarily unavailable")}, &grokOAuthClientStub{})
-		defer oauthSvc.Stop()
+		startSessionOwnerTest(t, oauthSvc)
 		provider := NewGrokTokenProvider(repo, cache)
 		provider.SetRefreshAPI(NewOAuthRefreshAPI(repo, cache), NewGrokTokenRefresher(oauthSvc))
 		svc := &OpenAIGatewayService{accountRepo: repo, grokTokenProvider: provider}
@@ -776,7 +776,7 @@ func TestGetRequestCredentialMapsTransientAndProviderFailuresSeparately(t *testi
 		repo := &grokCredentialPersistingRepo{tokenRefreshAccountRepo: baseRepo}
 		cache := &grokTokenCacheForProviderTest{lockResult: true}
 		oauthSvc := NewGrokOAuthService(&grokCredentialProxyRepoStub{err: ErrProxyNotFound}, &grokOAuthClientStub{})
-		defer oauthSvc.Stop()
+		startSessionOwnerTest(t, oauthSvc)
 		provider := NewGrokTokenProvider(repo, cache)
 		provider.SetRefreshAPI(NewOAuthRefreshAPI(repo, cache), NewGrokTokenRefresher(oauthSvc))
 		svc := &OpenAIGatewayService{accountRepo: repo, grokTokenProvider: provider}
@@ -1661,5 +1661,26 @@ func expiredGrokOAuthAccountForCredentialTest(id int64) *Account {
 			"expires_at":    time.Now().Add(-time.Minute).UTC().Format(time.RFC3339),
 			"base_url":      xai.DefaultCLIBaseURL,
 		},
+	}
+}
+
+func TestGetRequestCredentialKeepsNativeAndGrokFailureContracts(t *testing.T) {
+	for _, platform := range []string{PlatformOpenAI, PlatformGrok} {
+		t.Run(platform, func(t *testing.T) {
+			svc := &OpenAIGatewayService{}
+			account := &Account{ID: 76, Platform: platform, Type: AccountTypeOAuth}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			_, _, err := svc.GetRequestCredential(t.Context(), c, account)
+			var failover *UpstreamFailoverError
+			require.ErrorAs(t, err, &failover)
+			if platform == PlatformOpenAI {
+				require.Equal(t, GatewayFailureReason("credential_preparation_failed"), failover.Reason)
+				require.True(t, failover.ShouldRetryNextAccount())
+				require.True(t, failover.RetryableOnSameAccount)
+			} else {
+				require.Equal(t, GrokCredentialReasonProviderConfig, failover.Reason)
+				require.False(t, failover.ShouldRetryNextAccount())
+			}
+		})
 	}
 }

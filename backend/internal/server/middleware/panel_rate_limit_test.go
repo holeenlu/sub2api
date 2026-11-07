@@ -200,23 +200,27 @@ func TestPanelRateLimiterHeavyUsesHeavyRPM(t *testing.T) {
 	require.Contains(t, allower.counts, "panel:heavy:user:7")
 }
 
-func TestPanelRateLimiterAdminExemption(t *testing.T) {
+func TestPanelRateLimiterSuperAdminExemption(t *testing.T) {
 	// 豁免开启：管理员不计数
 	p := &PanelRateLimiter{
 		limiter:        &fakePanelAllower{},
 		settingService: newPanelRateLimitTestService(t, `{"enabled":true,"user_rpm":1,"heavy_rpm":1,"exempt_admin":true,"public_ip_rpm":0}`),
 	}
-	admin := newPanelTestRouter(p.Global(), &panelTestIdentity{userID: 9, role: service.RoleAdmin})
+	admin := newPanelTestRouter(p.Global(), &panelTestIdentity{userID: 9, role: service.RoleSuperAdmin})
 	for i := 0; i < 5; i++ {
 		require.Equal(t, http.StatusOK, performPanelRequest(admin, "127.0.0.1:1000").Code)
 	}
+
+	limited := newPanelTestRouter(p.Global(), &panelTestIdentity{userID: 10, role: service.RoleAdmin})
+	require.Equal(t, http.StatusOK, performPanelRequest(limited, "127.0.0.1:1000").Code)
+	require.Equal(t, http.StatusTooManyRequests, performPanelRequest(limited, "127.0.0.1:1000").Code)
 
 	// 豁免关闭：管理员一样受限
 	p2 := &PanelRateLimiter{
 		limiter:        &fakePanelAllower{},
 		settingService: newPanelRateLimitTestService(t, `{"enabled":true,"user_rpm":1,"heavy_rpm":1,"exempt_admin":false,"public_ip_rpm":0}`),
 	}
-	admin2 := newPanelTestRouter(p2.Global(), &panelTestIdentity{userID: 9, role: service.RoleAdmin})
+	admin2 := newPanelTestRouter(p2.Global(), &panelTestIdentity{userID: 9, role: service.RoleSuperAdmin})
 	require.Equal(t, http.StatusOK, performPanelRequest(admin2, "127.0.0.1:1000").Code)
 	require.Equal(t, http.StatusTooManyRequests, performPanelRequest(admin2, "127.0.0.1:1000").Code)
 }

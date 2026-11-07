@@ -50,6 +50,12 @@ func (Account) Mixin() []ent.Mixin {
 // Fields 定义账户实体的所有字段。
 func (Account) Fields() []ent.Field {
 	return []ent.Field{
+		field.Int64("created_by").Optional().Nillable().Immutable(),
+		field.String("created_by_name").Default("").Immutable(),
+		field.String("created_by_role").Default("").Immutable(),
+		field.Int64("vendor_id").Optional().Nillable(),
+		field.Time("vendor_paused_at").Optional().Nillable(),
+		field.String("vendor_notes").Default(""),
 		// name: 账户显示名称，用于在界面中标识账户
 		field.String("name").
 			MaxLen(100).
@@ -98,14 +104,14 @@ func (Account) Fields() []ent.Field {
 		// concurrency: 账户最大并发请求数
 		// 用于限制同一时间对该账户发起的请求数量
 		field.Int("concurrency").
-			Default(3),
+			Default(domain.DefaultAccountConcurrency),
 
 		field.Int("load_factor").Optional().Nillable(),
 
 		// priority: 账户优先级，数值越小优先级越高
 		// 调度器会优先使用高优先级的账户
 		field.Int("priority").
-			Default(50),
+			Default(domain.DefaultAccountPriority),
 
 		// rate_multiplier: 账号计费倍率（>=0，允许 0 表示该账号计费为 0）
 		// 仅影响账号维度计费口径，不影响用户/API Key 扣费（分组倍率）

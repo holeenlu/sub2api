@@ -52,7 +52,7 @@ func isCodexToolCallOutputItemType(typ string) bool {
 
 // NeedsToolContinuation 判定请求是否需要工具调用续链处理。
 // 满足以下任一信号即视为续链：previous_response_id、input 内包含工具输出/item_reference、
-// 或显式声明 tools/tool_choice。
+// 或声明工具/指定工具选择；无工具时的 auto/none 仅是策略默认值，不代表续链。
 func NeedsToolContinuation(reqBody map[string]any) bool {
 	if reqBody == nil {
 		return false
@@ -60,7 +60,7 @@ func NeedsToolContinuation(reqBody map[string]any) bool {
 	if hasNonEmptyString(reqBody["previous_response_id"]) {
 		return true
 	}
-	if hasToolsSignal(reqBody) {
+	if openAIRequestBodyHasToolsMap(reqBody) {
 		return true
 	}
 	if hasToolChoiceSignal(reqBody) {
@@ -76,7 +76,9 @@ func NeedsToolContinuation(reqBody map[string]any) bool {
 			continue
 		}
 		itemType, _ := itemMap["type"].(string)
-		if isCodexToolCallItemType(itemType) || itemType == "item_reference" {
+		// Hosted call history also needs its original IDs. It is not a
+		// client call/output pair and must not acquire a synthetic call_id.
+		if isCodexToolCallItemType(itemType) || strings.HasSuffix(itemType, "_call") || itemType == "item_reference" {
 			return true
 		}
 	}
@@ -447,19 +449,9 @@ func hasNonEmptyString(value any) bool {
 	return ok && strings.TrimSpace(stringValue) != ""
 }
 
-// hasToolsSignal 判断 tools 字段是否显式声明（存在且不为空）。
-func hasToolsSignal(reqBody map[string]any) bool {
-	raw, exists := reqBody["tools"]
-	if !exists || raw == nil {
-		return false
-	}
-	if tools, ok := raw.([]any); ok {
-		return len(tools) > 0
-	}
-	return false
-}
-
-// hasToolChoiceSignal 判断 tool_choice 是否显式声明（非空或非 nil）。
+// hasToolChoiceSignal excludes neutral policies also emitted by OAuth defaults.
+// Tool declarations and replayed calls are checked separately, so auto/none
+// cannot hide a real continuation or make an ordinary first turn skip prewarm.
 func hasToolChoiceSignal(reqBody map[string]any) bool {
 	raw, exists := reqBody["tool_choice"]
 	if !exists || raw == nil {
@@ -467,7 +459,12 @@ func hasToolChoiceSignal(reqBody map[string]any) bool {
 	}
 	switch value := raw.(type) {
 	case string:
-		return strings.TrimSpace(value) != ""
+		switch strings.TrimSpace(value) {
+		case "", "auto", "none":
+			return false
+		default:
+			return true
+		}
 	case map[string]any:
 		return len(value) > 0
 	default:

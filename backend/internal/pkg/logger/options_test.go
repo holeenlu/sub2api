@@ -100,3 +100,15 @@ func TestBuildFileCore_InvalidPathFallback(t *testing.T) {
 		t.Fatalf("buildFileCore() expected error for invalid path")
 	}
 }
+
+func TestProjectIdentityDefaultsAndExplicitServiceName(t *testing.T) {
+	if got := bootstrapOptions().ServiceName; got != "sub2api" {
+		t.Fatalf("bootstrap identity = %q", got)
+	}
+	if got := (InitOptions{}).normalized().ServiceName; got != "sub2api" {
+		t.Fatalf("default identity = %q", got)
+	}
+	if got := (InitOptions{ServiceName: "deployment-service"}).normalized().ServiceName; got != "deployment-service" {
+		t.Fatalf("explicit deployment identity overwritten: %q", got)
+	}
+}

@@ -41,6 +41,10 @@ func (h *OpsHandler) GetErrorLogByID(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	if c.Query("diagnostics") == "1" {
+		response.Success(c, service.BuildOpsRequestDiagnostics(detail))
+		return
+	}
 
 	response.Success(c, detail)
 }

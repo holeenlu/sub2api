@@ -3,6 +3,8 @@ package service
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
 // GPT-5.5 retired from Codex with ChatGPT sign-in on 2026-10-14 at
@@ -13,7 +15,7 @@ func isRetiredOpenAISubscriptionModel(account *Account, upstreamModel string) bo
 	if account == nil || !account.IsOpenAI() || (!account.IsOpenAIOAuthLike() && !account.IsShadow()) {
 		return false
 	}
-	model := canonicalizeOpenAIModelAliasSpelling(upstreamModel)
+	model := openai.CanonicalizeOpenAIModelAliasSpelling(upstreamModel)
 	return model == "gpt-5.5" || strings.HasPrefix(model, "gpt-5.5-")
 }
 
@@ -84,6 +86,9 @@ func filterRetiredOpenAIPublicModelsBody(body []byte, accounts []Account, codex 
 // Compact-only administrator mappings are evaluated against their actual
 // target, without treating an old client-visible name as a retired target.
 func supportsOpenAIRequestModel(account *Account, requestedModel string, requireCompact bool) bool {
+	if account != nil && account.IsOpenAICloudConfigured() && requireCompact {
+		return false
+	}
 	if isRetiredOpenAISubscriptionModel(account, resolveOpenAIAccountUpstreamModelForRequest(account, requestedModel, requireCompact)) {
 		return false
 	}

@@ -36,8 +36,10 @@ func TestRecordUsage_ReasoningPricingUsesForwardedEffort(t *testing.T) {
 			}
 			account := &Account{ID: 30, Platform: platform, Type: AccountTypeAPIKey}
 			user := &User{ID: 20}
+			var billingRepo UsageBillingRepository
 			if platform == PlatformAnthropic {
 				svc := newGatewayRecordUsageServiceForTest(usageRepo, userRepo, subRepo)
+				billingRepo = svc.usageBillingRepo
 				svc.resolver = NewModelPricingResolver(nil, svc.billingService)
 				require.NoError(t, svc.RecordUsage(context.Background(), &RecordUsageInput{
 					Result: &ForwardResult{
@@ -49,6 +51,7 @@ func TestRecordUsage_ReasoningPricingUsesForwardedEffort(t *testing.T) {
 				}))
 			} else {
 				svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, subRepo, nil)
+				billingRepo = svc.usageBillingRepo
 				svc.resolver = NewModelPricingResolver(nil, svc.billingService)
 				require.NoError(t, svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
 					Result: &OpenAIForwardResult{
@@ -64,7 +67,7 @@ func TestRecordUsage_ReasoningPricingUsesForwardedEffort(t *testing.T) {
 			require.InDelta(t, 0.15, usageRepo.lastLog.ActualCost, 1e-12)
 			require.Equal(t, forwarded, *usageRepo.lastLog.ReasoningEffort)
 			require.Equal(t, requested, *usageRepo.lastLog.RequestedReasoningEffort)
-			require.InDelta(t, 0.15, userRepo.lastAmount, 1e-12)
+			require.InDelta(t, 0.15, recordUsageBillingCommand(t, billingRepo).BalanceCost, 1e-12)
 		})
 	}
 }

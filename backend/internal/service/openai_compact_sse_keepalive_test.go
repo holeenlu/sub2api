@@ -1,6 +1,8 @@
 package service
 
 import (
+	"context"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -322,4 +324,59 @@ func TestWriteOpenAIFastPolicyBlockedResponse_BeforeKeepaliveCommit(t *testing.T
 
 	require.Equal(t, http.StatusForbidden, rec.Code)
 	require.Equal(t, "permission_error", gjson.Get(rec.Body.String(), "error.type").String())
+}
+
+func TestClaudeKeepaliveErrorResponsePreservesFailure(t *testing.T) {
+	for _, committed := range []bool{false, true} {
+		for _, retryExhausted := range []bool{false, true} {
+			c, rec := newCompactBridgeTestContext(t, false)
+			stop := StartSSEKeepalive(c, time.Hour)
+			if committed {
+				value, _ := c.Get(openAICompactSSEKeepaliveKey)
+				require.True(t, value.(*openAICompactSSEKeepalive).beat())
+			}
+			body := `{"type":"error","error":{"type":"invalid_request_error","code":"invalid_field","message":"rejected"}}`
+			resp := &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}
+			account := &Account{Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
+			var err error
+			logicalStatus := http.StatusBadRequest
+			if retryExhausted {
+				_, err = (&GatewayService{}).handleRetryExhaustedError(context.Background(), resp, c, account)
+				logicalStatus = http.StatusBadGateway
+			} else {
+				_, err = (&GatewayService{}).handleErrorResponse(context.Background(), resp, c, account)
+			}
+			stop()
+			require.Error(t, err)
+			require.Equal(t, http.StatusBadRequest, c.GetInt(OpsUpstreamStatusCodeKey))
+			if committed {
+				require.Equal(t, http.StatusOK, rec.Code)
+				require.Equal(t, 1, strings.Count(rec.Body.String(), "event: error\n"))
+				require.Contains(t, rec.Body.String(), `"type":"error"`)
+				require.True(t, IsResponseCommitted(c))
+				outcome, ok := GetOpsStreamError(c)
+				require.True(t, ok)
+				require.Equal(t, logicalStatus, outcome.IntendedStatus)
+			} else {
+				require.Equal(t, logicalStatus, rec.Code)
+				require.True(t, gjson.Valid(rec.Body.String()))
+			}
+		}
+	}
+}
+
+func TestClaudeKeepaliveDoesNotBlockEmptyStreamFailover(t *testing.T) {
+	c, rec := newCompactBridgeTestContext(t, false)
+	stop := StartSSEKeepalive(c, time.Hour)
+	defer stop()
+	value, _ := c.Get(openAICompactSSEKeepaliveKey)
+	require.True(t, value.(*openAICompactSSEKeepalive).beat())
+	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(""))}
+	svc := &GatewayService{rateLimitService: &RateLimitService{}}
+	result, err := svc.handleStreamingResponse(context.Background(), resp, c, &Account{Platform: PlatformAnthropic}, time.Now(), "claude-test", "claude-test", false)
+	var failover *UpstreamFailoverError
+	require.ErrorAs(t, err, &failover)
+	require.Nil(t, result)
+	require.Equal(t, -1, OpenAICompactKeepaliveAdjustedWrittenSize(c))
+	require.Equal(t, ": keepalive\n\n", rec.Body.String())
 }

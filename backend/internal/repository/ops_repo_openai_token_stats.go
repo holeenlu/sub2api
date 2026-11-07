@@ -60,7 +60,7 @@ WITH stats AS (
 
 	countSQL := baseCTE + `SELECT COUNT(*) FROM stats`
 	var total int64
-	if err := r.db.QueryRowContext(ctx, countSQL, baseArgs...).Scan(&total); err != nil {
+	if err := r.queryOpsRow(ctx, countSQL, baseArgs...).Scan(&total); err != nil {
 		return nil, err
 	}
 
@@ -88,7 +88,7 @@ ORDER BY request_count DESC, model ASC`
 		args = append(args, filter.PageSize, offset)
 	}
 
-	rows, err := r.db.QueryContext(ctx, querySQL, args...)
+	rows, err := r.queryOpsRows(ctx, querySQL, args...)
 	if err != nil {
 		return nil, err
 	}

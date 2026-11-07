@@ -5,7 +5,10 @@ package service
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -60,30 +63,6 @@ type authCacheInvalidatorStub struct {
 	userIDs  []int64
 	groupIDs []int64
 	keys     []string
-}
-
-type adminRechargeAffiliateAccruerStub struct {
-	calls  []adminRechargeAffiliateAccrual
-	rebate float64
-	err    error
-}
-
-type adminRechargeAffiliateAccrual struct {
-	userID int64
-	amount float64
-}
-
-func (s *adminRechargeAffiliateAccruerStub) AccrueInviteRebate(_ context.Context, userID int64, amount float64) (float64, error) {
-	s.calls = append(s.calls, adminRechargeAffiliateAccrual{userID: userID, amount: amount})
-	return s.rebate, s.err
-}
-
-func adminRechargeSettingService(enabled bool) *SettingService {
-	values := map[string]string{}
-	if enabled {
-		values[SettingKeyAffiliateAdminRechargeEnabled] = "true"
-	}
-	return NewSettingService(&settingRepoStub{values: values}, nil)
 }
 
 func (s *authCacheInvalidatorStub) InvalidateAuthCacheByKey(ctx context.Context, key string) {
@@ -189,75 +168,223 @@ func TestAdminService_UpdateUserBalance_NoChangeNoInvalidate(t *testing.T) {
 	require.Empty(t, redeemRepo.created)
 }
 
-func TestAdminService_UpdateUserBalance_AdminRechargeAffiliateRebate(t *testing.T) {
-	tests := []struct {
-		name      string
-		enabled   bool
-		operation string
-		amount    float64
-		wantCalls []adminRechargeAffiliateAccrual
-	}{
-		{
-			name:      "disabled by default",
-			operation: "add",
-			amount:    5,
-		},
-		{
-			name:      "enabled add",
-			enabled:   true,
-			operation: "add",
-			amount:    0.1,
-			wantCalls: []adminRechargeAffiliateAccrual{{userID: 7, amount: 0.1}},
-		},
-		{
-			name:      "enabled set increase",
-			enabled:   true,
-			operation: "set",
-			amount:    15,
-		},
-		{
-			name:      "enabled subtract",
-			enabled:   true,
-			operation: "subtract",
-			amount:    5,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			baseRepo := &userRepoStub{user: &User{ID: 7, Balance: 10}}
-			repo := &balanceUserRepoStub{userRepoStub: baseRepo}
-			redeemRepo := &balanceRedeemRepoStub{redeemRepoStub: &redeemRepoStub{}}
-			affiliate := &adminRechargeAffiliateAccruerStub{}
-			svc := &adminServiceImpl{
-				userRepo:         repo,
-				redeemCodeRepo:   redeemRepo,
-				settingService:   adminRechargeSettingService(tt.enabled),
-				affiliateService: affiliate,
-			}
-
-			_, err := svc.UpdateUserBalance(context.Background(), 7, tt.amount, tt.operation, "")
-			require.NoError(t, err)
-			require.Equal(t, tt.wantCalls, affiliate.calls)
-		})
-	}
+type balanceInvalidationCacheStub struct {
+	BillingCache
+	invalidate func(context.Context, int64) error
 }
 
-func TestAdminService_UpdateUserBalance_AffiliateFailureDoesNotRollbackRecharge(t *testing.T) {
-	baseRepo := &userRepoStub{user: &User{ID: 7, Balance: 10}}
-	repo := &balanceUserRepoStub{userRepoStub: baseRepo}
-	redeemRepo := &balanceRedeemRepoStub{redeemRepoStub: &redeemRepoStub{}}
-	affiliate := &adminRechargeAffiliateAccruerStub{err: errors.New("affiliate unavailable")}
-	svc := &adminServiceImpl{
-		userRepo:         repo,
-		redeemCodeRepo:   redeemRepo,
-		settingService:   adminRechargeSettingService(true),
-		affiliateService: affiliate,
-	}
+func (s *balanceInvalidationCacheStub) InvalidateUserBalance(ctx context.Context, userID int64) error {
+	return s.invalidate(ctx, userID)
+}
 
-	user, err := svc.UpdateUserBalance(context.Background(), 7, 5, "add", "")
-	require.NoError(t, err)
-	require.Equal(t, 15.0, user.Balance)
-	require.Equal(t, []adminRechargeAffiliateAccrual{{userID: 7, amount: 5}}, affiliate.calls)
+func TestAdminService_UpdateUserBalance_JoinsBillingInvalidationAfterRequestCancel(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		type requestValueKey struct{}
+		ctx, cancel := context.WithTimeout(context.WithValue(t.Context(), requestValueKey{}, "balance-adjustment"), time.Second)
+		defer cancel()
+		repo := &balanceUserRepoStub{userRepoStub: &userRepoStub{user: &User{ID: 7, Balance: 10}}}
+		redeemRepo := &balanceRedeemRepoStub{redeemRepoStub: &redeemRepoStub{}}
+		entered := make(chan context.Context, 1)
+		release := make(chan struct{})
+		releaseCache := sync.OnceFunc(func() { close(release) })
+		defer func() {
+			releaseCache()
+			synctest.Wait()
+		}()
+		var cacheUserID int64
+		cache := &balanceInvalidationCacheStub{invalidate: func(cacheCtx context.Context, userID int64) error {
+			cacheUserID = userID
+			entered <- cacheCtx
+			<-release
+			return nil
+		}}
+		svc := &adminServiceImpl{
+			userRepo: repo, redeemCodeRepo: redeemRepo,
+			billingCacheService: &BillingCacheService{cache: cache},
+		}
+		type outcome struct {
+			user *User
+			err  error
+		}
+		result := make(chan outcome, 1)
+		go func() {
+			user, err := svc.UpdateUserBalance(ctx, 7, 5, "add", "owned invalidation")
+			result <- outcome{user, err}
+		}()
+		synctest.Wait()
+		var cacheCtx context.Context
+		select {
+		case cacheCtx = <-entered:
+		default:
+			t.Fatal("balance mutation never reached billing cache invalidation")
+		}
+		// Wait proves the service goroutine is blocked; an empty result channel
+		// here cannot be explained by the scheduler merely not running it yet.
+		select {
+		case <-result:
+			t.Fatal("balance update returned while billing invalidation was still in flight")
+		default:
+		}
+		require.Equal(t, int64(7), cacheUserID)
+		require.Equal(t, []BalanceChange{{Old: 10, New: 15}}, repo.changes)
+		require.Len(t, redeemRepo.created, 1, "adjustment bookkeeping must precede cache cleanup")
+		require.Equal(t, "balance-adjustment", cacheCtx.Value(requestValueKey{}))
+		deadline, ok := cacheCtx.Deadline()
+		require.True(t, ok)
+		require.Equal(t, 5*time.Second, deadline.Sub(time.Now()), "cleanup keeps its existing budget, independently of the request deadline")
+
+		cancel()
+		synctest.Wait()
+		require.ErrorIs(t, ctx.Err(), context.Canceled)
+		require.NoError(t, cacheCtx.Err(), "cancellation after commit must not abandon invalidation")
+		select {
+		case <-result:
+			t.Fatal("request cancellation released the service before invalidation joined")
+		default:
+		}
+
+		releaseCache()
+		synctest.Wait()
+		got := <-result
+		require.NoError(t, got.err)
+		require.Equal(t, float64(15), got.user.Balance)
+		require.ErrorIs(t, cacheCtx.Err(), context.Canceled, "completed cleanup releases its timeout context")
+		require.Len(t, repo.changes, 1)
+		require.Len(t, redeemRepo.created, 1)
+	})
+}
+
+func TestAdminService_UpdateUserBalance_BillingInvalidationDeadlinePreservesCommit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		repo := &balanceUserRepoStub{userRepoStub: &userRepoStub{user: &User{ID: 7, Balance: 10}}}
+		redeemRepo := &balanceRedeemRepoStub{redeemRepoStub: &redeemRepoStub{}}
+		var invalidationErr error
+		calls := 0
+		cache := &balanceInvalidationCacheStub{invalidate: func(ctx context.Context, _ int64) error {
+			calls++
+			<-ctx.Done()
+			invalidationErr = ctx.Err()
+			return invalidationErr
+		}}
+		svc := &adminServiceImpl{
+			userRepo: repo, redeemCodeRepo: redeemRepo,
+			billingCacheService: &BillingCacheService{cache: cache},
+		}
+		started := time.Now()
+		// Waiting for the real cleanup context advances only synctest's virtual
+		// clock. No sleep or wall-clock scheduling assumption establishes join.
+		user, err := svc.UpdateUserBalance(t.Context(), 7, 5, "add", "bounded invalidation")
+		require.NoError(t, err, "a cache timeout must not turn the committed mutation into a retryable failure")
+		require.Equal(t, float64(15), user.Balance)
+		require.ErrorIs(t, invalidationErr, context.DeadlineExceeded)
+		require.Equal(t, 5*time.Second, time.Since(started))
+		require.Equal(t, 1, calls)
+		require.Equal(t, []BalanceChange{{Old: 10, New: 15}}, repo.changes)
+		require.Len(t, redeemRepo.created, 1)
+	})
+}
+
+func TestAdminService_UpdateUserBalance_BillingInvalidationFailurePreservesCommit(t *testing.T) {
+	repo := &balanceUserRepoStub{userRepoStub: &userRepoStub{user: &User{ID: 7, Balance: 10}}}
+	redeemRepo := &balanceRedeemRepoStub{redeemRepoStub: &redeemRepoStub{}}
+	failure := errors.New("billing cache unavailable")
+	var cacheCtx context.Context
+	calls := 0
+	cache := &balanceInvalidationCacheStub{invalidate: func(ctx context.Context, _ int64) error {
+		cacheCtx = ctx
+		calls++
+		return failure
+	}}
+	svc := &adminServiceImpl{
+		userRepo: repo, redeemCodeRepo: redeemRepo,
+		billingCacheService: &BillingCacheService{cache: cache},
+	}
+	user, err := svc.UpdateUserBalance(t.Context(), 7, 5, "add", "failed invalidation")
+	require.NoError(t, err, "the existing cache failure policy preserves the committed result")
+	require.Equal(t, float64(15), user.Balance)
+	require.Equal(t, 1, calls)
+	require.NotNil(t, cacheCtx)
+	require.ErrorIs(t, cacheCtx.Err(), context.Canceled)
+	require.Equal(t, []BalanceChange{{Old: 10, New: 15}}, repo.changes)
 	require.Len(t, redeemRepo.created, 1)
+}
+
+type balanceReadAfterWriteFailureRepo struct {
+	*balanceUserRepoStub
+	readErr error
+	reads   int
+}
+
+func (s *balanceReadAfterWriteFailureRepo) GetByID(ctx context.Context, userID int64) (*User, error) {
+	s.reads++
+	if len(s.changes) > 0 {
+		return nil, s.readErr
+	}
+	return s.userRepoStub.GetByID(ctx, userID)
+}
+
+func TestAdminService_UpdateUserBalance_ReadAfterWriteFailureStillJoinsInvalidation(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		cacheErr error
+	}{
+		{name: "cache_success"},
+		{name: "cache_failure", cacheErr: errors.New("billing cache unavailable")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				readErr := errors.New("read after committed balance update failed")
+				repo := &balanceReadAfterWriteFailureRepo{
+					balanceUserRepoStub: &balanceUserRepoStub{userRepoStub: &userRepoStub{user: &User{ID: 7, Balance: 10}}},
+					readErr:             readErr,
+				}
+				redeemRepo := &balanceRedeemRepoStub{redeemRepoStub: &redeemRepoStub{}}
+				release := make(chan struct{})
+				releaseCache := sync.OnceFunc(func() { close(release) })
+				defer func() {
+					releaseCache()
+					synctest.Wait()
+				}()
+				var invalidatedUsers []int64
+				cache := &balanceInvalidationCacheStub{invalidate: func(_ context.Context, userID int64) error {
+					invalidatedUsers = append(invalidatedUsers, userID)
+					<-release
+					return tc.cacheErr
+				}}
+				svc := &adminServiceImpl{
+					userRepo: repo, redeemCodeRepo: redeemRepo,
+					billingCacheService: &BillingCacheService{cache: cache},
+				}
+				type outcome struct {
+					user *User
+					err  error
+				}
+				result := make(chan outcome, 1)
+				go func() {
+					user, err := svc.UpdateUserBalance(t.Context(), 7, 5, "add", "failed post-commit read")
+					result <- outcome{user, err}
+				}()
+				synctest.Wait()
+				require.Equal(t, 2, repo.reads, "the admission read succeeds and the post-commit read fails")
+				require.Equal(t, []BalanceChange{{Old: 10, New: 15}}, repo.changes)
+				require.Equal(t, []int64{7}, invalidatedUsers, "a failed read must not skip post-commit invalidation")
+				select {
+				case <-result:
+					t.Fatal("read failure returned while post-commit invalidation was still in flight")
+				default:
+				}
+				require.Empty(t, redeemRepo.created, "failed user read must not fabricate adjustment bookkeeping")
+
+				releaseCache()
+				synctest.Wait()
+				got := <-result
+				require.Nil(t, got.user)
+				require.Same(t, readErr, got.err, "cache cleanup must preserve the original read error")
+				require.Equal(t, []int64{7}, invalidatedUsers)
+				require.Equal(t, []BalanceChange{{Old: 10, New: 15}}, repo.changes)
+				require.Equal(t, float64(15), repo.userRepoStub.user.Balance)
+				require.Empty(t, redeemRepo.created)
+			})
+		})
+	}
 }

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -14,11 +15,15 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/gateway/model"
+	native "github.com/Wei-Shaw/sub2api/internal/providers/openai"
 	"golang.org/x/sync/errgroup"
 )
 
 const (
-	openAIWSConnMaxAge          = 60 * time.Minute
+	// Leave headroom before the provider's hard 60-minute lifetime. Active
+	// leases rotate at the next turn boundary, never in the middle of output.
+	openAIWSConnMaxAge          = 55 * time.Minute
 	openAIWSConnHealthCheckIdle = 90 * time.Second
 	// 仅对没有常驻读循环的连接实现生效：这类连接空闲时无人应答上游 ping，须在
 	// 上游保活窗口到期前回收。coder/websocket 连接由池常驻读循环应答 ping，不受此阈值约束。
@@ -37,10 +42,11 @@ const (
 )
 
 var (
-	errOpenAIWSConnClosed               = errors.New("openai ws connection closed")
-	errOpenAIWSConnQueueFull            = errors.New("openai ws connection queue full")
-	errOpenAIWSPreferredConnUnavailable = errors.New("openai ws preferred connection unavailable")
-	errOpenAIWSPoolChanged              = errors.New("openai ws account pool changed")
+	errOpenAIWSConnClosed                 = errors.New("openai ws connection closed")
+	errOpenAIWSConnQueueFull              = errors.New("openai ws connection queue full")
+	errOpenAIWSPreferredConnUnavailable   = errors.New("openai ws preferred connection unavailable")
+	errOpenAIWSResponseContextUnavailable = errors.New("openai ws response context unavailable")
+	errOpenAIWSPoolChanged                = errors.New("openai ws account pool changed")
 )
 
 type openAIWSDialError struct {
@@ -67,16 +73,28 @@ func (e *openAIWSDialError) Unwrap() error {
 	return e.Err
 }
 
+// Proven edge/policy denials did not reject the account credential. Reuse the
+// scheduler's existing scope contract instead of adding a cooldown mechanism.
+func (e *openAIWSDialError) RequestScoped() bool {
+	_, class, _ := OpenAIWSHandshakeFailure(e)
+	return class == "handshake_edge_challenge" || class == "handshake_edge_block" || class == "handshake_request_policy"
+}
+
 type openAIWSAcquireRequest struct {
-	Account *Account
-	WSURL   string
-	Headers http.Header
+	TenantScope     string   // authenticated tenant, independent of client-controlled headers
+	CredentialScope [32]byte // selected resource and credential owner generation; not an authorization grant
+	Account         *Account
+	WSURL           string
+	Headers         http.Header
 	// HeadersFactory is evaluated inside dialConn. It exists so credentials
 	// whose authorization is per-dial (Agent Identity) are never cached in
 	// lastAcquire or delayed prewarm state.
-	HeadersFactory  func(context.Context, http.Header) (http.Header, error)
-	ProxyURL        string
-	PreferredConnID string
+	HeadersFactory        func(context.Context, http.Header) (http.Header, error)
+	HandshakeFactsFactory func(context.Context, http.Header) (nativeWSHandshake, error)
+	ProxyURL              string
+	PreferredConnID       string
+	// RequiredResponseID proves a connection-local producer after queueing.
+	RequiredResponseID string
 	// ForceNewConn: 强制本次获取新连接（避免复用导致连接内续链状态互相污染）。
 	ForceNewConn bool
 	// ForcePreferredConn: 强制本次只使用 PreferredConnID，禁止漂移到其它连接。
@@ -84,6 +102,10 @@ type openAIWSAcquireRequest struct {
 }
 
 type openAIWSHandshakeCompatibilityKey struct {
+	targetURL           string
+	proxyURL            string
+	credentialScope     [32]byte
+	tenantScope         string
 	betaFeatures        string
 	codexInstallationID string
 	sessionIDHyphen     string
@@ -94,15 +116,20 @@ type openAIWSHandshakeCompatibilityKey struct {
 }
 
 type openAIWSConnLease struct {
-	pool       *openAIWSConnPool
-	accountID  int64
-	conn       *openAIWSConn
-	queueWait  time.Duration
-	connPick   time.Duration
-	idleBefore time.Duration
-	ageBefore  time.Duration
-	reused     bool
-	released   atomic.Bool
+	pool          *openAIWSConnPool
+	accountID     int64
+	conn          *openAIWSConn
+	queueWait     time.Duration
+	connPick      time.Duration
+	idleBefore    time.Duration
+	ageBefore     time.Duration
+	reused        bool
+	released      atomic.Bool
+	nativeAttempt atomic.Pointer[nativeWSAttempt]
+	// Receipt of this lease's actual generation write, using the connection's
+	// existing counter. Control writes cannot certify a generation response.
+	responseWriteGeneration atomic.Uint64
+	requiredResponse        atomic.Pointer[openAIWSConnResponse]
 }
 
 func (l *openAIWSConnLease) activeConn() (*openAIWSConn, error) {
@@ -120,6 +147,27 @@ func (l *openAIWSConnLease) ConnID() string {
 		return ""
 	}
 	return l.conn.id
+}
+
+func (l *openAIWSConnLease) ConfirmResponse(responseID string, generation uint64) {
+	conn, err := l.activeConn()
+	responseID = stringsTrim(responseID)
+	if err != nil || responseID == "" {
+		return
+	}
+	if err := conn.writeMu.lock(context.Background()); err != nil {
+		return
+	}
+	defer conn.writeMu.unlock()
+	if !l.released.Load() && conn.isLeased() && !conn.isClosed() && !conn.unusable.Load() &&
+		generation > 0 && generation == l.responseWriteGeneration.Load() && generation == conn.writeGeneration.Load() {
+		conn.latestResponse.Store(&openAIWSConnResponse{responseID: responseID, writeGeneration: generation})
+	}
+}
+
+func (l *openAIWSConnLease) HasResponseContext(responseID string) bool {
+	conn, err := l.activeConn()
+	return err == nil && conn.isLeased() && conn.matchesResponseContext(responseID)
 }
 
 func (l *openAIWSConnLease) QueueWaitDuration() time.Duration {
@@ -199,7 +247,7 @@ func (l *openAIWSConnLease) WriteJSON(value any, timeout time.Duration) error {
 	if err != nil {
 		return err
 	}
-	return conn.writeJSONWithTimeout(context.Background(), value, timeout)
+	return conn.writeJSONWithTimeout(context.Background(), value, timeout, l)
 }
 
 func (l *openAIWSConnLease) WriteJSONWithContextTimeout(ctx context.Context, value any, timeout time.Duration) error {
@@ -207,7 +255,7 @@ func (l *openAIWSConnLease) WriteJSONWithContextTimeout(ctx context.Context, val
 	if err != nil {
 		return err
 	}
-	return conn.writeJSONWithTimeout(ctx, value, timeout)
+	return conn.writeJSONWithTimeout(ctx, value, timeout, l)
 }
 
 func (l *openAIWSConnLease) WriteJSONContext(ctx context.Context, value any) error {
@@ -215,7 +263,7 @@ func (l *openAIWSConnLease) WriteJSONContext(ctx context.Context, value any) err
 	if err != nil {
 		return err
 	}
-	return conn.writeJSON(value, ctx)
+	return conn.writeJSON(value, ctx, l)
 }
 
 func (l *openAIWSConnLease) ReadMessage(timeout time.Duration) ([]byte, error) {
@@ -223,7 +271,8 @@ func (l *openAIWSConnLease) ReadMessage(timeout time.Duration) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return conn.readMessageWithTimeout(timeout)
+	body, readErr := conn.readMessageWithTimeout(timeout)
+	return body, l.nativeAttempt.Load().observe(body, readErr)
 }
 
 func (l *openAIWSConnLease) ReadMessageContext(ctx context.Context) ([]byte, error) {
@@ -231,7 +280,8 @@ func (l *openAIWSConnLease) ReadMessageContext(ctx context.Context) ([]byte, err
 	if err != nil {
 		return nil, err
 	}
-	return conn.readMessage(ctx)
+	body, readErr := conn.readMessage(ctx)
+	return body, l.nativeAttempt.Load().observe(body, readErr)
 }
 
 func (l *openAIWSConnLease) ReadMessageWithContextTimeout(ctx context.Context, timeout time.Duration) ([]byte, error) {
@@ -239,7 +289,8 @@ func (l *openAIWSConnLease) ReadMessageWithContextTimeout(ctx context.Context, t
 	if err != nil {
 		return nil, err
 	}
-	return conn.readMessageWithContextTimeout(ctx, timeout)
+	body, readErr := conn.readMessageWithContextTimeout(ctx, timeout)
+	return body, l.nativeAttempt.Load().observe(body, readErr)
 }
 
 func (l *openAIWSConnLease) PingWithTimeout(timeout time.Duration) error {
@@ -269,29 +320,133 @@ func (l *openAIWSConnLease) Release() {
 	if l == nil || l.conn == nil {
 		return
 	}
+	// Transfer the exclusive lease only after its in-flight writer has left.
+	if err := l.conn.writeMu.lock(context.Background()); err != nil {
+		return
+	}
+	defer l.conn.writeMu.unlock()
 	if !l.released.CompareAndSwap(false, true) {
 		return
 	}
+	l.nativeAttempt.Swap(nil).close(nil)
 	l.conn.release()
 	if l.pool != nil {
 		l.pool.notifyAccountPoolChanged(l.accountID)
+		l.pool.retireReleasedConn(l.conn)
 	}
 }
 
-type openAIWSConn struct {
-	id string
-	ws openAIWSClientConn
+// openAIWSWriteGate is the existing pool writer coordinator with cancellable
+// acquisition. It replaces, rather than layers on top of, the previous mutex.
+// The zero value is usable by connection fixtures as well as production dials.
+type openAIWSWriteGate struct {
+	once  sync.Once
+	token chan struct{}
+}
 
+func (g *openAIWSWriteGate) lock(ctx context.Context) error {
+	if ctx == nil {
+		return native.ErrInvalidWSPreparation
+	}
+	g.once.Do(func() { g.token = make(chan struct{}, 1); g.token <- struct{}{} })
+	select {
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	case <-g.token:
+		if err := ctx.Err(); err != nil {
+			g.unlock()
+			return context.Cause(ctx)
+		}
+		return nil
+	}
+}
+func (g *openAIWSWriteGate) unlock() { g.token <- struct{}{} }
+
+// WriteWS retains the exclusive lease through the physical write. A transport
+// without the actual last-writer gate is denied; legacy WriteJSON is no fallback.
+func (l *openAIWSConnLease) WriteWS(ctx context.Context, write *native.WSWrite) (model.SendState, error) {
+	c, err := l.activeConn()
+	if err != nil {
+		return model.SendNotSent, err
+	}
+	if err := c.writeMu.lock(ctx); err != nil {
+		return model.SendNotSent, err
+	}
+	state, err := func() (model.SendState, error) {
+		defer c.writeMu.unlock()
+		if l.released.Load() || c.isClosed() || !c.isLeased() || c.unusable.Load() {
+			return model.SendNotSent, errOpenAIWSConnClosed
+		}
+		requiredReceipt := l.requiredResponse.Load()
+		if requiredReceipt != nil && (!c.matchesResponseContext(requiredReceipt.responseID) ||
+			requiredReceipt.writeGeneration != c.writeGeneration.Load()) {
+			return model.SendNotSent, errors.Join(ErrOpenAIContinuationUnavailable, errOpenAIWSResponseContextUnavailable)
+		}
+		if required, ok := ctx.Value(openAIWSResponseRequirementKey{}).(openAIWSResponseRequirement); ok {
+			if required.lease != l || !c.matchesResponseContext(required.responseID) ||
+				required.generation == 0 || required.generation != c.writeGeneration.Load() {
+				return model.SendNotSent, errors.Join(ErrOpenAIContinuationUnavailable, errOpenAIWSResponseContextUnavailable)
+			}
+		}
+		writer, ok := c.ws.(native.WSWriter)
+		if !ok {
+			return model.SendNotSent, native.ErrInvalidWSPreparation
+		}
+		state, err := writer.WriteWS(ctx, write)
+		if state == model.SendSent || state == model.SendAmbiguous {
+			l.responseWriteGeneration.Store(c.writeGeneration.Add(1))
+			l.requiredResponse.CompareAndSwap(requiredReceipt, nil)
+		}
+		if err == nil {
+			c.touch()
+		}
+		// Do not let Release transfer a failed socket before it is retired.
+		if err != nil {
+			c.unusable.Store(true)
+		}
+		return state, err
+	}()
+	if err != nil && c.unusable.Load() {
+		// No registry lock is held. Retire only this exclusive connection; the
+		// pool's existing tracked close/reader owners perform lifecycle cleanup.
+		c.abort()
+		if l.pool != nil {
+			l.MarkBroken()
+		}
+		select {
+		case <-c.readerDone:
+		case <-ctx.Done():
+			return state, errors.Join(err, context.Cause(ctx))
+		}
+		return state, errors.Join(err, c.closeFailure())
+	}
+	return state, err
+}
+
+type openAIWSConn struct {
+	id        string
+	accountID int64
+	ws        openAIWSClientConn
+
+	nativeHandshake        nativeWSHandshake
 	handshakeHeaders       http.Header
 	handshakeCompatibility openAIWSHandshakeCompatibilityKey
 	routingAffinity        string
 
-	leaseCh   chan struct{}
-	closedCh  chan struct{}
-	closeOnce sync.Once
+	leaseCh        chan struct{}
+	closedCh       chan struct{}
+	closeOnce      sync.Once
+	abortOnce      sync.Once
+	poolWatchOnce  sync.Once
+	closeDone      chan struct{}
+	readerDone     chan struct{}
+	lifetimeCtx    context.Context
+	cancelLifetime context.CancelFunc
+	closeErrMu     sync.Mutex
+	closeErr       error
 
 	readMu  sync.Mutex
-	writeMu sync.Mutex
+	writeMu openAIWSWriteGate
 
 	// readerLoopResults 非 nil 表示池为该连接常驻了读循环：coder/websocket 只在
 	// 阻塞读期间应答上游 ping，空闲连接没有读循环会被上游按保活超时关闭。
@@ -308,12 +463,34 @@ type openAIWSConn struct {
 	createdAtNano atomic.Int64
 	lastUsedNano  atomic.Int64
 	prewarmed     atomic.Bool
+	// Any write can replace the server's most recent response on this socket,
+	// including another thread or generate=false. Idle pings do not advance it.
+	writeGeneration atomic.Uint64
+	latestResponse  atomic.Pointer[openAIWSConnResponse]
 }
 
-func newOpenAIWSConn(id string, _ int64, ws openAIWSClientConn, handshakeHeaders http.Header) *openAIWSConn {
+type openAIWSConnResponse struct {
+	responseID      string
+	writeGeneration uint64
+}
+
+func (c *openAIWSConn) matchesResponseContext(responseID string) bool {
+	if c == nil || c.isClosed() || c.unusable.Load() {
+		return false
+	}
+	latest := c.latestResponse.Load()
+	return latest != nil && latest.responseID == stringsTrim(responseID) &&
+		latest.writeGeneration > 0 && latest.writeGeneration == c.writeGeneration.Load()
+}
+
+func newOpenAIWSConn(id string, accountID int64, ws openAIWSClientConn, handshakeHeaders http.Header) *openAIWSConn {
 	now := time.Now()
+	lifetime, cancel := context.WithCancel(context.Background())
 	conn := &openAIWSConn{
-		id:               id,
+		id:        id,
+		accountID: accountID,
+		closeDone: make(chan struct{}), readerDone: make(chan struct{}),
+		lifetimeCtx: lifetime, cancelLifetime: cancel,
 		ws:               ws,
 		handshakeHeaders: cloneHeader(handshakeHeaders),
 		leaseCh:          make(chan struct{}, 1),
@@ -325,14 +502,17 @@ func newOpenAIWSConn(id string, _ int64, ws openAIWSClientConn, handshakeHeaders
 	if capable, ok := ws.(openAIWSReaderLoopCapable); ok && capable.RequiresReaderLoop() {
 		conn.readerLoopResults = make(chan []byte, 1)
 		go conn.runReaderLoop()
+	} else {
+		close(conn.readerDone)
 	}
 	return conn
 }
 
 func (c *openAIWSConn) runReaderLoop() {
+	defer close(c.readerDone)
 	defer close(c.readerLoopResults)
 	for {
-		payload, err := c.ws.ReadMessage(context.Background())
+		payload, err := c.ws.ReadMessage(c.lifetimeCtx)
 		if err != nil {
 			c.readerLoopErrMu.Lock()
 			c.readerLoopErr = err
@@ -549,13 +729,31 @@ func (c *openAIWSConn) closeWith(force bool) {
 	if c == nil {
 		return
 	}
+	// Escalate a graceful close already waiting on the peer without waiting
+	// behind closeOnce. Pool-owned close tasks join both calls before success.
+	if force && c.isClosed() {
+		c.cancelLifetime()
+		select {
+		case <-c.closeDone:
+			return
+		default:
+		}
+		if closer, ok := c.ws.(openAIWSForceCloser); ok {
+			c.abortOnce.Do(func() { c.recordCloseError(closer.CloseNow()) })
+		}
+	}
 	c.closeOnce.Do(func() {
+		defer close(c.closeDone)
 		close(c.closedCh)
+		defer c.cancelLifetime()
+		if force {
+			c.cancelLifetime()
+		}
 		if c.ws != nil {
 			if forceCloser, ok := c.ws.(openAIWSForceCloser); ok && force {
-				_ = forceCloser.CloseNow()
+				c.abortOnce.Do(func() { c.recordCloseError(forceCloser.CloseNow()) })
 			} else {
-				_ = c.ws.Close()
+				c.recordCloseError(c.ws.Close())
 			}
 		}
 		select {
@@ -565,7 +763,22 @@ func (c *openAIWSConn) closeWith(force bool) {
 	})
 }
 
-func (c *openAIWSConn) writeJSONWithTimeout(parent context.Context, value any, timeout time.Duration) error {
+func (c *openAIWSConn) recordCloseError(err error) {
+	if err == nil {
+		return
+	}
+	c.closeErrMu.Lock()
+	c.closeErr = errors.Join(c.closeErr, err)
+	c.closeErrMu.Unlock()
+}
+
+func (c *openAIWSConn) closeFailure() error {
+	c.closeErrMu.Lock()
+	defer c.closeErrMu.Unlock()
+	return c.closeErr
+}
+
+func (c *openAIWSConn) writeJSONWithTimeout(parent context.Context, value any, timeout time.Duration, owners ...*openAIWSConnLease) error {
 	if c == nil {
 		return errOpenAIWSConnClosed
 	}
@@ -580,23 +793,55 @@ func (c *openAIWSConn) writeJSONWithTimeout(parent context.Context, value any, t
 		writeCtx = context.Background()
 	}
 	if timeout <= 0 {
-		return c.writeJSON(value, writeCtx)
+		return c.writeJSON(value, writeCtx, owners...)
 	}
 	var cancel context.CancelFunc
 	writeCtx, cancel = context.WithTimeout(writeCtx, timeout)
 	defer cancel()
-	return c.writeJSON(value, writeCtx)
+	return c.writeJSON(value, writeCtx, owners...)
 }
 
-func (c *openAIWSConn) writeJSON(value any, writeCtx context.Context) error {
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
+func (c *openAIWSConn) writeJSON(value any, writeCtx context.Context, owners ...*openAIWSConnLease) error {
+	if writeCtx == nil {
+		writeCtx = context.Background()
+	}
+	if err := c.writeMu.lock(writeCtx); err != nil {
+		return err
+	}
+	defer c.writeMu.unlock()
+	// A queued control frame belongs to the original exclusive lease. Release
+	// and a new lane may have won the gate before this writer resumed.
+	for _, owner := range owners {
+		if owner == nil || owner.conn != c || owner.released.Load() {
+			return errOpenAIWSConnClosed
+		}
+	}
+	select {
+	case <-c.closedCh:
+		return errOpenAIWSConnClosed
+	default:
+	}
 	if c.ws == nil {
 		return errOpenAIWSConnClosed
 	}
 	if writeCtx == nil {
 		writeCtx = context.Background()
 	}
+	payload, err := json.Marshal(value)
+	if raw, ok := value.(json.RawMessage); ok {
+		payload = raw
+	}
+	if err != nil {
+		return err
+	}
+	create, err := nativeWSIsCreate(payload)
+	if err != nil {
+		return err
+	}
+	if create {
+		return native.ErrInvalidWSPreparation
+	}
+	c.writeGeneration.Add(1)
 	if err := c.ws.WriteJSON(writeCtx, value); err != nil {
 		return err
 	}
@@ -682,7 +927,7 @@ func (c *openAIWSConn) pingWithTimeout(timeout time.Duration) error {
 	if timeout <= 0 {
 		timeout = openAIWSConnHealthCheckTO
 	}
-	pingCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	pingCtx, cancel := context.WithTimeout(c.lifetimeCtx, timeout)
 	defer cancel()
 	if err := c.ws.Ping(pingCtx); err != nil {
 		return err
@@ -858,7 +1103,7 @@ type openAIWSConnPool struct {
 
 	workerStopCh chan struct{}
 	workerWg     sync.WaitGroup
-	closeOnce    sync.Once
+	lifecycle    openAIWSPoolLifecycle
 }
 
 func newOpenAIWSConnPool(cfg *config.Config) *openAIWSConnPool {
@@ -905,39 +1150,27 @@ func (p *openAIWSConnPool) setClientDialerForTest(dialer openAIWSClientDialer) {
 	p.clientDialer = dialer
 }
 
-// Close 停止后台 worker 并关闭所有空闲连接，应在优雅关闭时调用。
+// Close is the bounded legacy shutdown entry. Root lifecycle uses Stop/Drain
+// so failure to join is returned to the shutdown coordinator.
 func (p *openAIWSConnPool) Close() {
 	if p == nil {
 		return
 	}
-	p.closeOnce.Do(func() {
-		if p.workerStopCh != nil {
-			close(p.workerStopCh)
-		}
-		p.workerWg.Wait()
-		// 遍历所有账户池，关闭全部空闲连接。
-		p.accounts.Range(func(key, value any) bool {
-			ap, ok := value.(*openAIWSAccountPool)
-			if !ok || ap == nil {
-				return true
-			}
-			ap.mu.Lock()
-			for _, conn := range ap.conns {
-				if conn != nil && !conn.isLeased() {
-					conn.close()
-				}
-			}
-			ap.mu.Unlock()
-			return true
-		})
-	})
+	p.closeLegacy()
 }
 
 func (p *openAIWSConnPool) startBackgroundWorkers() {
 	if p == nil || p.workerStopCh == nil {
 		return
 	}
+	p.lifecycle.mu.Lock()
+	p.initLifecycleLocked()
+	if p.lifecycle.state != openAIWSPoolRunning {
+		p.lifecycle.mu.Unlock()
+		return
+	}
 	p.workerWg.Add(2)
+	p.lifecycle.mu.Unlock()
 	go func() {
 		defer p.workerWg.Done()
 		p.runBackgroundPingWorker()
@@ -1107,11 +1340,55 @@ type openAIWSAcquireQueueWait struct {
 }
 
 func (p *openAIWSConnPool) Acquire(ctx context.Context, req openAIWSAcquireRequest) (*openAIWSConnLease, error) {
+	ctx, end, beginErr := p.beginPoolWork(ctx)
+	if beginErr != nil {
+		return nil, beginErr
+	}
+	defer end()
 	if p != nil {
 		p.metrics.acquireTotal.Add(1)
 	}
+	req = cloneOpenAIWSAcquireRequest(req)
+	if req.RequiredResponseID != "" {
+		if req.ForceNewConn || req.PreferredConnID == "" {
+			return nil, errors.Join(ErrOpenAIContinuationUnavailable, errOpenAIWSResponseContextUnavailable)
+		}
+		req.ForcePreferredConn = true
+	}
 	queueWait := &openAIWSAcquireQueueWait{}
-	lease, err := p.acquire(ctx, cloneOpenAIWSAcquireRequest(req), 0, queueWait)
+	lease, err := p.acquire(ctx, req, 0, queueWait)
+	if req.RequiredResponseID != "" {
+		if err != nil && errors.Is(err, errOpenAIWSPreferredConnUnavailable) {
+			return nil, errors.Join(ErrOpenAIContinuationUnavailable, errOpenAIWSResponseContextUnavailable, err)
+		}
+		// This covers both immediate and queued acquisition. The socket may
+		// advance while waiting, even if its ID and routing scope are unchanged.
+		if lease != nil && !lease.HasResponseContext(req.RequiredResponseID) {
+			lease.Release()
+			return nil, errors.Join(ErrOpenAIContinuationUnavailable, errOpenAIWSResponseContextUnavailable)
+		}
+		if lease != nil {
+			// Retain the actual receipt across later preparation/writer waits.
+			// Every physical write on this lease checks it even if a caller
+			// does not need the held-multi-turn context binding.
+			lease.requiredResponse.Store(lease.conn.latestResponse.Load())
+		}
+	}
+	if err != nil && errors.Is(context.Cause(ctx), errOpenAIWSPoolDraining) {
+		return nil, errOpenAIWSPoolDraining
+	}
+	if lease != nil {
+		p.lifecycle.mu.Lock()
+		running := p.lifecycle.state == openAIWSPoolRunning
+		p.lifecycle.mu.Unlock()
+		if !running || ctx.Err() != nil {
+			lease.Release()
+			if !running {
+				return nil, errOpenAIWSPoolDraining
+			}
+			return nil, context.Cause(ctx)
+		}
+	}
 	if lease != nil && queueWait.rewoken {
 		// 广播重选经 tryAcquire 拿令牌，不像排队分支那样在取得令牌后检查取消，
 		// 这里补上复查：上下文已取消就归还令牌并按取消返回。
@@ -1144,8 +1421,11 @@ func (p *openAIWSConnPool) acquire(ctx context.Context, req openAIWSAcquireReque
 	}
 
 retryAcquire:
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
 	accountID := req.Account.ID
-	compatibility := normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers)
+	compatibility := normalizeOpenAIWSAcquireCompatibility(req, req.Headers)
 	routingAffinity := normalizeOpenAIWSRoutingAffinity(req.Headers)
 	effectiveMaxConns := p.effectiveMaxConnsByAccount(req.Account)
 	if effectiveMaxConns <= 0 {
@@ -1433,7 +1713,12 @@ retryAcquire:
 			conn.close()
 			return nil, errOpenAIWSConnClosed
 		}
-		ap.conns[conn.id] = conn
+		if !p.publishConnLocked(ap, conn) {
+			ap.signalChangedLocked()
+			ap.mu.Unlock()
+			p.closeConnAsync(conn)
+			return nil, errOpenAIWSPoolDraining
+		}
 		ap.prewarmFails = 0
 		ap.prewarmFailAt = time.Time{}
 		// Wake acquires that observed creating>0 with no compatible connection.
@@ -1544,6 +1829,11 @@ func (p *openAIWSConnPool) recordLastSuccessfulAcquire(accountID int64, generati
 		ap.mu.Unlock()
 		return
 	}
+	if !p.poolRunning() {
+		ap.mu.Unlock()
+		return
+	}
+
 	ap.lastAcquire = cloneOpenAIWSAcquireRequestPtr(&req)
 	ap.mu.Unlock()
 }
@@ -1870,6 +2160,10 @@ func (p *openAIWSConnPool) ensureTargetIdleAsync(accountID int64) {
 	if need <= 0 {
 		return
 	}
+	workCtx, end, err := p.beginPoolWork(context.Background())
+	if err != nil {
+		return
+	}
 	req = cloneOpenAIWSAcquireRequest(*ap.lastAcquire)
 	generation = ap.generation
 	ap.prewarmActive = true
@@ -1879,7 +2173,7 @@ func (p *openAIWSConnPool) ensureTargetIdleAsync(accountID int64) {
 	ap.creating += need
 	p.metrics.scaleUpTotal.Add(int64(need))
 
-	go p.prewarmConns(accountID, req, need, generation)
+	go func() { defer end(); p.prewarmConnsOwned(workCtx, accountID, req, need, generation) }()
 }
 
 func (p *openAIWSConnPool) targetConnCountLocked(ap *openAIWSAccountPool, maxConns int) int {
@@ -1923,14 +2217,25 @@ func (p *openAIWSConnPool) targetConnCountLocked(ap *openAIWSAccountPool, maxCon
 }
 
 func (p *openAIWSConnPool) prewarmConns(accountID int64, req openAIWSAcquireRequest, total int, generations ...uint64) {
+	ctx, end, err := p.beginPoolWork(context.Background())
+	if err != nil {
+		return
+	}
+	defer end()
+	p.prewarmConnsOwned(ctx, accountID, req, total, generations...)
+}
+
+func (p *openAIWSConnPool) prewarmConnsOwned(parent context.Context, accountID int64, req openAIWSAcquireRequest, total int, generations ...uint64) {
 	generation := uint64(0)
 	if len(generations) > 0 {
 		generation = generations[0]
 	}
 	staleTarget := false
+	remaining := total
 	defer func() {
 		if ap, ok := p.getAccountPool(accountID); ok && ap != nil {
 			ap.mu.Lock()
+			ap.creating = max(0, ap.creating-remaining)
 			ap.prewarmActive = false
 			ap.signalChangedLocked()
 			ap.mu.Unlock()
@@ -1944,7 +2249,10 @@ func (p *openAIWSConnPool) prewarmConns(accountID int64, req openAIWSAcquireRequ
 	}()
 
 	for i := 0; i < total; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), p.dialTimeout()+openAIWSConnPrewarmExtraDelay)
+		if parent.Err() != nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(parent, p.dialTimeout()+openAIWSConnPrewarmExtraDelay)
 		conn, err := p.dialConn(ctx, req)
 		cancel()
 
@@ -1959,6 +2267,7 @@ func (p *openAIWSConnPool) prewarmConns(accountID int64, req openAIWSAcquireRequ
 		if ap.creating > 0 {
 			ap.creating--
 		}
+		remaining--
 		if err != nil {
 			ap.prewarmFails++
 			ap.prewarmFailAt = time.Now()
@@ -1984,7 +2293,12 @@ func (p *openAIWSConnPool) prewarmConns(accountID int64, req openAIWSAcquireRequ
 			conn.close()
 			continue
 		}
-		ap.conns[conn.id] = conn
+		if !p.publishConnLocked(ap, conn) {
+			ap.signalChangedLocked()
+			ap.mu.Unlock()
+			p.closeConnAsync(conn)
+			return
+		}
 		ap.prewarmFails = 0
 		ap.prewarmFailAt = time.Time{}
 		ap.signalChangedLocked()
@@ -2118,6 +2432,11 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	if p == nil || p.clientDialer == nil {
 		return nil, errors.New("openai ws client dialer is nil")
 	}
+	ctx, end, beginErr := p.beginPoolWork(ctx)
+	if beginErr != nil {
+		return nil, beginErr
+	}
+	defer end()
 	headers := cloneHeader(req.Headers)
 	var err error
 	if req.HeadersFactory != nil {
@@ -2126,7 +2445,22 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 			return nil, err
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	var handshakeFact nativeWSHandshake
+	if req.HandshakeFactsFactory != nil {
+		handshakeFact, err = req.HandshakeFactsFactory(ctx, headers)
+		if err != nil {
+			return nil, err
+		}
+	}
 	conn, status, handshakeHeaders, err := p.clientDialer.Dial(ctx, req.WSURL, headers, req.ProxyURL)
+	if conn != nil && err != nil {
+		orphan := newOpenAIWSConn(p.nextConnID(req.Account.ID), req.Account.ID, conn, handshakeHeaders)
+		p.trackConn(orphan)
+		p.closeConnAsync(orphan)
+	}
 	if err != nil {
 		var handshakeErr *openAIWSHandshakeError
 		var responseBody []byte
@@ -2149,11 +2483,28 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	}
 	id := p.nextConnID(req.Account.ID)
 	pooledConn := newOpenAIWSConn(id, req.Account.ID, conn, handshakeHeaders)
+	if req.HandshakeFactsFactory != nil {
+		handshakeFact, err = completeNativeWSHandshake(handshakeFact, conn, headers)
+		if err != nil {
+			p.trackConn(pooledConn)
+			p.closeConnAsync(pooledConn)
+			return nil, err
+		}
+		pooledConn.nativeHandshake = handshakeFact
+	}
 	accountID := req.Account.ID
 	evict := func() { p.evictConn(accountID, id) }
 	pooledConn.onPeerClosed.Store(&evict)
-	pooledConn.handshakeCompatibility = normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers)
+	pooledConn.handshakeCompatibility = normalizeOpenAIWSAcquireCompatibility(req, req.Headers)
 	pooledConn.routingAffinity = normalizeOpenAIWSRoutingAffinity(req.Headers)
+	p.trackConn(pooledConn)
+	if !p.poolRunning() || ctx.Err() != nil {
+		p.closeConnAsync(pooledConn)
+		if ctx.Err() != nil {
+			return nil, context.Cause(ctx)
+		}
+		return nil, errOpenAIWSPoolDraining
+	}
 	return pooledConn, nil
 }
 
@@ -2319,6 +2670,7 @@ func cloneOpenAIWSAcquireRequest(req openAIWSAcquireRequest) openAIWSAcquireRequ
 	copied.WSURL = stringsTrim(req.WSURL)
 	copied.ProxyURL = stringsTrim(req.ProxyURL)
 	copied.PreferredConnID = stringsTrim(req.PreferredConnID)
+	copied.RequiredResponseID = stringsTrim(req.RequiredResponseID)
 	return copied
 }
 
@@ -2333,7 +2685,7 @@ func cloneOpenAIWSAcquireRequestPtr(req *openAIWSAcquireRequest) *openAIWSAcquir
 func sameOpenAIWSPrewarmTarget(a, b openAIWSAcquireRequest) bool {
 	return stringsTrim(a.WSURL) == stringsTrim(b.WSURL) &&
 		stringsTrim(a.ProxyURL) == stringsTrim(b.ProxyURL) &&
-		normalizeOpenAIWSHandshakeCompatibility(a.Account, a.Headers) == normalizeOpenAIWSHandshakeCompatibility(b.Account, b.Headers)
+		normalizeOpenAIWSAcquireCompatibility(a, a.Headers) == normalizeOpenAIWSAcquireCompatibility(b, b.Headers)
 }
 
 func normalizeOpenAIWSBetaFeatures(headers http.Header) string {
@@ -2456,4 +2808,17 @@ func closeOpenAIWSConns(conns []*openAIWSConn) {
 
 func stringsTrim(value string) string {
 	return strings.TrimSpace(value)
+}
+
+func normalizeOpenAIWSAcquireCompatibility(req openAIWSAcquireRequest, headers http.Header) openAIWSHandshakeCompatibilityKey {
+	key := normalizeOpenAIWSHandshakeCompatibility(req.Account, headers)
+	key.tenantScope = req.TenantScope
+	key.targetURL, key.proxyURL = stringsTrim(req.WSURL), stringsTrim(req.ProxyURL)
+	key.credentialScope = req.CredentialScope
+	if key.credentialScope == ([32]byte{}) && req.Account != nil {
+		// Generic pool callers have no shadow credential owner; production
+		// native composition supplies the full selected/owner scope above.
+		key.credentialScope, _ = nativeWSReuseScope(req.Account, req.Account)
+	}
+	return key
 }

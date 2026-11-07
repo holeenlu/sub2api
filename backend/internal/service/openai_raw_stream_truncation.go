@@ -13,32 +13,18 @@ import (
 // openAIRawStreamTruncatedUpstreamMessage 是 raw CC 直转路径上游截断的 ops 消息。
 const openAIRawStreamTruncatedUpstreamMessage = "Upstream Chat Completions stream ended before any terminal chunk"
 
-// openAIRawStreamTerminalState 记录 raw Chat Completions SSE 流是否收到过
-// **终止信号**。
-//
-// 背景：CC 直转路径把上游 SSE 原样透传，此前只要 HTTP 状态是 200 就按成功收尾——
-// 上游中途断流（Cloudflare edge reset、后端 worker 掉线）会被伪装成
-// `HTTP 200 + usage 0/0`：客户端拿到半截回答，网关既不报错也不计入 SLA，
-// Ops 侧完全不可见。
-//
-// 三种终止信号任一出现即认为上游"讲完了"，只是尾巴可能丢失，不作截断处理：
-//
-//   - [DONE]        —— OpenAI CC 协议标准哨兵
-//   - usage chunk   —— include_usage 生效时的末尾用量帧（网关强制打开）
-//   - finish_reason —— 生成正常结束（stop/length/tool_calls/...）
-//
-// 只认 [DONE] 会误伤那些跑完最后一帧就直接 EOF 的兼容上游；只认 usage 会误伤
-// 不支持 include_usage 的上游。三者取并集，把误判压到"上游确实在生成中途被切断"。
+// openAIRawStreamTerminalState is shared by native Chat and both converters.
+// Measured usage is independent of completion: only a usage-only trailer, DONE,
+// or the finish reasons of every observed choice can prove success. Keep the
+// first explicit error even if a later frame claims completion.
 type openAIRawStreamTerminalState struct {
-	// sawDataLine 表示上游至少发过一行 `data:`，即响应确实是 SSE 语义流。
-	// 非 SSE 响应体（上游对 stream 请求返回裸 JSON）不参与截断判定，保持既有透传行为。
 	sawDataLine     bool
 	sawDone         bool
-	sawUsage        bool
-	sawFinishReason bool
+	sawUsageTrailer bool
+	choices         map[int64]bool
+	failure         error
 }
 
-// ObserveDataLine 从单行 SSE `data:` 载荷中提取终止信号。payload 需已 TrimSpace。
 func (t *openAIRawStreamTerminalState) ObserveDataLine(payload string) {
 	if t == nil {
 		return
@@ -48,34 +34,57 @@ func (t *openAIRawStreamTerminalState) ObserveDataLine(payload string) {
 		t.sawDone = true
 		return
 	}
-	if usage := gjson.Get(payload, "usage"); usage.Exists() && usage.IsObject() {
-		t.sawUsage = true
+	if eventError := gjson.Get(payload, "error"); (eventError.Exists() && eventError.Type != gjson.Null) || gjson.Get(payload, "type").String() == "error" {
+		t.fail()
 	}
-	if t.sawFinishReason {
-		return
+	if isOpenAIChatUsageOnlyStreamChunk(payload) && gjson.Get(payload, "usage").IsObject() {
+		t.sawUsageTrailer = true
 	}
 	for _, choice := range gjson.Get(payload, "choices").Array() {
-		// finish_reason 为 null 时 String() 返回空串，不算终止。
-		if strings.TrimSpace(choice.Get("finish_reason").String()) != "" {
-			t.sawFinishReason = true
+		if t.choices == nil {
+			t.choices = make(map[int64]bool)
+		}
+		index := choice.Get("index").Int()
+		if _, exists := t.choices[index]; !exists && len(t.choices) >= 16*1024 {
+			t.failure = errors.New("upstream Chat Completions choice limit exceeded")
 			return
 		}
+		t.choices[index] = t.choices[index] || strings.TrimSpace(choice.Get("finish_reason").String()) != ""
 	}
 }
 
-// Terminated 表示上游给出过终止信号。
-func (t *openAIRawStreamTerminalState) Terminated() bool {
-	return t != nil && (t.sawDone || t.sawUsage || t.sawFinishReason)
+func (t *openAIRawStreamTerminalState) fail() {
+	if t.failure == nil {
+		t.failure = errors.New("upstream Chat Completions error event")
+	}
 }
 
-// IsTruncated 判定上游是否在任何终止信号之前结束。clientOutputStarted 用于放行
-// 非 SSE 响应体：那类响应本就没有 data: 行，既有行为是原样透传，不在本次判定范围内；
-// 但"一个字节都没收到"的空 200 依然算截断。
-func (t *openAIRawStreamTerminalState) IsTruncated(clientOutputStarted bool) bool {
+func (t *openAIRawStreamTerminalState) Terminated() bool {
+	if t == nil || t.failure != nil {
+		return false
+	}
+	if t.sawDone || t.sawUsageTrailer {
+		return true
+	}
+	if len(t.choices) == 0 {
+		return false
+	}
+	for _, finished := range t.choices {
+		if !finished {
+			return false
+		}
+	}
+	return true
+}
+
+// IsTruncated retains the existing non-SSE pass-through only when the caller
+// has identified a non-SSE response and actually forwarded bytes. SSE metadata
+// is never proof of successful generation.
+func (t *openAIRawStreamTerminalState) IsTruncated(allowNonSSEBody bool) bool {
 	if t == nil || t.Terminated() {
 		return false
 	}
-	return t.sawDataLine || !clientOutputStarted
+	return t.sawDataLine || !allowNonSSEBody
 }
 
 // newOpenAIRawStreamTruncatedFailoverError 处理"上游截断且尚未向客户端写出任何
@@ -160,4 +169,20 @@ func openAIRawStreamTruncatedErrorBody(cause error) []byte {
 			`","message":"Upstream response stream ended before completion"}}`)
 	}
 	return body
+}
+
+// Metadata and empty delta fields do not satisfy the first-output budget.
+func chatStreamPayloadHasSemanticOutput(payload string) bool {
+	for _, choice := range gjson.Get(payload, "choices").Array() {
+		delta := choice.Get("delta")
+		for _, field := range []string{"content", "reasoning_content", "reasoning", "refusal"} {
+			if delta.Get(field).String() != "" {
+				return true
+			}
+		}
+		if len(delta.Get("tool_calls").Array()) > 0 || delta.Get("function_call.name").String() != "" || delta.Get("function_call.arguments").String() != "" {
+			return true
+		}
+	}
+	return false
 }

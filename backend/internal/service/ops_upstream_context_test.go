@@ -2,12 +2,18 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestSafeUpstreamURL(t *testing.T) {
@@ -308,4 +314,121 @@ func TestOpsServiceGetErrorLogByIDNormalizesLegacyProxyAttribution(t *testing.T)
 	require.NotContains(t, detail.UpstreamErrors, `"proxy_mode"`)
 	require.NotContains(t, detail.UpstreamErrors, `"proxy_source"`)
 	require.NotContains(t, detail.UpstreamErrors, `"proxy_fallback"`)
+}
+
+func TestSchedulingTraceBoundsAndIsolation(t *testing.T) {
+	ctx := WithSchedulingTrace(context.Background(), nil)
+	counts := map[string]int{"excluded": 1}
+	RecordSchedulingDecision(ctx, SchedulingDecision{Stage: "filter", Action: "filtered", Excluded: counts})
+	counts["excluded"] = 99
+	before := WithOpsSchedulingTrace(ctx, nil)
+	require.Contains(t, before[0].Detail, `"excluded":1`)
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			RecordSchedulingDecision(ctx, SchedulingDecision{Stage: "retry", Action: "decided", Reason: strings.Repeat("x", 1000)})
+		}()
+	}
+	wg.Wait()
+	trace := WithOpsSchedulingTrace(ctx, nil)
+	require.Len(t, trace, 1)
+	require.Nil(t, LastOpsUpstreamAttempt(trace), "local decisions must never become upstream attempts")
+	require.LessOrEqual(t, len(trace[0].Detail), maxSchedulingTraceBytes)
+	var snapshot struct {
+		Dropped int                  `json:"dropped_events"`
+		Events  []SchedulingDecision `json:"events"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(trace[0].Detail), &snapshot))
+	require.Positive(t, snapshot.Dropped)
+	require.LessOrEqual(t, len(snapshot.Events), maxSchedulingTraceEvents)
+	require.Contains(t, before[0].Detail, `"excluded":1`, "queued snapshots are immutable")
+	require.Empty(t, WithOpsSchedulingTrace(context.Background(), nil), "collectors do not leak between requests")
+	entry := &OpsInsertErrorLogInput{UpstreamErrors: trace}
+	require.NoError(t, sanitizeOpsUpstreamErrors(entry))
+	require.NotNil(t, entry.UpstreamErrorsJSON)
+	var persisted []*OpsUpstreamErrorEvent
+	require.NoError(t, json.Unmarshal([]byte(*entry.UpstreamErrorsJSON), &persisted))
+	require.JSONEq(t, trace[0].Detail, persisted[0].Detail)
+
+	// Large reason aggregates must hit the byte bound before the event bound.
+	byteCtx := WithSchedulingTrace(context.Background(), nil)
+	large := make(map[string]int)
+	for i := 0; i < 32; i++ {
+		large[strconv.Itoa(i)+strings.Repeat("<", 60)] = 1
+	}
+	for i := 0; i < 4; i++ {
+		RecordSchedulingDecision(byteCtx, SchedulingDecision{Stage: "filter", Action: "filtered", Excluded: large})
+	}
+	bounded := WithOpsSchedulingTrace(byteCtx, nil)
+	require.LessOrEqual(t, len(bounded[0].Detail), maxSchedulingTraceBytes)
+	require.NoError(t, json.Unmarshal([]byte(bounded[0].Detail), &snapshot))
+	require.Positive(t, snapshot.Dropped)
+	require.Less(t, len(snapshot.Events), maxSchedulingTraceEvents)
+
+	// The local envelope must not displace one of the 16 retained provider bodies.
+	var attempts []*OpsUpstreamErrorEvent
+	for i := 0; i < opsUpstreamErrorsBodyWindow; i++ {
+		attempts = append(attempts, &OpsUpstreamErrorEvent{Kind: "http_error", UpstreamStatusCode: 429, UpstreamResponseBody: "limited"})
+	}
+	entry = &OpsInsertErrorLogInput{UpstreamErrors: WithOpsSchedulingTrace(ctx, attempts)}
+	require.NoError(t, sanitizeOpsUpstreamErrors(entry))
+	require.NoError(t, json.Unmarshal([]byte(*entry.UpstreamErrorsJSON), &persisted))
+	require.Len(t, persisted, opsUpstreamErrorsBodyWindow+1)
+	for _, attempt := range persisted[:opsUpstreamErrorsBodyWindow] {
+		require.Equal(t, "limited", attempt.UpstreamResponseBody)
+	}
+}
+
+func TestSchedulingTraceWSTurnSnapshots(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx := WithSchedulingTrace(context.Background(), nil)
+	c.Request = httptest.NewRequest("GET", "/v1/responses", nil).WithContext(ctx)
+	SetOpenAIClientTransport(c, OpenAIClientTransportWS)
+	BeginOpsStreamTurn(c, 1)
+	RecordSchedulingDecision(ctx, SchedulingDecision{Stage: "selection", Action: "stopped", Reason: "first_turn"})
+	MarkOpsStreamError(c, "rate_limit_error", "wait exhausted", 429)
+	require.True(t, HasOpsCurrentStreamError(c))
+	first := GetOpsStreamErrors(c)
+	require.Len(t, first, 1)
+	require.Len(t, first[0].UpstreamErrors, 1)
+	c.Set(OpsUpstreamModelKey, "previous-upstream-model")
+	BeginOpsStreamTurn(c, 2)
+	require.Empty(t, c.GetString(OpsUpstreamModelKey), "a new WS turn must resolve its own outbound model")
+	require.False(t, HasOpsCurrentStreamError(c), "a previous failed turn must not label this one as failed")
+	// Forwarders retain derived contexts across turns; resetting must reach them.
+	RecordSchedulingDecision(ctx, SchedulingDecision{Stage: "selection", Action: "acquired", AccountID: 2})
+	second := WithOpsSchedulingTrace(ctx, nil)
+	require.NotContains(t, second[0].Detail, "first_turn")
+	require.Contains(t, first[0].UpstreamErrors[0].Detail, "first_turn")
+	require.Nil(t, LastOpsUpstreamAttempt(first[0].UpstreamErrors))
+}
+
+func TestSchedulingTraceAsyncSnapshotPreservesFailure(t *testing.T) {
+	core, logs := observer.New(zap.InfoLevel)
+	var jobs []func()
+	ctx := WithSchedulingTrace(logger.IntoContext(t.Context(), zap.New(core)), func(job func()) bool { jobs = append(jobs, job); return true })
+	RecordSchedulingDecision(ctx, SchedulingDecision{Stage: "filter", Action: "filtered", Excluded: map[string]int{"busy": 2}})
+	RecordSchedulingDecision(ctx, SchedulingDecision{Stage: "retry", Action: "stopped", Reason: "keep_failure"})
+	for range 100 {
+		RecordSchedulingDecision(ctx, SchedulingDecision{Stage: "slot", Action: "acquired"})
+	}
+	LogSchedulingTrace(ctx, false)
+	require.Len(t, jobs, 1)
+	require.Zero(t, logs.Len(), "serialization and logging must run on the existing worker")
+	var work sync.WaitGroup
+	work.Add(1)
+	go func() { defer work.Done(); jobs[0]() }()
+	// Mutate the live summary before resetting the next WS turn as the worker runs.
+	RecordSchedulingDecision(ctx, SchedulingDecision{Stage: "filter", Action: "filtered", Excluded: map[string]int{"next_turn": 99}})
+	resetSchedulingTrace(ctx)
+	work.Wait()
+	require.Equal(t, 1, logs.Len())
+	detail := logs.All()[0].ContextMap()["decisions"].(string)
+	require.Contains(t, detail, "keep_failure")
+	require.Contains(t, detail, `"busy":2`)
+	require.NotContains(t, detail, "next_turn")
+	require.Contains(t, detail, "dropped_events")
+	require.LessOrEqual(t, len(detail), maxSchedulingTraceBytes)
 }

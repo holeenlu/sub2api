@@ -46,7 +46,7 @@ func newInflightTestGinContext() *gin.Context {
 func TestReserveInflightBalance_SkipsWhenDisabledOrSubscription(t *testing.T) {
 	cfg := &config.Config{}
 	billing := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
-	t.Cleanup(billing.Stop)
+	cleanupHandlerBillingCache(t, billing)
 	est := &countingEstimator{cost: 1, priced: true}
 	apiKey := &service.APIKey{User: &service.User{ID: 1}}
 
@@ -68,7 +68,7 @@ func TestReserveInflightBalance_UnpricedFailOpenByDefaultFailClosedOptIn(t *test
 	cfg := &config.Config{}
 	cfg.Billing.InflightReservation = config.InflightReservationConfig{Enabled: true, TTLSeconds: 60}
 	billing := service.NewBillingCacheService(cache, nil, nil, nil, nil, nil, cfg, nil)
-	t.Cleanup(billing.Stop)
+	cleanupHandlerBillingCache(t, billing)
 	apiKey := &service.APIKey{User: &service.User{ID: 1}}
 	est := &countingEstimator{priced: false}
 
@@ -135,7 +135,7 @@ func TestWrapUsageRecordTaskContext_HandsReservationToBillingTask(t *testing.T) 
 	cfg := &config.Config{}
 	cfg.Billing.InflightReservation = config.InflightReservationConfig{Enabled: true, TTLSeconds: 60}
 	billing := service.NewBillingCacheService(cache, nil, nil, nil, nil, nil, cfg, nil)
-	t.Cleanup(billing.Stop)
+	cleanupHandlerBillingCache(t, billing)
 	apiKey := &service.APIKey{User: &service.User{ID: 5}}
 
 	c := newInflightTestGinContext()
@@ -169,7 +169,7 @@ func TestWebSearch_RejectsWhenInflightExceedsBalance(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Billing.InflightReservation = config.InflightReservationConfig{Enabled: true, TTLSeconds: 60}
 	billingCache := service.NewBillingCacheService(cache, nil, nil, nil, nil, nil, cfg, nil)
-	t.Cleanup(billingCache.Stop)
+	cleanupHandlerBillingCache(t, billingCache)
 	billing := service.NewBillingService(cfg, nil)
 	gw := service.NewGatewayService(
 		nil, nil, nil, nil, nil, nil, nil, nil, cfg, nil, nil, billing, nil, nil,

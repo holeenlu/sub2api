@@ -1,11 +1,49 @@
 package apicompat
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOpenAICacheWriteLifetimesRoundTrip(t *testing.T) {
+	var usage ResponsesUsage
+	require.NoError(t, json.Unmarshal([]byte(`{"input_tokens":12000,"output_tokens":5,"input_tokens_details":{"cached_tokens":4000,"cache_write_tokens":7000,"cache_write_tokens_details":{"ttl_30m_tokens":3000,"ttl_12h_tokens":4000}}}`), &usage))
+	require.Equal(t, 7000, usage.CacheCreationInputTokens)
+	chat := chatUsageFromResponsesUsage(&usage)
+	require.Equal(t, &CacheWriteTokensDetails{TTL30mTokens: 3000, TTL12hTokens: 4000}, chat.PromptTokensDetails.CacheWriteTokensDetails)
+	back := ChatUsageToResponsesUsage(chat)
+	require.Equal(t, usage.InputTokensDetails, back.InputTokensDetails)
+	require.Equal(t, usage.CacheCreationInputTokens, back.CacheCreationInputTokens)
+	// The two write components never become extra input tokens.
+	require.Equal(t, 1000, anthropicUsageFromResponsesUsage(back).InputTokens)
+}
+
+func TestOpenAICacheWriteLifetimesNormalize(t *testing.T) {
+	previous := CacheWriteTokensDetails{TTL30mTokens: 100, TTL12hTokens: 100}
+	require.Equal(t, previous, previous.MergeNonZero(CacheWriteTokensDetails{}, 200))
+	require.Equal(t, CacheWriteTokensDetails{TTL30mTokens: 120, TTL12hTokens: 100}, previous.MergeNonZero(CacheWriteTokensDetails{TTL30mTokens: 120}, 220))
+	require.Equal(t, CacheWriteTokensDetails{TTL30mTokens: 50, TTL12hTokens: 50}, previous.MergeNonZero(CacheWriteTokensDetails{}, 100))
+	require.Equal(t, CacheWriteTokensDetails{}, previous.MergeNonZero(CacheWriteTokensDetails{}, 0))
+	for _, tc := range []struct {
+		name                                    string
+		total, short, long, wantShort, wantLong int
+	}{
+		{"mixed", 7000, 3000, 4000, 3000, 4000},
+		{"partial details keep remainder unknown", 7000, 1000, 2000, 1000, 2000},
+		{"aggregate zero is authoritative", 0, 3000, 4000, 0, 0},
+		{"negative counters", 100, -3, 40, 0, 40},
+		{"contradictory components", 100, 100, 100, 50, 50},
+		{"overflow safe", 100, int(^uint(0) >> 1), int(^uint(0) >> 1), 50, 50},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := (CacheWriteTokensDetails{TTL30mTokens: tc.short, TTL12hTokens: tc.long}).Normalize(tc.total)
+			require.Equal(t, CacheWriteTokensDetails{TTL30mTokens: tc.wantShort, TTL12hTokens: tc.wantLong}, got)
+		})
+	}
+}
 
 func TestAnthropicUsageFromResponsesUsage_CacheCreation(t *testing.T) {
 	usage := &ResponsesUsage{

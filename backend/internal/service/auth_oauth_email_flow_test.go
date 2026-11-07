@@ -59,10 +59,6 @@ func (s *redeemCodeRepoStub) Update(_ context.Context, code *RedeemCode) error {
 	return nil
 }
 
-func (s *redeemCodeRepoStub) BatchUpdate(context.Context, []int64, RedeemCodeBatchUpdateFields) (int64, error) {
-	panic("unexpected BatchUpdate call")
-}
-
 func (s *redeemCodeRepoStub) Delete(context.Context, int64) error {
 	panic("unexpected Delete call")
 }
@@ -133,13 +129,10 @@ func newOAuthEmailFlowAuthService(
 	return NewAuthService(
 		nil,
 		userRepo,
-		redeemRepo,
 		refreshTokenCache,
 		cfg,
 		settingService,
 		emailService,
-		nil,
-		nil,
 		nil,
 		nil,
 		nil,
@@ -172,9 +165,8 @@ func TestRegisterOAuthEmailAccountRollsBackCreatedUserWhenTokenPairGenerationFai
 		redeemRepo,
 		nil,
 		map[string]string{
-			SettingKeyRegistrationEnabled:   "true",
-			SettingKeyInvitationCodeEnabled: "true",
-			SettingKeyEmailVerifyEnabled:    "true",
+			SettingKeyRegistrationEnabled: "true",
+			SettingKeyEmailVerifyEnabled:  "true",
 		},
 		emailCache,
 		nil,
@@ -185,9 +177,7 @@ func TestRegisterOAuthEmailAccountRollsBackCreatedUserWhenTokenPairGenerationFai
 		"fresh@example.com",
 		"secret-123",
 		"246810",
-		"INVITE123",
-		"oidc",
-	)
+		"oidc")
 
 	require.Nil(t, tokenPair)
 	require.Nil(t, user)
@@ -223,9 +213,7 @@ func TestRegisterOAuthEmailAccount_NonWhitelistDomainLimit(t *testing.T) {
 		"second@custom.example",
 		"secret-123",
 		"246810",
-		"",
-		"oidc",
-	)
+		"oidc")
 
 	require.ErrorIs(t, err, ErrEmailDomainRegistrationLimit)
 }
@@ -249,9 +237,7 @@ func TestRegisterVerifiedOAuthEmailAccount_NonWhitelistDomainLimit(t *testing.T)
 		context.Background(),
 		"second@custom.example",
 		"secret-123",
-		"",
-		"oidc",
-	)
+		"oidc")
 
 	require.ErrorIs(t, err, ErrEmailDomainRegistrationLimit)
 }
@@ -329,9 +315,7 @@ func TestRegisterOAuthEmailAccountSetsNormalizedSignupSourceOnCreatedUser(t *tes
 		"fresh@example.com",
 		"secret-123",
 		"246810",
-		"",
-		" OIDC ",
-	)
+		" OIDC ")
 
 	require.NoError(t, err)
 	require.NotNil(t, tokenPair)
@@ -389,9 +373,7 @@ func TestRegisterOAuthEmailAccountKeepsGitHubAndGoogleSignupSource(t *testing.T)
 				tt.email,
 				"secret-123",
 				"246810",
-				"",
-				tt.signupSource,
-			)
+				tt.signupSource)
 
 			require.NoError(t, err)
 			require.NotNil(t, tokenPair)
@@ -429,57 +411,13 @@ func TestRegisterOAuthEmailAccountFallsBackUnknownSignupSourceToEmail(t *testing
 		"fallback@example.com",
 		"secret-123",
 		"246810",
-		"",
-		"unknown-provider",
-	)
+		"unknown-provider")
 
 	require.NoError(t, err)
 	require.NotNil(t, tokenPair)
 	require.NotNil(t, user)
 	require.Len(t, userRepo.created, 1)
 	require.Equal(t, "email", userRepo.created[0].SignupSource)
-}
-
-func TestRollbackOAuthEmailAccountCreationRestoresInvitationUsage(t *testing.T) {
-	userRepo := &userRepoStub{}
-	redeemRepo := &redeemCodeRepoStub{
-		codesByCode: map[string]*RedeemCode{
-			"INVITE123": {
-				ID:     7,
-				Code:   "INVITE123",
-				Type:   RedeemTypeInvitation,
-				Status: StatusUsed,
-				UsedBy: func() *int64 {
-					v := int64(42)
-					return &v
-				}(),
-				UsedAt: func() *time.Time {
-					v := time.Now().UTC()
-					return &v
-				}(),
-			},
-		},
-	}
-	authService := newOAuthEmailFlowAuthService(
-		userRepo,
-		redeemRepo,
-		&refreshTokenCacheStub{},
-		map[string]string{
-			SettingKeyRegistrationEnabled:   "true",
-			SettingKeyInvitationCodeEnabled: "true",
-		},
-		&emailCacheStub{},
-		nil,
-	)
-
-	err := authService.RollbackOAuthEmailAccountCreation(context.Background(), 42, "INVITE123")
-
-	require.NoError(t, err)
-	require.Equal(t, []int64{42}, userRepo.deletedIDs)
-	require.Len(t, redeemRepo.updateCalls, 1)
-	require.Equal(t, StatusUnused, redeemRepo.updateCalls[0].Status)
-	require.Nil(t, redeemRepo.updateCalls[0].UsedBy)
-	require.Nil(t, redeemRepo.updateCalls[0].UsedAt)
 }
 
 func TestRollbackOAuthEmailAccountCreationPropagatesDeleteError(t *testing.T) {
@@ -495,7 +433,7 @@ func TestRollbackOAuthEmailAccountCreationPropagatesDeleteError(t *testing.T) {
 		nil,
 	)
 
-	err := authService.RollbackOAuthEmailAccountCreation(context.Background(), 42, "")
+	err := authService.RollbackOAuthEmailAccountCreation(context.Background(), 42)
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "delete created oauth user")
@@ -529,10 +467,7 @@ func TestFinalizeOAuthEmailAccount_SnapshotsPlatformQuotaDefaults(t *testing.T) 
 	err := authService.FinalizeOAuthEmailAccount(
 		context.Background(),
 		user,
-		"",
-		"oidc",
-		"",
-	)
+		"oidc")
 
 	require.NoError(t, err)
 

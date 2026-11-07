@@ -168,6 +168,7 @@ func TestIsCloudflareBotBlockResponseOnlyMatches1010(t *testing.T) {
 		{"different JSON code", `{"code":403,"message":"forbidden"}`, false},
 		{"unrelated code 1010", `{"error":{"code":1010,"message":"account banned"}}`, false},
 		{"message mentions 1010", `{"message":"error code: 1010"}`, false},
+		{"echoed input", `{"error":{"code":"account_deactivated"},"input":{"error_name":"browser_signature_banned"}}`, false},
 		{"malformed JSON", `{"code":1010`, false},
 	}
 
@@ -261,5 +262,20 @@ func TestIsHTMLResponse(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, isHTMLResponse([]byte(tc.body)))
 		})
+	}
+}
+
+func TestCloudflare1010SkipsEarlyAccountPolicies(t *testing.T) {
+	for _, platform := range []string{PlatformOpenAI, PlatformAnthropic, PlatformGemini, PlatformGrok} {
+		for _, body := range []string{openAI403Cloudflare1010Body, `{"errors":[{"cloudflare_error":true,"code":1010}]}`} {
+			h := newOpenAI403TestHarness(t, 701, 1)
+			h.account.Platform = platform
+			h.account.Credentials = map[string]any{"custom_error_codes_enabled": true, "custom_error_codes": []any{float64(403)}}
+			require.Equal(t, ErrorPolicySkipped, h.svc.CheckErrorPolicy(context.Background(), h.account, 403, []byte(body)))
+			require.False(t, h.handle(body))
+			gateway := &OpenAIGatewayService{rateLimitService: h.svc}
+			require.False(t, gateway.handleOpenAIAccountUpstreamError(context.Background(), h.account, 403, nil, []byte(body)))
+			h.requireNoAccountPenalty(t)
+		}
 	}
 }

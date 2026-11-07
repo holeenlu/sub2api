@@ -1,0 +1,20 @@
+
+# The root ignores directories named tests. Publish only acceptance definitions,
+# keeping generated results, credentials and other local test material ignored.
+!/tests/
+/tests/*
+!/tests/acceptance/
+/tests/acceptance/*
+!/tests/acceptance/README.md
+!/tests/acceptance/CASES.md
+!/tests/acceptance/EXECUTION.md
+!/tests/acceptance/FIXTURES.md
+!/tests/acceptance/cases.json
+!/tests/acceptance/catalog.schema.json
+!/tests/acceptance/result-template.json
+!/tests/acceptance/result.schema.json
+!/tests/acceptance/route-inventory.json
+
+/dist-vendor/
+/dist-review/
+/.vendor-*/

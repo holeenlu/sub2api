@@ -45,6 +45,10 @@ func TestFetchChatGPTAccountInfo_SkipsExpiredWorkspaceCandidate(t *testing.T) {
 	expiredAt := time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/profile-unavailable" {
+			w.WriteHeader(403)
+			return
+		}
 		require.Equal(t, "/backend-api/accounts/check/v4-2023-04-27", r.URL.Path)
 		require.Equal(t, "Bearer access-token", r.Header.Get("Authorization"))
 
@@ -70,9 +74,11 @@ func TestFetchChatGPTAccountInfo_SkipsExpiredWorkspaceCandidate(t *testing.T) {
 	}))
 	defer server.Close()
 
+	oldMe := chatGPTMeURL
+	chatGPTMeURL = server.URL + "/profile-unavailable"
 	oldURL := chatGPTAccountsCheckURL
 	chatGPTAccountsCheckURL = server.URL + "/backend-api/accounts/check/v4-2023-04-27"
-	t.Cleanup(func() { chatGPTAccountsCheckURL = oldURL })
+	t.Cleanup(func() { chatGPTAccountsCheckURL = oldURL; chatGPTMeURL = oldMe })
 
 	got := fetchChatGPTAccountInfo(context.Background(), func(proxyURL string) (*req.Client, error) {
 		return req.C().SetTimeout(5 * time.Second), nil
@@ -85,6 +91,10 @@ func TestFetchChatGPTAccountInfo_SkipsExpiredWorkspaceCandidate(t *testing.T) {
 
 func TestFetchChatGPTAccountInfo_SkipsDeactivatedWorkspaceCandidate(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/profile-unavailable" {
+			w.WriteHeader(403)
+			return
+		}
 		require.Equal(t, "/backend-api/accounts/check/v4-2023-04-27", r.URL.Path)
 
 		w.Header().Set("Content-Type", "application/json")
@@ -107,9 +117,11 @@ func TestFetchChatGPTAccountInfo_SkipsDeactivatedWorkspaceCandidate(t *testing.T
 	}))
 	defer server.Close()
 
+	oldMe := chatGPTMeURL
+	chatGPTMeURL = server.URL + "/profile-unavailable"
 	oldURL := chatGPTAccountsCheckURL
 	chatGPTAccountsCheckURL = server.URL + "/backend-api/accounts/check/v4-2023-04-27"
-	t.Cleanup(func() { chatGPTAccountsCheckURL = oldURL })
+	t.Cleanup(func() { chatGPTAccountsCheckURL = oldURL; chatGPTMeURL = oldMe })
 
 	got := fetchChatGPTAccountInfo(context.Background(), func(proxyURL string) (*req.Client, error) {
 		return req.C().SetTimeout(5 * time.Second), nil
@@ -159,9 +171,11 @@ func TestFetchChatGPTAccountInfo_ReportsAccountID(t *testing.T) {
 	}))
 	defer server.Close()
 
+	oldMe := chatGPTMeURL
+	chatGPTMeURL = server.URL + "/profile-unavailable"
 	oldURL := chatGPTAccountsCheckURL
 	chatGPTAccountsCheckURL = server.URL + "/backend-api/accounts/check/v4-2023-04-27"
-	t.Cleanup(func() { chatGPTAccountsCheckURL = oldURL })
+	t.Cleanup(func() { chatGPTAccountsCheckURL = oldURL; chatGPTMeURL = oldMe })
 
 	got := fetchChatGPTAccountInfo(context.Background(), newTestPrivacyClientFactory(), "access-token", "", "")
 	require.NotNil(t, got)
@@ -303,6 +317,7 @@ func TestEnrichTokenInfo_WorkspacePlanTypeKeepsItsOwnExpiry(t *testing.T) {
 }
 
 type chatGPTBackendTestServerConfig struct {
+	email          string
 	accountsCheck  map[string]any
 	onSubscription func(accountID string) map[string]any
 }
@@ -314,6 +329,8 @@ func newChatGPTBackendTestServer(t *testing.T, cfg chatGPTBackendTestServerConfi
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
+		case "/backend-api/me":
+			_ = json.NewEncoder(w).Encode(map[string]any{"email": cfg.email})
 		case "/backend-api/accounts/check/v4-2023-04-27":
 			_ = json.NewEncoder(w).Encode(cfg.accountsCheck)
 		case "/backend-api/subscriptions":
@@ -327,10 +344,13 @@ func newChatGPTBackendTestServer(t *testing.T, cfg chatGPTBackendTestServerConfi
 		}
 	}))
 
+	oldMe := chatGPTMeURL
 	oldAccounts, oldSubscriptions := chatGPTAccountsCheckURL, chatGPTSubscriptionsURL
 	chatGPTAccountsCheckURL = server.URL + "/backend-api/accounts/check/v4-2023-04-27"
 	chatGPTSubscriptionsURL = server.URL + "/backend-api/subscriptions"
+	chatGPTMeURL = server.URL + "/backend-api/me"
 	t.Cleanup(func() {
+		chatGPTMeURL = oldMe
 		chatGPTAccountsCheckURL, chatGPTSubscriptionsURL = oldAccounts, oldSubscriptions
 	})
 	return server

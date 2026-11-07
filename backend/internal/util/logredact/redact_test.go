@@ -27,6 +27,36 @@ func TestRedactText_QueryLike(t *testing.T) {
 	}
 }
 
+func TestRedactText_URLCredentials(t *testing.T) {
+	for _, input := range []string{
+		`request "https://alice:private-pass@api.example.test/v1?q=private-query&other=private-other" failed`,
+		`connect wss://alice:private-pass@[2001:db8::1]/v1?custom=private-query;`,
+		`{"error":{"message":"https://alice:private-pass@api.example.test/v1?custom=private-query"}}`,
+		`bad https://alice:private-pass@api.example.test/%zz?custom=private-query`,
+		`callback https://auth.example.test/#access_token=private-query`,
+	} {
+		t.Run(input, func(t *testing.T) {
+			out := RedactText(input)
+			for _, secret := range []string{"alice", "private-pass", "private-query", "private-other"} {
+				if strings.Contains(out, secret) {
+					t.Fatalf("credential %q survived in %q", secret, out)
+				}
+			}
+		})
+	}
+	readable := `see 'https://docs.example.org/help(foo)' or https://docs.example.org/errors#quota; model gpt-6.1-sol and user@example.org`
+	if out := RedactText(readable); out != readable {
+		t.Fatalf("readable diagnostics changed: %q", out)
+	}
+	providerError := "provider error code: 403; model gpt-6.1-sol; " + readable
+	if out := RedactURLCredentials(providerError); out != providerError {
+		t.Fatalf("provider diagnostics changed: %q", out)
+	}
+	if out := RedactText(`request "https://api.example.test/v1?q=private-query" failed`); !strings.HasSuffix(out, `" failed`) {
+		t.Fatalf("URL delimiters changed: %q", out)
+	}
+}
+
 func TestRedactText_GOCSPX(t *testing.T) {
 	in := "client_secret=GOCSPX-your-client-secret"
 	out := RedactText(in)

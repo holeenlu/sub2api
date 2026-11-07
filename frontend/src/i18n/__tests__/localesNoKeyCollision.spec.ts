@@ -1,82 +1,71 @@
 import { describe, expect, it } from 'vitest'
+import { localeContributions } from '@/app/i18n'
 
-import enAdminAccounts from '../locales/en/admin/accounts'
-import enAdminChannels from '../locales/en/admin/channels'
-import enAdminOps from '../locales/en/admin/ops'
-import enAdminOverview from '../locales/en/admin/overview'
-import enAdminResources from '../locales/en/admin/resources'
-import enAdminSettings from '../locales/en/admin/settings'
-import enCommon from '../locales/en/common'
-import enDashboard from '../locales/en/dashboard'
-import enLanding from '../locales/en/landing'
-import enMisc from '../locales/en/misc'
-import zhAdminAccounts from '../locales/zh/admin/accounts'
-import zhAdminChannels from '../locales/zh/admin/channels'
-import zhAdminOps from '../locales/zh/admin/ops'
-import zhAdminOverview from '../locales/zh/admin/overview'
-import zhAdminResources from '../locales/zh/admin/resources'
-import zhAdminSettings from '../locales/zh/admin/settings'
-import zhCommon from '../locales/zh/common'
-import zhDashboard from '../locales/zh/dashboard'
-import zhLanding from '../locales/zh/landing'
-import zhMisc from '../locales/zh/misc'
-
-// locales/{zh,en}/index.ts 与 admin/index.ts 使用对象展开聚合各域模块，
-// 展开模块之间若出现同名顶层键会静默覆盖。本测试将该风险固化为显式失败。
 type Modules = Record<string, Record<string, unknown>>
+
+// Containers such as admin/settings may be shared; message leaves may not.
+function leaves(value: unknown, prefix = '', result: Record<string, unknown> = {}): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    if (prefix) result[prefix] = value
+    return result
+  }
+  for (const [key, child] of Object.entries(value)) {
+    leaves(child, prefix ? prefix + '.' + key : key, result)
+  }
+  return result
+}
 
 function collisions(modules: Modules): string[] {
   const seen = new Map<string, string>()
   const out: string[] = []
   for (const [name, mod] of Object.entries(modules)) {
     for (const key of Object.keys(mod)) {
-      const prev = seen.get(key)
-      if (prev) {
-        out.push(`"${key}" in both ${prev} and ${name}`)
-      } else {
-        seen.set(key, name)
-      }
+      const previous = seen.get(key)
+      if (previous) out.push(key + ' in both ' + previous + ' and ' + name)
+      else seen.set(key, name)
     }
   }
   return out
 }
 
-const roots: Record<string, Modules> = {
-  zh: { landing: zhLanding, common: zhCommon, dashboard: zhDashboard, misc: zhMisc },
-  en: { landing: enLanding, common: enCommon, dashboard: enDashboard, misc: enMisc }
+const roots: Record<string, Modules> = {}
+const admins: Record<string, Modules> = {}
+for (const locale of ['en', 'zh', 'zh-TW', 'ja'] as const) {
+  const entries = await Promise.all(Object.entries(localeContributions)
+    .map(async ([owner, loaders]) => [owner, (await loaders[locale]()).default] as const))
+  roots[locale] = Object.fromEntries(entries.map(([owner, messages]) => [owner, leaves(messages)]))
+  admins[locale] = Object.fromEntries(entries.map(([owner, messages]) => [owner, leaves(messages.admin ?? {})]))
 }
 
-const admins: Record<string, Modules> = {
-  zh: {
-    overview: zhAdminOverview,
-    channels: zhAdminChannels,
-    accounts: zhAdminAccounts,
-    resources: zhAdminResources,
-    ops: zhAdminOps,
-    settings: zhAdminSettings
-  },
-  en: {
-    overview: enAdminOverview,
-    channels: enAdminChannels,
-    accounts: enAdminAccounts,
-    resources: enAdminResources,
-    ops: enAdminOps,
-    settings: enAdminSettings
+it('keeps every message leaf in the same owner across all languages', () => {
+  function ownership(locale: string): [string, string][] {
+    return Object.entries(roots[locale]).flatMap(([owner, messages]) =>
+      Object.keys(messages).map(key => [key, owner] as [string, string])
+    ).sort(([left], [right]) => left.localeCompare(right))
   }
-}
+  const expected = ownership('en')
+  for (const locale of ['zh', 'zh-TW', 'ja']) expect(ownership(locale)).toEqual(expected)
+})
 
-describe.each(Object.keys(roots))('locale %s spread assembly', (locale) => {
-  it('root modules have no overlapping top-level keys', () => {
+it('keeps only common technical namespaces in the core contribution', async () => {
+  for (const locale of ['en', 'zh', 'zh-TW', 'ja'] as const) {
+    const messages = (await localeContributions.common[locale]()).default
+    expect(Object.keys(messages).sort()).toEqual(['common', 'dates', 'empty', 'errors', 'pagination', 'table', 'ui'])
+  }
+})
+
+describe.each(Object.keys(roots))('locale %s contribution assembly', locale => {
+  it('root modules have no overlapping message leaves', () => {
     expect(collisions(roots[locale])).toEqual([])
   })
 
-  it('root modules do not shadow the explicit "admin" namespace', () => {
+  it('root modules do not shadow the admin namespace with a message', () => {
     for (const [name, mod] of Object.entries(roots[locale])) {
-      expect(Object.keys(mod), `module ${name} must not define "admin"`).not.toContain('admin')
+      expect(Object.keys(mod), 'module ' + name + ' must not define admin as a leaf').not.toContain('admin')
     }
   })
 
-  it('admin modules have no overlapping top-level keys', () => {
+  it('admin modules have no overlapping message leaves', () => {
     expect(collisions(admins[locale])).toEqual([])
   })
 })

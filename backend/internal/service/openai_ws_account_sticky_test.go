@@ -6,8 +6,30 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/gateway/routing"
+	gatewaysession "github.com/Wei-Shaw/sub2api/internal/gateway/session"
 	"github.com/stretchr/testify/require"
 )
+
+// A schedulable sticky hit must use the current capacity proof contract, not
+// fall into a wait plan because an old fixture lacks the lease-check port.
+type openAIWSStickyLeaseCache struct {
+	stubConcurrencyCache
+	attempts []int64
+}
+
+func (c *openAIWSStickyLeaseCache) AcquireAccountSlot(ctx context.Context, accountID int64, limit int, token string) (bool, error) {
+	c.attempts = append(c.attempts, accountID)
+	return c.stubConcurrencyCache.AcquireAccountSlot(ctx, accountID, limit, token)
+}
+
+func (c *openAIWSStickyLeaseCache) CheckCapacityLease(ctx context.Context, request routing.CapacityRequest) (time.Duration, error) {
+	return time.Hour, ctx.Err()
+}
+
+func (c *openAIWSStickyLeaseCache) RefreshCapacityLease(ctx context.Context, request routing.CapacityRequest) (time.Duration, error) {
+	return c.CheckCapacityLease(ctx, request)
+}
 
 func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_Hit(t *testing.T) {
 	ctx := context.Background()
@@ -31,11 +53,12 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_Hit(t *testing.T
 		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{account}},
 		cache:              cache,
 		cfg:                cfg,
-		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+		concurrencyService: NewConcurrencyService(&openAIWSStickyLeaseCache{}),
 		openaiWSStateStore: store,
 	}
 
 	require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_prev_1", account.ID, time.Hour))
+	require.NoError(t, store.BindResponseMode(ctx, groupID, "resp_prev_1", gatewaysession.ResponseModeNative, time.Hour))
 
 	selection, err := svc.SelectAccountByPreviousResponseID(ctx, &groupID, "resp_prev_1", "gpt-5.1", nil, false)
 	require.NoError(t, err)
@@ -48,7 +71,7 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_Hit(t *testing.T
 	}
 }
 
-func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_QuotaAutoPausedMiss(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_QuotaAutoPausedUnavailable(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(23)
 	account := Account{
@@ -71,14 +94,14 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_QuotaAutoPausedM
 		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{account}},
 		cache:              cache,
 		cfg:                cfg,
-		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+		concurrencyService: NewConcurrencyService(&openAIWSStickyLeaseCache{}),
 		openaiWSStateStore: store,
 	}
 
 	require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_prev_quota", account.ID, time.Hour))
 
 	selection, err := svc.SelectAccountByPreviousResponseID(ctx, &groupID, "resp_prev_quota", "gpt-5.1", nil, false)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrOpenAIContinuationUnavailable)
 	require.Nil(t, selection, "超过 5h 配额阈值的账号不应继续命中 previous_response_id 粘连")
 
 	// Auto-pause is transient, so the binding is preserved: the chain can resume on the
@@ -88,7 +111,7 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_QuotaAutoPausedM
 	require.Equal(t, account.ID, boundAccountID)
 }
 
-func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_RateLimitedMiss(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_RateLimitedUnavailable(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(23)
 	rateLimitedUntil := time.Now().Add(30 * time.Minute)
@@ -111,21 +134,21 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_RateLimitedMiss(
 		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{account}},
 		cache:              cache,
 		cfg:                cfg,
-		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+		concurrencyService: NewConcurrencyService(&openAIWSStickyLeaseCache{}),
 		openaiWSStateStore: store,
 	}
 
 	require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_prev_rl", account.ID, time.Hour))
 
 	selection, err := svc.SelectAccountByPreviousResponseID(ctx, &groupID, "resp_prev_rl", "gpt-5.1", nil, false)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrOpenAIContinuationUnavailable)
 	require.Nil(t, selection, "限额中的账号不应继续命中 previous_response_id 粘连")
 	boundAccountID, getErr := store.GetResponseAccount(ctx, groupID, "resp_prev_rl")
 	require.NoError(t, getErr)
-	require.Zero(t, boundAccountID)
+	require.Equal(t, account.ID, boundAccountID)
 }
 
-func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_DBRuntimeRecheckRateLimitedMiss(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_DBRuntimeRecheckRateLimitedUnavailable(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(24)
 	rateLimitedUntil := time.Now().Add(30 * time.Minute)
@@ -162,7 +185,7 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_DBRuntimeRecheck
 		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{dbAccount}},
 		cache:              cache,
 		cfg:                cfg,
-		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+		concurrencyService: NewConcurrencyService(&openAIWSStickyLeaseCache{}),
 		openaiWSStateStore: store,
 		schedulerSnapshot:  &SchedulerSnapshotService{cache: snapshotCache},
 	}
@@ -170,11 +193,11 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_DBRuntimeRecheck
 	require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_prev_db_rl", dbAccount.ID, time.Hour))
 
 	selection, err := svc.SelectAccountByPreviousResponseID(ctx, &groupID, "resp_prev_db_rl", "gpt-5.1", nil, false)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrOpenAIContinuationUnavailable)
 	require.Nil(t, selection, "DB 中已限流的账号不应继续命中 previous_response_id 粘连")
 	boundAccountID, getErr := store.GetResponseAccount(ctx, groupID, "resp_prev_db_rl")
 	require.NoError(t, getErr)
-	require.Zero(t, boundAccountID)
+	require.Equal(t, dbAccount.ID, boundAccountID)
 }
 
 func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_Excluded(t *testing.T) {
@@ -198,14 +221,14 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_Excluded(t *test
 		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{account}},
 		cache:              cache,
 		cfg:                cfg,
-		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+		concurrencyService: NewConcurrencyService(&openAIWSStickyLeaseCache{}),
 		openaiWSStateStore: store,
 	}
 
 	require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_prev_2", account.ID, time.Hour))
 
 	selection, err := svc.SelectAccountByPreviousResponseID(ctx, &groupID, "resp_prev_2", "gpt-5.1", map[int64]struct{}{account.ID: {}}, false)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrOpenAIContinuationUnavailable)
 	require.Nil(t, selection)
 }
 
@@ -231,23 +254,27 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_APIKeyForceHTTPH
 		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{account}},
 		cache:              cache,
 		cfg:                cfg,
-		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+		concurrencyService: NewConcurrencyService(&openAIWSStickyLeaseCache{}),
 		openaiWSStateStore: store,
 	}
 
 	require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_prev_force_http", account.ID, time.Hour))
+	require.NoError(t, store.BindResponseMode(ctx, groupID, "resp_prev_force_http", gatewaysession.ResponseModeNative, time.Hour))
 
 	selection, err := svc.SelectAccountByPreviousResponseID(ctx, &groupID, "resp_prev_force_http", "gpt-5.1", nil, false)
 	require.NoError(t, err)
 	require.NotNil(t, selection, "API-key HTTP continuation must retain the key/project that created the response")
 	require.NotNil(t, selection.Account)
 	require.Equal(t, account.ID, selection.Account.ID)
+	require.True(t, selection.Acquired)
+	require.Nil(t, selection.WaitPlan)
+	require.NotNil(t, selection.ReleaseFunc)
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()
 	}
 }
 
-func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_OAuthForceHTTPIgnored(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_OAuthForceHTTPUnavailable(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(23)
 	account := Account{
@@ -268,14 +295,14 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_OAuthForceHTTPIg
 		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{account}},
 		cache:              cache,
 		cfg:                newOpenAIWSV2TestConfig(),
-		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+		concurrencyService: NewConcurrencyService(&openAIWSStickyLeaseCache{}),
 		openaiWSStateStore: store,
 	}
 
 	require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_prev_oauth_force_http", account.ID, time.Hour))
 
 	selection, err := svc.SelectAccountByPreviousResponseID(ctx, &groupID, "resp_prev_oauth_force_http", "gpt-5.1", nil, false)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrOpenAIContinuationUnavailable)
 	require.Nil(t, selection, "OAuth HTTP fallback cannot preserve WSv2 continuation state")
 }
 
@@ -325,15 +352,17 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_BusyKeepsSticky(
 		},
 	}
 
+	leaseCache := &openAIWSStickyLeaseCache{stubConcurrencyCache: concurrencyCache}
 	svc := &OpenAIGatewayService{
 		accountRepo:        stubOpenAIAccountRepo{accounts: accounts},
 		cache:              cache,
 		cfg:                cfg,
-		concurrencyService: NewConcurrencyService(concurrencyCache),
+		concurrencyService: NewConcurrencyService(leaseCache),
 		openaiWSStateStore: store,
 	}
 
 	require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_prev_busy", 21, time.Hour))
+	require.NoError(t, store.BindResponseMode(ctx, groupID, "resp_prev_busy", gatewaysession.ResponseModeNative, time.Hour))
 
 	selection, err := svc.SelectAccountByPreviousResponseID(ctx, &groupID, "resp_prev_busy", "gpt-5.1", nil, false)
 	require.NoError(t, err)
@@ -343,6 +372,7 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_BusyKeepsSticky(
 	require.False(t, selection.Acquired)
 	require.NotNil(t, selection.WaitPlan)
 	require.Equal(t, int64(21), selection.WaitPlan.AccountID)
+	require.Equal(t, []int64{21}, leaseCache.attempts, "busy parent must not attempt another account")
 }
 
 func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_CapabilityMismatchKeepsSticky(t *testing.T) {
@@ -369,7 +399,7 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_CapabilityMismat
 		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{account}},
 		cache:              cache,
 		cfg:                cfg,
-		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+		concurrencyService: NewConcurrencyService(&openAIWSStickyLeaseCache{}),
 		openaiWSStateStore: store,
 	}
 
@@ -384,7 +414,7 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_CapabilityMismat
 		OpenAIEndpointCapabilityEmbeddings,
 		false,
 	)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrOpenAIContinuationUnavailable)
 	require.Nil(t, selection)
 	boundAccountID, getErr := store.GetResponseAccount(ctx, groupID, "resp_prev_capability")
 	require.NoError(t, getErr)
@@ -399,4 +429,29 @@ func newOpenAIWSV2TestConfig() *config.Config {
 	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
 	cfg.Gateway.OpenAIWS.StickyResponseIDTTLSeconds = 3600
 	return cfg
+}
+
+func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_BPSHTTPHit(t *testing.T) {
+	groupID := int64(23)
+	account := excelAccount()
+	account.Extra["openai_ws_force_http"] = true
+	account.GroupIDs = []int64{groupID}
+	cache := &stubGatewayCache{}
+	store := NewOpenAIWSStateStore(cache)
+	svc := excelBPSGatewayTestService(nil)
+	svc.accountRepo = stubOpenAIAccountRepo{accounts: []Account{*account}}
+	svc.cache, svc.openaiWSStateStore = cache, store
+	svc.concurrencyService = NewConcurrencyService(&openAIWSStickyLeaseCache{})
+	require.NoError(t, store.BindResponseAccount(t.Context(), groupID, "resp_bps_http", account.ID, time.Hour))
+	require.NoError(t, store.BindResponseMode(t.Context(), groupID, "resp_bps_http", gatewaysession.ResponseModeBPS, time.Hour))
+	selection, err := svc.SelectAccountByPreviousResponseID(t.Context(), &groupID, "resp_bps_http", "gpt-6-astra", nil, false)
+	require.NoError(t, err)
+	require.NotNil(t, selection, "BPS reconnect must retain its snapshot's account even with native WS off")
+	require.Equal(t, account.ID, selection.Account.ID)
+	require.True(t, selection.Acquired)
+	require.Nil(t, selection.WaitPlan)
+	require.NotNil(t, selection.ReleaseFunc)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,7 +16,7 @@ const (
 	// that only one instance issues the upstream payment-provider calls per cycle.
 	paymentOrderExpiryLeaderLockKey = "payment:order:expiry:leader"
 	// paymentOrderExpiryLeaderLockTTL must exceed the combined reconcile + expiry
-	// timeouts (2 * expiryCheckTimeout) so the lock never expires mid-run.
+	// timeouts (3 * expiryCheckTimeout) so the lock never expires mid-run.
 	paymentOrderExpiryLeaderLockTTL = 3 * time.Minute
 )
 
@@ -25,9 +24,7 @@ const (
 type PaymentOrderExpiryService struct {
 	paymentSvc *PaymentService
 	interval   time.Duration
-	stopCh     chan struct{}
-	stopOnce   sync.Once
-	wg         sync.WaitGroup
+	tasks      maintenanceTaskOwner
 
 	lockCache  LeaderLockCache
 	db         *sql.DB
@@ -38,7 +35,6 @@ func NewPaymentOrderExpiryService(paymentSvc *PaymentService, interval time.Dura
 	return &PaymentOrderExpiryService{
 		paymentSvc: paymentSvc,
 		interval:   interval,
-		stopCh:     make(chan struct{}),
 		instanceID: uuid.NewString(),
 	}
 }
@@ -54,50 +50,64 @@ func (s *PaymentOrderExpiryService) SetLeaderLock(lockCache LeaderLockCache, db 
 	s.db = db
 }
 
-func (s *PaymentOrderExpiryService) Start() {
+func (s *PaymentOrderExpiryService) Start(ctx context.Context) error {
 	if s == nil || s.paymentSvc == nil || s.interval <= 0 {
-		return
+		return nil
 	}
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		ticker := time.NewTicker(s.interval)
-		defer ticker.Stop()
+	return s.tasks.start(ctx, func(context.Context) error { return s.tasks.launch(s.loop) })
+}
 
-		s.runOnce()
-		for {
-			select {
-			case <-ticker.C:
-				s.runOnce()
-			case <-s.stopCh:
-				return
-			}
+func (s *PaymentOrderExpiryService) loop(ctx context.Context) {
+	ticker := time.NewTicker(s.interval)
+	defer ticker.Stop()
+	s.runOnce(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.runOnce(ctx)
 		}
-	}()
+	}
 }
 
-func (s *PaymentOrderExpiryService) Stop() {
+func (s *PaymentOrderExpiryService) RequestStop() {
+	if s != nil {
+		s.tasks.seal(true)
+	}
+}
+
+// Reconciliation remains durable/idempotent in PaymentService. The periodic
+// owner cancels in-flight IO and retains its real join across deadline retries.
+func (s *PaymentOrderExpiryService) Drain(ctx context.Context) error {
 	if s == nil {
+		return nil
+	}
+	return s.tasks.stop(ctx)
+}
+
+func (s *PaymentOrderExpiryService) Stop(ctx context.Context) error {
+	return s.Drain(ctx)
+}
+
+func (s *PaymentOrderExpiryService) runOnce(ctx context.Context) {
+	if ctx.Err() != nil {
 		return
 	}
-	s.stopOnce.Do(func() {
-		close(s.stopCh)
-	})
-	s.wg.Wait()
-}
-
-func (s *PaymentOrderExpiryService) runOnce() {
 	// Multi-instance guard: only the leader reconciles/expires orders per cycle,
 	// avoiding N× upstream payment-provider API calls and update races.
-	lockCtx, lockCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	lockCtx, lockCancel := context.WithTimeout(ctx, 2*time.Second)
 	release, ok := tryAcquireSingletonLeaderLock(lockCtx, s.lockCache, s.db, paymentOrderExpiryLeaderLockKey, s.instanceID, paymentOrderExpiryLeaderLockTTL)
 	lockCancel()
 	if !ok {
 		return
 	}
 	defer release()
+	if ctx.Err() != nil {
+		return
+	}
 
-	reconcileCtx, cancel := context.WithTimeout(context.Background(), expiryCheckTimeout)
+	reconcileCtx, cancel := context.WithTimeout(ctx, expiryCheckTimeout)
 	recovered, err := s.paymentSvc.ReconcilePendingPaymentOrders(reconcileCtx)
 	cancel()
 	if err != nil {
@@ -106,7 +116,19 @@ func (s *PaymentOrderExpiryService) runOnce() {
 		slog.Info("[PaymentOrderExpiry] reconciled paid orders", "count", recovered)
 	}
 
-	expireCtx, cancel := context.WithTimeout(context.Background(), expiryCheckTimeout)
+	if ctx.Err() != nil {
+		return
+	}
+	refundCtx, refundCancel := context.WithTimeout(ctx, expiryCheckTimeout)
+	if err := s.paymentSvc.ReconcilePendingRefunds(refundCtx); err != nil {
+		slog.Warn("refund reconciliation failed", "error", err)
+	}
+	refundCancel()
+
+	if ctx.Err() != nil {
+		return
+	}
+	expireCtx, cancel := context.WithTimeout(ctx, expiryCheckTimeout)
 	defer cancel()
 	expired, err := s.paymentSvc.ExpireTimedOutOrders(expireCtx)
 	if err != nil {

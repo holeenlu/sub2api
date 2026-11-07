@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
@@ -27,9 +28,9 @@ func TestGPT61TerraIdentityAndEffort(t *testing.T) {
 		model := "openai/GPT-6.1-Terra-" + effort
 		require.True(t, openai.IsGPT61TerraModelSpelling(model))
 		require.False(t, openai.IsGPT61SolModelSpelling(model))
-		require.Equal(t, "gpt-6.1-terra", normalizeCodexModel(model))
-		require.Equal(t, "gpt-6.1-terra", normalizeKnownOpenAICodexModel(model))
-		require.Equal(t, "gpt-6.1-terra", NormalizeOpenAICompatRequestedModel(model))
+		require.Equal(t, "gpt-6.1-terra", catalog.NormalizeCodexModel(model))
+		require.Equal(t, "gpt-6.1-terra", catalog.NormalizeKnownOpenAICodexModel(model))
+		require.Equal(t, "gpt-6.1-terra", catalog.NormalizeOpenAICompatRequestedModel(model))
 		require.Equal(t, effort, normalizeOpenAIReasoningEffortForModel(effort, model))
 		request := &apicompat.AnthropicRequest{Model: model}
 		applyOpenAICompatModelNormalization(request)
@@ -50,7 +51,7 @@ func TestGPT61TerraIdentityAndEffort(t *testing.T) {
 		require.NoError(t, validateGPT61CompatRequest([]byte(`{"reasoning":{"effort":"`+effort+`"}}`), model))
 	}
 	for _, model := range []string{"gpt-6.1-terra", "gpt-6.1-terra-openai-compact", "openai/gpt_6.1_terra"} {
-		require.Equal(t, "gpt-6.1-terra", normalizeKnownOpenAICodexModel(model))
+		require.Equal(t, "gpt-6.1-terra", catalog.NormalizeKnownOpenAICodexModel(model))
 	}
 	for _, model := range []string{"gpt-6.1-sol", "gpt-5.6-terra", "gpt-6.1-terra-pro", "gpt-6.1-terra-ultra", "gpt-6.1-terra-preview"} {
 		require.False(t, openai.IsGPT61TerraModelSpelling(model))
@@ -146,7 +147,7 @@ func TestGPT61TerraChatFallbackRejectsTools(t *testing.T) {
 
 func TestGPT61TerraRejectsMinimalEffort(t *testing.T) {
 	require.True(t, openai.IsGPT61TerraModelSpelling("openai/GPT-6.1-Terra-minimal"))
-	require.Equal(t, "gpt-6.1-terra", normalizeKnownOpenAICodexModel("gpt-6.1-terra-minimal"))
+	require.Equal(t, "gpt-6.1-terra", catalog.NormalizeKnownOpenAICodexModel("gpt-6.1-terra-minimal"))
 	for _, body := range []string{
 		`{"reasoning":{"effort":"minimal"}}`,
 		`{"reasoning_effort":"MINIMAL"}`,

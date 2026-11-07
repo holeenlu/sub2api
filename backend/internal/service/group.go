@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 )
@@ -108,7 +109,7 @@ type Group struct {
 	RequirePrivacySet           bool // 调度时仅允许 privacy 已成功设置的账号（OpenAI/Antigravity/Anthropic/Gemini）
 	DefaultMappedModel          string
 	MessagesDispatchModelConfig OpenAIMessagesDispatchModelConfig
-	ModelAllowlist              GroupModelAllowlist
+	ModelAllowlist              catalog.ModelAllowlist
 	// CodexModelsManifestConfig 开启后，普通模型列表与 Codex manifest 优先使用
 	// 固定账号列表拉取并合并，不经过调度器（仅 openai 平台）。
 	CodexModelsManifestConfig GroupCodexModelsManifestConfig

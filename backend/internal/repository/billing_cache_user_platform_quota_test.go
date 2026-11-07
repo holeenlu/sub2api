@@ -86,40 +86,6 @@ func TestUserPlatformQuotaCache_NilLimitSetThenGet(t *testing.T) {
 	}
 }
 
-func TestUserPlatformQuotaCache_IncrMissIsNoop(t *testing.T) {
-	c, _ := newMiniRedisCache(t)
-	if err := c.IncrUserPlatformQuotaUsageCache(context.Background(), 1, "openai", 0.5, time.Minute, false); err != nil {
-		t.Fatal(err)
-	}
-	_, ok, _ := c.GetUserPlatformQuotaCache(context.Background(), 1, "openai")
-	if ok {
-		t.Error("expected key absent after no-op incr")
-	}
-}
-
-func TestUserPlatformQuotaCache_IncrHitAccumulates(t *testing.T) {
-	c, _ := newMiniRedisCache(t)
-	ctx := context.Background()
-	// SchemaVersion 必须显式设为 V1,否则 Lua 脚本会因 schema 不匹配而 return 0,跳过累加。
-	_ = c.SetUserPlatformQuotaCache(ctx, 1, "openai", &service.UserPlatformQuotaCacheEntry{
-		Version:       1,
-		SchemaVersion: service.UserPlatformQuotaCacheSchemaV1,
-	}, time.Minute)
-	if err := c.IncrUserPlatformQuotaUsageCache(ctx, 1, "openai", 0.5, time.Minute, false); err != nil {
-		t.Fatal(err)
-	}
-	if err := c.IncrUserPlatformQuotaUsageCache(ctx, 1, "openai", 0.25, time.Minute, false); err != nil {
-		t.Fatal(err)
-	}
-	got, _, _ := c.GetUserPlatformQuotaCache(ctx, 1, "openai")
-	if got.DailyUsageUSD != 0.75 || got.WeeklyUsageUSD != 0.75 || got.MonthlyUsageUSD != 0.75 {
-		t.Errorf("got %+v, want daily/weekly/monthly=0.75", got)
-	}
-	if got.Version != 3 {
-		t.Errorf("version = %d, want 3 (initial 1 + 2 incr)", got.Version)
-	}
-}
-
 func TestUserPlatformQuotaCache_Delete(t *testing.T) {
 	c, _ := newMiniRedisCache(t)
 	ctx := context.Background()

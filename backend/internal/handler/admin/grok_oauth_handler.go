@@ -317,20 +317,20 @@ func (h *GrokOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 }
 
 type GrokSSOToOAuthRequest struct {
-	SSOTokens          []string       `json:"sso_tokens"`
-	SSOToken           string         `json:"sso_token"`
-	Name               string         `json:"name"`
-	Notes              *string        `json:"notes"`
-	ProxyID            *int64         `json:"proxy_id"`
-	GroupIDs           []int64        `json:"group_ids"`
-	Credentials        map[string]any `json:"credentials"`
-	Extra              map[string]any `json:"extra"`
-	Concurrency        int            `json:"concurrency"`
-	LoadFactor         *int           `json:"load_factor"`
-	Priority           int            `json:"priority"`
-	RateMultiplier     *float64       `json:"rate_multiplier"`
-	ExpiresAt          *int64         `json:"expires_at"`
-	AutoPauseOnExpired *bool          `json:"auto_pause_on_expired"`
+	SSOTokens          []string       `json:"sso_tokens" authz:"base"`
+	SSOToken           string         `json:"sso_token" authz:"base"`
+	Name               string         `json:"name" authz:"base"`
+	Notes              *string        `json:"notes" authz:"base"`
+	ProxyID            *int64         `json:"proxy_id" authz:"base"`
+	GroupIDs           []int64        `json:"group_ids" authz:"base"`
+	Credentials        map[string]any `json:"credentials" authz:"base"`
+	Extra              map[string]any `json:"extra" authz:"account_create_extra"`
+	Concurrency        int            `json:"concurrency" authz:"base"`
+	LoadFactor         *int           `json:"load_factor" authz:"base"`
+	Priority           int            `json:"priority" authz:"base"`
+	RateMultiplier     *float64       `json:"rate_multiplier" authz:"billing.rates.update"`
+	ExpiresAt          *int64         `json:"expires_at" authz:"base"`
+	AutoPauseOnExpired *bool          `json:"auto_pause_on_expired" authz:"base"`
 }
 
 type GrokSSOToOAuthItemResult struct {

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +19,7 @@ func TestGetByKeyForAuthCarriesGroupModelAllowlist(t *testing.T) {
 	group := mustCreateGroup(t, integrationEntClient, &service.Group{
 		Name: fmt.Sprintf("model-allowlist-proj-group-%d", suffix), Platform: service.PlatformOpenAI,
 		RateMultiplier: 1,
-		ModelAllowlist: service.GroupModelAllowlist{
+		ModelAllowlist: catalog.ModelAllowlist{
 			Enabled: true,
 			Models:  []string{"gpt-5.4", "gpt-5.5-*"},
 		},

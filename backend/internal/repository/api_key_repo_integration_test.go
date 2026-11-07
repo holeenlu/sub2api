@@ -38,11 +38,13 @@ func TestAPIKeyRepoSuite(t *testing.T) {
 func (s *APIKeyRepoSuite) TestCreate() {
 	user := s.mustCreateUser("create@test.com")
 
+	window := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
 	key := &service.APIKey{
-		UserID: user.ID,
-		Key:    "sk-create-test",
-		Name:   "Test Key",
-		Status: service.StatusActive,
+		UserID: user.ID, Key: "sk-create-test", Name: "Test Key", Status: "inactive",
+		Quota: 20, QuotaUsed: 12.5, ExpiresAt: &window,
+		RateLimit5h: 2, RateLimit1d: 4, RateLimit7d: 8,
+		Usage5h: 1, Usage1d: 2, Usage7d: 3,
+		Window5hStart: &window, Window1dStart: &window, Window7dStart: &window,
 	}
 
 	err := s.repo.Create(s.ctx, key)
@@ -52,6 +54,15 @@ func (s *APIKeyRepoSuite) TestCreate() {
 	got, err := s.repo.GetByID(s.ctx, key.ID)
 	s.Require().NoError(err, "GetByID")
 	s.Require().Equal("sk-create-test", got.Key)
+	s.Require().Equal("inactive", got.Status)
+	s.Require().Equal(key.QuotaUsed, got.QuotaUsed)
+	s.Require().Equal(key.ExpiresAt, got.ExpiresAt)
+	s.Require().Equal(key.Usage5h, got.Usage5h)
+	s.Require().Equal(key.Usage1d, got.Usage1d)
+	s.Require().Equal(key.Usage7d, got.Usage7d)
+	s.Require().Equal(key.Window5hStart, got.Window5hStart)
+	s.Require().Equal(key.Window1dStart, got.Window1dStart)
+	s.Require().Equal(key.Window7dStart, got.Window7dStart)
 }
 
 func (s *APIKeyRepoSuite) TestGetByID_NotFound() {

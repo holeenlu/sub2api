@@ -55,6 +55,123 @@ func (_u *ProxyUpdate) ClearDeletedAt() *ProxyUpdate {
 	return _u
 }
 
+// SetVendorID sets the "vendor_id" field.
+func (_u *ProxyUpdate) SetVendorID(v int64) *ProxyUpdate {
+	_u.mutation.ResetVendorID()
+	_u.mutation.SetVendorID(v)
+	return _u
+}
+
+// SetNillableVendorID sets the "vendor_id" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableVendorID(v *int64) *ProxyUpdate {
+	if v != nil {
+		_u.SetVendorID(*v)
+	}
+	return _u
+}
+
+// AddVendorID adds value to the "vendor_id" field.
+func (_u *ProxyUpdate) AddVendorID(v int64) *ProxyUpdate {
+	_u.mutation.AddVendorID(v)
+	return _u
+}
+
+// ClearVendorID clears the value of the "vendor_id" field.
+func (_u *ProxyUpdate) ClearVendorID() *ProxyUpdate {
+	_u.mutation.ClearVendorID()
+	return _u
+}
+
+// SetCreatedBy sets the "created_by" field.
+func (_u *ProxyUpdate) SetCreatedBy(v int64) *ProxyUpdate {
+	_u.mutation.ResetCreatedBy()
+	_u.mutation.SetCreatedBy(v)
+	return _u
+}
+
+// SetNillableCreatedBy sets the "created_by" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableCreatedBy(v *int64) *ProxyUpdate {
+	if v != nil {
+		_u.SetCreatedBy(*v)
+	}
+	return _u
+}
+
+// AddCreatedBy adds value to the "created_by" field.
+func (_u *ProxyUpdate) AddCreatedBy(v int64) *ProxyUpdate {
+	_u.mutation.AddCreatedBy(v)
+	return _u
+}
+
+// ClearCreatedBy clears the value of the "created_by" field.
+func (_u *ProxyUpdate) ClearCreatedBy() *ProxyUpdate {
+	_u.mutation.ClearCreatedBy()
+	return _u
+}
+
+// SetVendorNotes sets the "vendor_notes" field.
+func (_u *ProxyUpdate) SetVendorNotes(v string) *ProxyUpdate {
+	_u.mutation.SetVendorNotes(v)
+	return _u
+}
+
+// SetNillableVendorNotes sets the "vendor_notes" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableVendorNotes(v *string) *ProxyUpdate {
+	if v != nil {
+		_u.SetVendorNotes(*v)
+	}
+	return _u
+}
+
+// SetRegionLabelCountryCode sets the "region_label_country_code" field.
+func (_u *ProxyUpdate) SetRegionLabelCountryCode(v string) *ProxyUpdate {
+	_u.mutation.SetRegionLabelCountryCode(v)
+	return _u
+}
+
+// SetNillableRegionLabelCountryCode sets the "region_label_country_code" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableRegionLabelCountryCode(v *string) *ProxyUpdate {
+	if v != nil {
+		_u.SetRegionLabelCountryCode(*v)
+	}
+	return _u
+}
+
+// SetRegionLabelCity sets the "region_label_city" field.
+func (_u *ProxyUpdate) SetRegionLabelCity(v string) *ProxyUpdate {
+	_u.mutation.SetRegionLabelCity(v)
+	return _u
+}
+
+// SetNillableRegionLabelCity sets the "region_label_city" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableRegionLabelCity(v *string) *ProxyUpdate {
+	if v != nil {
+		_u.SetRegionLabelCity(*v)
+	}
+	return _u
+}
+
+// SetConfigVersion sets the "config_version" field.
+func (_u *ProxyUpdate) SetConfigVersion(v int64) *ProxyUpdate {
+	_u.mutation.ResetConfigVersion()
+	_u.mutation.SetConfigVersion(v)
+	return _u
+}
+
+// SetNillableConfigVersion sets the "config_version" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableConfigVersion(v *int64) *ProxyUpdate {
+	if v != nil {
+		_u.SetConfigVersion(*v)
+	}
+	return _u
+}
+
+// AddConfigVersion adds value to the "config_version" field.
+func (_u *ProxyUpdate) AddConfigVersion(v int64) *ProxyUpdate {
+	_u.mutation.AddConfigVersion(v)
+	return _u
+}
+
 // SetName sets the "name" field.
 func (_u *ProxyUpdate) SetName(v string) *ProxyUpdate {
 	_u.mutation.SetName(v)
@@ -379,6 +496,16 @@ func (_u *ProxyUpdate) defaults() error {
 
 // check runs all checks and user-defined validators on the builder.
 func (_u *ProxyUpdate) check() error {
+	if v, ok := _u.mutation.RegionLabelCountryCode(); ok {
+		if err := proxy.RegionLabelCountryCodeValidator(v); err != nil {
+			return &ValidationError{Name: "region_label_country_code", err: fmt.Errorf(`ent: validator failed for field "Proxy.region_label_country_code": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.RegionLabelCity(); ok {
+		if err := proxy.RegionLabelCityValidator(v); err != nil {
+			return &ValidationError{Name: "region_label_city", err: fmt.Errorf(`ent: validator failed for field "Proxy.region_label_city": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Name(); ok {
 		if err := proxy.NameValidator(v); err != nil {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "Proxy.name": %w`, err)}
@@ -437,6 +564,39 @@ func (_u *ProxyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.DeletedAtCleared() {
 		_spec.ClearField(proxy.FieldDeletedAt, field.TypeTime)
+	}
+	if value, ok := _u.mutation.VendorID(); ok {
+		_spec.SetField(proxy.FieldVendorID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedVendorID(); ok {
+		_spec.AddField(proxy.FieldVendorID, field.TypeInt64, value)
+	}
+	if _u.mutation.VendorIDCleared() {
+		_spec.ClearField(proxy.FieldVendorID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.CreatedBy(); ok {
+		_spec.SetField(proxy.FieldCreatedBy, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedCreatedBy(); ok {
+		_spec.AddField(proxy.FieldCreatedBy, field.TypeInt64, value)
+	}
+	if _u.mutation.CreatedByCleared() {
+		_spec.ClearField(proxy.FieldCreatedBy, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.VendorNotes(); ok {
+		_spec.SetField(proxy.FieldVendorNotes, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.RegionLabelCountryCode(); ok {
+		_spec.SetField(proxy.FieldRegionLabelCountryCode, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.RegionLabelCity(); ok {
+		_spec.SetField(proxy.FieldRegionLabelCity, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ConfigVersion(); ok {
+		_spec.SetField(proxy.FieldConfigVersion, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedConfigVersion(); ok {
+		_spec.AddField(proxy.FieldConfigVersion, field.TypeInt64, value)
 	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(proxy.FieldName, field.TypeString, value)
@@ -645,6 +805,123 @@ func (_u *ProxyUpdateOne) SetNillableDeletedAt(v *time.Time) *ProxyUpdateOne {
 // ClearDeletedAt clears the value of the "deleted_at" field.
 func (_u *ProxyUpdateOne) ClearDeletedAt() *ProxyUpdateOne {
 	_u.mutation.ClearDeletedAt()
+	return _u
+}
+
+// SetVendorID sets the "vendor_id" field.
+func (_u *ProxyUpdateOne) SetVendorID(v int64) *ProxyUpdateOne {
+	_u.mutation.ResetVendorID()
+	_u.mutation.SetVendorID(v)
+	return _u
+}
+
+// SetNillableVendorID sets the "vendor_id" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableVendorID(v *int64) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetVendorID(*v)
+	}
+	return _u
+}
+
+// AddVendorID adds value to the "vendor_id" field.
+func (_u *ProxyUpdateOne) AddVendorID(v int64) *ProxyUpdateOne {
+	_u.mutation.AddVendorID(v)
+	return _u
+}
+
+// ClearVendorID clears the value of the "vendor_id" field.
+func (_u *ProxyUpdateOne) ClearVendorID() *ProxyUpdateOne {
+	_u.mutation.ClearVendorID()
+	return _u
+}
+
+// SetCreatedBy sets the "created_by" field.
+func (_u *ProxyUpdateOne) SetCreatedBy(v int64) *ProxyUpdateOne {
+	_u.mutation.ResetCreatedBy()
+	_u.mutation.SetCreatedBy(v)
+	return _u
+}
+
+// SetNillableCreatedBy sets the "created_by" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableCreatedBy(v *int64) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetCreatedBy(*v)
+	}
+	return _u
+}
+
+// AddCreatedBy adds value to the "created_by" field.
+func (_u *ProxyUpdateOne) AddCreatedBy(v int64) *ProxyUpdateOne {
+	_u.mutation.AddCreatedBy(v)
+	return _u
+}
+
+// ClearCreatedBy clears the value of the "created_by" field.
+func (_u *ProxyUpdateOne) ClearCreatedBy() *ProxyUpdateOne {
+	_u.mutation.ClearCreatedBy()
+	return _u
+}
+
+// SetVendorNotes sets the "vendor_notes" field.
+func (_u *ProxyUpdateOne) SetVendorNotes(v string) *ProxyUpdateOne {
+	_u.mutation.SetVendorNotes(v)
+	return _u
+}
+
+// SetNillableVendorNotes sets the "vendor_notes" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableVendorNotes(v *string) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetVendorNotes(*v)
+	}
+	return _u
+}
+
+// SetRegionLabelCountryCode sets the "region_label_country_code" field.
+func (_u *ProxyUpdateOne) SetRegionLabelCountryCode(v string) *ProxyUpdateOne {
+	_u.mutation.SetRegionLabelCountryCode(v)
+	return _u
+}
+
+// SetNillableRegionLabelCountryCode sets the "region_label_country_code" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableRegionLabelCountryCode(v *string) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetRegionLabelCountryCode(*v)
+	}
+	return _u
+}
+
+// SetRegionLabelCity sets the "region_label_city" field.
+func (_u *ProxyUpdateOne) SetRegionLabelCity(v string) *ProxyUpdateOne {
+	_u.mutation.SetRegionLabelCity(v)
+	return _u
+}
+
+// SetNillableRegionLabelCity sets the "region_label_city" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableRegionLabelCity(v *string) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetRegionLabelCity(*v)
+	}
+	return _u
+}
+
+// SetConfigVersion sets the "config_version" field.
+func (_u *ProxyUpdateOne) SetConfigVersion(v int64) *ProxyUpdateOne {
+	_u.mutation.ResetConfigVersion()
+	_u.mutation.SetConfigVersion(v)
+	return _u
+}
+
+// SetNillableConfigVersion sets the "config_version" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableConfigVersion(v *int64) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetConfigVersion(*v)
+	}
+	return _u
+}
+
+// AddConfigVersion adds value to the "config_version" field.
+func (_u *ProxyUpdateOne) AddConfigVersion(v int64) *ProxyUpdateOne {
+	_u.mutation.AddConfigVersion(v)
 	return _u
 }
 
@@ -985,6 +1262,16 @@ func (_u *ProxyUpdateOne) defaults() error {
 
 // check runs all checks and user-defined validators on the builder.
 func (_u *ProxyUpdateOne) check() error {
+	if v, ok := _u.mutation.RegionLabelCountryCode(); ok {
+		if err := proxy.RegionLabelCountryCodeValidator(v); err != nil {
+			return &ValidationError{Name: "region_label_country_code", err: fmt.Errorf(`ent: validator failed for field "Proxy.region_label_country_code": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.RegionLabelCity(); ok {
+		if err := proxy.RegionLabelCityValidator(v); err != nil {
+			return &ValidationError{Name: "region_label_city", err: fmt.Errorf(`ent: validator failed for field "Proxy.region_label_city": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Name(); ok {
 		if err := proxy.NameValidator(v); err != nil {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "Proxy.name": %w`, err)}
@@ -1060,6 +1347,39 @@ func (_u *ProxyUpdateOne) sqlSave(ctx context.Context) (_node *Proxy, err error)
 	}
 	if _u.mutation.DeletedAtCleared() {
 		_spec.ClearField(proxy.FieldDeletedAt, field.TypeTime)
+	}
+	if value, ok := _u.mutation.VendorID(); ok {
+		_spec.SetField(proxy.FieldVendorID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedVendorID(); ok {
+		_spec.AddField(proxy.FieldVendorID, field.TypeInt64, value)
+	}
+	if _u.mutation.VendorIDCleared() {
+		_spec.ClearField(proxy.FieldVendorID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.CreatedBy(); ok {
+		_spec.SetField(proxy.FieldCreatedBy, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedCreatedBy(); ok {
+		_spec.AddField(proxy.FieldCreatedBy, field.TypeInt64, value)
+	}
+	if _u.mutation.CreatedByCleared() {
+		_spec.ClearField(proxy.FieldCreatedBy, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.VendorNotes(); ok {
+		_spec.SetField(proxy.FieldVendorNotes, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.RegionLabelCountryCode(); ok {
+		_spec.SetField(proxy.FieldRegionLabelCountryCode, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.RegionLabelCity(); ok {
+		_spec.SetField(proxy.FieldRegionLabelCity, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ConfigVersion(); ok {
+		_spec.SetField(proxy.FieldConfigVersion, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedConfigVersion(); ok {
+		_spec.AddField(proxy.FieldConfigVersion, field.TypeInt64, value)
 	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(proxy.FieldName, field.TypeString, value)

@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -163,7 +164,7 @@ func TestCodexModelsAppliesLocalFiltersBeforeClientETag(t *testing.T) {
 	group := &service.Group{
 		ID:       groupID,
 		Platform: service.PlatformOpenAI,
-		ModelAllowlist: service.GroupModelAllowlist{
+		ModelAllowlist: catalog.ModelAllowlist{
 			Enabled: true,
 			Models:  []string{"codex-auto-review", "gpt-5.6"},
 		},
@@ -232,7 +233,7 @@ func TestCodexModelsAPIKeyCacheDoesNotLeakGroupFilters(t *testing.T) {
 	groupA := &service.Group{
 		ID:       91,
 		Platform: service.PlatformOpenAI,
-		ModelAllowlist: service.GroupModelAllowlist{
+		ModelAllowlist: catalog.ModelAllowlist{
 			Enabled: true,
 			Models:  []string{"model-a"},
 		},
@@ -240,7 +241,7 @@ func TestCodexModelsAPIKeyCacheDoesNotLeakGroupFilters(t *testing.T) {
 	groupB := &service.Group{
 		ID:       92,
 		Platform: service.PlatformOpenAI,
-		ModelAllowlist: service.GroupModelAllowlist{
+		ModelAllowlist: catalog.ModelAllowlist{
 			Enabled: true,
 			Models:  []string{"model-b"},
 		},
@@ -395,7 +396,7 @@ func TestCodexModelsUnmappedParentAndSparkShadowHonorCustomListAndETag(t *testin
 	firstETag := first.Header().Get("ETag")
 	require.NotEmpty(t, firstETag)
 
-	group.ModelAllowlist = service.GroupModelAllowlist{
+	group.ModelAllowlist = catalog.ModelAllowlist{
 		Enabled: true, Models: []string{"gpt-5.6-sol", sparkModel, "unknown-model"},
 	}
 	second := performCodexModelsRequestForGroup(t, handler, group, firstETag)
@@ -481,7 +482,7 @@ func TestCodexModelsFailsOverFromUpstreamTransportError(t *testing.T) {
 
 func TestCodexModelsFailsOverFromInvalidManifestEnvelope(t *testing.T) {
 	handler, upstream, groupID := newCodexModelsFailoverTestHandler(http.StatusOK)
-	upstream.firstBody = `{"object":"list","data":[]}`
+	upstream.firstBody = `{"object":"list","data":null}`
 	recorder := performCodexModelsRequest(t, handler, groupID)
 
 	if got, want := upstream.calls(), []int64{1, 2}; !equalInt64Slices(got, want) {
@@ -958,7 +959,7 @@ func TestCodexModelsPinnedAccountsStillApplyCustomModelsListFilter(t *testing.T)
 	group := &service.Group{
 		ID:       84,
 		Platform: service.PlatformOpenAI,
-		ModelAllowlist: service.GroupModelAllowlist{
+		ModelAllowlist: catalog.ModelAllowlist{
 			Enabled: true,
 			Models:  []string{"model-b"},
 		},
@@ -1012,7 +1013,7 @@ func TestCodexModelsDiscoveryProjectsWildcardMappingWithoutAllowlist(t *testing.
 			}}
 			handler := newPinnedCodexTestHandler([]service.Account{account}, upstream, 3)
 			group := &service.Group{ID: 84, Platform: service.PlatformOpenAI,
-				ModelAllowlist: service.GroupModelAllowlist{Models: []string{"blocked"}},
+				ModelAllowlist: catalog.ModelAllowlist{Models: []string{"blocked"}},
 			}
 			if mode != "ordinary" {
 				group.CodexModelsManifestConfig = service.GroupCodexModelsManifestConfig{Enabled: true, AccountIDs: []int64{1}}

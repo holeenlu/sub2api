@@ -7,8 +7,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/ent/user"
 	"hash/fnv"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -219,7 +221,24 @@ func (s *AuthPendingIdentityService) CreatePendingSession(ctx context.Context, i
 		expiresAt = time.Now().UTC().Add(defaultPendingAuthTTL)
 	}
 
-	create := s.entClient.PendingAuthSession.Create().
+	client := s.entClient
+	var tx *dbent.Tx
+	if input.TargetUserID != nil {
+		var err error
+		tx, err = client.Tx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = tx.Rollback() }()
+		client = tx.Client()
+		current, err := LockAuthLifecycleUser(ctx, client, *input.TargetUserID)
+		if err != nil {
+			return nil, err
+		}
+		input.LocalFlowState = copyPendingMap(input.LocalFlowState)
+		input.LocalFlowState["credential_version"] = strconv.FormatInt(CredentialVersion(&User{Email: current.Email, PasswordHash: current.PasswordHash, SessionGeneration: current.SessionGeneration}), 10)
+	}
+	create := client.PendingAuthSession.Create().
 		SetSessionToken(sessionToken).
 		SetIntent(strings.TrimSpace(input.Intent)).
 		SetProviderType(strings.TrimSpace(input.Identity.ProviderType)).
@@ -235,7 +254,16 @@ func (s *AuthPendingIdentityService) CreatePendingSession(ctx context.Context, i
 	if input.TargetUserID != nil {
 		create = create.SetTargetUserID(*input.TargetUserID)
 	}
-	return create.Save(ctx)
+	session, err := create.Save(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+	}
+	return session, nil
 }
 
 func (s *AuthPendingIdentityService) IssueCompletionCode(ctx context.Context, input IssuePendingAuthCompletionCodeInput) (*IssuePendingAuthCompletionCodeResult, error) {
@@ -398,6 +426,7 @@ func (s *AuthPendingIdentityService) consumeSession(
 
 func sanitizePendingAuthLocalFlowState(localFlowState map[string]any) map[string]any {
 	sanitized := copyPendingMap(localFlowState)
+	delete(sanitized, "bind_claims")
 	if len(sanitized) == 0 {
 		return sanitized
 	}
@@ -540,4 +569,14 @@ func randomOpaqueToken(byteLen int) (string, error) {
 func hashPendingAuthCode(code string) string {
 	sum := sha256.Sum256([]byte(code))
 	return hex.EncodeToString(sum[:])
+}
+
+// LockAuthLifecycleUser serializes pending credential mutation with revocation/unlink.
+// SQLite test transactions serialize writes themselves; PostgreSQL needs the row lock.
+func LockAuthLifecycleUser(ctx context.Context, client *dbent.Client, id int64) (*dbent.User, error) {
+	query := client.User.Query().Where(user.IDEQ(id))
+	if client.Driver().Dialect() == dialect.Postgres {
+		query = query.ForUpdate()
+	}
+	return query.Only(ctx)
 }

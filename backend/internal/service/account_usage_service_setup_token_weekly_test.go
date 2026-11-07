@@ -95,7 +95,7 @@ func TestAccountUsageService_SetupTokenWeeklyUsage(t *testing.T) {
 	}
 }
 
-func TestAccountUsageService_NonAnthropicSetupTokenPreservesEstimate(t *testing.T) {
+func TestAccountUsageService_NonAnthropicSetupTokenDoesNotInventUsage(t *testing.T) {
 	resetAt := time.Now().Add(time.Hour)
 	account := Account{
 		ID: 8509, Platform: PlatformOpenAI, Type: AccountTypeSetupToken,
@@ -107,9 +107,6 @@ func TestAccountUsageService_NonAnthropicSetupTokenPreservesEstimate(t *testing.
 		cache:        NewUsageCache(),
 	}
 	usage, err := svc.GetUsage(t.Context(), account.ID)
-	require.NoError(t, err)
-	require.NotNil(t, usage.FiveHour)
-	require.Equal(t, 80.0, usage.FiveHour.Utilization)
-	require.Nil(t, usage.SevenDay)
-	require.Empty(t, usage.Source)
+	require.ErrorContains(t, err, "does not support usage query")
+	require.Nil(t, usage)
 }

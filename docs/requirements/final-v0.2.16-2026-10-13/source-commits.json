@@ -1,0 +1,1338 @@
+{
+  "current_history": [
+    {
+      "sha": "cba51ec0f6af3ded9bddfd41a3e8f5292181935b",
+      "parents": "3f1a2ea0a760730e3bc528105c00b4ee4f23e469",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-07T20:27:03+08:00",
+      "message": "chore(schema): consolidate preserved migrations and entity schemas\n\nReorganize the final 数据库升级与历史兼容 files without changing their contents.\nRequirements and complete path list: docs/requirements/final-2026-10-07/01-migration.md\nThis classification is part of the complete delivery series; shared settings, routes, types and generated assets are cross-group dependencies.\n\nOriginal-main: 3669ffb0dc4f5b7ff83bd7bc7a50156dbd187238\nOfficial-base: 3f1a2ea0a760730e3bc528105c00b4ee4f23e469\nRequirement-group: 01\nFile-path-items: 61\nAttribution: docs/requirements/final-2026-10-07/provenance.json\nValidation: final code-tree identity checked across all three branches; prior functional test evidence is recorded in the requirements index.",
+      "requirement_groups": [
+        "01",
+        "17"
+      ]
+    },
+    {
+      "sha": "230ddc10f4926e88f62de3caa805a5bfa0598bf0",
+      "parents": "cba51ec0f6af3ded9bddfd41a3e8f5292181935b",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-07T20:27:03+08:00",
+      "message": "feat(auth): consolidate three-tier roles and session protections\n\nReorganize the final 三级角色、会话与管理授权 files without changing their contents.\nRequirements and complete path list: docs/requirements/final-2026-10-07/02-identity.md\nThis classification is part of the complete delivery series; shared settings, routes, types and generated assets are cross-group dependencies.\n\nOriginal-main: 3669ffb0dc4f5b7ff83bd7bc7a50156dbd187238\nOfficial-base: 3f1a2ea0a760730e3bc528105c00b4ee4f23e469\nRequirement-group: 02\nFile-path-items: 151\nAttribution: docs/requirements/final-2026-10-07/provenance.json\nValidation: final code-tree identity checked across all three branches; prior functional test evidence is recorded in the requirements index.",
+      "requirement_groups": [
+        "02",
+        "17"
+      ]
+    },
+    {
+      "sha": "a47851536b749381397de8bb8c10e2812928f08d",
+      "parents": "230ddc10f4926e88f62de3caa805a5bfa0598bf0",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-07T20:27:03+08:00",
+      "message": "fix(gateway): consolidate native forwarding and tenant isolation\n\nReorganize the final 原生网关与多媒体安全 files without changing their contents.\nRequirements and complete path list: docs/requirements/final-2026-10-07/03-gateway.md\nThis classification is part of the complete delivery series; shared settings, routes, types and generated assets are cross-group dependencies.\n\nOriginal-main: 3669ffb0dc4f5b7ff83bd7bc7a50156dbd187238\nOfficial-base: 3f1a2ea0a760730e3bc528105c00b4ee4f23e469\nRequirement-group: 03\nFile-path-items: 41\nAttribution: docs/requirements/final-2026-10-07/provenance.json\nValidation: final code-tree identity checked across all three branches; prior functional test evidence is recorded in the requirements index.",
+      "requirement_groups": [
+        "03",
+        "17"
+      ]
+    },
+    {
+      "sha": "1c56f12c4c90d9435e7959cdc25ff39106062a97",
+      "parents": "a47851536b749381397de8bb8c10e2812928f08d",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-07T20:27:03+08:00",
+      "message": "feat(accounts): consolidate setup tokens sticky history and Fable thresholds\n\nReorganize the final 账号、Anthropic 授权与调度 files without changing their contents.\nRequirements and complete path list: docs/requirements/final-2026-10-07/04-anthropic.md\nThis classification is part of the complete delivery series; shared settings, routes, types and generated assets are cross-group dependencies.\n\nOriginal-main: 3669ffb0dc4f5b7ff83bd7bc7a50156dbd187238\nOfficial-base: 3f1a2ea0a760730e3bc528105c00b4ee4f23e469\nRequirement-group: 04\nFile-path-items: 60\nAttribution: docs/requirements/final-2026-10-07/provenance.json\nValidation: final code-tree identity checked across all three branches; prior functional test evidence is recorded in the requirements index.",
+      "requirement_groups": [
+        "04",
+        "17"
+      ]
+    },
+    {
+      "sha": "6902e3b21a59df794601ff8fc13c2ac8f5824106",
+      "parents": "1c56f12c4c90d9435e7959cdc25ff39106062a97",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-07T20:27:03+08:00",
+      "message": "fix(billing): consolidate payment and refund invariants\n\nReorganize the final 支付、退款与返利完整性 files without changing their contents.\nRequirements and complete path list: docs/requirements/final-2026-10-07/05-billing.md\nThis classification is part of the complete delivery series; shared settings, routes, types and generated assets are cross-group dependencies.\n\nOriginal-main: 3669ffb0dc4f5b7ff83bd7bc7a50156dbd187238\nOfficial-base: 3f1a2ea0a760730e3bc528105c00b4ee4f23e469\nRequirement-group: 05\nFile-path-items: 37\nAttribution: docs/requirements/final-2026-10-07/provenance.json\nValidation: final code-tree identity checked across all three branches; prior functional test evidence is recorded in the requirements index.",
+      "requirement_groups": [
+        "09",
+        "17"
+      ]
+    },
+    {
+      "sha": "64fa31719baa9fa11ffc36842b49608955d3720e",
+      "parents": "6902e3b21a59df794601ff8fc13c2ac8f5824106",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-07T20:27:03+08:00",
+      "message": "feat(usage): consolidate rankings and page loading improvements\n\nReorganize the final 用量排行与页面加载 files without changing their contents.\nRequirements and complete path list: docs/requirements/final-2026-10-07/06-usage.md\nThis classification is part of the complete delivery series; shared settings, routes, types and generated assets are cross-group dependencies.\n\nOriginal-main: 3669ffb0dc4f5b7ff83bd7bc7a50156dbd187238\nOfficial-base: 3f1a2ea0a760730e3bc528105c00b4ee4f23e469\nRequirement-group: 06\nFile-path-items: 37\nAttribution: docs/requirements/final-2026-10-07/provenance.json\nValidation: final code-tree identity checked across all three branches; prior functional test evidence is recorded in the requirements index.",
+      "requirement_groups": [
+        "10",
+        "17"
+      ]
+    },
+    {
+      "sha": "0d5ef648ec39915cfa09d560ae3c9fe43f866826",
+      "parents": "64fa31719baa9fa11ffc36842b49608955d3720e",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-07T20:27:03+08:00",
+      "message": "feat(diagnostics): consolidate Codex probes and scheduled tests\n\nReorganize the final Codex 降智检测与定时诊断 files without changing their contents.\nRequirements and complete path list: docs/requirements/final-2026-10-07/07-diagnostics.md\nThis classification is part of the complete delivery series; shared settings, routes, types and generated assets are cross-group dependencies.\n\nOriginal-main: 3669ffb0dc4f5b7ff83bd7bc7a50156dbd187238\nOfficial-base: 3f1a2ea0a760730e3bc528105c00b4ee4f23e469\nRequirement-group: 07\nFile-path-items: 32\nAttribution: docs/requirements/final-2026-10-07/provenance.json\nValidation: final code-tree identity checked across all three branches; prior functional test evidence is recorded in the requirements index.",
+      "requirement_groups": [
+        "11",
+        "17"
+      ]
+    },
+    {
+      "sha": "d75e372d49d61ba00e2afb6f7a77f090eda0d694",
+      "parents": "0d5ef648ec39915cfa09d560ae3c9fe43f866826",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-07T20:27:03+08:00",
+      "message": "feat(clients): consolidate Codex setup catalogs and downloads\n\nReorganize the final API Key 客户端配置与下载工具 files without changing their contents.\nRequirements and complete path list: docs/requirements/final-2026-10-07/08-clients.md\nThis classification is part of the complete delivery series; shared settings, routes, types and generated assets are cross-group dependencies.\n\nOriginal-main: 3669ffb0dc4f5b7ff83bd7bc7a50156dbd187238\nOfficial-base: 3f1a2ea0a760730e3bc528105c00b4ee4f23e469\nRequirement-group: 08\nFile-path-items: 47\nAttribution: docs/requirements/final-2026-10-07/provenance.json\nValidation: final code-tree identity checked across all three branches; prior functional test evidence is recorded in the requirements index.",
+      "requirement_groups": [
+        "12",
+        "17"
+      ]
+    },
+    {
+      "sha": "e4bf78f132acb2d09d3f604a4cde873f5ebd2d29",
+      "parents": "d75e372d49d61ba00e2afb6f7a77f090eda0d694",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-07T20:27:03+08:00",
+      "message": "feat(site): consolidate KDAN presentation and documentation portal\n\nReorganize the final 品牌界面、文档站与用户体验 files without changing their contents.\nRequirements and complete path list: docs/requirements/final-2026-10-07/09-site.md\nThis classification is part of the complete delivery series; shared settings, routes, types and generated assets are cross-group dependencies.\n\nOriginal-main: 3669ffb0dc4f5b7ff83bd7bc7a50156dbd187238\nOfficial-base: 3f1a2ea0a760730e3bc528105c00b4ee4f23e469\nRequirement-group: 09\nFile-path-items: 223\nAttribution: docs/requirements/final-2026-10-07/provenance.json\nValidation: final code-tree identity checked across all three branches; prior functional test evidence is recorded in the requirements index.",
+      "requirement_groups": [
+        "13",
+        "17"
+      ]
+    },
+    {
+      "sha": "880b96f67612767ed5955efa8b91b56fa2681daf",
+      "parents": "e4bf78f132acb2d09d3f604a4cde873f5ebd2d29",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-07T20:27:03+08:00",
+      "message": "feat(i18n): consolidate translations and generated traditional Chinese\n\nReorganize the final 多语言与繁体生成 files without changing their contents.\nRequirements and complete path list: docs/requirements/final-2026-10-07/10-localization.md\nThis classification is part of the complete delivery series; shared settings, routes, types and generated assets are cross-group dependencies.\n\nOriginal-main: 3669ffb0dc4f5b7ff83bd7bc7a50156dbd187238\nOfficial-base: 3f1a2ea0a760730e3bc528105c00b4ee4f23e469\nRequirement-group: 10\nFile-path-items: 89\nAttribution: docs/requirements/final-2026-10-07/provenance.json\nValidation: final code-tree identity checked across all three branches; prior functional test evidence is recorded in the requirements index.",
+      "requirement_groups": [
+        "14",
+        "17"
+      ]
+    },
+    {
+      "sha": "f9daed217b4d198a26178c1610ca02a8d9d903f9",
+      "parents": "880b96f67612767ed5955efa8b91b56fa2681daf",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-07T20:27:03+08:00",
+      "message": "chore(delivery): consolidate manual release and update tooling\n\nKeep repository-scoped manual releases and host-side online updates.\nPrevent migration preflight containers from requesting the live service's\nfixed IPv4/IPv6 addresses. Resolve the deployed Compose model, clear only\nthose addresses for the disposable candidate, and preserve inherited\nnetwork aliases, database environment and the live image override.\n\nExisting update rollback and interruption recovery remain in place.\nThe host updater must be refreshed to receive this preflight repair;\nupdating the application image alone does not replace the host script.\n\nValidated with 27 update/release tests (one opt-in container integration\nskipped) and the installed Docker Compose configuration renderer.\n\nOriginal-main: 3669ffb0dc4f5b7ff83bd7bc7a50156dbd187238\nOfficial-base: 3f1a2ea0a760730e3bc528105c00b4ee4f23e469\nRequirement-group: 11\nFile-path-items: 84\nAttribution: docs/requirements/final-2026-10-07/provenance.json\nValidation: final code-tree identity checked across all three branches; prior functional test evidence is recorded in the requirements index.",
+      "requirement_groups": [
+        "15",
+        "17"
+      ]
+    },
+    {
+      "sha": "bb7c4d0a169b5ba3dbd5aa3cec957d52170d0265",
+      "parents": "f9daed217b4d198a26178c1610ca02a8d9d903f9",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-07T20:27:03+08:00",
+      "message": "refactor(core): consolidate shared settings routes and dependency wiring\n\nReorganize the final 跨功能设置、路由与依赖装配 files without changing their contents.\nRequirements and complete path list: docs/requirements/final-2026-10-07/12-integration.md\nThis classification is part of the complete delivery series; shared settings, routes, types and generated assets are cross-group dependencies.\n\nOriginal-main: 3669ffb0dc4f5b7ff83bd7bc7a50156dbd187238\nOfficial-base: 3f1a2ea0a760730e3bc528105c00b4ee4f23e469\nRequirement-group: 12\nFile-path-items: 82\nAttribution: docs/requirements/final-2026-10-07/provenance.json\nValidation: final code-tree identity checked across all three branches; prior functional test evidence is recorded in the requirements index.",
+      "requirement_groups": [
+        "05",
+        "16",
+        "17"
+      ]
+    },
+    {
+      "sha": "88bfc6ae8ed9033a1d5642af9eecc9f358af1f07",
+      "parents": "2e83e47bc12d60c125917a986706c205ee6a3e91",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-07T20:27:03+08:00",
+      "message": "chore(brand): consolidate final tokensavy branding and delivery adaptations\n\nApply the preserved final tokensavy overlay to the reorganized main.\n\nRequirements: docs/requirements/final-2026-10-07/BRAND.md\nFile inventory: docs/requirements/final-2026-10-07/files-tokensavy.tsv\nOriginal-brand: fcc675b664360da27b3fccbafce32c7de55647b2\nOriginal-main: 3669ffb0dc4f5b7ff83bd7bc7a50156dbd187238\nValidation: all pre-existing file modes/blobs identical; only requirements documentation added.\nRuntime changes: none. Releases and deployments are not part of this commit.",
+      "requirement_groups": [
+        "02",
+        "03",
+        "04",
+        "10",
+        "12",
+        "13",
+        "14",
+        "15",
+        "16",
+        "17"
+      ]
+    },
+    {
+      "sha": "8f74eca9a04678b38366040e59b9328d578cff80",
+      "parents": "2e83e47bc12d60c125917a986706c205ee6a3e91",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-07T20:27:03+08:00",
+      "message": "chore(brand): consolidate final TapModels branding and delivery adaptations\n\nApply the preserved final TapModels overlay to the reorganized main.\n\nRequirements: docs/requirements/final-2026-10-07/BRAND.md\nFile inventory: docs/requirements/final-2026-10-07/files-TapModels.tsv\nOriginal-brand: a2d3feb5fe7c4e79ec280c04f20714aed78fa68f\nOriginal-main: 3669ffb0dc4f5b7ff83bd7bc7a50156dbd187238\nValidation: all pre-existing file modes/blobs identical; only requirements documentation added.\nRuntime changes: none. Releases and deployments are not part of this commit.",
+      "requirement_groups": [
+        "02",
+        "03",
+        "04",
+        "10",
+        "12",
+        "13",
+        "14",
+        "15",
+        "16",
+        "17"
+      ]
+    },
+    {
+      "sha": "2e83e47bc12d60c125917a986706c205ee6a3e91",
+      "parents": "bb7c4d0a169b5ba3dbd5aa3cec957d52170d0265",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-07T20:27:03+08:00",
+      "message": "docs(requirements): record final feature requirements and file inventories\n\nRecord final requirements, provenance and file inventories. Extend the\nshared implementation standards with upstream conflict decisions based\non actual behavior and current requirements, including semantic conflicts\nin automatically merged code. Compare adoption, retention, integration\nand replacement before resolving an undecided requirement or safety tradeoff.\n\nIncludes the guidance from d11a2a4e018c78f48820aa86aedd82ef32ac8e24.\n\nOriginal-main: 3669ffb0dc4f5b7ff83bd7bc7a50156dbd187238\nOfficial-base: 3f1a2ea0a760730e3bc528105c00b4ee4f23e469\nRequirement-group: 13\nFile-path-items: 32\nAttribution: docs/requirements/final-2026-10-07/provenance.json\nValidation: final code-tree identity checked across all three branches; prior functional test evidence is recorded in the requirements index.",
+      "requirement_groups": [
+        "07",
+        "17"
+      ]
+    },
+    {
+      "sha": "80b909b67607da3aed46a7a32076f9cf91229682",
+      "parents": "88bfc6ae8ed9033a1d5642af9eecc9f358af1f07 c6a92e1501a3ed5bb405c02bd541fcb59366bd28",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-08T12:20:28+08:00",
+      "message": "merge(main): sync upstream protocol, catalog and Ops fixes",
+      "requirement_groups": [
+        "03",
+        "04",
+        "06",
+        "07",
+        "08",
+        "09",
+        "10",
+        "13",
+        "14",
+        "15",
+        "16"
+      ]
+    },
+    {
+      "sha": "9fe206a61ba9e4794af09e0d70514d33fef60c97",
+      "parents": "8f74eca9a04678b38366040e59b9328d578cff80 c6a92e1501a3ed5bb405c02bd541fcb59366bd28",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-08T12:16:36+08:00",
+      "message": "merge(main): sync upstream protocol, catalog and Ops fixes",
+      "requirement_groups": [
+        "03",
+        "04",
+        "06",
+        "07",
+        "08",
+        "09",
+        "10",
+        "13",
+        "14",
+        "15",
+        "16"
+      ]
+    },
+    {
+      "sha": "c6a92e1501a3ed5bb405c02bd541fcb59366bd28",
+      "parents": "2e83e47bc12d60c125917a986706c205ee6a3e91 745ff1d3ca79a7f39520f627f6aa44d778a11580",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-08T12:12:45+08:00",
+      "message": "merge(upstream): sync main through 745ff1d3c",
+      "requirement_groups": [
+        "03",
+        "04",
+        "06",
+        "07",
+        "08",
+        "09",
+        "10",
+        "13",
+        "14",
+        "15",
+        "16"
+      ]
+    },
+    {
+      "sha": "ccb81060efc1182990682a116cfc7db3b5662fb4",
+      "parents": "80b909b67607da3aed46a7a32076f9cf91229682 3bd5cd406dd37b332f01a446718caca3a8a4222f",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-08T13:34:38+08:00",
+      "message": "merge(main): consolidate model restriction and allowlist updates",
+      "requirement_groups": [
+        "02",
+        "04",
+        "05",
+        "14",
+        "15",
+        "16"
+      ]
+    },
+    {
+      "sha": "5653d40d9310687b71c893862711621bdc80a1dc",
+      "parents": "9fe206a61ba9e4794af09e0d70514d33fef60c97 3bd5cd406dd37b332f01a446718caca3a8a4222f",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-08T13:34:38+08:00",
+      "message": "merge(main): consolidate model restriction and allowlist updates",
+      "requirement_groups": [
+        "02",
+        "04",
+        "05",
+        "14",
+        "15",
+        "16"
+      ]
+    },
+    {
+      "sha": "3bd5cd406dd37b332f01a446718caca3a8a4222f",
+      "parents": "c6a92e1501a3ed5bb405c02bd541fcb59366bd28",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-08T13:34:38+08:00",
+      "message": "fix(models): complete account restrictions and refresh group allowlist candidates\n\nRestore model restriction editing for Anthropic OAuth and setup-token accounts.\nReuse upstream model sync for bulk targets, preserving drafts on failures and\nadding only shared supported models. Add Haiku 5.5 to account candidates.\n\nRefresh provider-specific group suggestions from current official catalogs;\nkeep saved rules and explicit mappings without reintroducing runtime aliases.\nDocument complete additions, removals, retained IDs, sources and scope.\n\nSquashes: c13a38a673e164d109302e3847fd25a75e1f848c\nSquashes: 1db26eccb74c9104b0abb4aaf1364a8982c8aa10\n\n\nUnify account model choices and latest-model sync with the group built-in catalog.\nInclude upstream-confirmed gpt-reserve and OpenAI OAuth/API Key bulk model sync.\nPreserve drafts on catalog failures and discard stale responses after platform changes.\nReuse the existing id=0 candidate endpoint for account editing in simple mode.\n\nUse the backend catalog for account creation defaults and remove obsolete frontend lists.\nApply saved group order to every Codex discovery mode and compute ETag after ordering.\nDocument the full model selection, policy, discovery and download data flow.",
+      "requirement_groups": [
+        "02",
+        "04",
+        "05",
+        "14",
+        "15",
+        "16"
+      ]
+    },
+    {
+      "sha": "6dc1165380ed5f93a5f63729eb5c3b8421d61126",
+      "parents": "3bd5cd406dd37b332f01a446718caca3a8a4222f 5fc0e486c3f6a8a191b8bd140f39b60457f611cf",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-08T17:35:33+08:00",
+      "message": "merge(upstream): sync main through 5fc0e486c",
+      "requirement_groups": [
+        "02",
+        "06",
+        "10",
+        "13",
+        "16"
+      ]
+    },
+    {
+      "sha": "4b920001aa3d1f06f03d904ac305c83d83723a3d",
+      "parents": "ccb81060efc1182990682a116cfc7db3b5662fb4 6dc1165380ed5f93a5f63729eb5c3b8421d61126",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-08T17:40:28+08:00",
+      "message": "merge(main): sync upstream signature, monitor and UI fixes",
+      "requirement_groups": [
+        "02",
+        "06",
+        "10",
+        "13",
+        "16"
+      ]
+    },
+    {
+      "sha": "655839fda8fea178179dd62e6ab66c8a46cc1e02",
+      "parents": "5653d40d9310687b71c893862711621bdc80a1dc 6dc1165380ed5f93a5f63729eb5c3b8421d61126",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-08T17:38:08+08:00",
+      "message": "merge(main): sync upstream signature, monitor and UI fixes",
+      "requirement_groups": [
+        "02",
+        "06",
+        "10",
+        "13",
+        "16"
+      ]
+    },
+    {
+      "sha": "4d9ac3e482106d2da3a39fe3e546d8d6801f1cc1",
+      "parents": "01842576b3d5c1e2545b5a99ad555d36e28ed306",
+      "author": "github-actions[bot]",
+      "email": "41898282+github-actions[bot]@users.noreply.github.com",
+      "date": "2026-10-13T07:20:40Z",
+      "message": "chore: sync VERSION to 0.2.16 [skip ci]",
+      "requirement_groups": [
+        "00"
+      ]
+    },
+    {
+      "sha": "4c5aa7b49988f5752b01940475530832c188b7ad",
+      "parents": "6dc1165380ed5f93a5f63729eb5c3b8421d61126",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-08T17:46:31+08:00",
+      "message": "fix(gateway): harden Responses recovery and Anthropic stream errors\n\nResponses requests could lose current-turn history or usage after upstream\nerrors, and completed or cancelled recovery could remain an Ops failure.\nUnify recovery evidence, context ownership and turn lifecycle across HTTP,\nnative WebSocket, HTTP bridge and passthrough without changing client models.\n\nPreserve encrypted reasoning and compaction. Remove legacy ciphertext deletion,\nblind predecessor deletion and cross-mode stripping. Repair explicit persisted\nitem rejections only from self-contained input, retaining call_id pairing and\ncomplete encrypted content. Collect late same-ID ciphertext without mutating\nearlier snapshots. An unresolved context rejection requires complete client\nhistory, never another account or an incomplete reasoning item.\n\nSeparate complete same-owner replay from cross-account portability. Capacity\nerrors may retry the owner with full encrypted history; private files, vector\nstores, containers and unresolved persisted state cannot move between accounts.\nEvaluate namespace children and dynamic additional_tools/tool_search_output\ninventories. Allow client discovery and read-only search; refuse execution tools,\nunknown or ambiguous definitions and opaque tool context. Repeated read-only\nsearch may incur upstream usage. Do not replay after committed output.\n\nStage metadata and response identity within 8 MiB and one second from identity.\nRecover safe EOF/1012 and connection-limit failures without exposing discarded\nresponse IDs. Rotate native leases at 55 minutes, retaining valid persisted\nanchors for store=true. Bare errors remain provisional until authoritative\noutput, terminal or configured idle expiry; definitive pre-response parameter\nrejections finish promptly. Preserve upstream error evidence and map capacity\nerrors to 503 while delivering the existing client-compatible error code.\n\nUse one client reader, serialized writes and bounded queues. Keep cancellation\non the active turn and credential. A rejected create with no response identity\nreturns a request error; completed rejection does not require closing the client\nsocket. Failed attempts do not become replay history. Bridge warmup remains a\nbounded local control turn without inference or billing. Bridge strips the WS\nenvelope from HTTP and restores lane/error correlation on WS events. This still\nadmits one lane per socket, not multiplexing.\n\nRevalidate later-turn keys, ungrouped keys, account authorization, group/model\neligibility and effective upstream configuration. Rebuild the upstream after\ncredential, proxy, endpoint or mode changes only with sufficient ownership and\ncontext evidence. Freeze account/user/model/request billing snapshots. Retain\nobserved partial usage after bounded cancellation/drain; never estimate missing\nusage or bill discarded attempts. Invalid encrypted input is not an account\nhealth failure.\n\nUse existing opt-in attempt and first-output budgets across admission, scheduling,\nbackoff and upstream operations. Cover headers and body for native HTTP,\npassthrough and bridge, and stop the first-output timer after semantic content.\nZero retains per-path defaults. Pre-send exhaustion and client cancellation do\nnot penalize an account that received no request. Refresh replay policy from\nthe final transformed request, including injected image tools.\n\nPersist bounded retry-stop diagnostics: actual mode/protocol, created-to-failure\ndelay, semantic/metadata commitment, tool blocker, context scope and remaining\nbudget. Keep prompt/output/ciphertext out of these diagnostics. Confirm recovered\nOps outcomes per turn and preserve observed upstream status alongside client\nrequest status. Explicit logging levels avoid error-keyword promotion.\n\nTrace HTTP connection/send boundaries and propagate proven-unsent evidence,\nincluding plugins. Retry transient proxy TLS handshakes only before send with\na rewindable body, adapting that narrow mechanism from\nranxi2001/sub2api@11be589504b482d77827ab383b4b53f777241238.\nFeed H2 body/protocol failures into the bounded expiring fallback map without\ntreating provider capacity errors as proxy protocol failures.\n\nKeep the existing scheduler, transactional usage, Grok-specific conversions,\nbrand channels, security boundaries and manual release workflow. Production\ntransport canaries and multi-lane/steering remain separate gated work.\n\nCorrect Anthropic overloaded_error classification after message_start or SSE\nkeepalives (#14165): preserve semantic 529 and the overload client response,\nwhile retaining pre-output cooldown policy and the no-replay guard.\nRegression checks cover both post-output cases, Ops diagnostics and\npre-output versus committed-stream client responses.\n\nTreat codex.rate_limits and codex.response.metadata as lifecycle metadata\nfor first-output deadlines and recovery progress. Preserve numeric WS\nevent counts through Ops redaction without exposing credentials or\nnon-numeric values. Keep the existing post-commit replay boundary.\n\nCo-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>",
+      "requirement_groups": [
+        "03",
+        "04",
+        "06",
+        "08",
+        "14",
+        "15",
+        "16",
+        "17"
+      ]
+    },
+    {
+      "sha": "d0693665192b63a4862f63787521ba5fa60d2858",
+      "parents": "4b920001aa3d1f06f03d904ac305c83d83723a3d 4c5aa7b49988f5752b01940475530832c188b7ad",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-09T12:52:07+08:00",
+      "message": "merge(main): consolidate OpenAI Responses recovery and turn lifecycle\n\nMerge the complete shared Responses recovery change, including its reviewed\nHTTP/WS send evidence, cancellation, usage, authorization and transport fixes.\nPreserve tokensavy branding, defaults, deployment and release-channel overrides.\n\nCo-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>",
+      "requirement_groups": [
+        "03",
+        "04",
+        "06",
+        "08",
+        "14",
+        "15",
+        "16",
+        "17"
+      ]
+    },
+    {
+      "sha": "48302eb1d43965d0ed1079fb21c2b8b767a40cdd",
+      "parents": "655839fda8fea178179dd62e6ab66c8a46cc1e02 4c5aa7b49988f5752b01940475530832c188b7ad",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-09T12:50:16+08:00",
+      "message": "merge(main): consolidate OpenAI Responses recovery and turn lifecycle\n\nMerge the complete shared Responses recovery change, including its reviewed\nHTTP/WS send evidence, cancellation, usage, authorization and transport fixes.\nPreserve TapModels branding, defaults, deployment and release-channel overrides.\n\nCo-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>",
+      "requirement_groups": [
+        "03",
+        "04",
+        "06",
+        "08",
+        "14",
+        "15",
+        "16",
+        "17"
+      ]
+    },
+    {
+      "sha": "944fdb1eff8e7ea33ed70ff722b6822f962e9255",
+      "parents": "4c5aa7b49988f5752b01940475530832c188b7ad 3a6fd1c9db07203ca308aaba69e502bc1f35b307",
+      "author": "holeen",
+      "email": "holeen@kdanmobile.com",
+      "date": "2026-10-09T13:44:28+08:00",
+      "message": "merge(upstream): sync main through 3a6fd1c9d",
+      "requirement_groups": [
+        "00",
+        "01",
+        "02",
+        "03",
+        "04",
+        "05",
+        "06",
+        "07",
+        "08",
+        "12",
+        "13",
+        "14",
+        "15",
+        "16"
+      ]
+    },
+    {
+      "sha": "264789f68aff358d1882f61f1f5276eb24a8918c",
+      "parents": "d0693665192b63a4862f63787521ba5fa60d2858 944fdb1eff8e7ea33ed70ff722b6822f962e9255",
+      "author": "holeen",
+      "email": "holeen@kdanmobile.com",
+      "date": "2026-10-09T13:51:12+08:00",
+      "message": "merge(main): sync platform catalog, provider and gateway fixes",
+      "requirement_groups": [
+        "00",
+        "01",
+        "02",
+        "03",
+        "04",
+        "05",
+        "06",
+        "07",
+        "08",
+        "12",
+        "13",
+        "14",
+        "15",
+        "16"
+      ]
+    },
+    {
+      "sha": "84ad79bf6dba0347607eb79298cb5676ee3668fc",
+      "parents": "48302eb1d43965d0ed1079fb21c2b8b767a40cdd 944fdb1eff8e7ea33ed70ff722b6822f962e9255",
+      "author": "holeen",
+      "email": "holeen@kdanmobile.com",
+      "date": "2026-10-09T13:48:20+08:00",
+      "message": "merge(main): sync platform catalog, provider and gateway fixes",
+      "requirement_groups": [
+        "00",
+        "01",
+        "02",
+        "03",
+        "04",
+        "05",
+        "06",
+        "07",
+        "08",
+        "12",
+        "13",
+        "14",
+        "15",
+        "16"
+      ]
+    },
+    {
+      "sha": "5dd818c1389af73a5ee524303dfad1966e0ae926",
+      "parents": "944fdb1eff8e7ea33ed70ff722b6822f962e9255",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-10T05:42:11+08:00",
+      "message": "fix(ci): avoid Docker Hub BuildKit bootstrap",
+      "requirement_groups": [
+        "15"
+      ]
+    },
+    {
+      "sha": "6d9b1ca04d7de779e09f2035739fe7da1bf73a5d",
+      "parents": "264789f68aff358d1882f61f1f5276eb24a8918c 5dd818c1389af73a5ee524303dfad1966e0ae926",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-10T05:44:40+08:00",
+      "message": "merge(main): avoid Docker Hub BuildKit bootstrap",
+      "requirement_groups": [
+        "15"
+      ]
+    },
+    {
+      "sha": "3175b70e08245639003a3129e7485c07a220498f",
+      "parents": "84ad79bf6dba0347607eb79298cb5676ee3668fc 5dd818c1389af73a5ee524303dfad1966e0ae926",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-10T05:44:39+08:00",
+      "message": "merge(main): avoid Docker Hub BuildKit bootstrap",
+      "requirement_groups": [
+        "15"
+      ]
+    },
+    {
+      "sha": "4b2cfde513867c40dbcc663a5ddea30cdd286dd2",
+      "parents": "5dd818c1389af73a5ee524303dfad1966e0ae926",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-12T05:52:30+08:00",
+      "message": "feat(bps): integrate Excel routing and reliable Responses WebSocket bridge\n\nPort the BPS protocol core and selected account, credential, tool, image,\nand admin controls onto the native gateway. Keep BPS disabled by default.\nShare the BPS HTTP/SSE path with client WebSocket turns and Messages/Chat\ncompatibility through the existing gateway and apicompat conversion.\n\nPreserve native history, response ownership, cancellation, attempt budgets,\npartial usage, error contracts and terminal-event precedence. Route and\nrefresh accounts by the selected model independently of native WS mode;\nisolate bridge sessions and retain usage through repair and compaction\nfailure, EOF, cancellation and failover. Reject opaque server context,\nkeep billing IDs out of response lineage, and preserve Excel-only guards,\nnative compact mapping and local Fast policy.\n\nRestore native account switching for explicit BPS model rejection and safe\npre-output transient failures across HTTP/SSE, WS and compatibility routes.\nPreserve absolute turn deadlines, cancellation and no-replay guards, actual\nusage, per-model cooldowns and filtered discovery. Freeze redacted upstream\ndiagnostics before Ops snapshots, attribute repair failures to their actual\nrequest IDs, and retain logical failure status after SSE keepalives.\n\nResolve declared tool names consistently across direct and wrapped BPS\ncalls, retaining exact namespace priority and bounded redacted catalog\ndiagnostics. Classify explicit BPS overload identifiers as 503 so existing\nsafe failover handles them without widening replay or attempt budgets.\n\nThe latest catalog and overload changes passed focused unit tests, complete\nprotocol and expanded BPS/WS race suites, boundary regressions repeated 20\ntimes, and server builds. Source manifests and manual-only release workflow\nchecks passed; detailed validation history remains in the dual-path audit.\n\nPreserve complete BPS terminal JSON tails across late body read errors and\ncontinue downstream failure event sequences. Distinguish clean EOF without\na terminal from transport errors; freeze safe stream diagnostics with the\nactual upstream HTTP identity without replaying accepted generations.\n\nUse a scoped source port to exclude retired and unrelated operations.\nRecord requirements, the dual-path audits, per-file source provenance and\na read-only review tool for subsequent upstream updates.\n\nPreviously completed validation: full backend unit suite; BPS/Excel/WS and\nbasispoints/transportdiag race suites; focused failure tests repeated 20\ntimes; server build, Wire check and integration-test compilation; frontend\nbuild and 29 focused tests; manual-release workflow tests. The final full\nbackend suite passed on rerun after one unrelated runtime snapshot timeout;\n20 isolated repeats each on current and baseline passed. Real BPS requests\nand PostgreSQL/Redis runtime integration were not executed.\n\nSquash the implementation and final reliability review into one portable\ncommit. Preserve the final reviewed file tree exactly; retain historical\naudit references in the documentation and original commits in local backups.\n\nSource-Repository: https://github.com/ranxi2001/sub2api\nSource-Commit: 1a74ed0e3cc6cf6923ba4747e8147decf15556b0\nTarget-Base: 128e28cd7728772bcb7a763450616ec4bdefb023\nSquashed-From: e7b94bbc301776215bf844776bab2a434e1033d9\nSquashed-From: 5e2f1d70e16e5b925ade9f72b1ed2f64bd696d32\nAmended-From: 5a2a1c2dd187805244de4545f394312bde60750c\nAmended-From: 4d848ca6d5584b12ebfec69b7da489e44a75e51d\nAmended-From: 1dc2c39acfde782cfe8d2da6ea5e193dba039ae2\n\nSync the reviewed ranxi image admission fix: reserve the existing image\nprocessing budget only after selecting an actual BPS account, per HTTP\nrequest or WebSocket turn. Keep native accounts and internal probes outside\nthat budget, reuse bounded account switching, and preserve request-scoped\nHTTP/WS errors without penalizing healthy accounts. Retain all prior\nmodel-access, catalog, overload, EOF, cancellation and no-replay safeguards.\n\nLatest focused BPS/Excel race suites, repeated admission/WS regressions,\nprotocol and compatibility tests, server build, locale completeness and\nmanual-release workflow checks passed; see docs/bps/VALIDATION.md.\n\nUpstream-Observed: a519cfeb66c253dd39d7728d20d55b7cf9f79897\nUpstream-Adopted: c59fabb39b88c1e2e1305f9813806a74fc1b2ba3\nAmended-From: 9ec45aaf0790a82517de7773f098edd5f82d1fd3\n\nHandle explicit BPS file-ownership validation failures across HTTP/SSE,\nclient WebSocket turns, image compaction and both tool correction paths.\nInvalidate only matching gateway attachment references in the request's\ncredential/session scope for a later explicit request. Preserve actual\nusage and failure request identity without replay, account switching or\nscheduling penalties. Retain encrypted-history opt-in and current encrypted\nagent-assignment guards; cover both transports and SSE event-header terminals.\n\nFinal protocol and BPS/Excel gateway/handler race suites, server build,\nformatting and changed-file provenance checks passed. No real BPS calls,\naccount setting changes, releases or production deployment were performed.\n\nAmended-From: 2f6e79a7526f94aca655bb7f28f59d28e02e1414\n\nAdd request-local provenance for BPS file-ownership failures (#26318).\nCount references from fresh uploads, scoped reuse/shared uploads and\nunmanaged files in the actual failed generation, compaction or correction\nrequest. Keep bounded local context separate from sanitized upstream bodies;\nrecord scoped cache evictions without file IDs, image contents or credentials.\nPreserve no-replay, usage and account-health contracts. The new diagnostics\ndo not establish or repair the production ownership failure itself.\n\nValidation: complete protocol race suite, BPS service/handler race tests,\nserver build and changed-file provenance checks passed.\n\nAmended-From: a793e7cfa792f538aa6cad8ca0933aabfca8fee5",
+      "requirement_groups": [
+        "01",
+        "02",
+        "03",
+        "04",
+        "07",
+        "14",
+        "15",
+        "16",
+        "17"
+      ]
+    },
+    {
+      "sha": "cb727187cabe7a706ff47dbbaaf8708710f612f3",
+      "parents": "6d9b1ca04d7de779e09f2035739fe7da1bf73a5d 4b2cfde513867c40dbcc663a5ddea30cdd286dd2",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-12T13:48:53+08:00",
+      "message": "merge(main): integrate consolidated BPS into tokensavy\n\nRecreate the BPS merge after the requested EOF amendment; retain all existing brand overrides.\n\nRecreate the shared gateway ancestry after the requested Anthropic overload\namendment (#14165), preserving the previously merged BPS EOF fixes.",
+      "requirement_groups": [
+        "01",
+        "02",
+        "03",
+        "04",
+        "07",
+        "14",
+        "15",
+        "16",
+        "17"
+      ]
+    },
+    {
+      "sha": "32ac3548005da3dd33b9f94c6cafb8c004f77813",
+      "parents": "3175b70e08245639003a3129e7485c07a220498f 4b2cfde513867c40dbcc663a5ddea30cdd286dd2",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-12T13:48:50+08:00",
+      "message": "merge(main): integrate consolidated BPS into TapModels\n\nRecreate the BPS merge after the requested EOF amendment; retain all existing brand overrides.\n\nRecreate the shared gateway ancestry after the requested Anthropic overload\namendment (#14165), preserving the previously merged BPS EOF fixes.",
+      "requirement_groups": [
+        "01",
+        "02",
+        "03",
+        "04",
+        "07",
+        "14",
+        "15",
+        "16",
+        "17"
+      ]
+    },
+    {
+      "sha": "e37f32177a2b3f31414e8e2801d1f20678983fe5",
+      "parents": "4b2cfde513867c40dbcc663a5ddea30cdd286dd2 e468262294eb962206ce2d6e4b83f2e8bc43ef02",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-12T17:05:50+08:00",
+      "message": "merge(upstream): sync main through e46826229",
+      "requirement_groups": [
+        "02",
+        "03",
+        "10",
+        "13",
+        "14",
+        "16"
+      ]
+    },
+    {
+      "sha": "10888349f9a187821afccd40a587a30b9a2eafa4",
+      "parents": "cb727187cabe7a706ff47dbbaaf8708710f612f3 e37f32177a2b3f31414e8e2801d1f20678983fe5",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-12T17:11:36+08:00",
+      "message": "merge(main): sync official upstream fixes into tokensavy",
+      "requirement_groups": [
+        "02",
+        "03",
+        "10",
+        "13",
+        "14",
+        "16"
+      ]
+    },
+    {
+      "sha": "11d70824929369079ffaa1f7c221b615e195ef26",
+      "parents": "32ac3548005da3dd33b9f94c6cafb8c004f77813 e37f32177a2b3f31414e8e2801d1f20678983fe5",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-12T17:09:20+08:00",
+      "message": "merge(main): sync official upstream fixes into TapModels",
+      "requirement_groups": [
+        "02",
+        "03",
+        "10",
+        "13",
+        "14",
+        "16"
+      ]
+    },
+    {
+      "sha": "be0749922538fe576b5e7329609e4f1d7716699f",
+      "parents": "e37f32177a2b3f31414e8e2801d1f20678983fe5 9591136d45cef26453348ed9532a7ebbce7cf99c",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-12T17:53:30+08:00",
+      "message": "merge(upstream): sync main through 9591136d4",
+      "requirement_groups": [
+        "05",
+        "07",
+        "16"
+      ]
+    },
+    {
+      "sha": "d36d5d4d2ffc14c6e638725094f6afad57fa9429",
+      "parents": "10888349f9a187821afccd40a587a30b9a2eafa4 be0749922538fe576b5e7329609e4f1d7716699f",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-12T17:55:23+08:00",
+      "message": "merge: sync main billing and Codex fixes into tokensavy",
+      "requirement_groups": [
+        "05",
+        "07",
+        "16"
+      ]
+    },
+    {
+      "sha": "15443159dcb5ecf8ca03680d0e2127862b1b61c8",
+      "parents": "11d70824929369079ffaa1f7c221b615e195ef26 be0749922538fe576b5e7329609e4f1d7716699f",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-12T17:54:42+08:00",
+      "message": "merge: sync main billing and Codex fixes into TapModels",
+      "requirement_groups": [
+        "05",
+        "07",
+        "16"
+      ]
+    },
+    {
+      "sha": "71fc12f8edf4cbb839a72ba5f06c86745a1f2612",
+      "parents": "be0749922538fe576b5e7329609e4f1d7716699f",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-13T06:55:09+08:00",
+      "message": "feat(gateway): normalize thinking by final model capabilities\n\nAdapt Claude thinking modes, effort and budgets at the final mapped model\nacross native Messages, OpenAI compatibility and Bedrock paths. Preserve\nsigned history, omitted defaults and account-attempt isolation. Keep Fable\nstrict disabled rejection and Sonnet between-tools conversion explicit.\n\nApply ingress effort policy once and preserve original intent on fallback.\nNormalize Gemini thinking within its own protocol and retain existing\nretry, billing, ownership and BPS recovery contracts.\n\nAddress acceptance findings for Opus 5 historical effort and Sonnet 5.5\nomitted effort; document manual-model low budgets and output-limit errors.\nInclude the pinned New API research, adoption plan and verification report.\n\nValidation: complete backend unit suite (24,734 passing events, 18 existing\nskips), targeted race (209 passing events), vet, server build and format\nchecks. golangci-lint reports zero new issues; 48 baseline issues remain.\nManual-release workflow and generated-download checks pass. No live\nprovider calls, deployment, release or database migration performed.",
+      "requirement_groups": [
+        "03",
+        "08",
+        "16"
+      ]
+    },
+    {
+      "sha": "cb5526a2a75a98c101ecd4494ed2d7cd1cbc8072",
+      "parents": "d36d5d4d2ffc14c6e638725094f6afad57fa9429 71fc12f8edf4cbb839a72ba5f06c86745a1f2612",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-13T06:58:59+08:00",
+      "message": "merge(main): sync model-aware thinking adaptation into tokensavy",
+      "requirement_groups": [
+        "03",
+        "08",
+        "16"
+      ]
+    },
+    {
+      "sha": "632365ee42fe282678ee48f8062409b58bf34d4c",
+      "parents": "15443159dcb5ecf8ca03680d0e2127862b1b61c8 71fc12f8edf4cbb839a72ba5f06c86745a1f2612",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-13T06:57:56+08:00",
+      "message": "merge(main): sync model-aware thinking adaptation into TapModels",
+      "requirement_groups": [
+        "03",
+        "08",
+        "16"
+      ]
+    },
+    {
+      "sha": "a2988a14ca54b99b09a6f64024166d52fa8db132",
+      "parents": "71fc12f8edf4cbb839a72ba5f06c86745a1f2612 ab80abc6d1f929a6864c8804fd077b509d21fda2",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-13T07:13:56+08:00",
+      "message": "merge(upstream): sync main through ab80abc6d",
+      "requirement_groups": [
+        "01",
+        "02",
+        "10",
+        "13",
+        "14",
+        "16"
+      ]
+    },
+    {
+      "sha": "8ea63d472a272b9ebc3300035471186a7dc6db2b",
+      "parents": "cb5526a2a75a98c101ecd4494ed2d7cd1cbc8072 a2988a14ca54b99b09a6f64024166d52fa8db132",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-13T07:16:11+08:00",
+      "message": "merge: sync main group translations into tokensavy",
+      "requirement_groups": [
+        "01",
+        "02",
+        "10",
+        "13",
+        "14",
+        "16"
+      ]
+    },
+    {
+      "sha": "97d51161c444c22920a6382c5f39e123b01375a6",
+      "parents": "632365ee42fe282678ee48f8062409b58bf34d4c a2988a14ca54b99b09a6f64024166d52fa8db132",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-13T07:15:05+08:00",
+      "message": "merge: sync main group translations into TapModels",
+      "requirement_groups": [
+        "01",
+        "02",
+        "10",
+        "13",
+        "14",
+        "16"
+      ]
+    },
+    {
+      "sha": "49b29ef158e6319cfd6b1227781307de5f8f870e",
+      "parents": "a2988a14ca54b99b09a6f64024166d52fa8db132 4d9ac3e482106d2da3a39fe3e546d8d6801f1cc1",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-13T16:14:49+08:00",
+      "message": "merge(upstream): sync main through 4d9ac3e48\n\nIntegrate OAuth web-search history conflict fix: preserve client web.run tools\nin native and Responses Lite requests instead of injecting a conflicting\nhosted web_search declaration. Validated with 138 targeted test/subtest passes.",
+      "requirement_groups": [
+        "00",
+        "03",
+        "04",
+        "05",
+        "06",
+        "07",
+        "08",
+        "13",
+        "14",
+        "15",
+        "16"
+      ]
+    },
+    {
+      "sha": "f58b507f2c774bb6e6f7f9b8915a84b60a1d3f7e",
+      "parents": "8ea63d472a272b9ebc3300035471186a7dc6db2b 49b29ef158e6319cfd6b1227781307de5f8f870e",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-13T17:28:51+08:00",
+      "message": "merge(main): sync upstream 0.2.16 into tokensavy\n\nIncludes OAuth web.run history conflict fix folded into the main sync commit.",
+      "requirement_groups": [
+        "00",
+        "03",
+        "04",
+        "05",
+        "06",
+        "07",
+        "08",
+        "13",
+        "14",
+        "15",
+        "16"
+      ]
+    },
+    {
+      "sha": "87fb1f2613667cb250525af8a4c7c0c12f03c2f6",
+      "parents": "97d51161c444c22920a6382c5f39e123b01375a6 49b29ef158e6319cfd6b1227781307de5f8f870e",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-13T17:28:33+08:00",
+      "message": "merge(main): sync upstream 0.2.16 into TapModels\n\nIncludes OAuth web.run history conflict fix folded into the main sync commit.",
+      "requirement_groups": [
+        "00",
+        "03",
+        "04",
+        "05",
+        "06",
+        "07",
+        "08",
+        "13",
+        "14",
+        "15",
+        "16"
+      ]
+    },
+    {
+      "sha": "acf71dbc6c3f1ffe8ab0200ed8b7499c1b7d0286",
+      "parents": "49b29ef158e6319cfd6b1227781307de5f8f870e",
+      "author": "holeen",
+      "email": "sohocase@gmail.com",
+      "date": "2026-10-13T21:07:34+08:00",
+      "message": "checkpoint: preserve complete worktree before v0.2.16 history reconstruction",
+      "requirement_groups": [
+        "17"
+      ]
+    }
+  ],
+  "earlier_provenance": {
+    "date": "2026-10-07",
+    "official_base": "3f1a2ea0a760730e3bc528105c00b4ee4f23e469",
+    "source_tips": {
+      "main": "3669ffb0dc4f5b7ff83bd7bc7a50156dbd187238",
+      "TapModels": "a2d3feb5fe7c4e79ec280c04f20714aed78fa68f",
+      "tokensavy": "fcc675b664360da27b3fccbafce32c7de55647b2"
+    },
+    "source_trees": {
+      "main": "bda7a34a9ff2b2e16812b14b854797e44517d848",
+      "TapModels": "0131ee7b185fc36d780b10a4b0584951f8583bc8",
+      "tokensavy": "4be81b40d7711031e2312be0f1ad95ef24c0c283"
+    },
+    "path_comparison": "git diff --no-renames; added/deleted names are separate rows",
+    "groups": {
+      "migration": {
+        "order": "01",
+        "title": "数据库升级与历史兼容",
+        "commit_subject": "chore(schema): consolidate preserved migrations and entity schemas"
+      },
+      "identity": {
+        "order": "02",
+        "title": "三级角色、会话与管理授权",
+        "commit_subject": "feat(auth): consolidate three-tier roles and session protections"
+      },
+      "gateway": {
+        "order": "03",
+        "title": "原生网关与多媒体安全",
+        "commit_subject": "fix(gateway): consolidate native forwarding and tenant isolation"
+      },
+      "anthropic": {
+        "order": "04",
+        "title": "账号、Anthropic 授权与调度",
+        "commit_subject": "feat(accounts): consolidate setup tokens sticky history and Fable thresholds"
+      },
+      "billing": {
+        "order": "05",
+        "title": "支付、退款与返利完整性",
+        "commit_subject": "fix(billing): consolidate payment and refund invariants"
+      },
+      "usage": {
+        "order": "06",
+        "title": "用量排行与页面加载",
+        "commit_subject": "feat(usage): consolidate rankings and page loading improvements"
+      },
+      "diagnostics": {
+        "order": "07",
+        "title": "Codex 降智检测与定时诊断",
+        "commit_subject": "feat(diagnostics): consolidate Codex probes and scheduled tests"
+      },
+      "clients": {
+        "order": "08",
+        "title": "API Key 客户端配置与下载工具",
+        "commit_subject": "feat(clients): consolidate Codex setup catalogs and downloads"
+      },
+      "site": {
+        "order": "09",
+        "title": "品牌界面、文档站与用户体验",
+        "commit_subject": "feat(site): consolidate KDAN presentation and documentation portal"
+      },
+      "localization": {
+        "order": "10",
+        "title": "多语言与繁体生成",
+        "commit_subject": "feat(i18n): consolidate translations and generated traditional Chinese"
+      },
+      "delivery": {
+        "order": "11",
+        "title": "构建、手动发布与在线更新",
+        "commit_subject": "chore(delivery): consolidate manual release and update tooling"
+      },
+      "integration": {
+        "order": "12",
+        "title": "跨功能设置、路由与依赖装配",
+        "commit_subject": "refactor(core): consolidate shared settings routes and dependency wiring"
+      },
+      "records": {
+        "order": "13",
+        "title": "需求、历史说明与工程规范",
+        "commit_subject": "docs(requirements): record final feature requirements and file inventories"
+      }
+    },
+    "source_custom_commits": [
+      {
+        "sha": "a2d3feb5fe7c4e79ec280c04f20714aed78fa68f",
+        "parents": [
+          "756e05168f650a4efa6b0ffb8f06e6d550a991e0",
+          "3669ffb0dc4f5b7ff83bd7bc7a50156dbd187238"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "merge(main): sync RBAC fixes and page loading improvements into TapModels"
+      },
+      {
+        "sha": "756e05168f650a4efa6b0ffb8f06e6d550a991e0",
+        "parents": [
+          "23d48cade6091491cb9750ea3341ec77923e1b69",
+          "3f0d6ede2dd5753bdd70d7b6b866d55a62559fa8"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "merge(main): sync corrected Codex configuration into TapModels"
+      },
+      {
+        "sha": "23d48cade6091491cb9750ea3341ec77923e1b69",
+        "parents": [
+          "b06532840289c33ae5f52cbab160d3c6d15b4071",
+          "207871b21721f36049f233cb1c71345188e3158f"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "merge(main): sync consolidated three-tier roles into TapModels"
+      },
+      {
+        "sha": "b06532840289c33ae5f52cbab160d3c6d15b4071",
+        "parents": [
+          "88bfcc93d3d1ed2dc6c5419e0f5d9dbcf307e6f4",
+          "7c9d3607f5ceb2a3450b53ed3c91bb00cc43f7d3"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "merge(main): sync amended Codex setup and native search"
+      },
+      {
+        "sha": "88bfcc93d3d1ed2dc6c5419e0f5d9dbcf307e6f4",
+        "parents": [
+          "0fde25b7c943076ff5bbc6c37cd44d9d05cb111b",
+          "3d46bfaef290935b4234b3758fefe4681dd0fa51"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "merge(main): auto-load Codex catalogs, add config downloads and remove CC-Switch import"
+      },
+      {
+        "sha": "0fde25b7c943076ff5bbc6c37cd44d9d05cb111b",
+        "parents": [
+          "524d6b248d3e52b7eec7f27c90f493a94a9ef25e",
+          "39d4e56db8fcdb4be4ff30e162a112bc835b15fc"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "merge(main): sync official bootstrap and dependency security fixes"
+      },
+      {
+        "sha": "524d6b248d3e52b7eec7f27c90f493a94a9ef25e",
+        "parents": [
+          "81f4853d813179903c697a1cf9f7d8ed8e7bf8f9",
+          "46fb3a3cfdcb7e167e735c72a37452b61efe82af"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "merge(main): sync official Codex discovery and EasyPay callback fixes"
+      },
+      {
+        "sha": "81f4853d813179903c697a1cf9f7d8ed8e7bf8f9",
+        "parents": [
+          "8dbfbbaccdb3388c63124f89f7299f389ae0d84e",
+          "704383a0232a3d05eeb6979fb9625cd0185070ba"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "merge(main): sync shared usage ranking fix"
+      },
+      {
+        "sha": "8dbfbbaccdb3388c63124f89f7299f389ae0d84e",
+        "parents": [
+          "cda3b84dc72101a9575e950e6f69a21667e1ad80"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "fix: consolidate recent audit and release repairs"
+      },
+      {
+        "sha": "cda3b84dc72101a9575e950e6f69a21667e1ad80",
+        "parents": [
+          "fdd35bbe1a6b929fd846aa7d5aa112220cb79650"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "rebuild: align TapModels with rebuilt main"
+      },
+      {
+        "sha": "fcc675b664360da27b3fccbafce32c7de55647b2",
+        "parents": [
+          "f5e68efe56fa4e82532bed91bdd839344e2c76f7",
+          "3669ffb0dc4f5b7ff83bd7bc7a50156dbd187238"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "merge(main): sync RBAC fixes and page loading improvements into tokensavy"
+      },
+      {
+        "sha": "3669ffb0dc4f5b7ff83bd7bc7a50156dbd187238",
+        "parents": [
+          "16f9fc2eadad9a476e4573ac8c899ecb9c9263de"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "perf: reduce page loading waits and batch account window queries"
+      },
+      {
+        "sha": "16f9fc2eadad9a476e4573ac8c899ecb9c9263de",
+        "parents": [
+          "77165317ad2504b735ca11f43b4f2c7fed28700e"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "feat(auth): implement audited three-tier roles and generated locales"
+      },
+      {
+        "sha": "f5e68efe56fa4e82532bed91bdd839344e2c76f7",
+        "parents": [
+          "96c636158334407122a4edbedc6ca883b5db8609",
+          "3f0d6ede2dd5753bdd70d7b6b866d55a62559fa8"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "merge(main): sync corrected Codex configuration into tokensavy"
+      },
+      {
+        "sha": "3f0d6ede2dd5753bdd70d7b6b866d55a62559fa8",
+        "parents": [
+          "77165317ad2504b735ca11f43b4f2c7fed28700e"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "feat(auth): implement audited three-tier roles and generated locales"
+      },
+      {
+        "sha": "77165317ad2504b735ca11f43b4f2c7fed28700e",
+        "parents": [
+          "b538d6c98a5b022aa6dc2f711ffa89eefc05e6ff"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "feat(keys): remove CC-Switch import"
+      },
+      {
+        "sha": "b538d6c98a5b022aa6dc2f711ffa89eefc05e6ff",
+        "parents": [
+          "39d4e56db8fcdb4be4ff30e162a112bc835b15fc"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "feat(keys): complete Codex setup with catalogs, downloads and native search"
+      },
+      {
+        "sha": "96c636158334407122a4edbedc6ca883b5db8609",
+        "parents": [
+          "b4d7693d3b9a2a2359e9854d02e5fbb097d87bb5",
+          "207871b21721f36049f233cb1c71345188e3158f"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "merge(main): sync consolidated three-tier roles into tokensavy"
+      },
+      {
+        "sha": "207871b21721f36049f233cb1c71345188e3158f",
+        "parents": [
+          "7c9d3607f5ceb2a3450b53ed3c91bb00cc43f7d3"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "feat(auth): implement audited three-tier roles and generated locales"
+      },
+      {
+        "sha": "b4d7693d3b9a2a2359e9854d02e5fbb097d87bb5",
+        "parents": [
+          "c2a78cd6237263798a7ef8eb7c8d882306780111",
+          "7c9d3607f5ceb2a3450b53ed3c91bb00cc43f7d3"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "merge(main): sync amended Codex setup and native search"
+      },
+      {
+        "sha": "7c9d3607f5ceb2a3450b53ed3c91bb00cc43f7d3",
+        "parents": [
+          "7f89a7ea9971ebd1491135ea96b12f49a8852163"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "feat(keys): remove CC-Switch import"
+      },
+      {
+        "sha": "7f89a7ea9971ebd1491135ea96b12f49a8852163",
+        "parents": [
+          "39d4e56db8fcdb4be4ff30e162a112bc835b15fc"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "feat(keys): complete Codex setup with catalogs, downloads and native search"
+      },
+      {
+        "sha": "c2a78cd6237263798a7ef8eb7c8d882306780111",
+        "parents": [
+          "1cba64680015d8774a2e62a4ce5c278bf03bc32d",
+          "3d46bfaef290935b4234b3758fefe4681dd0fa51"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "merge(main): auto-load Codex catalogs, add config downloads and remove CC-Switch import"
+      },
+      {
+        "sha": "3d46bfaef290935b4234b3758fefe4681dd0fa51",
+        "parents": [
+          "35ebb83d83e6c9f680fffd26b08ab67978681d1e"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "feat(keys): remove CC-Switch import"
+      },
+      {
+        "sha": "35ebb83d83e6c9f680fffd26b08ab67978681d1e",
+        "parents": [
+          "39d4e56db8fcdb4be4ff30e162a112bc835b15fc"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "feat(keys): load Codex catalogs automatically and add config downloads"
+      },
+      {
+        "sha": "1cba64680015d8774a2e62a4ce5c278bf03bc32d",
+        "parents": [
+          "0b718feb97fe4ecdf5cc44ae8524f5a183d29eb8",
+          "39d4e56db8fcdb4be4ff30e162a112bc835b15fc"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "merge(main): sync official bootstrap and dependency security fixes"
+      },
+      {
+        "sha": "39d4e56db8fcdb4be4ff30e162a112bc835b15fc",
+        "parents": [
+          "46fb3a3cfdcb7e167e735c72a37452b61efe82af",
+          "3f1a2ea0a760730e3bc528105c00b4ee4f23e469"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "merge(upstream): sync main through 3f1a2ea0a"
+      },
+      {
+        "sha": "0b718feb97fe4ecdf5cc44ae8524f5a183d29eb8",
+        "parents": [
+          "2f84132c6991a3f3859f600402a1c3e98d8dff84",
+          "46fb3a3cfdcb7e167e735c72a37452b61efe82af"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "merge(main): sync official Codex discovery and EasyPay callback fixes"
+      },
+      {
+        "sha": "46fb3a3cfdcb7e167e735c72a37452b61efe82af",
+        "parents": [
+          "704383a0232a3d05eeb6979fb9625cd0185070ba",
+          "d97ccc952ff3b7f63b44c45079ee6a28422f1393"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "merge(upstream): sync main through d97ccc952"
+      },
+      {
+        "sha": "2f84132c6991a3f3859f600402a1c3e98d8dff84",
+        "parents": [
+          "d1b4d3dc21a9e2e1cc6c9f9e8d29afcb0f46f2d2",
+          "704383a0232a3d05eeb6979fb9625cd0185070ba"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "merge(main): sync shared usage ranking fix"
+      },
+      {
+        "sha": "704383a0232a3d05eeb6979fb9625cd0185070ba",
+        "parents": [
+          "f7f744e3ae7e600e955ed21cdb4b2924b5fd2c8d"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "fix: consolidate recent audit and release repairs"
+      },
+      {
+        "sha": "f7f744e3ae7e600e955ed21cdb4b2924b5fd2c8d",
+        "parents": [
+          "b56b53e63f5392adfde2817f15218650a2af9852"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "docs: define project implementation standards"
+      },
+      {
+        "sha": "b56b53e63f5392adfde2817f15218650a2af9852",
+        "parents": [
+          "c551e4a7bc8fc1f83990b28a5d7dbafdb796dfa1"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "i18n: complete API key ranking labels"
+      },
+      {
+        "sha": "c551e4a7bc8fc1f83990b28a5d7dbafdb796dfa1",
+        "parents": [
+          "cd71d889ae143d645bf1f16e139982411a899d57"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "test(usage): cover user API key ranking tab"
+      },
+      {
+        "sha": "cd71d889ae143d645bf1f16e139982411a899d57",
+        "parents": [
+          "fdea0e20368e36357b8fb997c5e14462311a6867"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "feat(usage): add user API key ranking"
+      },
+      {
+        "sha": "d1b4d3dc21a9e2e1cc6c9f9e8d29afcb0f46f2d2",
+        "parents": [
+          "c9b3fe5cd0828979eebeb8ce340f8e60318c7ed3"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "fix: consolidate recent audit and release repairs"
+      },
+      {
+        "sha": "c9b3fe5cd0828979eebeb8ce340f8e60318c7ed3",
+        "parents": [
+          "fdd35bbe1a6b929fd846aa7d5aa112220cb79650"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "rebuild: align tokensavy with rebuilt main"
+      },
+      {
+        "sha": "fdd35bbe1a6b929fd846aa7d5aa112220cb79650",
+        "parents": [
+          "6c40c27e6889bfcab6c0c0fee561a0a04a92ee28"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "docs: define project implementation standards"
+      },
+      {
+        "sha": "6c40c27e6889bfcab6c0c0fee561a0a04a92ee28",
+        "parents": [
+          "893d9eed3a5d62b401978f093ff2b884d59731b1"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "i18n: complete API key ranking labels"
+      },
+      {
+        "sha": "893d9eed3a5d62b401978f093ff2b884d59731b1",
+        "parents": [
+          "b415d6cd1b9f03e5637a7d69a1ed92e7ecb1e2be"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "test(usage): cover user API key ranking tab"
+      },
+      {
+        "sha": "b415d6cd1b9f03e5637a7d69a1ed92e7ecb1e2be",
+        "parents": [
+          "fdea0e20368e36357b8fb997c5e14462311a6867"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "feat(usage): add user API key ranking"
+      },
+      {
+        "sha": "fdea0e20368e36357b8fb997c5e14462311a6867",
+        "parents": [
+          "50f93c72fdf2ed11ebddc1e236a01700c5c2b19b"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "feat(gateway): make Anthropic sticky-session affinity outlive the hour"
+      },
+      {
+        "sha": "50f93c72fdf2ed11ebddc1e236a01700c5c2b19b",
+        "parents": [
+          "13307e42b64e72be87ddaf83a05fd3de56966685"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "feat(usage): add an API key ranking tab to the admin usage page"
+      },
+      {
+        "sha": "13307e42b64e72be87ddaf83a05fd3de56966685",
+        "parents": [
+          "b8dece9000c68815a5b867ca5a1e6f236e173905"
+        ],
+        "author": "holeen",
+        "email": "sohocase@gmail.com",
+        "subject": "rebuild: port current branded customizations onto upstream main"
+      }
+    ],
+    "runtime_change_in_this_reorganization": false,
+    "new_http_endpoints": 0,
+    "new_runtime_configuration": 0,
+    "new_execution_paths": 0,
+    "preserved_attribution": [
+      "Upstream Wei-Shaw Git history and repository LICENSE retained",
+      "backend/internal/service/modeltrace_LICENSE unchanged"
+    ]
+  }
+}

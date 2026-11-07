@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/gateway/routing"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -196,6 +198,7 @@ type liveTestConcurrencyCache struct {
 	ConcurrencyCache
 	mu       sync.Mutex
 	releases int
+	proof    func() (time.Duration, error)
 }
 
 func (c *liveTestConcurrencyCache) AcquireLiveLease(
@@ -377,6 +380,7 @@ func TestProxyLiveSidebandForwardsTextAndBinary(t *testing.T) {
 		cache:                     store,
 		openaiWSPassthroughDialer: dialer,
 		liveAttestationCipher:     attestationCipher,
+		concurrencyService:        NewConcurrencyService(&liveTestConcurrencyCache{}),
 	}
 	proxyResult := make(chan error, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -401,12 +405,22 @@ func TestProxyLiveSidebandForwardsTextAndBinary(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"client.text"}`)))
-	clientText := <-upstream.writes
+	var clientText liveTestFrame
+	select {
+	case clientText = <-upstream.writes:
+	case <-ctx.Done():
+		t.Fatal("text relay did not forward before timeout")
+	}
 	require.Equal(t, coderws.MessageText, clientText.messageType)
 	require.JSONEq(t, `{"type":"client.text"}`, string(clientText.payload))
 
 	require.NoError(t, client.Write(ctx, coderws.MessageBinary, []byte{1, 2, 3}))
-	clientBinary := <-upstream.writes
+	var clientBinary liveTestFrame
+	select {
+	case clientBinary = <-upstream.writes:
+	case <-ctx.Done():
+		t.Fatal("binary relay did not forward before timeout")
+	}
 	require.Equal(t, coderws.MessageBinary, clientBinary.messageType)
 	require.Equal(t, []byte{1, 2, 3}, clientBinary.payload)
 
@@ -600,4 +614,89 @@ func TestFinalizeLiveCallUsageLogFallsBackToSyncCreate(t *testing.T) {
 	require.Equal(t, 1, usageRepo.bestEffortCalls)
 	require.Len(t, usageRepo.logs, 1, "best-effort 失败后必须同步兜底落库")
 	require.Equal(t, record.CallHash, usageRepo.logs[0].RequestID)
+}
+
+func (c *liveTestConcurrencyCache) CheckLiveLease(ctx context.Context, _ int64, _ int64, _ int64, _ string) (time.Duration, error) {
+	if c.proof != nil {
+		return c.proof()
+	}
+	return time.Minute, ctx.Err()
+}
+func (c *liveTestConcurrencyCache) RefreshLiveLeaseProof(ctx context.Context, _ int64, _ int64, _ int64, _ string) (time.Duration, error) {
+	return time.Minute, ctx.Err()
+}
+
+func TestLiveCreateRejectsLostLeaseAtActualSendBoundary(t *testing.T) {
+	var valid atomic.Bool
+	valid.Store(true)
+	authority := &liveTestConcurrencyCache{proof: func() (time.Duration, error) {
+		if valid.Load() {
+			return time.Minute, nil
+		}
+		return 0, nil
+	}}
+	lease, err := routing.AdoptLiveLease(t.Context(), authority, routing.LeaseIdentity{AccountID: 7, UserID: 1, APIKeyID: 1, Token: "owner"})
+	require.NoError(t, err)
+	defer lease.Release()
+	upstream := &liveHTTPUpstreamStub{}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{ID: 7, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "test-token", "chatgpt_account_id": "acct_test"}}
+	valid.Store(false)
+	_, err = svc.createUpstreamLiveCall(t.Context(), account, &LiveCallRequest{SDP: "v=offer", Session: json.RawMessage(`{"model":"gpt-live"}`)}, "test-attestation", lease)
+	require.ErrorIs(t, err, routing.ErrCapacityLeaseLost)
+	require.Nil(t, upstream.request)
+}
+
+type joiningLiveFrameConn struct {
+	*liveTestFrameConn
+	entered, exit, readDone chan struct{}
+}
+
+func (c *joiningLiveFrameConn) ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error) {
+	close(c.entered)
+	<-ctx.Done()
+	<-c.exit
+	close(c.readDone)
+	return 0, nil, context.Cause(ctx)
+}
+func TestLiveObserverLeaseLossCancelsAndJoinsReader(t *testing.T) {
+	var valid atomic.Bool
+	valid.Store(true)
+	authority := &liveTestConcurrencyCache{proof: func() (time.Duration, error) {
+		if valid.Load() {
+			return time.Minute, nil
+		}
+		return 0, nil
+	}}
+	lease, err := routing.AdoptLiveLease(t.Context(), authority, routing.LeaseIdentity{AccountID: 7, UserID: 1, APIKeyID: 1, Token: "owner"})
+	require.NoError(t, err)
+	defer lease.Handoff()
+	ctx, detach := lease.Bind(t.Context())
+	defer detach()
+	frame := &joiningLiveFrameConn{liveTestFrameConn: newLiveTestFrameConn(), entered: make(chan struct{}), exit: make(chan struct{}), readDone: make(chan struct{})}
+	record := &LiveCallRecord{CallHash: "call", Controller: LiveControllerObserver, ControllerOwner: "controller", ExpiresAt: time.Now().Add(time.Minute)}
+	store := &liveTestStore{record: record}
+	svc := &OpenAIGatewayService{cache: store}
+	joined := make(chan error, 1)
+	go func() { joined <- svc.runLiveObserverConnection(ctx, record, frame) }()
+	<-frame.entered
+	valid.Store(false)
+	require.ErrorIs(t, lease.Validate(t.Context()), routing.ErrCapacityLeaseLost)
+	select {
+	case <-joined:
+		t.Fatal("observer returned without joining its reader")
+	case <-time.After(10 * time.Millisecond):
+	}
+	close(frame.exit)
+	select {
+	case err := <-joined:
+		require.ErrorIs(t, err, routing.ErrCapacityLeaseLost)
+	case <-time.After(time.Second):
+		t.Fatal("reader did not join")
+	}
+	select {
+	case <-frame.readDone:
+	default:
+		t.Fatal("read goroutine still active")
+	}
 }

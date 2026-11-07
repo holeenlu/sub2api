@@ -1,0 +1,8 @@
+# TLS entry only. Static files and API forwarding are owned by the portal image.
+{$PORTAL_PUBLIC_ORIGIN} {
+	reverse_proxy vendor-portal:8080 {
+		header_up Host {host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+}

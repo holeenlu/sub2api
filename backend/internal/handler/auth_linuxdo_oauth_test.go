@@ -8,11 +8,9 @@ import (
 	"net/url"
 	"strings"
 	"testing"
-	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/authidentity"
-	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
 	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
 	dbuser "github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -145,6 +143,7 @@ func TestLinuxDoOAuthBindStartRedirectsAndSetsBindCookies(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/oauth/linuxdo/bind/start?intent=bind_current_user&redirect=/settings/connections", nil)
 	c.Request = req
 	c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 42})
+	seedUserID := lifecycleSeedAuth(t, handler, c, 42)
 
 	handler.LinuxDoOAuthStart(c)
 
@@ -166,9 +165,8 @@ func TestLinuxDoOAuthBindStartRedirectsAndSetsBindCookies(t *testing.T) {
 
 	bindCookie := findCookie(cookies, linuxDoOAuthBindUserCookieName)
 	require.NotNil(t, bindCookie)
-	userID, err := parseOAuthBindUserCookieValue(decodeCookieValueForTest(t, bindCookie.Value), "test-secret")
-	require.NoError(t, err)
-	require.Equal(t, int64(42), userID)
+	userID := lifecycleBindCookieUser(t, handler, decodeCookieValueForTest(t, bindCookie.Value))
+	require.Equal(t, seedUserID, userID)
 }
 
 func TestLinuxDoOAuthStartOmitsPKCEWhenDisabled(t *testing.T) {
@@ -304,8 +302,7 @@ func TestLinuxDoOAuthBindStartAcceptsAccessTokenCookie(t *testing.T) {
 
 	bindCookie := findCookie(recorder.Result().Cookies(), linuxDoOAuthBindUserCookieName)
 	require.NotNil(t, bindCookie)
-	userID, err := parseOAuthBindUserCookieValue(decodeCookieValueForTest(t, bindCookie.Value), "test-secret")
-	require.NoError(t, err)
+	userID := lifecycleBindCookieUser(t, handler, decodeCookieValueForTest(t, bindCookie.Value))
 	require.Equal(t, user.ID, userID)
 
 	accessTokenCookie := findCookie(recorder.Result().Cookies(), oauthBindAccessTokenCookieName)
@@ -568,7 +565,7 @@ func TestLinuxDoOAuthCallbackCreatesBindPendingSessionForCompatEmailUser(t *test
 	require.False(t, hasAccessToken)
 }
 
-func TestLinuxDoOAuthCallbackCreatesChoicePendingSessionWhenSignupRequiresInvite(t *testing.T) {
+func TestLinuxDoOAuthCallbackCreatesUserWithoutInvitation(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/token":
@@ -611,24 +608,10 @@ func TestLinuxDoOAuthCallbackCreatesChoicePendingSessionWhenSignupRequiresInvite
 	handler.LinuxDoOAuthCallback(c)
 
 	require.Equal(t, http.StatusFound, recorder.Code)
-	require.Equal(t, "/auth/linuxdo/callback", recorder.Header().Get("Location"))
-
-	sessionCookie := findCookie(recorder.Result().Cookies(), oauthPendingSessionCookieName)
-	require.NotNil(t, sessionCookie)
-
-	ctx := context.Background()
-	session, err := client.PendingAuthSession.Query().
-		Where(pendingauthsession.SessionTokenEQ(decodeCookieValueForTest(t, sessionCookie.Value))).
-		Only(ctx)
+	require.True(t, strings.HasPrefix(recorder.Header().Get("Location"), "/auth/linuxdo/callback#access_token="))
+	count, err := client.User.Query().Count(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, oauthIntentLogin, session.Intent)
-	require.Nil(t, session.TargetUserID)
-
-	completion, ok := session.LocalFlowState[oauthCompletionResponseKey].(map[string]any)
-	require.True(t, ok)
-	require.Equal(t, oauthPendingChoiceStep, completion["step"])
-	require.Equal(t, "/dashboard", completion["redirect"])
-	require.Equal(t, "third_party_signup", completion["choice_reason"])
+	require.Equal(t, 1, count)
 }
 
 func TestLinuxDoOAuthCallbackEmailVerificationCompletesWithBoundEmail(t *testing.T) {
@@ -856,8 +839,9 @@ func TestLinuxDoOAuthCallbackCreatesBindPendingSessionForCurrentUser(t *testing.
 	req.AddCookie(encodedCookie(linuxDoOAuthRedirectCookie, "/settings/connections"))
 	req.AddCookie(encodedCookie(linuxDoOAuthVerifierCookie, "verifier-bind"))
 	req.AddCookie(encodedCookie(linuxDoOAuthIntentCookieName, oauthIntentBindCurrentUser))
-	req.AddCookie(encodedCookie(linuxDoOAuthBindUserCookieName, buildEncodedOAuthBindUserCookie(t, currentUser.ID, "test-secret")))
 	req.AddCookie(encodedCookie(oauthPendingBrowserCookieName, "browser-bind"))
+
+	lifecycleAddBindCapability(t, handler, req, linuxDoOAuthBindUserCookieName, currentUser.ID)
 	c.Request = req
 
 	handler.LinuxDoOAuthCallback(c)
@@ -886,314 +870,6 @@ func TestLinuxDoOAuthCallbackCreatesBindPendingSessionForCurrentUser(t *testing.
 	userCount, err := client.User.Query().Count(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 1, userCount)
-}
-
-func TestCompleteLinuxDoOAuthRegistrationAppliesPendingAdoptionDecision(t *testing.T) {
-	handler, client := newOAuthPendingFlowTestHandler(t, false)
-	ctx := context.Background()
-
-	session, err := client.PendingAuthSession.Create().
-		SetSessionToken("linuxdo-complete-session").
-		SetIntent("login").
-		SetProviderType("linuxdo").
-		SetProviderKey("linuxdo").
-		SetProviderSubject("linuxdo-subject-1").
-		SetResolvedEmail("linuxdo-subject-1@linuxdo-connect.invalid").
-		SetBrowserSessionKey("linuxdo-browser").
-		SetUpstreamIdentityClaims(map[string]any{
-			"username":               "linuxdo_user",
-			"suggested_display_name": "LinuxDo Display",
-			"suggested_avatar_url":   "https://cdn.example/linuxdo.png",
-		}).
-		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
-		Save(ctx)
-	require.NoError(t, err)
-
-	_, err = service.NewAuthPendingIdentityService(client).UpsertAdoptionDecision(ctx, service.PendingIdentityAdoptionDecisionInput{
-		PendingAuthSessionID: session.ID,
-		AdoptAvatar:          true,
-	})
-	require.NoError(t, err)
-
-	body := bytes.NewBufferString(`{"invitation_code":"invite-1","adopt_display_name":true}`)
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/linuxdo/complete-registration", body)
-	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
-	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("linuxdo-browser")})
-	c.Request = req
-
-	handler.CompleteLinuxDoOAuthRegistration(c)
-
-	require.Equal(t, http.StatusOK, recorder.Code)
-	responseData := decodeJSONBody(t, recorder)
-	require.NotEmpty(t, responseData["access_token"])
-
-	userEntity, err := client.User.Query().
-		Where(dbuser.EmailEQ(session.ResolvedEmail)).
-		Only(ctx)
-	require.NoError(t, err)
-	require.Equal(t, "LinuxDo Display", userEntity.Username)
-
-	identity, err := client.AuthIdentity.Query().
-		Where(
-			authidentity.ProviderTypeEQ("linuxdo"),
-			authidentity.ProviderKeyEQ("linuxdo"),
-			authidentity.ProviderSubjectEQ("linuxdo-subject-1"),
-		).
-		Only(ctx)
-	require.NoError(t, err)
-	require.Equal(t, userEntity.ID, identity.UserID)
-	require.Equal(t, "LinuxDo Display", identity.Metadata["display_name"])
-	require.Equal(t, "https://cdn.example/linuxdo.png", identity.Metadata["avatar_url"])
-
-	decision, err := client.IdentityAdoptionDecision.Query().
-		Where(identityadoptiondecision.PendingAuthSessionIDEQ(session.ID)).
-		Only(ctx)
-	require.NoError(t, err)
-	require.NotNil(t, decision.IdentityID)
-	require.Equal(t, identity.ID, *decision.IdentityID)
-	require.True(t, decision.AdoptDisplayName)
-	require.True(t, decision.AdoptAvatar)
-
-	consumed, err := client.PendingAuthSession.Query().
-		Where(pendingauthsession.IDEQ(session.ID)).
-		Only(ctx)
-	require.NoError(t, err)
-	require.NotNil(t, consumed.ConsumedAt)
-}
-
-func TestCompleteLinuxDoOAuthRegistrationRejectsAdoptExistingUserSession(t *testing.T) {
-	handler, client := newOAuthPendingFlowTestHandler(t, false)
-	ctx := context.Background()
-
-	existingUser, err := client.User.Create().
-		SetEmail("owner@example.com").
-		SetUsername("owner-user").
-		SetPasswordHash("hash").
-		SetRole(service.RoleUser).
-		SetStatus(service.StatusActive).
-		Save(ctx)
-	require.NoError(t, err)
-
-	session, err := client.PendingAuthSession.Create().
-		SetSessionToken("linuxdo-complete-invalid-session").
-		SetIntent("adopt_existing_user_by_email").
-		SetProviderType("linuxdo").
-		SetProviderKey("linuxdo").
-		SetProviderSubject("linuxdo-invalid-subject-1").
-		SetTargetUserID(existingUser.ID).
-		SetResolvedEmail(existingUser.Email).
-		SetBrowserSessionKey("linuxdo-invalid-browser").
-		SetUpstreamIdentityClaims(map[string]any{
-			"username": "linuxdo_user",
-		}).
-		SetLocalFlowState(map[string]any{
-			oauthCompletionResponseKey: map[string]any{
-				"step": "bind_login_required",
-			},
-		}).
-		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
-		Save(ctx)
-	require.NoError(t, err)
-
-	body := bytes.NewBufferString(`{"invitation_code":"invite-1"}`)
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/linuxdo/complete-registration", body)
-	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
-	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("linuxdo-invalid-browser")})
-	c.Request = req
-
-	handler.CompleteLinuxDoOAuthRegistration(c)
-
-	require.Equal(t, http.StatusBadRequest, recorder.Code)
-
-	storedSession, err := client.PendingAuthSession.Get(ctx, session.ID)
-	require.NoError(t, err)
-	require.Nil(t, storedSession.ConsumedAt)
-}
-
-func TestCompleteLinuxDoOAuthRegistrationReturnsPendingSessionWhenChoiceStillRequired(t *testing.T) {
-	handler, client := newOAuthPendingFlowTestHandler(t, false)
-	ctx := context.Background()
-
-	session, err := client.PendingAuthSession.Create().
-		SetSessionToken("linuxdo-complete-choice-session").
-		SetIntent("login").
-		SetProviderType("linuxdo").
-		SetProviderKey("linuxdo").
-		SetProviderSubject("linuxdo-choice-subject-1").
-		SetResolvedEmail("linuxdo-choice-subject-1@linuxdo-connect.invalid").
-		SetBrowserSessionKey("linuxdo-choice-browser").
-		SetUpstreamIdentityClaims(map[string]any{
-			"username": "linuxdo_user",
-		}).
-		SetLocalFlowState(map[string]any{
-			oauthCompletionResponseKey: map[string]any{
-				"step":                  oauthPendingChoiceStep,
-				"redirect":              "/dashboard",
-				"email":                 "fresh@example.com",
-				"resolved_email":        "fresh@example.com",
-				"force_email_on_signup": true,
-			},
-		}).
-		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
-		Save(ctx)
-	require.NoError(t, err)
-
-	body := bytes.NewBufferString(`{"invitation_code":"invite-1"}`)
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/linuxdo/complete-registration", body)
-	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
-	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("linuxdo-choice-browser")})
-	c.Request = req
-
-	handler.CompleteLinuxDoOAuthRegistration(c)
-
-	require.Equal(t, http.StatusOK, recorder.Code)
-	responseData := decodeJSONBody(t, recorder)
-	require.Equal(t, "pending_session", responseData["auth_result"])
-	require.Equal(t, oauthPendingChoiceStep, responseData["step"])
-	require.Equal(t, true, responseData["force_email_on_signup"])
-	require.Empty(t, responseData["access_token"])
-
-	userCount, err := client.User.Query().Count(ctx)
-	require.NoError(t, err)
-	require.Zero(t, userCount)
-
-	storedSession, err := client.PendingAuthSession.Get(ctx, session.ID)
-	require.NoError(t, err)
-	require.Nil(t, storedSession.ConsumedAt)
-}
-
-func TestCompleteLinuxDoOAuthRegistrationBindsIdentityWithoutAdoptionFlags(t *testing.T) {
-	handler, client := newOAuthPendingFlowTestHandler(t, false)
-	ctx := context.Background()
-
-	session, err := client.PendingAuthSession.Create().
-		SetSessionToken("linuxdo-complete-no-adoption-session").
-		SetIntent("login").
-		SetProviderType("linuxdo").
-		SetProviderKey("linuxdo").
-		SetProviderSubject("linuxdo-subject-no-adoption").
-		SetResolvedEmail("linuxdo-subject-no-adoption@linuxdo-connect.invalid").
-		SetBrowserSessionKey("linuxdo-browser-no-adoption").
-		SetUpstreamIdentityClaims(map[string]any{
-			"username":               "linuxdo_user",
-			"suggested_display_name": "LinuxDo Legacy",
-			"suggested_avatar_url":   "https://cdn.example/linuxdo-legacy.png",
-		}).
-		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
-		Save(ctx)
-	require.NoError(t, err)
-
-	body := bytes.NewBufferString(`{"invitation_code":"invite-1"}`)
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/linuxdo/complete-registration", body)
-	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
-	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("linuxdo-browser-no-adoption")})
-	c.Request = req
-
-	handler.CompleteLinuxDoOAuthRegistration(c)
-
-	require.Equal(t, http.StatusOK, recorder.Code)
-	responseData := decodeJSONBody(t, recorder)
-	require.NotEmpty(t, responseData["access_token"])
-	require.NotEmpty(t, responseData["refresh_token"])
-
-	userEntity, err := client.User.Query().
-		Where(dbuser.EmailEQ(session.ResolvedEmail)).
-		Only(ctx)
-	require.NoError(t, err)
-	require.Equal(t, "linuxdo_user", userEntity.Username)
-
-	identity, err := client.AuthIdentity.Query().
-		Where(
-			authidentity.ProviderTypeEQ("linuxdo"),
-			authidentity.ProviderKeyEQ("linuxdo"),
-			authidentity.ProviderSubjectEQ("linuxdo-subject-no-adoption"),
-		).
-		Only(ctx)
-	require.NoError(t, err)
-	require.Equal(t, userEntity.ID, identity.UserID)
-
-	decision, err := client.IdentityAdoptionDecision.Query().
-		Where(identityadoptiondecision.PendingAuthSessionIDEQ(session.ID)).
-		Only(ctx)
-	require.NoError(t, err)
-	require.NotNil(t, decision.IdentityID)
-	require.Equal(t, identity.ID, *decision.IdentityID)
-	require.False(t, decision.AdoptDisplayName)
-	require.False(t, decision.AdoptAvatar)
-}
-
-func TestCompleteLinuxDoOAuthRegistrationRejectsIdentityOwnershipConflictBeforeUserCreation(t *testing.T) {
-	handler, client := newOAuthPendingFlowTestHandler(t, false)
-	ctx := context.Background()
-
-	existingOwner, err := client.User.Create().
-		SetEmail("owner@example.com").
-		SetUsername("owner-user").
-		SetPasswordHash("hash").
-		SetRole(service.RoleUser).
-		SetStatus(service.StatusActive).
-		Save(ctx)
-	require.NoError(t, err)
-
-	_, err = client.AuthIdentity.Create().
-		SetUserID(existingOwner.ID).
-		SetProviderType("linuxdo").
-		SetProviderKey("linuxdo").
-		SetProviderSubject("linuxdo-conflict-subject").
-		Save(ctx)
-	require.NoError(t, err)
-
-	session, err := client.PendingAuthSession.Create().
-		SetSessionToken("linuxdo-complete-conflict-session").
-		SetIntent("login").
-		SetProviderType("linuxdo").
-		SetProviderKey("linuxdo").
-		SetProviderSubject("linuxdo-conflict-subject").
-		SetResolvedEmail("linuxdo-conflict-subject@linuxdo-connect.invalid").
-		SetBrowserSessionKey("linuxdo-conflict-browser").
-		SetUpstreamIdentityClaims(map[string]any{
-			"username": "linuxdo_user",
-		}).
-		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
-		Save(ctx)
-	require.NoError(t, err)
-
-	body := bytes.NewBufferString(`{"invitation_code":"invite-1"}`)
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/linuxdo/complete-registration", body)
-	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
-	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("linuxdo-conflict-browser")})
-	c.Request = req
-
-	handler.CompleteLinuxDoOAuthRegistration(c)
-
-	require.Equal(t, http.StatusConflict, recorder.Code)
-	payload := decodeJSONBody(t, recorder)
-	require.Equal(t, "AUTH_IDENTITY_OWNERSHIP_CONFLICT", payload["reason"])
-
-	userCount, err := client.User.Query().
-		Where(dbuser.EmailEQ("linuxdo-conflict-subject@linuxdo-connect.invalid")).
-		Count(ctx)
-	require.NoError(t, err)
-	require.Zero(t, userCount)
-
-	storedSession, err := client.PendingAuthSession.Get(ctx, session.ID)
-	require.NoError(t, err)
-	require.Nil(t, storedSession.ConsumedAt)
 }
 
 func newLinuxDoOAuthTestHandler(t *testing.T, invitationEnabled bool, oauthCfg config.LinuxDoConnectConfig) *AuthHandler {

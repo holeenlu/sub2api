@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -18,7 +19,8 @@ func BackendModeUserGuard(settingService *service.SettingService) gin.HandlerFun
 			return
 		}
 		role, _ := GetUserRoleFromContext(c)
-		if role == "admin" {
+		supplier, _ := authz.SupplierOrigin(c.Request.Context())
+		if role == "admin" || role == "super_admin" || (supplier && authz.IsVendorRole(role) && vendorProfileRoute(c.FullPath())) {
 			c.Next()
 			return
 		}

@@ -1,13 +1,11 @@
 package service
 
-// imageCountBillingEnabled 表示该分组强制按实际出图张数计费，即使渠道是 token 计费。
+// imageCountBillingEnabled selects the existing dedicated-image group policy.
 func imageCountBillingEnabled(apiKey *APIKey) bool {
 	return apiKey != nil && apiKey.Group != nil && apiKey.Group.ImageCountBilling
 }
 
-// imageCountBillingApplies 判断分组按张计费开关是否作用于本次请求。
-// 开关只影响专用图片端点；混合的 Responses/Chat/WS 请求即使带图片工具，
-// 也必须保留 token 计费，避免整条请求被按图片单价结算而丢失文本 token 费用。
+// Mixed requests retain their token accounting, even if they also produce images.
 func imageCountBillingApplies(apiKey *APIKey, imageEndpoint bool) bool {
 	return imageEndpoint && imageCountBillingEnabled(apiKey)
 }

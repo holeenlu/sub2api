@@ -33,7 +33,7 @@ Sub2API releases frequently, and fixes ship in a new release rather than being b
 | Latest release | ✅ |
 | Older releases | ❌ |
 
-Please confirm that the issue reproduces on the latest release or on `main` before reporting.
+Please confirm that the issue reproduces on the latest `NewAPI` release before reporting.
 
 ### Scope
 
@@ -85,7 +85,7 @@ Sub2API 发版频繁，安全修复随新版本发布，不向旧版本回移。
 | 最新 Release | ✅ |
 | 更早的版本 | ❌ |
 
-报告前请先确认问题在最新 Release 或 `main` 上仍可复现。
+报告前请先确认问题在最新 `NewAPI` Release 上仍可复现。
 
 ### 范围
 

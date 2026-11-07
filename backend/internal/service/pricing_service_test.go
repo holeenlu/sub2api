@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -13,14 +14,10 @@ import (
 
 func TestPricingSchedulerBlankRemoteURLDoesNotStart(t *testing.T) {
 	svc := NewPricingService(&config.Config{Pricing: config.PricingConfig{RemoteURL: "  \t  "}}, nil)
-	defer svc.Stop()
+	defer svc.Stop(context.Background())
 
-	svc.startUpdateScheduler()
-	done := make(chan struct{})
-	go func() {
-		svc.wg.Wait()
-		close(done)
-	}()
+	require.NoError(t, svc.Start(context.Background()))
+	done := svc.done
 
 	select {
 	case <-done:

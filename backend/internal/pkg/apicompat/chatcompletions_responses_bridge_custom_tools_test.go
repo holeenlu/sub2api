@@ -1164,3 +1164,21 @@ func TestChatCompletionsChunkToResponsesEvents_FunctionToolStreamUnaffected(t *t
 	}
 	assert.True(t, sawArgsDelta, "function 工具应保持原有参数增量事件")
 }
+
+// Test-only adapters and reference algorithms; production uses the current entrypoints.
+// responsesInputToChatMessages converts a Responses request's instructions +
+// input[] into Chat Completions messages. It is a three-stage pipeline:
+//
+//	parse   — instructions become a system message; input[] is split into items
+//	build   — buildChatMessagesFromItems walks items, attaching reasoning to the
+//	          assistant message that produced a tool call, merging parallel tool
+//	          calls into one assistant message, and skipping item types that have
+//	          no Chat equivalent
+//	normalize — normalizeChatMessages enforces the invariants DeepSeek requires
+//
+// The build + normalize split keeps every protocol rule in one place rather than
+// scattered across per-item cases, and makes unknown future codex item types
+// fail safe instead of leaking into the upstream request.
+func responsesInputToChatMessages(instructions string, inputRaw json.RawMessage) ([]ChatMessage, error) {
+	return responsesInputToChatMessagesWithOptions(instructions, inputRaw, nil)
+}

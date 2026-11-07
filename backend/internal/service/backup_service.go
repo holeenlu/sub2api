@@ -3,6 +3,7 @@ package service
 import (
 	"compress/gzip"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -10,11 +11,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"os"
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -188,11 +189,9 @@ type BackupService struct {
 	db         *sql.DB
 	instanceID string
 
-	wg            sync.WaitGroup     // 追踪活跃的备份/恢复 goroutine
-	shuttingDown  atomic.Bool        // 阻止新备份启动
-	bgCtx         context.Context    // 所有后台操作的 parent context
-	bgCancel      context.CancelFunc // 取消所有活跃后台操作
-	partSizeBytes int64              // 分卷阈值；生产使用 4 GiB，测试可注入更小值
+	tasks         maintenanceTaskOwner
+	cronStopped   context.Context // retained actual scheduler join
+	partSizeBytes int64           // 分卷阈值；生产使用 4 GiB，测试可注入更小值
 }
 
 func NewBackupService(
@@ -202,7 +201,6 @@ func NewBackupService(
 	storeFactory BackupObjectStoreFactory,
 	dumper DBDumper,
 ) *BackupService {
-	bgCtx, bgCancel := context.WithCancel(context.Background())
 	return &BackupService{
 		settingRepo:             settingRepo,
 		dbCfg:                   &cfg.Database,
@@ -210,8 +208,6 @@ func NewBackupService(
 		encryptionKeyConfigured: cfg.Totp.EncryptionKeyConfigured,
 		storeFactory:            storeFactory,
 		dumper:                  dumper,
-		bgCtx:                   bgCtx,
-		bgCancel:                bgCancel,
 		partSizeBytes:           defaultBackupPartSizeBytes,
 		instanceID:              uuid.NewString(),
 	}
@@ -229,35 +225,42 @@ func (s *BackupService) SetLeaderLock(lockCache LeaderLockCache, db *sql.DB) {
 }
 
 // Start 启动定时备份调度器并清理孤立记录
-func (s *BackupService) Start() {
-	s.cronSched = cron.New()
-	// A recently interrupted job may still belong to a live peer. Revisit it
-	// after the maximum execution window rather than deleting it at startup.
-	_, _ = s.cronSched.AddFunc("@every 5m", s.recoverStaleRecords)
-	s.cronSched.Start()
-
-	// 清理重启后孤立的 running 记录
-	s.recoverStaleRecords()
-
-	// 加载已有的定时配置
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	schedule, err := s.GetSchedule(ctx)
-	if err != nil {
-		logger.LegacyPrintf("service.backup", "[Backup] 加载定时备份配置失败: %v", err)
-		return
+func (s *BackupService) Start(ctx context.Context) error {
+	if s == nil {
+		return nil
 	}
-	if schedule.Enabled && schedule.CronExpr != "" {
-		if err := s.applyCronSchedule(schedule); err != nil {
-			logger.LegacyPrintf("service.backup", "[Backup] 应用定时备份配置失败: %v", err)
+	return s.tasks.start(ctx, func(runCtx context.Context) error {
+		c := cron.New()
+		if _, err := c.AddFunc("@every 5m", func() { s.tasks.run(s.recoverStaleRecords) }); err != nil {
+			return err
 		}
-	}
+		s.cronMu.Lock()
+		if !s.tasks.accepting() {
+			s.cronMu.Unlock()
+			return errMaintenanceStopped
+		}
+		s.cronSched = c
+		c.Start()
+		s.cronMu.Unlock()
+		s.recoverStaleRecords(runCtx)
+		loadCtx, cancel := context.WithTimeout(runCtx, 10*time.Second)
+		defer cancel()
+		schedule, err := s.GetSchedule(loadCtx)
+		if err != nil {
+			logger.LegacyPrintf("service.backup", "[Backup] 加载定时备份配置失败: %v", err)
+			return err
+		}
+		if schedule.Enabled && schedule.CronExpr != "" {
+			return s.applyCronSchedule(schedule)
+		}
+		return runCtx.Err()
+	})
 }
 
 // recoverStaleRecords expires interrupted operations only after their maximum
 // runtime. Re-read, status persistence and object deletion share the writer lock.
-func (s *BackupService) recoverStaleRecords() {
-	ctx, cancel := context.WithTimeout(s.bgCtx, 5*time.Minute)
+func (s *BackupService) recoverStaleRecords(parent context.Context) {
+	ctx, cancel := context.WithTimeout(parent, 5*time.Minute)
 	defer cancel()
 	ctx, release, err := s.lockBackupRecordUpdates(ctx)
 	if err != nil {
@@ -331,41 +334,70 @@ func (s *BackupService) cleanupStaleBackupObjects(ctx context.Context, record *B
 }
 
 // Stop 停止定时备份并等待活跃操作完成
-func (s *BackupService) Stop() {
-	s.shuttingDown.Store(true)
+// Drain stops new backup/restore/recovery work and scheduling, then joins all
+// admitted operations. It never pretends completion when the caller expires.
+func (s *BackupService) Drain(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	return s.shutdown(ctx, false)
+}
 
-	var cronStopped context.Context
+// Stop cancels dump/upload/restore IO and waits for its real completion and
+// bounded outcome persistence. Timeout preserves ownership for a subsequent join.
+func (s *BackupService) Stop(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	return s.shutdown(ctx, true)
+}
+
+func (s *BackupService) shutdown(ctx context.Context, cancelWork bool) error {
+	s.tasks.seal(cancelWork)
 	s.cronMu.Lock()
-	if s.cronSched != nil {
-		cronStopped = s.cronSched.Stop()
+	if s.cronSched != nil && s.cronStopped == nil {
+		s.cronStopped = s.cronSched.Stop()
 	}
+	stopped := s.cronStopped
 	s.cronMu.Unlock()
-
-	// 等待活跃备份/恢复完成（最多 5 分钟）
-	done := make(chan struct{})
-	go func() {
-		if cronStopped != nil {
-			<-cronStopped.Done()
-		}
-		s.wg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-		logger.LegacyPrintf("service.backup", "[Backup] all active operations finished")
-	case <-time.After(5 * time.Minute):
-		logger.LegacyPrintf("service.backup", "[Backup] shutdown timeout after 5min, cancelling active operations")
-		if s.bgCancel != nil {
-			s.bgCancel() // 取消所有后台操作
-		}
-		// 给 goroutine 时间响应取消并完成清理
-		select {
-		case <-done:
-			logger.LegacyPrintf("service.backup", "[Backup] active operations cancelled and cleaned up")
-		case <-time.After(10 * time.Second):
-			logger.LegacyPrintf("service.backup", "[Backup] goroutine cleanup timed out")
+	if stopped != nil {
+		if err := waitMaintenanceDone(ctx, stopped.Done()); err != nil {
+			return err
 		}
 	}
+	if cancelWork {
+		return s.tasks.stop(ctx)
+	}
+	return s.tasks.drain(ctx)
+}
+
+// closeBackupResource reports teardown failures as well as preserving the
+// resource's real completion; a failed Close cannot become a successful Stop.
+func (s *BackupService) closeBackupResource(resource io.Closer, label string) error {
+	if err := resource.Close(); err != nil {
+		wrapped := fmt.Errorf("close %s: %w", label, err)
+		s.tasks.recordCloseError(wrapped)
+		return wrapped
+	}
+	return nil
+}
+
+// Preserve durable final outcomes even after execution cancellation. This is a
+// bounded part of the admitted operation, and shutdown still joins it.
+func (s *BackupService) persistBackupOutcome(record *BackupRecord, restore bool) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var err error
+	if restore {
+		err = s.saveRestoreRecord(ctx, record)
+	} else {
+		err = s.saveRecord(ctx, record)
+	}
+	if err != nil {
+		s.tasks.recordCloseError(fmt.Errorf("persist backup outcome: %w", err))
+		logger.LegacyPrintf("service.backup", "[Backup] 保存最终记录失败: %v", err)
+	}
+	return err
 }
 
 // ─── S3 配置管理 ───
@@ -512,8 +544,8 @@ func (s *BackupService) applyCronSchedule(cfg *BackupScheduleConfig) error {
 	s.cronMu.Lock()
 	defer s.cronMu.Unlock()
 
-	if s.cronSched == nil {
-		return fmt.Errorf("cron scheduler not initialized")
+	if s.cronSched == nil || !s.tasks.accepting() {
+		return fmt.Errorf("cron scheduler is not accepting work")
 	}
 
 	// 移除旧任务
@@ -544,10 +576,12 @@ func (s *BackupService) removeCronSchedule() {
 }
 
 func (s *BackupService) runScheduledBackup() {
-	s.wg.Add(1)
-	defer s.wg.Done()
-
-	ctx, cancel := context.WithTimeout(s.bgCtx, 30*time.Minute)
+	parent, finish, err := s.tasks.begin()
+	if err != nil {
+		return
+	}
+	defer finish()
+	ctx, cancel := context.WithTimeout(parent, 30*time.Minute)
 	defer cancel()
 
 	// 多实例保护: 集群部署时只让 leader 执行定时备份, 避免每个实例各自对同一个
@@ -597,14 +631,15 @@ func (s *BackupService) runScheduledBackup() {
 // CreateBackup 创建全量数据库备份并上传到 S3。
 // expireDays: 备份过期天数，0=永不过期，默认14天
 func (s *BackupService) CreateBackup(ctx context.Context, triggeredBy string, expireDays int) (*BackupRecord, error) {
+	ctx, finish, err := s.tasks.attach(ctx)
+	if err != nil {
+		return nil, infraerrors.ServiceUnavailable("SERVER_SHUTTING_DOWN", "server is shutting down")
+	}
+	defer finish()
 	return s.createBackup(ctx, triggeredBy, expireDays, nil)
 }
 
 func (s *BackupService) createBackup(ctx context.Context, triggeredBy string, expireDays int, schedule *BackupScheduleConfig) (*BackupRecord, error) {
-	if s.shuttingDown.Load() {
-		return nil, infraerrors.ServiceUnavailable("SERVER_SHUTTING_DOWN", "server is shutting down")
-	}
-
 	s.opMu.Lock()
 	if s.backingUp {
 		s.opMu.Unlock()
@@ -684,9 +719,18 @@ func (s *BackupService) createBackup(ctx context.Context, triggeredBy string, ex
 
 // StartBackup 异步创建备份，立即返回 running 状态的记录
 func (s *BackupService) StartBackup(ctx context.Context, triggeredBy string, expireDays int) (*BackupRecord, error) {
-	if s.shuttingDown.Load() {
+	root, finish, err := s.tasks.begin()
+	if err != nil {
 		return nil, infraerrors.ServiceUnavailable("SERVER_SHUTTING_DOWN", "server is shutting down")
 	}
+	ctx, cancelInput := linkMaintenanceContext(ctx, root)
+	defer cancelInput()
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			finish()
+		}
+	}()
 
 	s.opMu.Lock()
 	if s.backingUp {
@@ -750,9 +794,9 @@ func (s *BackupService) StartBackup(ctx context.Context, triggeredBy string, exp
 	// 在启动 goroutine 前完成拷贝，避免数据竞争
 	result := *record
 
-	s.wg.Add(1)
+	handedOff = true
 	go func() {
-		defer s.wg.Done()
+		defer finish()
 		defer func() {
 			s.opMu.Lock()
 			s.backingUp = false
@@ -765,18 +809,18 @@ func (s *BackupService) StartBackup(ctx context.Context, triggeredBy string, exp
 				record.ErrorMsg = fmt.Sprintf("internal panic: %v", r)
 				record.Progress = ""
 				record.FinishedAt = time.Now().Format(time.RFC3339)
-				_ = s.saveRecord(context.Background(), record)
+				_ = s.persistBackupOutcome(record, false)
 			}
 		}()
-		s.executeBackup(record, objectStore, s3Cfg)
+		s.executeBackup(root, record, objectStore, s3Cfg)
 	}()
 
 	return &result, nil
 }
 
 // executeBackup 后台执行备份（独立于 HTTP context）
-func (s *BackupService) executeBackup(record *BackupRecord, objectStore BackupObjectStore, s3Cfg *BackupS3Config) {
-	ctx, cancel := context.WithTimeout(s.bgCtx, 30*time.Minute)
+func (s *BackupService) executeBackup(parent context.Context, record *BackupRecord, objectStore BackupObjectStore, s3Cfg *BackupS3Config) {
+	ctx, cancel := context.WithTimeout(parent, 30*time.Minute)
 	defer cancel()
 
 	// 阶段1: pg_dump -> gzip 临时文件
@@ -788,7 +832,7 @@ func (s *BackupService) executeBackup(record *BackupRecord, objectStore BackupOb
 		record.ErrorMsg = err.Error()
 		record.Progress = ""
 		record.FinishedAt = time.Now().Format(time.RFC3339)
-		_ = s.saveRecord(context.Background(), record)
+		_ = s.persistBackupOutcome(record, false)
 		return
 	}
 	defer func() { _ = cleanupBackupFiles(archivePath) }()
@@ -802,7 +846,7 @@ func (s *BackupService) executeBackup(record *BackupRecord, objectStore BackupOb
 		record.ErrorMsg = err.Error()
 		record.Progress = ""
 		record.FinishedAt = time.Now().Format(time.RFC3339)
-		_ = s.saveRecord(context.Background(), record)
+		_ = s.persistBackupOutcome(record, false)
 		return
 	}
 
@@ -810,7 +854,7 @@ func (s *BackupService) executeBackup(record *BackupRecord, objectStore BackupOb
 	record.Status = "completed"
 	record.Progress = ""
 	record.FinishedAt = time.Now().Format(time.RFC3339)
-	if err := s.saveRecord(context.Background(), record); err != nil {
+	if err := s.persistBackupOutcome(record, false); err != nil {
 		logger.LegacyPrintf("service.backup", "[Backup] 保存备份记录失败: %v", err)
 	}
 }
@@ -822,20 +866,20 @@ func (s *BackupService) createCompressedBackupFile(ctx context.Context) (string,
 	}
 	archive, err := os.CreateTemp("", "sub2api-backup-*.sql.gz")
 	if err != nil {
-		_ = dumpReader.Close()
+		_ = s.closeBackupResource(dumpReader, "database dump")
 		return "", 0, fmt.Errorf("create backup archive: %w", err)
 	}
 	archivePath := archive.Name()
 
 	gzWriter := gzip.NewWriter(archive)
 	_, copyErr := io.Copy(gzWriter, dumpReader)
-	if closeErr := gzWriter.Close(); copyErr == nil && closeErr != nil {
+	if closeErr := s.closeBackupResource(gzWriter, "backup gzip writer"); copyErr == nil && closeErr != nil {
 		copyErr = closeErr
 	}
-	if closeErr := dumpReader.Close(); copyErr == nil && closeErr != nil {
+	if closeErr := s.closeBackupResource(dumpReader, "database dump"); copyErr == nil && closeErr != nil {
 		copyErr = closeErr
 	}
-	if closeErr := archive.Close(); copyErr == nil && closeErr != nil {
+	if closeErr := s.closeBackupResource(archive, "backup archive"); copyErr == nil && closeErr != nil {
 		copyErr = closeErr
 	}
 	if copyErr != nil {
@@ -918,7 +962,13 @@ func (s *BackupService) buildBackupPartKey(root string, index int) string {
 }
 
 // RestoreBackup 从 S3 下载备份并流式恢复到数据库
-func (s *BackupService) RestoreBackup(ctx context.Context, backupID string) error {
+func (s *BackupService) RestoreBackup(ctx context.Context, backupID string) (retErr error) {
+	ctx, finish, err := s.tasks.attach(ctx)
+	if err != nil {
+		return err
+	}
+	defer finish()
+
 	s.opMu.Lock()
 	if s.restoring {
 		s.opMu.Unlock()
@@ -963,17 +1013,17 @@ func (s *BackupService) RestoreBackup(ctx context.Context, backupID string) erro
 	if err != nil {
 		return fmt.Errorf("S3 download failed: %w", err)
 	}
-	defer func() { _ = body.Close() }()
+	defer func() { retErr = errors.Join(retErr, s.closeBackupResource(body, "backup download")) }()
 
 	// 流式解压 gzip -> psql（不将全部数据加载到内存）
 	gzReader, err := gzip.NewReader(body)
 	if err != nil {
 		return fmt.Errorf("gzip reader: %w", err)
 	}
-	defer func() { _ = gzReader.Close() }()
+	defer func() { retErr = errors.Join(retErr, s.closeBackupResource(gzReader, "restore gzip reader")) }()
 
 	// 流式恢复
-	if err := s.dumper.Restore(ctx, gzReader); err != nil {
+	if err := s.restoreWithSessionInvalidation(ctx, gzReader); err != nil {
 		return fmt.Errorf("pg restore: %w", err)
 	}
 
@@ -982,9 +1032,18 @@ func (s *BackupService) RestoreBackup(ctx context.Context, backupID string) erro
 
 // StartRestore 异步恢复备份，立即返回
 func (s *BackupService) StartRestore(ctx context.Context, backupID string) (*BackupRecord, error) {
-	if s.shuttingDown.Load() {
+	root, finish, err := s.tasks.begin()
+	if err != nil {
 		return nil, infraerrors.ServiceUnavailable("SERVER_SHUTTING_DOWN", "server is shutting down")
 	}
+	ctx, cancelInput := linkMaintenanceContext(ctx, root)
+	defer cancelInput()
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			finish()
+		}
+	}()
 
 	s.opMu.Lock()
 	if s.restoring {
@@ -1031,9 +1090,9 @@ func (s *BackupService) StartRestore(ctx context.Context, backupID string) (*Bac
 	launched = true
 	result := *record
 
-	s.wg.Add(1)
+	handedOff = true
 	go func() {
-		defer s.wg.Done()
+		defer finish()
 		defer func() {
 			s.opMu.Lock()
 			s.restoring = false
@@ -1044,18 +1103,18 @@ func (s *BackupService) StartRestore(ctx context.Context, backupID string) (*Bac
 				logger.LegacyPrintf("service.backup", "[Backup] restore panic recovered: %v", r)
 				record.RestoreStatus = "failed"
 				record.RestoreError = fmt.Sprintf("internal panic: %v", r)
-				_ = s.saveRestoreRecord(context.Background(), record)
+				_ = s.persistBackupOutcome(record, true)
 			}
 		}()
-		s.executeRestore(record, objectStore)
+		s.executeRestore(root, record, objectStore)
 	}()
 
 	return &result, nil
 }
 
 // executeRestore 后台执行恢复
-func (s *BackupService) executeRestore(record *BackupRecord, objectStore BackupObjectStore) {
-	ctx, cancel := context.WithTimeout(s.bgCtx, 30*time.Minute)
+func (s *BackupService) executeRestore(parent context.Context, record *BackupRecord, objectStore BackupObjectStore) {
+	ctx, cancel := context.WithTimeout(parent, 30*time.Minute)
 	defer cancel()
 
 	if len(record.Parts) > 0 {
@@ -1063,19 +1122,19 @@ func (s *BackupService) executeRestore(record *BackupRecord, objectStore BackupO
 		if err != nil {
 			record.RestoreStatus = "failed"
 			record.RestoreError = err.Error()
-			_ = s.saveRestoreRecord(context.Background(), record)
+			_ = s.persistBackupOutcome(record, true)
 			return
 		}
 		defer func() { _ = cleanupBackupFiles(archivePath) }()
 		if err := s.restoreArchive(ctx, archivePath); err != nil {
 			record.RestoreStatus = "failed"
 			record.RestoreError = fmt.Sprintf("pg restore: %v", err)
-			_ = s.saveRestoreRecord(context.Background(), record)
+			_ = s.persistBackupOutcome(record, true)
 			return
 		}
 		record.RestoreStatus = "completed"
 		record.RestoredAt = time.Now().Format(time.RFC3339)
-		if err := s.saveRestoreRecord(context.Background(), record); err != nil {
+		if err := s.persistBackupOutcome(record, true); err != nil {
 			logger.LegacyPrintf("service.backup", "[Backup] 保存恢复记录失败: %v", err)
 		}
 		return
@@ -1085,30 +1144,30 @@ func (s *BackupService) executeRestore(record *BackupRecord, objectStore BackupO
 	if err != nil {
 		record.RestoreStatus = "failed"
 		record.RestoreError = fmt.Sprintf("S3 download failed: %v", err)
-		_ = s.saveRestoreRecord(context.Background(), record)
+		_ = s.persistBackupOutcome(record, true)
 		return
 	}
-	defer func() { _ = body.Close() }()
+	defer func() { _ = s.closeBackupResource(body, "backup download") }()
 
 	gzReader, err := gzip.NewReader(body)
 	if err != nil {
 		record.RestoreStatus = "failed"
 		record.RestoreError = fmt.Sprintf("gzip reader: %v", err)
-		_ = s.saveRestoreRecord(context.Background(), record)
+		_ = s.persistBackupOutcome(record, true)
 		return
 	}
-	defer func() { _ = gzReader.Close() }()
+	defer func() { _ = s.closeBackupResource(gzReader, "restore gzip reader") }()
 
-	if err := s.dumper.Restore(ctx, gzReader); err != nil {
+	if err := s.restoreWithSessionInvalidation(ctx, gzReader); err != nil {
 		record.RestoreStatus = "failed"
 		record.RestoreError = fmt.Sprintf("pg restore: %v", err)
-		_ = s.saveRestoreRecord(context.Background(), record)
+		_ = s.persistBackupOutcome(record, true)
 		return
 	}
 
 	record.RestoreStatus = "completed"
 	record.RestoredAt = time.Now().Format(time.RFC3339)
-	if err := s.saveRestoreRecord(context.Background(), record); err != nil {
+	if err := s.persistBackupOutcome(record, true); err != nil {
 		logger.LegacyPrintf("service.backup", "[Backup] 保存恢复记录失败: %v", err)
 	}
 }
@@ -1143,7 +1202,7 @@ func (s *BackupService) downloadBackupParts(ctx context.Context, objectStore Bac
 		}
 		hash := sha256.New()
 		written, copyErr := io.Copy(io.MultiWriter(archive, hash), body)
-		closeErr := body.Close()
+		closeErr := s.closeBackupResource(body, "backup download")
 		if copyErr != nil {
 			cleanup()
 			return "", fmt.Errorf("read backup part %d: %w", part.Index, copyErr)
@@ -1161,26 +1220,38 @@ func (s *BackupService) downloadBackupParts(ctx context.Context, objectStore Bac
 			return "", fmt.Errorf("backup part %d checksum mismatch", part.Index)
 		}
 	}
-	if err := archive.Close(); err != nil {
+	if err := s.closeBackupResource(archive, "restore archive"); err != nil {
 		_ = cleanupBackupFiles(path)
 		return "", fmt.Errorf("close restore archive: %w", err)
 	}
 	return path, nil
 }
 
-func (s *BackupService) restoreArchive(ctx context.Context, archivePath string) error {
+// The dump and this epilogue run in PgDumper's one transaction. A fresh random
+// generation is essential: incrementing a restored old value could recreate
+// the generation of an already revoked token from before the restore.
+func (s *BackupService) restoreWithSessionInvalidation(ctx context.Context, data io.Reader) error {
+	generation, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 62))
+	if err != nil {
+		return err
+	}
+	epilogue := fmt.Sprintf("\n-- Invalidate pre-restore authentication in the same restore transaction.\nUPDATE users SET session_generation = %d;\nUPDATE pending_auth_sessions SET consumed_at = NOW() WHERE consumed_at IS NULL;\n", generation.Int64()+1)
+	return s.dumper.Restore(ctx, io.MultiReader(data, strings.NewReader(epilogue)))
+}
+
+func (s *BackupService) restoreArchive(ctx context.Context, archivePath string) (retErr error) {
 	archive, err := os.Open(archivePath)
 	if err != nil {
 		return fmt.Errorf("open restore archive: %w", err)
 	}
-	defer func() { _ = archive.Close() }()
+	defer func() { retErr = errors.Join(retErr, s.closeBackupResource(archive, "restore archive")) }()
 
 	gzReader, err := gzip.NewReader(archive)
 	if err != nil {
 		return fmt.Errorf("gzip reader: %w", err)
 	}
-	defer func() { _ = gzReader.Close() }()
-	if err := s.dumper.Restore(ctx, gzReader); err != nil {
+	defer func() { retErr = errors.Join(retErr, s.closeBackupResource(gzReader, "restore gzip reader")) }()
+	if err := s.restoreWithSessionInvalidation(ctx, gzReader); err != nil {
 		return fmt.Errorf("pg restore: %w", err)
 	}
 	return nil

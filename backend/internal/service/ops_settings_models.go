@@ -97,6 +97,7 @@ type OpsAlertRuntimeSettings struct {
 
 // OpsAdvancedSettings stores advanced ops configuration (data retention, aggregation).
 type OpsAdvancedSettings struct {
+	QuotaProtection             SchedulingQuotaProtection              `json:"quota_protection"`
 	DataRetention               OpsDataRetentionSettings               `json:"data_retention"`
 	Aggregation                 OpsAggregationSettings                 `json:"aggregation"`
 	OpenAIAccountQuotaAutoPause OpsOpenAIAccountQuotaAutoPauseSettings `json:"openai_account_quota_auto_pause"`
@@ -104,12 +105,14 @@ type OpsAdvancedSettings struct {
 	IgnoreContextCanceled       bool                                   `json:"ignore_context_canceled"`
 	IgnoreNoAvailableAccounts   bool                                   `json:"ignore_no_available_accounts"`
 	// Deprecated compatibility field. It is always normalized to true.
-	IgnoreInvalidApiKeyErrors       bool `json:"ignore_invalid_api_key_errors"`
-	IgnoreInsufficientBalanceErrors bool `json:"ignore_insufficient_balance_errors"`
-	DisplayOpenAITokenStats         bool `json:"display_openai_token_stats"`
-	DisplayAlertEvents              bool `json:"display_alert_events"`
-	AutoRefreshEnabled              bool `json:"auto_refresh_enabled"`
-	AutoRefreshIntervalSec          int  `json:"auto_refresh_interval_seconds"`
+	IgnoreInvalidApiKeyErrors             bool `json:"ignore_invalid_api_key_errors"`
+	IgnoreInsufficientBalanceErrors       bool `json:"ignore_insufficient_balance_errors"`
+	AccountTelemetrySendingEnabled        bool `json:"account_telemetry_sending_enabled"`
+	AccountTelemetryUploadIntervalSeconds int  `json:"account_telemetry_upload_interval_seconds"`
+	DisplayOpenAITokenStats               bool `json:"display_openai_token_stats"`
+	DisplayAlertEvents                    bool `json:"display_alert_events"`
+	AutoRefreshEnabled                    bool `json:"auto_refresh_enabled"`
+	AutoRefreshIntervalSec                int  `json:"auto_refresh_interval_seconds"`
 }
 
 type OpsOpenAIAccountQuotaAutoPauseSettings struct {

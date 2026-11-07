@@ -105,37 +105,31 @@ func (c *RPMCacheImpl) GetRPM(ctx context.Context, accountID int64) (int, error)
 	return val, nil
 }
 
-// GetRPMBatch 批量获取多个账号的 RPM 计数（使用 Pipeline）
+// GetRPMBatch uses one multi-key read after Redis TIME, avoiding a pipeline
+// with one command per account. Missing counters retain the existing zero value.
 func (c *RPMCacheImpl) GetRPMBatch(ctx context.Context, accountIDs []int64) (map[int64]int, error) {
 	if len(accountIDs) == 0 {
 		return map[int64]int{}, nil
 	}
-
-	// 获取当前分钟后缀
 	minuteSuffix, err := c.currentMinuteSuffix(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("rpm batch get: %w", err)
 	}
-
-	// 使用 Pipeline 批量 GET
-	pipe := c.rdb.Pipeline()
-	cmds := make(map[int64]*redis.StringCmd, len(accountIDs))
-	for _, id := range accountIDs {
-		key := fmt.Sprintf("%s%d:%s", rpmKeyPrefix, id, minuteSuffix)
-		cmds[id] = pipe.Get(ctx, key)
+	keys := make([]string, len(accountIDs))
+	for i, id := range accountIDs {
+		keys[i] = fmt.Sprintf("%s%d:%s", rpmKeyPrefix, id, minuteSuffix)
 	}
-
-	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+	values, err := c.rdb.MGet(ctx, keys...).Result()
+	if err != nil {
 		return nil, fmt.Errorf("rpm batch get: %w", err)
 	}
-
 	result := make(map[int64]int, len(accountIDs))
-	for id, cmd := range cmds {
-		if val, err := cmd.Int(); err == nil {
-			result[id] = val
-		} else {
-			result[id] = 0
+	for i, value := range values {
+		count := 0
+		if raw, ok := value.(string); ok {
+			count, _ = strconv.Atoi(raw)
 		}
+		result[accountIDs[i]] = count
 	}
 	return result, nil
 }

@@ -105,8 +105,8 @@ func TestOpenAIResponsesWebSocket_CompositeModelSwitchRequiresReconnect(t *testi
 		for _, model := range []string{"gpt-5.4", "grok-4.3", "unknown-alias"} {
 			t.Run(mode+"/"+model, func(t *testing.T) {
 				runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-					firstPayload:  `{"type":"response.create","model":"public-alias"}`,
-					secondPayload: `{"type":"response.create","model":"` + model + `"}`, group: compositeWSGroup(), ingressMode: mode,
+					firstPayload:  `{"type":"response.create","model":"public-alias","input":[{"role":"user","content":"hello"}]}`,
+					secondPayload: `{"type":"response.create","model":"` + model + `","input":"hello"}`, group: compositeWSGroup(), ingressMode: mode,
 					compositeResolver:       compositeWSResolver(service.PlatformOpenAI, "responses", "gpt-5.4"),
 					secondTurnCloseExpected: true, closeReason: "model switch requires reconnect",
 				})
@@ -119,8 +119,8 @@ func TestOpenAIResponsesWebSocket_CompositeChannelBilling(t *testing.T) {
 	for _, source := range []string{service.BillingModelSourceRequested, service.BillingModelSourceChannelMapped, service.BillingModelSourceUpstream} {
 		t.Run(source, func(t *testing.T) {
 			got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-				firstPayload:      `{"type":"response.create","model":"gpt-5.6-sol"}`,
-				secondPayload:     `{"type":"response.create","model":"gpt-5.6-sol"}`,
+				firstPayload:      `{"type":"response.create","model":"gpt-5.6-sol","input":[{"role":"user","content":"hello"}]}`,
+				secondPayload:     `{"type":"response.create","model":"gpt-5.6-sol","input":[{"role":"user","content":"hello"}]}`,
 				group:             compositeWSGroup("gpt-5.6-sol"),
 				compositeResolver: service.NewCompositeRouteResolver(&compositeWSRouteRepo{routes: []service.CompositeModelRoute{{PublicModel: "gpt-5.6-sol", MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformOpenAI, Endpoint: service.CompositeRouteEndpointResponses, UpstreamModel: "route-target"}}}),
 				channelMapping:    map[string]string{"route-target": "gpt-5.4"}, billingModelSource: source,
@@ -142,7 +142,7 @@ func TestOpenAIResponsesWebSocket_CompositeChannelBilling(t *testing.T) {
 
 func TestOpenAIResponsesWebSocket_CompositeDetectorFallback(t *testing.T) {
 	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-		firstPayload: `{"type":"response.create","model":"gpt-5.4"}`, group: compositeWSGroup(),
+		firstPayload: `{"type":"response.create","model":"gpt-5.4","input":[{"role":"user","content":"hello"}]}`, group: compositeWSGroup(),
 		compositeResolver: service.NewCompositeRouteResolver(&compositeWSRouteRepo{}),
 	})
 	require.Equal(t, "gpt-5.4", gjson.GetBytes(got.upstreamFirstPayload, "model").String())
@@ -150,9 +150,9 @@ func TestOpenAIResponsesWebSocket_CompositeDetectorFallback(t *testing.T) {
 
 func TestOpenAIResponsesWebSocket_CompositeSessionModelSwitchRequiresReconnect(t *testing.T) {
 	runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-		firstPayload:  `{"type":"response.create","model":"public-alias"}`,
+		firstPayload:  `{"type":"response.create","model":"public-alias","input":[{"role":"user","content":"hello"}]}`,
 		midPayload:    `{"type":"session.update","session":{"model":"grok-4.3"}}`,
-		secondPayload: `{"type":"response.create"}`, group: compositeWSGroup(),
+		secondPayload: `{"type":"response.create","input":"hello"}`, group: compositeWSGroup(),
 		compositeResolver:       compositeWSResolver(service.PlatformOpenAI, "responses", "gpt-5.4"),
 		secondTurnCloseExpected: true, closeReason: "model switch requires reconnect",
 	})

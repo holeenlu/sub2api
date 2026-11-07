@@ -40,6 +40,14 @@ var gatewayTransportFailoverBody = []byte(`{"type":"error","error":{"type":"upst
 // It deliberately does NOT write to the response: the handler owns the
 // response (failover, or a protocol-correct error once failover is exhausted).
 func (s *GatewayService) handleUpstreamTransportError(ctx context.Context, c *gin.Context, account *Account, err error, event OpsUpstreamErrorEvent) error {
+	if IsTurnBudgetError(err) {
+		return err
+	}
+	var recovery *UpstreamFailoverError
+	if errors.As(err, &recovery) {
+		return err
+	}
+
 	if isClientCanceledTransportError(ctx, err) {
 		return err
 	}
@@ -68,7 +76,9 @@ func (s *GatewayService) handleUpstreamTransportError(ctx context.Context, c *gi
 	}
 
 	return &UpstreamFailoverError{
-		StatusCode:   http.StatusBadGateway,
+		StatusCode: http.StatusBadGateway,
+		Cause:      err, RequestNotSent: requestDefinitelyUnsent(err),
+		RetryableOnSameAccount: !classifyUpstreamTransportError(err).Persistent, SameAccountRetryMax: 1,
 		ResponseBody: gatewayTransportFailoverBody,
 	}
 }

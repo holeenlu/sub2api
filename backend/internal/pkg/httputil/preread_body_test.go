@@ -94,4 +94,15 @@ func TestPrereadBodyPartialConsumeThenPreallocReturnsFullBody(t *testing.T) {
 	if !bytes.Equal(got, body) {
 		t.Fatalf("expected full body after partial consume, got %d bytes", len(got))
 	}
+	var tail bytes.Buffer
+	written, err := preread.WriteTo(&tail)
+	if err != nil || written != int64(len(body)-len(head)) || !bytes.Equal(tail.Bytes(), body[len(head):]) {
+		t.Fatalf("WriteTo must consume only the remaining bytes: wrote %d, err %v", written, err)
+	}
+	if n, err := preread.Read(head); n != 0 || err != io.EOF {
+		t.Fatalf("WriteTo did not advance the read cursor: %d, %v", n, err)
+	}
+	if &preread.Bytes()[0] != &body[0] || !bytes.Equal(preread.Bytes(), body) {
+		t.Fatal("WriteTo changed the immutable complete body")
+	}
 }

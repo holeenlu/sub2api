@@ -123,7 +123,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_StateBoundToExec
 		}
 		scope, _ := resolveOpenAIWSExecutionScope(ginCtx, firstMessage, 21)
 		keysCh <- [2]string{svc.GenerateSessionHash(ginCtx, firstMessage), scope}
-		serverErrCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "sk-test", firstMessage, nil)
+		serverErrCh <- svc.ProxyResponsesWebSocketFromClient(openAIWSTestAdmissionContext(r.Context()), ginCtx, conn, account, "sk-test", firstMessage, nil)
 	}))
 	defer wsServer.Close()
 
@@ -286,7 +286,7 @@ func runOpenAIWSCodexThreadPair(t *testing.T, threadA, threadB string) (serverEr
 			serverErrCh <- readErr
 			return
 		}
-		serverErrCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "test-token", firstMessage, nil)
+		serverErrCh <- svc.ProxyResponsesWebSocketFromClient(openAIWSTestAdmissionContext(r.Context()), ginCtx, conn, account, "test-token", firstMessage, nil)
 	}))
 	defer wsServer.Close()
 

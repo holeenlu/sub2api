@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math"
 	"strings"
 	"sync/atomic"
@@ -92,6 +93,7 @@ type wildcardMappingEntry struct {
 
 // channelCache 渠道缓存快照（扁平化哈希结构，热路径 O(1) 查找）
 type channelCache struct {
+	loadErr error // retained failure is not a successful empty pricing publication
 	// 热路径查找
 	pricingByGroupModel     map[channelModelKey]*ChannelModelPricing            // (groupID, platform, model) → 定价
 	wildcardByGroupPlatform map[channelGroupPlatformKey][]*wildcardPricingEntry // (groupID, platform) → 通配符定价（按配置顺序，先匹配先使用）
@@ -160,6 +162,7 @@ type ChannelCachePubSub interface {
 
 // ChannelService 渠道管理服务
 type ChannelService struct {
+	modelSettings        *SettingService
 	repo                 ChannelRepository
 	groupRepo            GroupRepository
 	authCacheInvalidator APIKeyAuthCacheInvalidator
@@ -189,7 +192,7 @@ func NewChannelService(repo ChannelRepository, groupRepo GroupRepository, authCa
 func (s *ChannelService) loadCache(ctx context.Context) (*channelCache, error) {
 	if cached, ok := s.cache.Load().(*channelCache); ok && cached != nil {
 		if time.Since(cached.loadedAt) < channelCacheTTL {
-			return cached, nil
+			return cached, cached.loadErr
 		}
 	}
 
@@ -197,7 +200,7 @@ func (s *ChannelService) loadCache(ctx context.Context) (*channelCache, error) {
 		// 双重检查
 		if cached, ok := s.cache.Load().(*channelCache); ok && cached != nil {
 			if time.Since(cached.loadedAt) < channelCacheTTL {
-				return cached, nil
+				return cached, cached.loadErr
 			}
 		}
 		return s.buildCache(ctx)
@@ -279,10 +282,13 @@ func expandMappingToCache(cache *channelCache, ch *Channel, gid int64, platform 
 
 // storeErrorCache 存入短 TTL 空缓存，防止 DB 错误后紧密重试。
 // 通过回退 loadedAt 使剩余 TTL = channelErrorTTL。
-func (s *ChannelService) storeErrorCache() {
+func (s *ChannelService) storeErrorCache(err error) {
 	errorCache := newEmptyChannelCache()
+	errorCache.loadErr = err
 	errorCache.loadedAt = time.Now().Add(-(channelCacheTTL - channelErrorTTL))
+	pricingViewPublicationMu.Lock()
 	s.cache.Store(errorCache)
+	pricingViewPublicationMu.Unlock()
 }
 
 // buildCache 从数据库构建渠道缓存。
@@ -297,7 +303,9 @@ func (s *ChannelService) buildCache(ctx context.Context) (*channelCache, error) 
 	}
 
 	cache := populateChannelCache(channels, groupPlatforms)
+	pricingViewPublicationMu.Lock()
 	s.cache.Store(cache)
+	pricingViewPublicationMu.Unlock()
 	return cache, nil
 }
 
@@ -306,7 +314,7 @@ func (s *ChannelService) fetchChannelData(ctx context.Context) ([]Channel, map[i
 	channels, err := s.repo.ListAll(ctx)
 	if err != nil {
 		slog.Warn("failed to build channel cache", "error", err)
-		s.storeErrorCache()
+		s.storeErrorCache(err)
 		return nil, nil, fmt.Errorf("list all channels: %w", err)
 	}
 
@@ -320,7 +328,7 @@ func (s *ChannelService) fetchChannelData(ctx context.Context) ([]Channel, map[i
 		groupPlatforms, err = s.repo.GetGroupPlatforms(ctx, allGroupIDs)
 		if err != nil {
 			slog.Warn("failed to load group platforms for channel cache", "error", err)
-			s.storeErrorCache()
+			s.storeErrorCache(err)
 			return nil, nil, fmt.Errorf("get group platforms: %w", err)
 		}
 	}
@@ -333,13 +341,13 @@ func (s *ChannelService) fetchChannelData(ctx context.Context) ([]Channel, map[i
 // 避免"每个出口各自记得 normalize"反模式。
 func populateChannelCache(channels []Channel, groupPlatforms map[int64]string) *channelCache {
 	cache := newEmptyChannelCache()
-	cache.groupPlatform = groupPlatforms
+	cache.groupPlatform = maps.Clone(groupPlatforms)
 	cache.byID = make(map[int64]*Channel, len(channels))
 	cache.loadedAt = time.Now()
 
 	for i := range channels {
-		channels[i].normalizeBillingModelSource()
-		ch := &channels[i]
+		ch := detachPricingChannel(&channels[i])
+		ch.normalizeBillingModelSource()
 		cache.byID[ch.ID] = ch
 		for _, gid := range ch.GroupIDs {
 			cache.channelByGroupID[gid] = ch
@@ -409,7 +417,9 @@ func (s *ChannelService) invalidateCache() {
 // invalidateCache prevents notifications received from Redis from being
 // published again in a loop.
 func (s *ChannelService) clearCache() {
+	pricingViewPublicationMu.Lock()
 	s.cache.Store((*channelCache)(nil))
+	pricingViewPublicationMu.Unlock()
 	s.cacheSF.Forget("channel_cache")
 }
 
@@ -504,7 +514,7 @@ func (s *ChannelService) GetChannelForGroup(ctx context.Context, groupID int64) 
 		return nil, nil
 	}
 
-	return ch.Clone(), nil
+	return detachPricingChannel(ch), nil
 }
 
 // GetGroupPlatform 获取分组的平台标识（从缓存）
@@ -521,6 +531,7 @@ type channelLookup struct {
 	cache    *channelCache
 	channel  *Channel
 	platform string
+	groupID  int64
 }
 
 // lookupGroupChannel 加载缓存并查找分组对应的渠道信息（公共热路径前置逻辑）。
@@ -530,15 +541,20 @@ func (s *ChannelService) lookupGroupChannel(ctx context.Context, groupID int64) 
 	if err != nil {
 		return nil, err
 	}
+	return lookupGroupChannelSnapshot(ctx, cache, groupID), nil
+}
+
+func lookupGroupChannelSnapshot(ctx context.Context, cache *channelCache, groupID int64) *channelLookup {
 	ch, ok := cache.channelByGroupID[groupID]
 	if !ok || !ch.IsActive() {
-		return nil, nil
+		return nil
 	}
 	return &channelLookup{
 		cache:    cache,
 		channel:  ch,
 		platform: channelLookupPlatform(ctx, cache.groupPlatform[groupID]),
-	}, nil
+		groupID:  groupID,
+	}
 }
 
 // GetChannelModelPricing 获取指定分组+模型的渠道定价（热路径 O(1)）。
@@ -549,17 +565,21 @@ func (s *ChannelService) GetChannelModelPricing(ctx context.Context, groupID int
 		slog.Warn("failed to load channel cache", "group_id", groupID, "error", err)
 		return nil
 	}
+	return lookupChannelModelPricing(lk, model)
+}
+
+func lookupChannelModelPricing(lk *channelLookup, model string) *ChannelModelPricing {
 	if lk == nil {
 		return nil
 	}
 
 	modelLower := strings.ToLower(model)
-	pricing := lookupPricingAcrossPlatforms(lk.cache, groupID, lk.platform, modelLower)
+	pricing := lookupPricingAcrossPlatforms(lk.cache, lk.groupID, lk.platform, modelLower)
 	if pricing == nil {
 		return nil
 	}
 
-	cp := pricing.Clone()
+	cp := detachChannelModelPricing(*pricing)
 	return &cp
 }
 
@@ -593,15 +613,41 @@ func (s *ChannelService) IsModelRestricted(ctx context.Context, groupID int64, m
 // ResolveChannelMappingAndRestrict 解析渠道映射。
 // 返回映射结果。模型限制检查已移至调度阶段（GatewayService.checkChannelPricingRestriction），
 // restricted 始终返回 false，保留签名兼容性。
-func (s *ChannelService) ResolveChannelMappingAndRestrict(ctx context.Context, groupID *int64, model string) (ChannelMappingResult, bool) {
-	if groupID == nil {
-		return ChannelMappingResult{MappedModel: model}, false
+func (s *ChannelService) ResolveChannelMappingAndRestrict(ctx context.Context, groupID *int64, name string) (ChannelMappingResult, bool) {
+	result := ChannelMappingResult{MappedModel: name}
+	platform := ""
+	if groupID != nil {
+		lk, _ := s.lookupGroupChannel(ctx, *groupID)
+		if lk != nil {
+			result = resolveMapping(lk, *groupID, name)
+		}
+		if s.modelSettings != nil {
+			group, err := s.groupRepo.GetByIDLite(ctx, *groupID)
+			if err != nil || group == nil {
+				return result, true
+			}
+			platform = group.Platform
+		}
 	}
-	lk, _ := s.lookupGroupChannel(ctx, *groupID)
-	if lk == nil {
-		return ChannelMappingResult{MappedModel: model}, false
+	if s.modelSettings == nil {
+		return result, false
 	}
-	return resolveMapping(lk, *groupID, model), false
+	snapshot, err := s.modelSettings.managedModelSnapshot(ctx, platform, name)
+	if err != nil {
+		return result, true
+	}
+	if err := snapshot.check(name); err != nil {
+		return result, true
+	}
+	target, err := snapshot.resolve(result.MappedModel)
+	if err != nil {
+		return result, true
+	}
+	if target != name {
+		result.Mapped = true
+	}
+	result.MappedModel = target
+	return result, false
 }
 
 // resolveMapping 基于已查找的渠道信息解析模型映射。
@@ -973,7 +1019,7 @@ func (s *ChannelService) applyUpdateInput(ctx context.Context, channel *Channel,
 		channel.BillingModelSource = input.BillingModelSource
 	}
 	if input.FeaturesConfig != nil {
-		channel.FeaturesConfig = mergeWebSearchEmulationDimensions(channel.FeaturesConfig, input.FeaturesConfig)
+		channel.FeaturesConfig = input.FeaturesConfig
 	}
 	if input.ApplyPricingToAccountStats != nil {
 		channel.ApplyPricingToAccountStats = *input.ApplyPricingToAccountStats
@@ -986,65 +1032,6 @@ func (s *ChannelService) applyUpdateInput(ctx context.Context, channel *Channel,
 
 // checkGroupConflicts 检查待关联的分组是否已属于其他渠道。
 // channelID 为当前渠道 ID（Create 时传 0）。
-// mergeWebSearchEmulationDimensions keeps the per-platform dimensions of
-// features_config.web_search_emulation across channel updates.
-//
-// Why: the key is a map keyed by platform ("anthropic", "openai", ...), but
-// UpdateChannel replaces features_config as a whole block. A client that only
-// knows about a subset of platforms (the admin UI used to submit the anthropic
-// dimension only) therefore erased every other platform's setting on each save —
-// silently disabling web search emulation for openai/command_code/... channels.
-//
-// Rules:
-//   - key present in the request: request dimensions win, missing dimensions are
-//     inherited from the current value;
-//   - key absent from the request: the whole key is inherited, so clients that do
-//     not know the feature cannot wipe it;
-//   - explicit empty object {} or null: treated as "clear" and replaces the value.
-//
-// Other features_config keys keep the historical whole-block replacement
-// semantics. No generic deep merge is performed: nested objects are replaced as
-// a unit so deleting a dimension stays expressible.
-func mergeWebSearchEmulationDimensions(existing, incoming map[string]any) map[string]any {
-	if incoming == nil {
-		return nil
-	}
-	current, _ := existing[featureKeyWebSearchEmulation].(map[string]any)
-	rawIncoming, present := incoming[featureKeyWebSearchEmulation]
-	incomingDims, incomingIsMap := rawIncoming.(map[string]any)
-
-	if !present && len(current) > 0 {
-		return withWebSearchEmulationKey(incoming, current)
-	}
-	if !incomingIsMap || len(current) == 0 || len(incomingDims) == 0 {
-		return incoming
-	}
-
-	merged := make(map[string]any, len(incomingDims)+len(current))
-	for platform, value := range current {
-		merged[platform] = value
-	}
-	for platform, value := range incomingDims {
-		merged[platform] = value
-	}
-	return withWebSearchEmulationKey(incoming, merged)
-}
-
-// withWebSearchEmulationKey returns a copy of incoming whose
-// web_search_emulation key points at a copy of value.
-func withWebSearchEmulationKey(incoming, value map[string]any) map[string]any {
-	out := make(map[string]any, len(incoming)+1)
-	for key, item := range incoming {
-		out[key] = item
-	}
-	copied := make(map[string]any, len(value))
-	for platform, item := range value {
-		copied[platform] = item
-	}
-	out[featureKeyWebSearchEmulation] = copied
-	return out
-}
-
 func (s *ChannelService) checkGroupConflicts(ctx context.Context, channelID int64, groupIDs []int64) error {
 	if len(groupIDs) == 0 {
 		return nil

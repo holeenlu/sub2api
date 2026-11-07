@@ -1,0 +1,35 @@
+# Optional TLS edge for a dedicated server A. Existing ingress users omit this.
+# Combine AFTER docker-compose.vendor.yml. The isolated edge IP is the only
+# trusted source of forwarded client IPs at the supplier portal.
+services:
+  vendor-portal:
+    environment:
+      PORTAL_TRUSTED_PROXY_CIDRS: "${PORTAL_EDGE_PROXY_IP:-172.30.88.2}/32"
+    networks: [default, portal-edge]
+  vendor-edge:
+    image: caddy:2.11.7-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PORTAL_PUBLIC_ORIGIN: ${PORTAL_PUBLIC_ORIGIN:?Set the public supplier origin}
+    volumes:
+      - ./examples/vendor-portal-container.Caddyfile:/etc/caddy/Caddyfile:ro
+      - vendor_edge_data:/data
+      - vendor_edge_config:/config
+    networks:
+      portal-edge:
+        ipv4_address: ${PORTAL_EDGE_PROXY_IP:-172.30.88.2}
+    depends_on:
+      vendor-portal:
+        condition: service_healthy
+    security_opt: [no-new-privileges:true]
+networks:
+  portal-edge:
+    ipam:
+      config:
+        - subnet: ${PORTAL_EDGE_SUBNET:-172.30.88.0/24}
+volumes:
+  vendor_edge_data:
+  vendor_edge_config:

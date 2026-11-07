@@ -2,9 +2,8 @@ package handler
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -113,11 +112,10 @@ func (h *AuthHandler) LinuxDoOAuthStart(c *gin.Context) {
 	setCookie(c, linuxDoOAuthRedirectCookie, encodeCookieValue(redirectTo), linuxDoOAuthCookieMaxAgeSec, secureCookie)
 	intent := normalizeOAuthIntent(c.Query("intent"))
 	setCookie(c, linuxDoOAuthIntentCookieName, encodeCookieValue(intent), linuxDoOAuthCookieMaxAgeSec, secureCookie)
-	captureOAuthPromoCode(c, secureCookie)
 	setOAuthPendingBrowserCookie(c, browserSessionKey, secureCookie)
 	clearOAuthPendingSessionCookie(c, secureCookie)
 	if intent == oauthIntentBindCurrentUser {
-		bindCookieValue, err := h.buildOAuthBindUserCookieFromContext(c)
+		bindCookieValue, err := h.buildOAuthBindUserCookieFromContext(c, linuxDoOAuthBindUserCookieName, state, browserSessionKey)
 		if err != nil {
 			response.ErrorFrom(c, err)
 			return
@@ -186,7 +184,6 @@ func (h *AuthHandler) LinuxDoOAuthCallback(c *gin.Context) {
 		clearCookie(c, linuxDoOAuthRedirectCookie, secureCookie)
 		clearCookie(c, linuxDoOAuthIntentCookieName, secureCookie)
 		clearCookie(c, linuxDoOAuthBindUserCookieName, secureCookie)
-		clearOAuthPromoCodeCookie(c, secureCookie)
 	}()
 
 	expectedState, err := readCookieDecoded(c, linuxDoOAuthStateCookieName)
@@ -334,15 +331,11 @@ func (h *AuthHandler) LinuxDoOAuthCallback(c *gin.Context) {
 			redirectOAuthError(c, frontendCallback, "session_error", infraerrors.Reason(err), infraerrors.Message(err))
 			return
 		}
-		tokenPair, user, err := h.authService.LoginOrRegisterOAuthWithTokenPairAndPromoCode(
+		tokenPair, user, err := h.authService.LoginOrRegisterOAuthWithTokenPair(
 			c.Request.Context(),
 			email,
 			username,
-			"",
-			"",
-			readOAuthPromoCode(c),
-			"linuxdo",
-		)
+			"linuxdo")
 		if err == nil {
 			if err := applyPendingOAuthBinding(
 				c.Request.Context(),
@@ -371,10 +364,10 @@ func (h *AuthHandler) LinuxDoOAuthCallback(c *gin.Context) {
 			redirectOAuthTokenPair(c, frontendCallback, tokenPair, redirectTo)
 			return
 		}
-		if !errors.Is(err, service.ErrOAuthInvitationRequired) {
-			redirectOAuthError(c, frontendCallback, "session_error", infraerrors.Reason(err), infraerrors.Message(err))
-			return
-		}
+
+		redirectOAuthError(c, frontendCallback, "session_error", infraerrors.Reason(err), infraerrors.Message(err))
+		return
+
 	}
 	if err := h.createLinuxDoOAuthChoicePendingSession(
 		c,
@@ -498,121 +491,6 @@ func (h *AuthHandler) createLinuxDoOAuthChoicePendingSession(
 		BrowserSessionKey:      browserSessionKey,
 		UpstreamIdentityClaims: upstreamClaims,
 		CompletionResponse:     completionResponse,
-	})
-}
-
-type completeLinuxDoOAuthRequest struct {
-	InvitationCode   string `json:"invitation_code" binding:"required"`
-	AffCode          string `json:"aff_code,omitempty"`
-	AdoptDisplayName *bool  `json:"adopt_display_name,omitempty"`
-	AdoptAvatar      *bool  `json:"adopt_avatar,omitempty"`
-}
-
-// CompleteLinuxDoOAuthRegistration completes a pending OAuth registration by validating
-// the invitation code and creating the user account.
-// POST /api/v1/auth/oauth/linuxdo/complete-registration
-func (h *AuthHandler) CompleteLinuxDoOAuthRegistration(c *gin.Context) {
-	var req completeLinuxDoOAuthRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_REQUEST", "message": err.Error()})
-		return
-	}
-
-	secureCookie := isRequestHTTPS(c)
-	sessionToken, err := readOAuthPendingSessionCookie(c)
-	if err != nil {
-		clearOAuthPendingSessionCookie(c, secureCookie)
-		clearOAuthPendingBrowserCookie(c, secureCookie)
-		response.ErrorFrom(c, service.ErrPendingAuthSessionNotFound)
-		return
-	}
-	browserSessionKey, err := readOAuthPendingBrowserCookie(c)
-	if err != nil {
-		clearOAuthPendingSessionCookie(c, secureCookie)
-		clearOAuthPendingBrowserCookie(c, secureCookie)
-		response.ErrorFrom(c, service.ErrPendingAuthBrowserMismatch)
-		return
-	}
-	pendingSvc, err := h.pendingIdentityService()
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	session, err := pendingSvc.GetBrowserSession(c.Request.Context(), sessionToken, browserSessionKey)
-	if err != nil {
-		clearOAuthPendingSessionCookie(c, secureCookie)
-		clearOAuthPendingBrowserCookie(c, secureCookie)
-		response.ErrorFrom(c, err)
-		return
-	}
-	if err := ensurePendingOAuthCompleteRegistrationSession(session); err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	if updatedSession, handled, err := h.legacyCompleteRegistrationSessionStatus(c, session); err != nil {
-		response.ErrorFrom(c, err)
-		return
-	} else if handled {
-		c.JSON(http.StatusOK, buildPendingOAuthSessionStatusPayload(updatedSession))
-		return
-	} else {
-		session = updatedSession
-	}
-	if err := h.ensureBackendModeAllowsNewUserLogin(c.Request.Context()); err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-
-	email := strings.TrimSpace(session.ResolvedEmail)
-	username := pendingSessionStringValue(session.UpstreamIdentityClaims, "username")
-	if email == "" || username == "" {
-		response.ErrorFrom(c, infraerrors.BadRequest("PENDING_AUTH_SESSION_INVALID", "pending auth registration context is invalid"))
-		return
-	}
-
-	client := h.entClient()
-	if client == nil {
-		response.ErrorFrom(c, infraerrors.ServiceUnavailable("PENDING_AUTH_NOT_READY", "pending auth service is not ready"))
-		return
-	}
-	if err := ensurePendingOAuthRegistrationIdentityAvailable(c.Request.Context(), client, session); err != nil {
-		respondPendingOAuthBindingApplyError(c, err)
-		return
-	}
-	decision, err := h.ensurePendingOAuthAdoptionDecision(c, session.ID, oauthAdoptionDecisionRequest{
-		AdoptDisplayName: req.AdoptDisplayName,
-		AdoptAvatar:      req.AdoptAvatar,
-	})
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	tokenPair, user, err := h.authService.LoginOrRegisterOAuthWithTokenPairAndPromoCode(
-		c.Request.Context(),
-		email,
-		username,
-		req.InvitationCode,
-		req.AffCode,
-		pendingOAuthPromoCode(session),
-		"linuxdo",
-	)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	if err := applyPendingOAuthAdoptionAndConsumeSession(c.Request.Context(), client, h.authService, h.userService, session, decision, user.ID); err != nil {
-		respondPendingOAuthBindingApplyError(c, err)
-		return
-	}
-	h.authService.RecordSuccessfulLogin(c.Request.Context(), user.ID)
-	clearOAuthPendingSessionCookie(c, secureCookie)
-	clearOAuthPendingBrowserCookie(c, secureCookie)
-
-	c.JSON(http.StatusOK, gin.H{
-		"access_token":  tokenPair.AccessToken,
-		"refresh_token": tokenPair.RefreshToken,
-		"expires_in":    tokenPair.ExpiresIn,
-		"token_type":    "Bearer",
 	})
 }
 
@@ -1155,12 +1033,35 @@ func normalizeOAuthIntent(raw string) string {
 	}
 }
 
-func (h *AuthHandler) buildOAuthBindUserCookieFromContext(c *gin.Context) (string, error) {
-	userID, err := h.resolveOAuthBindTargetUserID(c)
-	if err != nil || userID == nil || *userID <= 0 {
-		return "", infraerrors.Unauthorized("UNAUTHORIZED", "authentication required")
+func (h *AuthHandler) buildOAuthBindUserCookieFromContext(c *gin.Context, provider, state, browser string) (string, error) {
+	claims, err := h.oauthBindClaims(c)
+	if err != nil {
+		return "", err
 	}
-	return buildOAuthBindUserCookieValue(*userID, h.oauthBindCookieSecret())
+	svc, err := h.pendingIdentityService()
+	if err != nil {
+		return "", err
+	}
+	encoded, err := json.Marshal(claims)
+	if err != nil {
+		return "", err
+	}
+	expiry := time.Now().Add(10 * time.Minute)
+	if claims.ExpiresAt == nil {
+		return "", service.ErrInvalidToken
+	}
+	if claims.ExpiresAt.Before(expiry) {
+		expiry = claims.ExpiresAt.Time
+	}
+	session, err := svc.CreatePendingSession(c.Request.Context(), service.CreatePendingAuthSessionInput{
+		Intent: "authorize_bind", Identity: service.PendingAuthIdentityKey{ProviderType: oauthBindProviderType(provider), ProviderKey: provider, ProviderSubject: state},
+		TargetUserID: &claims.UserID, BrowserSessionKey: browser, ExpiresAt: expiry,
+		LocalFlowState: map[string]any{"bind_claims": string(encoded)},
+	})
+	if err != nil {
+		return "", err
+	}
+	return session.SessionToken, nil
 }
 
 func (h *AuthHandler) PrepareOAuthBindAccessTokenCookie(c *gin.Context) {
@@ -1183,40 +1084,59 @@ func (h *AuthHandler) PrepareOAuthBindAccessTokenCookie(c *gin.Context) {
 	c.Writer.WriteHeaderNow()
 }
 
-func (h *AuthHandler) resolveOAuthBindTargetUserID(c *gin.Context) (*int64, error) {
-	if subject, ok := servermiddleware.GetAuthSubjectFromContext(c); ok && subject.UserID > 0 {
-		return &subject.UserID, nil
-	}
+func (h *AuthHandler) oauthBindClaims(c *gin.Context) (*service.JWTClaims, error) {
 	if h == nil || h.authService == nil || h.userService == nil {
 		return nil, service.ErrInvalidToken
 	}
-
-	ck, err := c.Request.Cookie(oauthBindAccessTokenCookieName)
-	clearOAuthBindAccessTokenCookie(c, isRequestHTTPS(c))
+	token := ""
+	parts := strings.Fields(c.GetHeader("Authorization"))
+	if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+		token = parts[1]
+	}
+	if token == "" {
+		cookie, err := c.Request.Cookie(oauthBindAccessTokenCookieName)
+		clearOAuthBindAccessTokenCookie(c, isRequestHTTPS(c))
+		if err != nil {
+			return nil, service.ErrInvalidToken
+		}
+		token, err = url.QueryUnescape(cookie.Value)
+		if err != nil {
+			return nil, service.ErrInvalidToken
+		}
+	}
+	claims, err := h.authService.ValidateToken(token)
 	if err != nil {
 		return nil, err
 	}
-
-	tokenString, err := url.QueryUnescape(strings.TrimSpace(ck.Value))
-	if err != nil {
+	if err := h.validateOAuthBindClaims(c, claims); err != nil {
 		return nil, err
 	}
-	if tokenString == "" {
-		return nil, service.ErrInvalidToken
-	}
+	return claims, nil
+}
 
-	claims, err := h.authService.ValidateToken(tokenString)
-	if err != nil {
-		return nil, err
+func (h *AuthHandler) validateOAuthBindClaims(c *gin.Context, claims *service.JWTClaims) error {
+	if claims == nil || claims.ExpiresAt == nil || !time.Now().Before(claims.ExpiresAt.Time) {
+		return service.ErrTokenExpired
 	}
 	user, err := h.userService.GetByID(c.Request.Context(), claims.UserID)
 	if err != nil {
+		return err
+	}
+	if err := h.authService.ValidateAccessSession(c.Request.Context(), claims, user); err != nil {
+		return err
+	}
+	if !servermiddleware.EnforceOAuthSessionBinding(c, h.authService, h.settingSvc, claims) {
+		return service.ErrSessionBindingMismatch
+	}
+	return nil
+}
+
+func (h *AuthHandler) resolveOAuthBindTargetUserID(c *gin.Context) (*int64, error) {
+	claims, err := h.oauthBindClaims(c)
+	if err != nil {
 		return nil, err
 	}
-	if user == nil || !user.IsActive() || claims.TokenVersion != user.TokenVersion {
-		return nil, service.ErrInvalidToken
-	}
-	return &user.ID, nil
+	return &claims.UserID, nil
 }
 
 func (h *AuthHandler) readOAuthBindUserIDFromCookie(c *gin.Context, cookieName string) (int64, error) {
@@ -1224,46 +1144,47 @@ func (h *AuthHandler) readOAuthBindUserIDFromCookie(c *gin.Context, cookieName s
 	if err != nil {
 		return 0, err
 	}
-	return parseOAuthBindUserCookieValue(value, h.oauthBindCookieSecret())
+	browser, err := readOAuthPendingBrowserCookie(c)
+	if err != nil {
+		return 0, err
+	}
+	svc, err := h.pendingIdentityService()
+	if err != nil {
+		return 0, err
+	}
+	session, err := svc.GetBrowserSession(c.Request.Context(), value, browser)
+	if err != nil {
+		return 0, err
+	}
+	if session.Intent != "authorize_bind" || session.ProviderKey != cookieName || session.ProviderSubject != c.Query("state") {
+		return 0, service.ErrInvalidToken
+	}
+	encoded := pendingSessionStringValue(session.LocalFlowState, "bind_claims")
+	var claims service.JWTClaims
+	if json.Unmarshal([]byte(encoded), &claims) != nil {
+		return 0, service.ErrInvalidToken
+	}
+	if err := h.validateOAuthBindClaims(c, &claims); err != nil {
+		return 0, err
+	}
+	if _, err := svc.ConsumeBrowserSession(c.Request.Context(), value, browser); err != nil {
+		return 0, err
+	}
+	c.Set("oauth_bind_claims", encoded)
+	return claims.UserID, nil
 }
 
-func (h *AuthHandler) oauthBindCookieSecret() string {
-	if h == nil || h.cfg == nil {
+func oauthBindProviderType(cookieName string) string {
+	switch cookieName {
+	case linuxDoOAuthBindUserCookieName:
+		return "linuxdo"
+	case oidcOAuthBindUserCookieName:
+		return "oidc"
+	case dingTalkOAuthBindUserCookieName:
+		return "dingtalk"
+	case wechatOAuthBindUserCookieName:
+		return "wechat"
+	default:
 		return ""
 	}
-	return strings.TrimSpace(h.cfg.JWT.Secret)
-}
-
-func buildOAuthBindUserCookieValue(userID int64, secret string) (string, error) {
-	secret = strings.TrimSpace(secret)
-	if userID <= 0 || secret == "" {
-		return "", errors.New("invalid oauth bind cookie input")
-	}
-	payload := strconv.FormatInt(userID, 10)
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte(payload))
-	signature := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-	return payload + "." + signature, nil
-}
-
-func parseOAuthBindUserCookieValue(value string, secret string) (int64, error) {
-	secret = strings.TrimSpace(secret)
-	if secret == "" {
-		return 0, errors.New("missing oauth bind cookie secret")
-	}
-	payload, signature, ok := strings.Cut(strings.TrimSpace(value), ".")
-	if !ok || payload == "" || signature == "" {
-		return 0, errors.New("invalid oauth bind cookie")
-	}
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte(payload))
-	expectedSignature := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-	if !hmac.Equal([]byte(signature), []byte(expectedSignature)) {
-		return 0, errors.New("invalid oauth bind cookie signature")
-	}
-	userID, err := strconv.ParseInt(payload, 10, 64)
-	if err != nil || userID <= 0 {
-		return 0, errors.New("invalid oauth bind cookie user")
-	}
-	return userID, nil
 }

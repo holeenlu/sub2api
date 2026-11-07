@@ -115,10 +115,6 @@ func (r *paymentOrderLifecycleRedeemRepo) Update(context.Context, *RedeemCode) e
 	panic("unexpected call")
 }
 
-func (r *paymentOrderLifecycleRedeemRepo) BatchUpdate(context.Context, []int64, RedeemCodeBatchUpdateFields) (int64, error) {
-	panic("unexpected call")
-}
-
 func (r *paymentOrderLifecycleRedeemRepo) Delete(context.Context, int64) error {
 	panic("unexpected call")
 }
@@ -223,11 +219,8 @@ func TestVerifyOrderByOutTradeNoBackfillsTradeNoFromPaidQuery(t *testing.T) {
 		userRepo,
 		nil,
 		nil,
-		nil,
 		client,
-		nil,
-		nil,
-	)
+		nil)
 	registry := payment.NewRegistry()
 	provider := &paymentOrderLifecycleQueryProvider{
 		resp: &payment.QueryOrderResponse{
@@ -324,11 +317,8 @@ func TestVerifyOrderByOutTradeNoRetriesZeroAmountPaidQueryOnce(t *testing.T) {
 		userRepo,
 		nil,
 		nil,
-		nil,
 		client,
-		nil,
-		nil,
-	)
+		nil)
 	registry := payment.NewRegistry()
 	provider := &paymentOrderLifecycleQueryProvider{
 		responses: []*payment.QueryOrderResponse{
@@ -415,11 +405,8 @@ func TestVerifyOrderByOutTradeNoRejectsPaidQueryWithZeroAmount(t *testing.T) {
 		userRepo,
 		nil,
 		nil,
-		nil,
 		client,
-		nil,
-		nil,
-	)
+		nil)
 	registry := payment.NewRegistry()
 	provider := &paymentOrderLifecycleQueryProvider{
 		resp: &payment.QueryOrderResponse{
@@ -628,11 +615,8 @@ func TestReconcilePendingPaymentOrdersBackfillsPaidOrder(t *testing.T) {
 		userRepo,
 		nil,
 		nil,
-		nil,
 		client,
-		nil,
-		nil,
-	)
+		nil)
 	registry := payment.NewRegistry()
 	provider := &paymentOrderLifecycleQueryProvider{
 		key: payment.TypeWxpay,
@@ -783,11 +767,8 @@ func TestVerifyOrderByOutTradeNoUsesOutTradeNoWhenPaymentTradeNoAlreadyExistsFor
 		userRepo,
 		nil,
 		nil,
-		nil,
 		client,
-		nil,
-		nil,
-	)
+		nil)
 	registry := payment.NewRegistry()
 	provider := &paymentOrderLifecycleQueryProvider{
 		resp: &payment.QueryOrderResponse{

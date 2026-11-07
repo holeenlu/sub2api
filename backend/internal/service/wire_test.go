@@ -1,37 +1,46 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
 
-	"github.com/zeromicro/go-zero/core/collection"
+	"github.com/Wei-Shaw/sub2api/internal/host"
+	"github.com/robfig/cron/v3"
+	"github.com/stretchr/testify/require"
 )
 
-func TestProvideTimingWheelService_ReturnsError(t *testing.T) {
-	original := newTimingWheel
-	t.Cleanup(func() { newTimingWheel = original })
-
-	newTimingWheel = func(_ time.Duration, _ int, _ collection.Execute) (*collection.TimingWheel, error) {
-		return nil, errors.New("boom")
-	}
-
-	svc, err := ProvideTimingWheelService()
-	if err == nil {
-		t.Fatalf("期望返回 error，但得到 nil")
-	}
-	if svc != nil {
-		t.Fatalf("期望返回 nil svc，但得到非空")
-	}
+func TestProvideTimingWheelService_StartErrorRetainsRollbackOwner(t *testing.T) {
+	original := newTimingScheduler
+	t.Cleanup(func() { newTimingScheduler = original })
+	failed := errors.New("scheduler construction failed")
+	calls := 0
+	newTimingScheduler = func() (*cron.Cron, error) { calls++; return nil, failed }
+	life := host.NewLifetime()
+	svc, err := ProvideLifetimeTimingWheelService(life)
+	require.NoError(t, err)
+	require.NotNil(t, svc)
+	require.Zero(t, calls, "construction must not create a scheduler")
+	require.ErrorIs(t, life.Start(context.Background()), failed)
+	require.Equal(t, 1, calls)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	require.NoError(t, life.Cleanup(ctx))
+	require.Empty(t, life.Pending(), "failed Start must still release its retained owner")
 }
 
-func TestProvideTimingWheelService_Success(t *testing.T) {
-	svc, err := ProvideTimingWheelService()
-	if err != nil {
-		t.Fatalf("期望 err 为 nil，但得到: %v", err)
-	}
-	if svc == nil {
-		t.Fatalf("期望 svc 非空，但得到 nil")
-	}
-	svc.Stop()
+func TestProvideTimingWheelService_ExplicitStartAndJoinedStop(t *testing.T) {
+	life := host.NewLifetime()
+	svc, err := ProvideLifetimeTimingWheelService(life)
+	require.NoError(t, err)
+	require.NotNil(t, svc)
+	require.ErrorIs(t, svc.Schedule("before-start", time.Second, func() {}), errTimingWheelNotStarted)
+	require.NoError(t, life.Start(context.Background()))
+	require.NoError(t, svc.Schedule("pending", time.Hour, func() { t.Error("shutdown must cancel pending timers, not execute them") }))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	require.NoError(t, life.Cleanup(ctx))
+	require.Empty(t, life.Pending())
+	require.Error(t, svc.Schedule("after-stop", time.Second, func() {}))
 }

@@ -2,6 +2,7 @@ package logredact
 
 import (
 	"encoding/json"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -40,8 +41,9 @@ type textRedactPatterns struct {
 }
 
 var (
-	reGOCSPX = regexp.MustCompile(`GOCSPX-[0-9A-Za-z_-]{24,}`)
-	reAIza   = regexp.MustCompile(`AIza[0-9A-Za-z_-]{35}`)
+	reCredentialURL = regexp.MustCompile(`(?i)\b(?:https?|wss?)://[^\s"<>{}]+`)
+	reGOCSPX        = regexp.MustCompile(`GOCSPX-[0-9A-Za-z_-]{24,}`)
+	reAIza          = regexp.MustCompile(`AIza[0-9A-Za-z_-]{35}`)
 	// Gemini auth key：AQ.Ab 前缀 + 48 位，长度放宽以覆盖格式变体。
 	reGeminiAuthKey = regexp.MustCompile(`AQ\.Ab[0-9A-Za-z_-]{40,}`)
 
@@ -98,7 +100,7 @@ func RedactText(input string, extraKeys ...string) string {
 
 	patterns := getTextRedactPatterns(extraKeys)
 
-	out := input
+	out := RedactURLCredentials(input)
 	out = reGOCSPX.ReplaceAllString(out, "GOCSPX-***")
 	out = reAIza.ReplaceAllString(out, "AIza***")
 	out = reGeminiAuthKey.ReplaceAllString(out, "AQ.***")
@@ -106,6 +108,46 @@ func RedactText(input string, extraKeys ...string) string {
 	out = patterns.reQueryLike.ReplaceAllString(out, `$1=***`)
 	out = patterns.rePlain.ReplaceAllString(out, `$1$2***`)
 	return out
+}
+
+// RedactURLCredentials preserves diagnostic text while hiding URL credentials.
+func RedactURLCredentials(input string) string {
+	return reCredentialURL.ReplaceAllStringFunc(input, func(raw string) string {
+		value := raw
+		for value != "" {
+			last := value[len(value)-1]
+			if !strings.ContainsRune(".,;:!?'", rune(last)) && (last != ')' || strings.Count(value, "(") >= strings.Count(value, ")")) {
+				break
+			}
+			value = value[:len(value)-1]
+		}
+		suffix := raw[len(value):]
+		u, err := url.Parse(value)
+		if err != nil {
+			return "<redacted-url>" + suffix
+		}
+		if u.User == nil && u.RawQuery == "" && !strings.Contains(u.Fragment, "=") {
+			return raw
+		}
+		if u.User != nil {
+			u.User = url.User("***")
+		}
+		if u.RawQuery != "" {
+			query, err := url.ParseQuery(u.RawQuery)
+			if err != nil {
+				u.RawQuery = "***"
+			} else {
+				for key := range query {
+					query[key] = []string{"***"}
+				}
+				u.RawQuery = strings.ReplaceAll(query.Encode(), "%2A%2A%2A", "***")
+			}
+		}
+		if strings.Contains(u.Fragment, "=") {
+			u.Fragment, u.RawFragment = "***", ""
+		}
+		return u.String() + suffix
+	})
 }
 
 func compileTextRedactPatterns(extraKeys []string) *textRedactPatterns {
@@ -220,6 +262,8 @@ func redactValueWithDepth(value any, keys map[string]struct{}, depth int) any {
 			out[i] = redactValueWithDepth(item, keys, depth+1)
 		}
 		return out
+	case string:
+		return RedactURLCredentials(v)
 	default:
 		return value
 	}

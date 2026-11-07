@@ -1,10 +1,14 @@
 package middleware
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -24,7 +28,7 @@ func TestDeriveAuditAction(t *testing.T) {
 		{"POST", "/api/v1/admin/accounts", "admin.accounts.create"},
 		{"DELETE", "/api/v1/admin/backups/:id", "admin.backups.delete"},
 		{"GET", "/api/v1/admin/users/:id/api-keys", "admin.users.api_keys.read"},
-		{"POST", "/api/v1/admin/redeem-codes/batch", "admin.redeem_codes.batch.create"},
+		{"POST", "/api/v1/admin/accounts/batch-refresh", "admin.accounts.batch_refresh.create"},
 	}
 	for _, tc := range cases {
 		if got := deriveAuditAction(tc.method, tc.path); got != tc.want {
@@ -50,14 +54,16 @@ func (r *auditCaptureRepository) Insert(_ context.Context, log *service.AuditLog
 	r.logs = append(r.logs, log)
 	return nil
 }
-func (r *auditCaptureRepository) List(context.Context, *service.AuditLogFilter) (*service.AuditLogList, error) {
+func (r *auditCaptureRepository) List(context.Context, service.AuditLogScope, *service.AuditLogFilter) (*service.AuditLogList, error) {
 	return &service.AuditLogList{}, nil
 }
-func (r *auditCaptureRepository) GetByID(context.Context, int64) (*service.AuditLog, error) {
+func (r *auditCaptureRepository) GetByID(context.Context, service.AuditLogScope, int64) (*service.AuditLog, error) {
 	return nil, service.ErrAuditLogNotFound
 }
-func (r *auditCaptureRepository) Count(context.Context) (int64, error) { return 0, nil }
-func (r *auditCaptureRepository) TruncateAll(context.Context) error    { return nil }
+func (r *auditCaptureRepository) Count(context.Context, service.AuditLogScope) (int64, error) {
+	return 0, nil
+}
+func (r *auditCaptureRepository) TruncateAll(context.Context) error { return nil }
 func (r *auditCaptureRepository) DeleteBefore(context.Context, time.Time, int) (int64, error) {
 	return 0, nil
 }
@@ -189,38 +195,114 @@ func TestOllamaCloudUsageSessionRouteOmitsAuditBody(t *testing.T) {
 	require.NotContains(t, logs[0].RequestBody, "audit-canary")
 }
 
-// MCP OAuth 是机器凭证：只读工具同样可以批量读取邮箱等数据，必须全部入审计并带上 grant。
-func TestAuditRecordsEveryMCPOAuthReadWithGrant(t *testing.T) {
+func TestAuditPreservesTruncatedRequestBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	svc := service.NewAuditLogService(&auditCaptureRepository{}, nil)
+	svc.Start()
+	defer svc.Stop()
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAuditLogMiddleware(svc)))
+	router.POST("/api/v1/admin/groups", func(c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		require.Equal(t, "partial", string(body))
+		require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+		_, err = io.ReadAll(c.Request.Body)
+		require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+		c.Status(http.StatusNoContent)
+	})
+	raw := strings.Join([]string{"POST /api/v1/admin/groups HTTP/1.1", "Host: example.test", "Content-Type: application/json", "Content-Length: 100", "", "partial"}, "\r\n")
+	req, err := http.ReadRequest(bufio.NewReader(strings.NewReader(raw)))
+	require.NoError(t, err)
+	router.ServeHTTP(httptest.NewRecorder(), req)
+}
+
+func TestRestoredBodyRetainsTypedFailure(t *testing.T) {
+	for _, cause := range []error{io.ErrUnexpectedEOF, context.Canceled, &http.MaxBytesError{Limit: 32}} {
+		r := &restoredBody{Reader: strings.NewReader("prefix"), closer: io.NopCloser(strings.NewReader("")), readErr: cause}
+		data, err := io.ReadAll(r)
+		require.Equal(t, "prefix", string(data))
+		require.ErrorIs(t, err, cause)
+		_, err = io.ReadAll(r)
+		require.ErrorIs(t, err, cause)
+		require.NoError(t, r.Close())
+	}
+}
+
+type auditReadCloseProbe struct {
+	body   []byte
+	cause  error
+	closed int
+}
+
+func (r *auditReadCloseProbe) Read(p []byte) (int, error) {
+	n := copy(p, r.body)
+	r.body = r.body[n:]
+	if len(r.body) == 0 {
+		if r.cause != nil {
+			return n, r.cause
+		}
+		return n, io.EOF
+	}
+	return n, nil
+}
+func (r *auditReadCloseProbe) Close() error { r.closed++; return nil }
+func TestAuditBodyReplayCloseAndCaptureBoundary(t *testing.T) {
+	for _, failure := range []bool{false, true} {
+		t.Run(fmt.Sprint(failure), func(t *testing.T) {
+			payload := bytes.Repeat([]byte("x"), service.AuditRequestBodyCaptureLimit+20)
+			if failure {
+				payload = []byte("prefix-before-error")
+			}
+			probe := &auditReadCloseProbe{body: append([]byte(nil), payload...)}
+			if failure {
+				probe.cause = io.ErrUnexpectedEOF
+			}
+			svc := service.NewAuditLogService(&auditCaptureRepository{}, nil)
+			svc.Start()
+			defer svc.Stop()
+			router := gin.New()
+			router.Use(gin.HandlerFunc(NewAuditLogMiddleware(svc)))
+			router.POST("/api/v1/admin/groups", func(c *gin.Context) {
+				require.Zero(t, probe.closed)
+				got, err := io.ReadAll(c.Request.Body)
+				require.Equal(t, payload, got)
+				if failure {
+					require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+				} else {
+					require.NoError(t, err)
+				}
+				require.NoError(t, c.Request.Body.Close())
+				require.Equal(t, 1, probe.closed)
+				c.Status(204)
+			})
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/groups", nil)
+			req.Body = probe
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(httptest.NewRecorder(), req)
+		})
+	}
+}
+
+func TestAPIKeyDataAuditProtectsBackupCredentials(t *testing.T) {
+	require.Equal(t, "user.api_keys.export", auditSensitiveReads["GET /api/v1/keys/export"])
+	require.Equal(t, "user.api_keys.import", auditActionOverrides["POST /api/v1/keys/import"])
+	redacted := service.RedactAuditBody([]byte(`{"data":{"keys":[{"name":"client","key":"sk-secret-import-0123"}]}}`), "application/json")
+	require.NotContains(t, redacted, "sk-secret-import-0123")
+	require.Contains(t, redacted, "client")
 	repository := &auditCaptureRepository{}
 	auditService := service.NewAuditLogService(repository, nil)
 	auditService.Start()
-
-	for _, authMethod := range []string{service.AuditAuthMethodMCPOAuth, ""} {
-		router := gin.New()
-		router.Use(func(c *gin.Context) {
-			c.Set(string(ContextKeyUser), AuthSubject{UserID: 77})
-			c.Set(string(ContextKeyUserRole), service.RoleAdmin)
-			if authMethod != "" {
-				c.Set("auth_method", authMethod)
-				SetAuditExtra(c, map[string]any{"mcp_grant_id": "grant-1", "mcp_tool": "admin_list_users"})
-			}
-			c.Next()
-		})
-		router.Use(gin.HandlerFunc(NewAuditLogMiddleware(auditService)))
-		router.GET("/api/v1/admin/users", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"items": []any{}}) })
-		recorder := httptest.NewRecorder()
-		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/admin/users?search=a", nil))
-		require.Equal(t, http.StatusOK, recorder.Code)
-	}
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAuditLogMiddleware(auditService)))
+	router.GET("/api/v1/keys/export", func(c *gin.Context) {
+		require.Equal(t, "sk-secret-search-0123", c.Query("search"))
+		c.Status(http.StatusOK)
+	})
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/api/v1/keys/export?search=sk-secret-search-0123&status=active", nil))
 	auditService.Stop()
-
 	repository.mu.Lock()
-	logs := append([]*service.AuditLog(nil), repository.logs...)
-	repository.mu.Unlock()
-	require.Len(t, logs, 1, "browser reads stay outside the audit log")
-	require.Equal(t, service.AuditAuthMethodMCPOAuth, logs[0].AuthMethod)
-	require.Equal(t, "admin.users.read", logs[0].Action)
-	require.Equal(t, "grant-1", logs[0].Extra["mcp_grant_id"])
-	require.Equal(t, "admin_list_users", logs[0].Extra["mcp_tool"])
+	defer repository.mu.Unlock()
+	require.Len(t, repository.logs, 1)
+	require.Equal(t, "user.api_keys.export", repository.logs[0].Action)
+	require.Equal(t, "status=active", repository.logs[0].Extra["query"])
 }

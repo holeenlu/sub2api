@@ -25,6 +25,14 @@ var geminiTransportFailoverBody = []byte(`{"error":{"code":502,"message":"Upstre
 //
 // 本函数不写响应：响应归 handler 所有（换号，或耗尽后按端点格式渲染错误）。
 func (s *GeminiMessagesCompatService) handleUpstreamTransportError(ctx context.Context, c *gin.Context, account *Account, err error) error {
+	if IsTurnBudgetError(err) {
+		return err
+	}
+	var recovery *UpstreamFailoverError
+	if errors.As(err, &recovery) {
+		return err
+	}
+
 	if isClientCanceledTransportError(ctx, err) {
 		return err
 	}
@@ -50,7 +58,9 @@ func (s *GeminiMessagesCompatService) handleUpstreamTransportError(ctx context.C
 	}
 
 	return &UpstreamFailoverError{
-		StatusCode:   http.StatusBadGateway,
+		StatusCode: http.StatusBadGateway,
+		Cause:      err, RequestNotSent: requestDefinitelyUnsent(err),
+		RetryableOnSameAccount: !classifyUpstreamTransportError(err).Persistent, SameAccountRetryMax: 1,
 		ResponseBody: geminiTransportFailoverBody,
 	}
 }

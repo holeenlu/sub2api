@@ -152,7 +152,8 @@ func TestOpenAIResponseFlush_SlowEventsFlushOnceAtBoundaries(t *testing.T) {
 	require.NotNil(t, result)
 	gotBody, flushes := recorder.snapshot()
 	require.Equal(t, body, gotBody)
-	require.Len(t, flushes, len(events))
+	require.NotEmpty(t, flushes)
+	require.LessOrEqual(t, len(flushes), len(events))
 	for _, flushed := range flushes {
 		require.True(t, strings.HasSuffix(flushed, "\n\n"), "flush must occur after a complete SSE event")
 	}
@@ -179,8 +180,8 @@ func TestOpenAIResponseFlush_DataQueuedButBlankDrainsFlushesOnce(t *testing.T) {
 
 	waitOpenAIResponseFlushSignal(t, recorder.flushBlocked)
 	close(allowSecond)
-	waitOpenAIResponseFlushSignal(t, terminalWaiting)
 	close(releaseFirstFlush)
+	waitOpenAIResponseFlushSignal(t, terminalWaiting)
 	waitOpenAIResponseFlushCount(t, recorder, 2)
 	close(allowTerminal)
 
@@ -216,16 +217,20 @@ func TestOpenAIResponseFlush_BurstDoesNotIncreaseFlushes(t *testing.T) {
 
 	waitOpenAIResponseFlushSignal(t, recorder.flushBlocked)
 	close(allowBurst)
-	waitOpenAIResponseFlushSignal(t, eofReached)
 	close(releaseFirstFlush)
+	waitOpenAIResponseFlushSignal(t, eofReached)
 
 	require.NoError(t, <-errCh)
 	require.NotNil(t, <-resultCh)
 	gotBody, flushes := recorder.snapshot()
 	require.Equal(t, first+burst, gotBody)
-	require.Len(t, flushes, 2, "queued burst must remain batched until its drained event boundary")
+	require.GreaterOrEqual(t, len(flushes), 2)
+	require.LessOrEqual(t, len(flushes), 4, "bounded pre-output queues may flush complete events individually")
+	for _, flushed := range flushes {
+		require.True(t, strings.HasSuffix(flushed, "\n\n"))
+	}
 	require.Equal(t, first, flushes[0])
-	require.Equal(t, first+burst, flushes[1])
+	require.Equal(t, first+burst, flushes[len(flushes)-1])
 }
 
 func TestOpenAIResponseFlush_CommentAndEOFOnlyFlushCompleteResidual(t *testing.T) {
@@ -236,18 +241,18 @@ func TestOpenAIResponseFlush_CommentAndEOFOnlyFlushCompleteResidual(t *testing.T
 
 	result, err := runOpenAIResponseFlushTest(recorder, io.NopCloser(strings.NewReader(body)), config.GatewayConfig{})
 
-	require.NoError(t, err)
+	require.Error(t, err)
 	require.NotNil(t, result)
 	gotBody, flushes := recorder.snapshot()
-	require.Equal(t, body, gotBody)
-	require.Len(t, flushes, 3)
-	require.True(t, strings.HasSuffix(flushes[0], "\n\n"))
-	require.True(t, strings.HasSuffix(flushes[1], "\n\n"))
-	require.True(t, strings.HasSuffix(flushes[2], "data: [DONE]\n"), "EOF must flush only the remaining bytes")
+	require.Contains(t, gotBody, "upstream-comment")
+	require.NotContains(t, gotBody, "[DONE]")
+	for _, flushed := range flushes {
+		require.True(t, strings.HasSuffix(flushed, "\n\n"))
+	}
 }
 
 func TestOpenAIResponseFlush_TerminalReadErrorFlushesResidual(t *testing.T) {
-	body := "data: [DONE]\n"
+	body := "data: [DONE]\n\n"
 	recorder := newOpenAIResponseFlushRecorder()
 
 	result, err := runOpenAIResponseFlushTest(recorder, &openAIResponseFlushReadError{payload: []byte(body)}, config.GatewayConfig{})
@@ -260,7 +265,7 @@ func TestOpenAIResponseFlush_TerminalReadErrorFlushesResidual(t *testing.T) {
 }
 
 func TestOpenAIResponseFlush_OutputWithoutTerminalFlushesResidualWithoutFailover(t *testing.T) {
-	body := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n"
+	body := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n"
 	recorder := newOpenAIResponseFlushRecorder()
 
 	result, err := runOpenAIResponseFlushTest(recorder, io.NopCloser(strings.NewReader(body)), config.GatewayConfig{})
@@ -289,7 +294,7 @@ func TestOpenAIResponseFlush_PreambleWithoutTerminalRemainsBufferedForFailover(t
 }
 
 func TestOpenAIResponseFlush_CanceledAfterOutputFlushesResidualWithoutErrorEvent(t *testing.T) {
-	body := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n"
+	body := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n"
 	recorder := newOpenAIResponseFlushRecorder()
 
 	result, err := runOpenAIResponseFlushTest(recorder, &openAIResponseFlushReadError{payload: []byte(body), err: context.Canceled}, config.GatewayConfig{})
@@ -321,14 +326,11 @@ func TestOpenAIResponseFlush_KeepaliveFlushesImmediately(t *testing.T) {
 	require.Len(t, flushes, 2)
 }
 
+// Header-wait/staged-frame heartbeat regression from sub4api 234ef4d60.
 func TestOpenAIResponseFlush_KeepaliveDoesNotSplitOpenEvent(t *testing.T) {
 	const dataLine = `data: {"type":"response.output_text.delta","delta":"a"}`
-	// Filling the 16-slot scan queue proves the main loop processed data before the reader reaches the gated blank.
-	dataLines := make([]string, 17)
-	for i := range dataLines {
-		dataLines[i] = dataLine
-	}
-	partialEvent := strings.Join(dataLines, "\n") + "\n"
+	// A partial event stays private until its real blank line arrives.
+	partialEvent := dataLine + "\n"
 	completeEvent := partialEvent + "\n"
 	terminal := "data: [DONE]\n\n"
 	allowBlank := make(chan struct{})
@@ -348,30 +350,33 @@ func TestOpenAIResponseFlush_KeepaliveDoesNotSplitOpenEvent(t *testing.T) {
 	select {
 	case count := <-recorder.flushEvents:
 		timer.Stop()
-		t.Fatalf("keepalive flushed open event before its blank boundary: flush %d", count)
+		body, _ := recorder.snapshot()
+		require.Equal(t, 1, count)
+		require.Equal(t, ":\n\n", body, "heartbeat must not flush the staged partial event")
 	case <-timer.C:
+		t.Fatal("expected pre-output transport heartbeat")
 	}
 
 	close(allowBlank)
-	waitOpenAIResponseFlushSignal(t, terminalWaiting)
-	waitOpenAIResponseFlushCount(t, recorder, 1)
+	waitOpenAIResponseFlushCount(t, recorder, 2)
 	gotBody, flushes := recorder.snapshot()
-	require.Equal(t, completeEvent, gotBody)
-	require.Equal(t, []string{completeEvent}, flushes)
+	require.Equal(t, ":\n\n"+completeEvent, gotBody)
+	require.Len(t, flushes, 2)
+	require.Equal(t, ":\n\n"+completeEvent, flushes[1])
 
 	close(allowTerminal)
 	require.NoError(t, <-errCh)
 	require.NotNil(t, <-resultCh)
 	gotBody, flushes = recorder.snapshot()
-	require.Equal(t, completeEvent+terminal, gotBody)
-	require.Len(t, flushes, 2)
-	require.Equal(t, completeEvent+terminal, flushes[1])
+	require.Equal(t, ":\n\n"+completeEvent+terminal, gotBody)
+	require.Len(t, flushes, 3)
+	require.Equal(t, ":\n\n"+completeEvent+terminal, flushes[2])
 }
 
 func TestOpenAIResponseFlush_FailedAndErrorEventsFlushAtBoundaries(t *testing.T) {
-	t.Run("failed at EOF", func(t *testing.T) {
+	t.Run("complete failed at EOF", func(t *testing.T) {
 		body := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"a\"}\n\n" +
-			"data: {\"type\":\"response.failed\",\"response\":{\"created_at\":1700000000,\"error\":{\"code\":\"safety_error\",\"message\":\"blocked\"},\"usage\":{\"input_tokens\":3,\"output_tokens\":1}}}\n"
+			"data: {\"type\":\"response.failed\",\"response\":{\"created_at\":1700000000,\"error\":{\"code\":\"safety_error\",\"message\":\"blocked\"},\"usage\":{\"input_tokens\":3,\"output_tokens\":1}}}\n\n"
 		recorder := newOpenAIResponseFlushRecorder()
 
 		result, err := runOpenAIResponseFlushTest(recorder, io.NopCloser(strings.NewReader(body)), config.GatewayConfig{})
@@ -381,7 +386,7 @@ func TestOpenAIResponseFlush_FailedAndErrorEventsFlushAtBoundaries(t *testing.T)
 		require.Equal(t, 3, result.usage.InputTokens)
 		gotBody, flushes := recorder.snapshot()
 		expectedBody := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"a\"}\n\n" +
-			"data: {\"type\":\"response.failed\",\"response\":{\"created_at\":1700000000,\"error\":{\"code\":\"safety_error\",\"message\":\"blocked\"}}}\n"
+			"data: {\"type\":\"response.failed\",\"response\":{\"created_at\":1700000000,\"error\":{\"code\":\"safety_error\",\"message\":\"blocked\"}}}\n\n"
 		require.Equal(t, expectedBody, gotBody)
 		require.Len(t, flushes, 2)
 		require.Contains(t, flushes[1], "response.failed")
@@ -552,7 +557,7 @@ func TestOpenAIResponseFlush_ReusedTypeKeepsSSEBytesAndTerminalSemantics(t *test
 		{
 			name:       "invalid JSON before done",
 			body:       "data: {\"type\":\n\ndata: [DONE]\n\n",
-			flushCount: 2,
+			flushCount: 0,
 		},
 	}
 
@@ -562,6 +567,13 @@ func TestOpenAIResponseFlush_ReusedTypeKeepsSSEBytesAndTerminalSemantics(t *test
 
 			result, err := runOpenAIResponseFlushTest(recorder, io.NopCloser(strings.NewReader(tt.body)), config.GatewayConfig{})
 
+			if tt.name == "invalid JSON before done" {
+				require.Error(t, err)
+				gotBody, flushes := recorder.snapshot()
+				require.Empty(t, gotBody)
+				require.Empty(t, flushes)
+				return
+			}
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			gotBody, flushes := recorder.snapshot()

@@ -2,12 +2,17 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/binary"
 	"hash/crc32"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -38,6 +43,51 @@ func TestExtractBedrockChunkData(t *testing.T) {
 		result := extractBedrockChunkData([]byte(`{"bytes":"not-valid-base64!!!"}`))
 		assert.Nil(t, result)
 	})
+}
+
+func TestBedrockFrameLengthsAreBoundedBeforeAllocation(t *testing.T) {
+	for _, lengths := range [][2]uint32{{16, 100}, {16, 1}, {33 << 20, 0}, {256 << 10, 129 << 10}} {
+		prelude := make([]byte, 12)
+		binary.BigEndian.PutUint32(prelude, lengths[0])
+		binary.BigEndian.PutUint32(prelude[4:], lengths[1])
+		binary.BigEndian.PutUint32(prelude[8:], crc32.ChecksumIEEE(prelude[:8]))
+		_, err := newBedrockEventStreamDecoder(bytes.NewReader(prelude)).Decode()
+		require.ErrorContains(t, err, "invalid eventstream lengths")
+	}
+}
+
+func TestBedrockStreamTerminalAndPartialUsage(t *testing.T) {
+	start := `{"type":"message_start","message":{"usage":{"input_tokens":10}}}`
+	delta := `{"type":"message_delta","usage":{"output_tokens":7}}`
+	for _, tc := range []struct {
+		name string
+		tail []byte
+		fail bool
+	}{
+		{"eof", nil, true},
+		{"crc", []byte("invalid-frame"), true},
+		{"complete", buildBedrockTestFrame("chunk", []byte(`{"bytes":"`+base64.StdEncoding.EncodeToString([]byte(`{"type":"message_stop"}`))+`"}`)), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var wire bytes.Buffer
+			for _, event := range []string{start, delta} {
+				wire.Write(buildBedrockTestFrame("chunk", []byte(`{"bytes":"`+base64.StdEncoding.EncodeToString([]byte(event))+`"}`)))
+			}
+			wire.Write(tc.tail)
+			c, recorder := gin.CreateTestContext(httptest.NewRecorder())
+			_ = recorder
+			c.Request = httptest.NewRequest("POST", "/v1/messages", nil)
+			result, err := (&GatewayService{}).handleBedrockStreamingResponse(context.Background(), &http.Response{Header: http.Header{}, Body: io.NopCloser(&wire)}, c, &Account{ID: 1}, time.Now(), "claude")
+			require.NotNil(t, result)
+			require.Equal(t, 10, result.usage.InputTokens)
+			require.Equal(t, 7, result.usage.OutputTokens)
+			if tc.fail {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }
 
 func TestTransformBedrockInvocationMetrics(t *testing.T) {
@@ -115,50 +165,50 @@ func TestExtractEventStreamHeaderValue(t *testing.T) {
 	})
 }
 
-func TestBedrockEventStreamDecoder(t *testing.T) {
+func buildBedrockTestFrame(eventType string, payload []byte) []byte {
 	crc32IeeeTab := crc32.MakeTable(crc32.IEEE)
+	// Build headers
+	var headersBuf bytes.Buffer
+	// :event-type header
+	_ = headersBuf.WriteByte(byte(len(":event-type")))
+	_, _ = headersBuf.WriteString(":event-type")
+	_ = headersBuf.WriteByte(7) // string type
+	_ = binary.Write(&headersBuf, binary.BigEndian, uint16(len(eventType)))
+	_, _ = headersBuf.WriteString(eventType)
+	// :message-type header
+	_ = headersBuf.WriteByte(byte(len(":message-type")))
+	_, _ = headersBuf.WriteString(":message-type")
+	_ = headersBuf.WriteByte(7)
+	_ = binary.Write(&headersBuf, binary.BigEndian, uint16(len("event")))
+	_, _ = headersBuf.WriteString("event")
 
-	// Build a valid EventStream frame with correct CRC32/IEEE checksums.
-	buildFrame := func(eventType string, payload []byte) []byte {
-		// Build headers
-		var headersBuf bytes.Buffer
-		// :event-type header
-		_ = headersBuf.WriteByte(byte(len(":event-type")))
-		_, _ = headersBuf.WriteString(":event-type")
-		_ = headersBuf.WriteByte(7) // string type
-		_ = binary.Write(&headersBuf, binary.BigEndian, uint16(len(eventType)))
-		_, _ = headersBuf.WriteString(eventType)
-		// :message-type header
-		_ = headersBuf.WriteByte(byte(len(":message-type")))
-		_, _ = headersBuf.WriteString(":message-type")
-		_ = headersBuf.WriteByte(7)
-		_ = binary.Write(&headersBuf, binary.BigEndian, uint16(len("event")))
-		_, _ = headersBuf.WriteString("event")
+	headers := headersBuf.Bytes()
+	headersLen := uint32(len(headers))
+	// total = 12 (prelude) + headers + payload + 4 (message_crc)
+	totalLen := uint32(12 + len(headers) + len(payload) + 4)
 
-		headers := headersBuf.Bytes()
-		headersLen := uint32(len(headers))
-		// total = 12 (prelude) + headers + payload + 4 (message_crc)
-		totalLen := uint32(12 + len(headers) + len(payload) + 4)
+	// Prelude: total_length(4) + headers_length(4)
+	var preludeBuf bytes.Buffer
+	_ = binary.Write(&preludeBuf, binary.BigEndian, totalLen)
+	_ = binary.Write(&preludeBuf, binary.BigEndian, headersLen)
+	preludeBytes := preludeBuf.Bytes()
+	preludeCRC := crc32.Checksum(preludeBytes, crc32IeeeTab)
 
-		// Prelude: total_length(4) + headers_length(4)
-		var preludeBuf bytes.Buffer
-		_ = binary.Write(&preludeBuf, binary.BigEndian, totalLen)
-		_ = binary.Write(&preludeBuf, binary.BigEndian, headersLen)
-		preludeBytes := preludeBuf.Bytes()
-		preludeCRC := crc32.Checksum(preludeBytes, crc32IeeeTab)
+	// Build frame: prelude + prelude_crc + headers + payload
+	var frame bytes.Buffer
+	_, _ = frame.Write(preludeBytes)
+	_ = binary.Write(&frame, binary.BigEndian, preludeCRC)
+	_, _ = frame.Write(headers)
+	_, _ = frame.Write(payload)
 
-		// Build frame: prelude + prelude_crc + headers + payload
-		var frame bytes.Buffer
-		_, _ = frame.Write(preludeBytes)
-		_ = binary.Write(&frame, binary.BigEndian, preludeCRC)
-		_, _ = frame.Write(headers)
-		_, _ = frame.Write(payload)
+	// Message CRC covers everything before itself
+	messageCRC := crc32.Checksum(frame.Bytes(), crc32IeeeTab)
+	_ = binary.Write(&frame, binary.BigEndian, messageCRC)
+	return frame.Bytes()
+}
 
-		// Message CRC covers everything before itself
-		messageCRC := crc32.Checksum(frame.Bytes(), crc32IeeeTab)
-		_ = binary.Write(&frame, binary.BigEndian, messageCRC)
-		return frame.Bytes()
-	}
+func TestBedrockEventStreamDecoder(t *testing.T) {
+	buildFrame := buildBedrockTestFrame
 
 	t.Run("decode chunk event", func(t *testing.T) {
 		payload := []byte(`{"bytes":"dGVzdA=="}`) // base64("test")

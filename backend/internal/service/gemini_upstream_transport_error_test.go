@@ -45,7 +45,7 @@ func requireGeminiTransportFailover(t *testing.T, err error) *UpstreamFailoverEr
 	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
 	require.Equal(t, string(geminiTransportFailoverBody), string(failoverErr.ResponseBody))
 	require.True(t, failoverErr.ShouldRetryNextAccount())
-	require.False(t, failoverErr.RetryableOnSameAccount, "传输层错误不做同账号重试")
+	require.Equal(t, !classifyUpstreamTransportError(failoverErr.Cause).Persistent, failoverErr.RetryableOnSameAccount, "only transient transport failures can retry the same owner")
 	return failoverErr
 }
 

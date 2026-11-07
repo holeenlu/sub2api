@@ -49,7 +49,7 @@ func (r *bmSettingRepo) SetMultiple(_ context.Context, settings map[string]strin
 }
 
 func (r *bmSettingRepo) GetAll(_ context.Context) (map[string]string, error) {
-	panic("unexpected GetAll call")
+	return r.values, nil
 }
 
 func (r *bmSettingRepo) Delete(_ context.Context, _ string) error {
@@ -66,8 +66,9 @@ func newBackendModeSettingService(t *testing.T, enabled string) *service.Setting
 	}
 	svc := service.NewSettingService(repo, &config.Config{})
 	require.NoError(t, svc.UpdateSettings(context.Background(), &service.SystemSettings{
+		Revision:           service.SettingsRevision(repo.values),
 		BackendModeEnabled: enabled == "true",
-	}))
+	}, nil, nil, nil))
 
 	return svc
 }
@@ -392,4 +393,15 @@ func TestBackendModeAuthGuard(t *testing.T) {
 			require.Equal(t, tc.wantStatus, w.Code)
 		})
 	}
+}
+
+func (r *bmSettingRepo) CompareAndSetMultiple(ctx context.Context, revision string, values map[string]string) (string, error) {
+	if service.SettingsRevision(r.values) != revision {
+		return "", service.ErrSettingsRevisionConflict
+	}
+	if err := r.SetMultiple(ctx, values); err != nil {
+		return "", err
+	}
+	current, err := r.GetAll(ctx)
+	return service.SettingsRevision(current), err
 }

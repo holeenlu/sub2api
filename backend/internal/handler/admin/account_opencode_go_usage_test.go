@@ -81,7 +81,7 @@ func (r *openCodeGoUsageHandlerTestRepo) ListDueOpenCodeGoUsageAccounts(context.
 func newOpenCodeGoUsageHandlerTestService(t *testing.T) *service.OpenCodeGoUsageService {
 	t.Helper()
 	svc := service.NewOpenCodeGoUsageService(nil, nil, nil)
-	t.Cleanup(svc.Stop)
+	startAdminFixtureService(t, svc)
 	return svc
 }
 
@@ -155,7 +155,7 @@ func TestOpenCodeGoUsageStateEmbeddedInListAndDetail(t *testing.T) {
 	adminService.accounts = []service.Account{*account}
 	adminService.getAccountResult = account
 	usageService := service.NewOpenCodeGoUsageService(repo, nil, nil)
-	t.Cleanup(usageService.Stop)
+	startAdminFixtureService(t, usageService)
 	handler := NewAccountHandler(adminService, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	handler.SetOpenCodeGoUsageService(usageService)
 	router := gin.New()

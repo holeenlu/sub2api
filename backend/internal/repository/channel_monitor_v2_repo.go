@@ -1179,6 +1179,8 @@ func channelMonitorV2Where(filter service.ChannelMonitorV2Filter, cfg service.Ch
 		args = append(args, pq.Array(groups))
 		conditions = append(conditions, fmt.Sprintf("%s.group_id = ANY($%d)", alias, len(args)))
 	}
+	// Rollups retain deleted groups; platform-level rows have no group record.
+	conditions = append(conditions, fmt.Sprintf("(%s.group_id <= 0 OR %s.group_id IN (SELECT id FROM groups WHERE deleted_at IS NULL))", alias, alias))
 	return "WHERE " + strings.Join(conditions, " AND "), args
 }
 

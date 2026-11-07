@@ -41,19 +41,6 @@ func (d *openAIChatSilentRefusalDetector) Enabled() bool {
 	return d != nil && d.enabled
 }
 
-func (d *openAIChatSilentRefusalDetector) ObserveSSELine(line string) {
-	if d == nil || !d.enabled {
-		return
-	}
-	if eventType, ok := extractOpenAISSEEventLine(line); ok {
-		d.observeEventType(eventType)
-		return
-	}
-	if payload, ok := extractOpenAISSEDataLine(line); ok {
-		d.ObservePayload([]byte(payload))
-	}
-}
-
 func (d *openAIChatSilentRefusalDetector) ObservePayload(payload []byte) {
 	if d == nil || !d.enabled {
 		return

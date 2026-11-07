@@ -79,7 +79,7 @@ func TestExtractOpenAIReasoningEffortModelCandidates(t *testing.T) {
 }
 
 // 回归：OAuth 账号请求后缀式模型（无显式 reasoning 字段）时，上游模型被
-// normalizeCodexModel 剥掉 effort 后缀，用量元数据的 effort 必须仍能从
+// catalog.NormalizeCodexModel 剥掉 effort 后缀，用量元数据的 effort 必须仍能从
 // 原始模型名后缀推导出来。
 func TestOpenAIGatewayServiceForwardOAuthDerivesEffortFromSuffixModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)

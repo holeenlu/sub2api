@@ -11,6 +11,38 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAccountRepositoryModelThresholdPreservesActiveUpstreamLimit(t *testing.T) {
+	tx := testEntTx(t)
+	repo := newAccountRepositoryWithSQL(tx.Client(), tx, nil)
+	account := mustCreateAccount(t, tx.Client(), &service.Account{
+		Name: "model-threshold-cas", Platform: service.PlatformAnthropic, Type: service.AccountTypeOAuth,
+		Credentials: map[string]any{"access_token": "token"},
+	})
+	ctx := t.Context()
+	until := time.Now().UTC().Add(6 * 24 * time.Hour).Truncate(time.Second)
+	const scope = "claude-fable-5"
+	const upstreamReason = "anthropic_7d_oi_window_exhausted"
+	require.NoError(t, repo.SetModelRateLimit(ctx, account.ID, scope, until, upstreamReason))
+	applied, err := repo.SetModelRateLimitIfNotActive(ctx, account.ID, scope, until.Add(-time.Hour), "local-threshold")
+	require.NoError(t, err)
+	require.False(t, applied)
+	stored, err := repo.GetByID(ctx, account.ID)
+	require.NoError(t, err)
+	limits := stored.Extra["model_rate_limits"].(map[string]any)
+	require.Equal(t, upstreamReason, limits[scope].(map[string]any)["reason"])
+	cleared, err := repo.ClearModelRateLimit(ctx, account.ID, scope, "local-threshold")
+	require.NoError(t, err)
+	require.False(t, cleared)
+	require.NoError(t, repo.SetModelRateLimit(ctx, account.ID, scope, time.Now().Add(-time.Hour), upstreamReason))
+	applied, err = repo.SetModelRateLimitIfNotActive(ctx, account.ID, scope, until, "local-threshold")
+	require.NoError(t, err)
+	require.True(t, applied)
+	require.NoError(t, repo.SetModelRateLimit(ctx, account.ID, scope, until, upstreamReason))
+	cleared, err = repo.ClearModelRateLimit(ctx, account.ID, scope, "local-threshold")
+	require.NoError(t, err)
+	require.False(t, cleared)
+}
+
 // TestAccountRepositorySetRateLimitedIfUnchanged exercises the atomic generation
 // CAS backing the Ollama Cloud usage probe write-back (SetRateLimitedIfUnchanged).
 // It must only write when the row still carries the exact UpdatedAt /

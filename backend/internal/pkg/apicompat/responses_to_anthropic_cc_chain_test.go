@@ -2,6 +2,7 @@ package apicompat
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -99,4 +100,62 @@ func TestCCChain_WellFormedMultiRound(t *testing.T) {
 		sawB = sawB || hasToolUse(blocks, "call_b")
 	}
 	require.True(t, sawA && sawB, "both well-formed calls should be preserved")
+}
+
+func TestCCChain_AdjacentAssistantToolsPreserveAllCalls(t *testing.T) {
+	msgs := ccChainToAnthropic(t, &ChatCompletionsRequest{Model: "claude-sonnet-5-5", Messages: []ChatMessage{
+		{Role: "user", Content: json.RawMessage(`"run both"`)},
+		{Role: "assistant", Content: json.RawMessage(`"..."`), ToolCalls: []ChatToolCall{{ID: "a", Type: "function", Function: ChatFunctionCall{Name: "lookup", Arguments: `{}`}}}},
+		{Role: "assistant", ToolCalls: []ChatToolCall{{ID: "b", Type: "function", Function: ChatFunctionCall{Name: "lookup", Arguments: `{}`}}}},
+		{Role: "tool", ToolCallID: "a", Content: json.RawMessage(`"A"`)},
+		{Role: "tool", ToolCallID: "b", Content: json.RawMessage(`"B"`)},
+	}})
+	var ids, texts []string
+	for _, msg := range msgs {
+		if msg.Role != "assistant" {
+			continue
+		}
+		for _, block := range parseContentBlocks(msg.Content) {
+			if block.Type == "tool_use" {
+				ids = append(ids, block.ID)
+			}
+			if block.Type == "text" {
+				texts = append(texts, block.Text)
+			}
+		}
+	}
+	require.Equal(t, []string{"toolu_a", "toolu_b"}, ids)
+	require.Equal(t, []string{"..."}, texts)
+}
+
+func TestResponsesFormatAndCompletedTailFidelity(t *testing.T) {
+	input := json.RawMessage(`[{"role":"user","content":"question"},{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"answer","annotations":[]}]}]`)
+	req := &ResponsesRequest{Model: "claude-sonnet-5-5", Input: input, Text: &ResponsesText{Format: json.RawMessage(`{"type":"json_schema","name":"result","strict":true,"schema":{"type":"object","properties":{"ok":{"type":"boolean"}},"additionalProperties":false}}`)}}
+	out, err := ResponsesToAnthropicRequest(req)
+	require.NoError(t, err)
+	require.Len(t, out.Messages, 1)
+	require.Len(t, out.Diagnostics, 1)
+	require.JSONEq(t, `{"type":"json_schema","schema":{"type":"object","properties":{"ok":{"type":"boolean"}},"additionalProperties":false}}`, string(out.OutputConfig.Format))
+	require.Equal(t, string(input), string(req.Input))
+	req.FromChatCompletions = true
+	out, err = ResponsesToAnthropicRequest(req)
+	require.NoError(t, err)
+	require.Len(t, out.Messages, 2)
+	req.FromChatCompletions = false
+	req.Input = json.RawMessage(`[{"role":"user","content":"question"},{"type":"message","role":"assistant","status":"in_progress","content":[{"type":"output_text","text":"partial"}]}]`)
+	out, err = ResponsesToAnthropicRequest(req)
+	require.NoError(t, err)
+	require.Len(t, out.Messages, 2)
+	req.Input = json.RawMessage(`[{"role":"user","content":"question"},{"type":"message","role":"assistant","status":"completed","provider_signature":"opaque","content":[{"type":"output_text","text":"answer"}]}]`)
+	var diagnostics ConversionDiagnostics
+	require.Equal(t, req.Input, omitCompletedResponsesTail(req.Input, &diagnostics))
+	require.Empty(t, diagnostics)
+}
+func TestConversionDiagnosticsBounded(t *testing.T) {
+	var d ConversionDiagnostics
+	for i := 0; i < 100; i++ {
+		d.Add("schema_legacy_conversion", fmt.Sprintf("tools[%d]", i))
+		d.Add("schema_legacy_conversion", fmt.Sprintf("tools[%d]", i))
+	}
+	require.Len(t, d, 32)
 }

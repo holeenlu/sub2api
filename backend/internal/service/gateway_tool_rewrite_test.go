@@ -3,10 +3,14 @@ package service
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -43,27 +47,57 @@ func TestSanitizeToolName_DynamicTakesPrecedence(t *testing.T) {
 	require.Equal(t, "analyze_ses00", got, "dynamic mapping wins over static prefix")
 }
 
-func TestRestoreToolNamesInBytes_LongestFirst(t *testing.T) {
+func TestRestoreToolNamesInBytes_ExactProtocolFields(t *testing.T) {
 	// 当假名 "abc_12" 是另一个更长假名的子串（真实场景极少但算法必须防御）时，
 	// 长的必须先替换。本测试用显式构造的映射来验证排序不变量。
 	rw := &ToolNameRewrite{
 		Forward: map[string]string{"foo": "abc_12", "bar": "abc_12_ext"},
 		Reverse: map[string]string{"abc_12": "foo", "abc_12_ext": "bar"},
 	}
-	// 手工构造 ReverseOrdered：长的在前
-	rw.ReverseOrdered = [][2]string{
-		{"abc_12_ext", "bar"},
-		{"abc_12", "foo"},
-	}
-	data := []byte(`{"tool":"abc_12_ext","other":"abc_12"}`)
+
+	data := []byte(`{"type":"message","content":[{"type":"tool_use","name":"abc_12_ext","input":{"path":"abc_12.txt"}},{"type":"tool_use","name":"abc_12"},{"type":"text","text":"abc_12_ext"}]}`)
 	restored := string(restoreToolNamesInBytes(data, rw))
-	require.Equal(t, `{"tool":"bar","other":"foo"}`, restored)
+	require.Equal(t, `{"type":"message","content":[{"type":"tool_use","name":"bar","input":{"path":"abc_12.txt"}},{"type":"tool_use","name":"foo"},{"type":"text","text":"abc_12_ext"}]}`, restored)
 }
 
-func TestRestoreToolNamesInBytes_StaticPrefixRollback(t *testing.T) {
-	data := []byte(`{"name":"sessions_list","id":"cc_ses_xyz"}`)
-	got := string(restoreToolNamesInBytes(data, nil))
-	require.Equal(t, `{"name":"sessions_list","id":"session_xyz"}`, got)
+func TestRestoreToolNamesInBytes_RequiresRequestMapping(t *testing.T) {
+	data := []byte(`{"type":"tool_use","name":"cc_sess_list","id":"cc_ses_xyz","text":"cc_sess_unmapped"}`)
+	require.Equal(t, data, restoreToolNamesInBytes(data, nil))
+	require.Equal(t, data, reverseToolNamesIfPresent(nil, data))
+	require.Equal(t, data, restoreToolNamesInBytes(data, &ToolNameRewrite{}))
+	rw := buildToolNameRewriteFromBody([]byte(`{"tools":[{"name":"sessions_list"}]}`))
+	require.NotNil(t, rw)
+	require.Equal(t, `{"type":"tool_use","name":"sessions_list","id":"cc_ses_xyz","text":"cc_sess_unmapped"}`, string(restoreToolNamesInBytes(data, rw)))
+}
+
+func TestGatewayService_Forward_ToolMappingBelongsToCurrentAttempt(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	const request = `{"model":"claude-sonnet-4-5","tools":[{"name":"sessions_list","input_schema":{"type":"object"}}],"messages":[{"role":"user","content":"hello"}]}`
+	const response = `{"type":"message","content":[{"type":"tool_use","name":"cc_sess_list","id":"cc_ses_unmapped"}],"usage":{"input_tokens":1}}`
+	upstream := &anthropicHTTPUpstreamRecorder{}
+	svc := newForwardPartialUsageServiceForTest(upstream)
+	for _, account := range []*Account{newAnthropicOAuthAccountForPartialUsageTest(), newAnthropicAPIKeyAccountForTest()} {
+		parsed, err := ParseGatewayRequest(NewRequestBodyRef([]byte(request)), PlatformAnthropic)
+		require.NoError(t, err)
+		upstream.resp = &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(response))}
+		result, err := svc.Forward(context.Background(), c, account, parsed)
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		if account.IsAnthropicAPIKeyPassthroughEnabled() {
+			require.Nil(t, toolNameRewriteFromContext(c), "prior attempt's mapping must not leak into passthrough")
+			require.Equal(t, "sessions_list", gjson.GetBytes(upstream.lastBody, "tools.0.name").String())
+			require.Equal(t, "cc_sess_list", gjson.GetBytes(rec.Body.Bytes(), "content.0.name").String())
+		} else {
+			require.NotNil(t, toolNameRewriteFromContext(c))
+			require.Equal(t, "cc_sess_list", gjson.GetBytes(upstream.lastBody, "tools.0.name").String())
+			require.Equal(t, "sessions_list", gjson.GetBytes(rec.Body.Bytes(), "content.0.name").String())
+		}
+		require.Equal(t, "cc_ses_unmapped", gjson.GetBytes(rec.Body.Bytes(), "content.0.id").String())
+		rec.Body.Reset()
+	}
 }
 
 func TestApplyToolNameRewriteToBody_RenamesToolsAndToolChoice(t *testing.T) {
@@ -253,22 +287,13 @@ func TestRewriteMessageCacheControlIfEnabled_OptInPreservesLegacyRewrite(t *test
 	require.Equal(t, "5m", gjson.GetBytes(out, "messages.3.content.0.cache_control.ttl").String())
 }
 
-func TestBuildToolNameRewriteFromBody_ReverseOrderedByLengthDesc(t *testing.T) {
-	// 超过阈值触发动态映射，验证 ReverseOrdered 按假名长度倒序排列
-	body := []byte(`{"tools":[
-        {"name":"t1","input_schema":{}},
-        {"name":"t2","input_schema":{}},
-        {"name":"t3","input_schema":{}},
-        {"name":"t4","input_schema":{}},
-        {"name":"t5","input_schema":{}},
-        {"name":"t6","input_schema":{}}
-    ]}`)
+func TestBuildToolNameRewriteFromBody_Bijective(t *testing.T) {
+	body := []byte(`{"tools":[{"name":"t1"},{"name":"t2"},{"name":"t3"},{"name":"t4"},{"name":"t5"},{"name":"t6"}]}`)
 	rw := buildToolNameRewriteFromBody(body)
 	require.NotNil(t, rw)
-	require.NotEmpty(t, rw.ReverseOrdered)
-	for i := 1; i < len(rw.ReverseOrdered); i++ {
-		require.GreaterOrEqual(t, len(rw.ReverseOrdered[i-1][0]), len(rw.ReverseOrdered[i][0]),
-			"ReverseOrdered must be sorted by fake-name length descending")
+	require.Len(t, rw.Reverse, len(rw.Forward))
+	for real, fake := range rw.Forward {
+		require.Equal(t, real, rw.Reverse[fake])
 	}
 }
 
@@ -298,10 +323,12 @@ func TestBuildDynamicToolMap_FakeNameShape(t *testing.T) {
 
 func TestApplyToolNameRewriteToBody_Spans(t *testing.T) {
 	body := []byte(`{"tools":[{"name":"sessions_\"quoted"},{"name":"session_last","defer_loading":true,"cache_control":{"type":"ephemeral"}}],"tool_choice":{"type":"tool","name":"sessions_\"quoted"},"messages":[{"content":[{"type":"tool_use","name":"sessions_\"quoted","input":{"name":"sessions_\"quoted"}},{"type":"tool_use"}]}],"metadata":{"name":"sessions_\"quoted"}}`)
-	out := applyToolNameRewriteToBody(body, buildToolNameRewriteFromBody(body))
+	rw := buildToolNameRewriteFromBody(body)
+	out := applyToolNameRewriteToBody(body, rw)
 	require.True(t, gjson.ValidBytes(out))
 	for _, path := range []string{"tools.0.name", "tool_choice.name", "messages.0.content.0.name"} {
-		require.Equal(t, `cc_sess_"quoted`, gjson.GetBytes(out, path).String())
+		require.Equal(t, rw.Forward[`sessions_"quoted`], gjson.GetBytes(out, path).String())
+		require.True(t, validAnthropicToolName(gjson.GetBytes(out, path).String()))
 	}
 	require.Equal(t, `sessions_"quoted`, gjson.GetBytes(out, "messages.0.content.0.input.name").String())
 	require.Equal(t, `sessions_"quoted`, gjson.GetBytes(out, "metadata.name").String())

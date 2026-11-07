@@ -68,9 +68,10 @@ func runGeminiImageGateEndpoint(t *testing.T, ep geminiImageGateEndpoint, group 
 	)
 	cfg := &config.Config{RunMode: config.RunModeSimple}
 	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
-	t.Cleanup(billingCacheService.Stop)
+	cleanupHandlerBillingCache(t, billingCacheService)
 	h := &GatewayHandler{
 		gatewayService:      gatewayService,
+		geminiCompatService: &service.GeminiMessagesCompatService{},
 		billingCacheService: billingCacheService,
 		concurrencyHelper:   NewConcurrencyHelper(service.NewConcurrencyService(&fakeConcurrencyCache{}), SSEPingFormatClaude, 0),
 		maxAccountSwitches:  1,

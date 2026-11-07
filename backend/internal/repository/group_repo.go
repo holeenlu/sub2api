@@ -9,14 +9,14 @@ import (
 	"sort"
 	"strings"
 
+	entsql "entgo.io/ent/dialect/sql"
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/group"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
-
-	entsql "entgo.io/ent/dialect/sql"
 )
 
 type sqlExecutor interface {
@@ -143,7 +143,7 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetRequirePrivacySet(groupIn.RequirePrivacySet).
 		SetDefaultMappedModel(groupIn.DefaultMappedModel).
 		SetMessagesDispatchModelConfig(groupIn.MessagesDispatchModelConfig).
-		SetModelAllowlist(service.DomainGroupModelAllowlist(groupIn.ModelAllowlist)).
+		SetModelAllowlist(domain.GroupModelAllowlist(groupIn.ModelAllowlist)).
 		SetCodexModelsManifestConfig(groupIn.CodexModelsManifestConfig).
 		SetRpmLimit(groupIn.RPMLimit).
 		SetMaxReasoningEffort(groupIn.MaxReasoningEffort).
@@ -203,6 +203,10 @@ func (r *groupRepository) FindByDuplicateOperationID(ctx context.Context, operat
 // CreateFromSource atomically persists a copied group, clones the source
 // account bindings with their exact priorities, and writes its scheduler event.
 func (r *groupRepository) CreateFromSource(ctx context.Context, groupIn *service.Group, sourceGroupID int64) error {
+	if err := guardVendorGroupWrite(ctx, txAwareSQLExecutor(ctx, r.sql, r.client), []int64{sourceGroupID}); err != nil {
+		return err
+	}
+
 	if groupIn == nil {
 		return errors.New("group is nil")
 	}
@@ -230,7 +234,7 @@ func (r *groupRepository) CreateFromSource(ctx context.Context, groupIn *service
 		 FROM account_groups ag
 		 JOIN accounts a ON a.id = ag.account_id
 		 WHERE ag.group_id = $1
-		   AND a.deleted_at IS NULL
+		   AND a.deleted_at IS NULL AND a.vendor_id IS NULL
 		   AND (NOT $3 OR a.type <> $4)
 		 ON CONFLICT (account_id, group_id) DO NOTHING`,
 		sourceGroupID,
@@ -283,11 +287,19 @@ func (r *groupRepository) GetByIDLite(ctx context.Context, id int64) (*service.G
 }
 
 func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) error {
+	client, tx, err := beginVendorGroupWrite(ctx, clientFromContext(ctx, r.client), groupIn.ID)
+	if err != nil {
+		return err
+	}
+	if tx != nil {
+		defer tx.Rollback()
+	}
+
 	modelPricing, err := json.Marshal(groupIn.ModelPricing)
 	if err != nil {
 		return fmt.Errorf("marshal group model pricing: %w", err)
 	}
-	builder := r.client.Group.UpdateOneID(groupIn.ID).
+	builder := client.Group.UpdateOneID(groupIn.ID).
 		SetName(groupIn.Name).
 		SetDescription(groupIn.Description).
 		SetPlatform(groupIn.Platform).
@@ -328,7 +340,7 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetRequirePrivacySet(groupIn.RequirePrivacySet).
 		SetDefaultMappedModel(groupIn.DefaultMappedModel).
 		SetMessagesDispatchModelConfig(groupIn.MessagesDispatchModelConfig).
-		SetModelAllowlist(service.DomainGroupModelAllowlist(groupIn.ModelAllowlist)).
+		SetModelAllowlist(domain.GroupModelAllowlist(groupIn.ModelAllowlist)).
 		SetCodexModelsManifestConfig(groupIn.CodexModelsManifestConfig).
 		SetRpmLimit(groupIn.RPMLimit).
 		SetMaxReasoningEffort(groupIn.MaxReasoningEffort).
@@ -448,19 +460,33 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		return translatePersistenceError(err, service.ErrGroupNotFound, service.ErrGroupExists)
 	}
 	groupIn.UpdatedAt = updated.UpdatedAt
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupIn.ID, nil); err != nil {
-		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group update failed: group=%d err=%v", groupIn.ID, err)
+	if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventGroupChanged, nil, &groupIn.ID, nil); err != nil {
+		return err
+	}
+	if tx != nil {
+		return tx.Commit()
 	}
 	return nil
 }
 
 func (r *groupRepository) Delete(ctx context.Context, id int64) error {
-	_, err := r.client.Group.Delete().Where(group.IDEQ(id)).Exec(ctx)
+	client, tx, err := beginVendorGroupWrite(ctx, clientFromContext(ctx, r.client), id)
+	if err != nil {
+		return err
+	}
+	if tx != nil {
+		defer tx.Rollback()
+	}
+
+	_, err = client.Group.Delete().Where(group.IDEQ(id)).Exec(ctx)
 	if err != nil {
 		return translatePersistenceError(err, service.ErrGroupNotFound, nil)
 	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &id, nil); err != nil {
-		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group delete failed: group=%d err=%v", id, err)
+	if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventGroupChanged, nil, &id, nil); err != nil {
+		return err
+	}
+	if tx != nil {
+		return tx.Commit()
 	}
 	return nil
 }
@@ -843,19 +869,38 @@ func (r *groupRepository) GetAccountCount(ctx context.Context, groupID int64) (t
 			COUNT(*) FILTER (WHERE %s),
 			COUNT(*) FILTER (WHERE %s)
 		FROM account_groups ag JOIN accounts a ON a.id = ag.account_id
-		WHERE ag.group_id = $1`, groupAccountAvailableSQL, groupAccountTemporarilyLimitedSQL),
+		WHERE ag.group_id = $1 AND %s`, groupAccountAvailableSQL, groupAccountTemporarilyLimitedSQL, accountVisibilitySQL(ctx, "a.vendor_id")),
 		[]any{groupID}, &total, &active, &rateLimited)
 	return
 }
 
 func (r *groupRepository) DeleteAccountGroupsByGroupID(ctx context.Context, groupID int64) (int64, error) {
-	res, err := r.sql.ExecContext(ctx, "DELETE FROM account_groups WHERE group_id = $1", groupID)
+	client, tx, err := beginVendorGroupWrite(ctx, clientFromContext(ctx, r.client), groupID)
 	if err != nil {
 		return 0, err
 	}
-	affected, _ := res.RowsAffected()
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupID, nil); err != nil {
-		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group account clear failed: group=%d err=%v", groupID, err)
+	if tx != nil {
+		defer tx.Rollback()
+	}
+	exec := sqlExecutor(client)
+	if tx == nil {
+		exec = txAwareSQLExecutor(ctx, r.sql, client)
+	}
+	res, err := exec.ExecContext(ctx, "DELETE FROM account_groups WHERE group_id=$1", groupID)
+	if err != nil {
+		return 0, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if err := enqueueSchedulerOutbox(ctx, exec, service.SchedulerOutboxEventGroupChanged, nil, &groupID, nil); err != nil {
+		return 0, err
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return 0, err
+		}
 	}
 	return affected, nil
 }
@@ -869,6 +914,7 @@ func (r *groupRepository) DeleteCascadeIfEmpty(ctx context.Context, id int64) ([
 }
 
 func (r *groupRepository) deleteCascade(ctx context.Context, id int64, requireEmpty bool) ([]int64, error) {
+
 	// 使用 ent 事务统一包裹：避免手工基于 *sql.Tx 构造 ent client 带来的驱动断言问题，
 	// 同时保证级联删除的原子性。
 	tx, err := r.client.Tx(ctx)
@@ -906,6 +952,9 @@ func (r *groupRepository) deleteCascade(ctx context.Context, id int64, requireEm
 	}
 	if lockedID == 0 {
 		return nil, service.ErrGroupNotFound
+	}
+	if err := guardVendorGroupWrite(ctx, exec, []int64{id}); err != nil {
+		return nil, err
 	}
 	if requireEmpty {
 		var hasAccount bool
@@ -1047,8 +1096,8 @@ func (r *groupRepository) loadAccountCounts(ctx context.Context, groupIDs []int6
 			COUNT(*) FILTER (WHERE %s) AS rate_limited
 		FROM account_groups ag
 		JOIN accounts a ON a.id = ag.account_id
-		WHERE ag.group_id = ANY($1)
-		GROUP BY ag.group_id`, groupAccountAvailableSQL, groupAccountTemporarilyLimitedSQL),
+		WHERE ag.group_id = ANY($1) AND %s
+		GROUP BY ag.group_id`, groupAccountAvailableSQL, groupAccountTemporarilyLimitedSQL, accountVisibilitySQL(ctx, "a.vendor_id")),
 		pq.Array(groupIDs),
 	)
 	if err != nil {
@@ -1084,7 +1133,7 @@ func (r *groupRepository) GetAccountIDsByGroupIDs(ctx context.Context, groupIDs 
 
 	rows, err := r.sql.QueryContext(
 		ctx,
-		"SELECT DISTINCT account_id FROM account_groups WHERE group_id = ANY($1) ORDER BY account_id",
+		"SELECT DISTINCT ag.account_id FROM account_groups ag JOIN accounts a ON a.id=ag.account_id WHERE ag.group_id = ANY($1) AND a.deleted_at IS NULL AND "+accountVisibilitySQL(ctx, "a.vendor_id")+" ORDER BY ag.account_id",
 		pq.Array(groupIDs),
 	)
 	if err != nil {
@@ -1122,10 +1171,17 @@ func (r *groupRepository) BindAccountsToGroup(ctx context.Context, groupID int64
 		defer func() { _ = tx.Rollback() }()
 		exec = tx.Client()
 	}
+
+	repo := &accountRepository{client: clientFromContext(ctx, r.client), sql: exec}
+	if err := repo.guardAccountScope(ctx, accountIDs...); err != nil {
+		return err
+	}
+	if err := validateVendorGroupBindings(ctx, exec, accountIDs, []int64{groupID}); err != nil {
+		return err
+	}
 	if err := lockLiveGroups(ctx, exec, []int64{groupID}); err != nil {
 		return err
 	}
-
 	// 使用 INSERT ... ON CONFLICT DO NOTHING 忽略已存在的绑定
 	_, err = exec.ExecContext(
 		ctx,
@@ -1138,15 +1194,13 @@ func (r *groupRepository) BindAccountsToGroup(ctx context.Context, groupID int64
 	if err != nil {
 		return err
 	}
+	if err := enqueueSchedulerOutbox(ctx, exec, service.SchedulerOutboxEventGroupChanged, nil, &groupID, nil); err != nil {
+		return err
+	}
 	if tx != nil {
 		if err := tx.Commit(); err != nil {
 			return err
 		}
-	}
-
-	// 发送调度器事件
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupID, nil); err != nil {
-		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue bind accounts to group failed: group=%d err=%v", groupID, err)
 	}
 
 	return nil

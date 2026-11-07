@@ -8,7 +8,7 @@ import (
 
 // PlatformCatalog 是前端使用的平台清单：domain 平台清单加上多协议供应商的
 // profile（接入模式、各协议默认基址、内置分流规则）。它被写成前端内置清单
-// frontend/src/constants/platformCatalog.builtin.json（见
+// frontend/src/features/catalog/model/platformCatalog.builtin.json（见
 // TestFrontendBuiltinPlatformCatalogInSync），前端据此生成平台选项、展示名与
 // 多协议账号表单，新登记的平台只需重新生成该文件，无需修改前端代码。
 type PlatformCatalog struct {

@@ -8,13 +8,13 @@ import (
 	"testing"
 	"time"
 
+	gocache "github.com/patrickmn/go-cache"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestDigestSessionStore_SaveAndFind(t *testing.T) {
 	store := NewDigestSessionStore()
-	t.Cleanup(store.Close)
 
 	store.Save(1, "prefix", "s:a1-u:b2-m:c3", "uuid-1", 100, "")
 
@@ -26,7 +26,6 @@ func TestDigestSessionStore_SaveAndFind(t *testing.T) {
 
 func TestDigestSessionStore_PrefixMatch(t *testing.T) {
 	store := NewDigestSessionStore()
-	t.Cleanup(store.Close)
 
 	// 保存短链
 	store.Save(1, "prefix", "u:a-m:b", "uuid-short", 10, "")
@@ -41,7 +40,6 @@ func TestDigestSessionStore_PrefixMatch(t *testing.T) {
 
 func TestDigestSessionStore_LongestPrefixMatch(t *testing.T) {
 	store := NewDigestSessionStore()
-	t.Cleanup(store.Close)
 
 	store.Save(1, "prefix", "u:a", "uuid-1", 1, "")
 	store.Save(1, "prefix", "u:a-m:b", "uuid-2", 2, "")
@@ -62,7 +60,6 @@ func TestDigestSessionStore_LongestPrefixMatch(t *testing.T) {
 
 func TestDigestSessionStore_SaveDeletesOldChain(t *testing.T) {
 	store := NewDigestSessionStore()
-	t.Cleanup(store.Close)
 
 	// 第一轮：保存 "u:a-m:b"
 	store.Save(1, "prefix", "u:a-m:b", "uuid-1", 100, "")
@@ -83,7 +80,6 @@ func TestDigestSessionStore_SaveDeletesOldChain(t *testing.T) {
 
 func TestDigestSessionStore_DifferentSessionsNoInterference(t *testing.T) {
 	store := NewDigestSessionStore()
-	t.Cleanup(store.Close)
 
 	// 相同系统提示词，不同用户提示词
 	store.Save(1, "prefix", "s:sys-u:user1", "uuid-1", 100, "")
@@ -102,7 +98,6 @@ func TestDigestSessionStore_DifferentSessionsNoInterference(t *testing.T) {
 
 func TestDigestSessionStore_NoMatch(t *testing.T) {
 	store := NewDigestSessionStore()
-	t.Cleanup(store.Close)
 
 	store.Save(1, "prefix", "u:a-m:b", "uuid-1", 100, "")
 
@@ -113,7 +108,6 @@ func TestDigestSessionStore_NoMatch(t *testing.T) {
 
 func TestDigestSessionStore_DifferentPrefixHash(t *testing.T) {
 	store := NewDigestSessionStore()
-	t.Cleanup(store.Close)
 
 	store.Save(1, "prefix1", "u:a-m:b", "uuid-1", 100, "")
 
@@ -124,7 +118,6 @@ func TestDigestSessionStore_DifferentPrefixHash(t *testing.T) {
 
 func TestDigestSessionStore_DifferentGroupID(t *testing.T) {
 	store := NewDigestSessionStore()
-	t.Cleanup(store.Close)
 
 	store.Save(1, "prefix", "u:a-m:b", "uuid-1", 100, "")
 
@@ -135,7 +128,6 @@ func TestDigestSessionStore_DifferentGroupID(t *testing.T) {
 
 func TestDigestSessionStore_EmptyDigestChain(t *testing.T) {
 	store := NewDigestSessionStore()
-	t.Cleanup(store.Close)
 
 	// 空链不应保存
 	store.Save(1, "prefix", "", "uuid-1", 100, "")
@@ -145,10 +137,8 @@ func TestDigestSessionStore_EmptyDigestChain(t *testing.T) {
 
 func TestDigestSessionStore_TTLExpiration(t *testing.T) {
 	store := &DigestSessionStore{
-		cache: sessionMemoryCache{sweep: 50 * time.Millisecond},
-		ttl:   100 * time.Millisecond,
+		cache: gocache.New(100*time.Millisecond, 50*time.Millisecond),
 	}
-	t.Cleanup(store.Close)
 
 	store.Save(1, "prefix", "u:a-m:b", "uuid-1", 100, "")
 
@@ -166,7 +156,6 @@ func TestDigestSessionStore_TTLExpiration(t *testing.T) {
 
 func TestDigestSessionStore_ConcurrentSafety(t *testing.T) {
 	store := NewDigestSessionStore()
-	t.Cleanup(store.Close)
 
 	var wg sync.WaitGroup
 	const goroutines = 50
@@ -190,7 +179,6 @@ func TestDigestSessionStore_ConcurrentSafety(t *testing.T) {
 
 func TestDigestSessionStore_MultipleSessions(t *testing.T) {
 	store := NewDigestSessionStore()
-	t.Cleanup(store.Close)
 
 	sessions := []struct {
 		chain     string
@@ -223,7 +211,6 @@ func TestDigestSessionStore_MultipleSessions(t *testing.T) {
 
 func TestDigestSessionStore_Performance1000Sessions(t *testing.T) {
 	store := NewDigestSessionStore()
-	t.Cleanup(store.Close)
 
 	// 插入 1000 个会话
 	for i := 0; i < 1000; i++ {
@@ -246,7 +233,6 @@ func TestDigestSessionStore_Performance1000Sessions(t *testing.T) {
 
 func TestDigestSessionStore_FindReturnsMatchedChain(t *testing.T) {
 	store := NewDigestSessionStore()
-	t.Cleanup(store.Close)
 
 	store.Save(1, "prefix", "u:a-m:b-u:c", "uuid-1", 100, "")
 
@@ -263,7 +249,6 @@ func TestDigestSessionStore_FindReturnsMatchedChain(t *testing.T) {
 
 func TestDigestSessionStore_CacheItemCountStable(t *testing.T) {
 	store := NewDigestSessionStore()
-	t.Cleanup(store.Close)
 
 	// 模拟 100 个独立会话，每个进行 10 轮对话
 	// 正确传递 oldDigestChain 时，每个会话始终只保留 1 个 key
@@ -293,10 +278,8 @@ func TestDigestSessionStore_CacheItemCountStable(t *testing.T) {
 func TestDigestSessionStore_TTLPreventsUnboundedGrowth(t *testing.T) {
 	// 使用极短 TTL 验证大量写入后 cache 能被清理
 	store := &DigestSessionStore{
-		cache: sessionMemoryCache{sweep: 50 * time.Millisecond},
-		ttl:   100 * time.Millisecond,
+		cache: gocache.New(100*time.Millisecond, 50*time.Millisecond),
 	}
-	t.Cleanup(store.Close)
 
 	// 插入 500 个不同的 key（无 oldDigestChain，模拟最坏场景：全是新会话首轮）
 	for i := 0; i < 500; i++ {
@@ -314,7 +297,6 @@ func TestDigestSessionStore_TTLPreventsUnboundedGrowth(t *testing.T) {
 
 func TestDigestSessionStore_SaveSameChainNoDelete(t *testing.T) {
 	store := NewDigestSessionStore()
-	t.Cleanup(store.Close)
 
 	// 保存 chain
 	store.Save(1, "prefix", "u:a-m:b", "uuid-1", 100, "")

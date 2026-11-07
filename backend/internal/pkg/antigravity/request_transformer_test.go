@@ -300,6 +300,38 @@ func TestBuildTools_KeepsWebSearchWhenNoClientFunctions(t *testing.T) {
 	require.Equal(t, 5, result[0].GoogleSearch.EnhancedContent.ImageSearch.MaxResultCount)
 }
 
+func TestTransformCallerSearchToolsKeepSchemaAndModel(t *testing.T) {
+	for _, name := range []string{"web_search", "google_search", "web_search_20250305"} {
+		for _, custom := range []bool{false, true} {
+			t.Run(name+"/custom="+map[bool]string{true: "true", false: "false"}[custom], func(t *testing.T) {
+				schema := map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}, "required": []string{"query"}}
+				tool := ClaudeTool{Name: name, InputSchema: schema}
+				if custom {
+					tool.Type, tool.InputSchema = "custom", nil
+					tool.Custom = &ClaudeCustomToolSpec{InputSchema: schema}
+				}
+				body, err := TransformClaudeToGeminiWithOptions(&ClaudeRequest{
+					Messages: []ClaudeMessage{{Role: "user", Content: json.RawMessage(`"search"`)}},
+					Tools:    []ClaudeTool{tool},
+				}, "project", "claude-sonnet-4-6", DefaultTransformOptions())
+				require.NoError(t, err)
+				var req V1InternalRequest
+				require.NoError(t, json.Unmarshal(body, &req))
+				require.Equal(t, "agent", req.RequestType)
+				require.Equal(t, "claude-sonnet-4-6", req.Model)
+				require.Len(t, req.Request.Tools, 1)
+				require.Nil(t, req.Request.Tools[0].GoogleSearch)
+				require.Len(t, req.Request.Tools[0].FunctionDeclarations, 1)
+				function := req.Request.Tools[0].FunctionDeclarations[0]
+				require.Equal(t, name, function.Name)
+				require.Equal(t, "string", function.Parameters["properties"].(map[string]any)["query"].(map[string]any)["type"])
+			})
+		}
+	}
+	// Explicit server types retain their meaning even when a schema is supplied.
+	require.True(t, isWebSearchTool(ClaudeTool{Type: "web_search_20250305", Name: "web_search", InputSchema: map[string]any{}}))
+}
+
 func TestBuildGenerationConfig_ThinkingDynamicBudget(t *testing.T) {
 	tests := []struct {
 		name        string

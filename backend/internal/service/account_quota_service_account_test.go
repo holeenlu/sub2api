@@ -123,28 +123,17 @@ func TestBuildUsageBillingCommandAccountQuotaCostForServiceAccount(t *testing.T)
 	require.Zero(t, cmd.AccountQuotaCost)
 }
 
-type accountQuotaIncrementRepoStub struct {
-	AccountRepository
-	calls []float64
-}
-
-func (s *accountQuotaIncrementRepoStub) IncrementQuotaUsed(_ context.Context, _ int64, amount float64) error {
-	s.calls = append(s.calls, amount)
-	return nil
-}
-
-func TestPostUsageBillingLegacyAccumulatesServiceAccountQuota(t *testing.T) {
-	repo := &accountQuotaIncrementRepoStub{}
-	postUsageBilling(context.Background(), &postUsageBillingParams{
-		Cost:                  &CostBreakdown{TotalCost: 2},
-		User:                  &User{ID: 7},
-		APIKey:                &APIKey{ID: 13},
+func TestApplyUsageBillingAccumulatesServiceAccountQuota(t *testing.T) {
+	repo := &simpleModeUsageBillingRepoStub{}
+	applied, err := applyUsageBilling(context.Background(), "service-account-atomic", &UsageLog{}, &postUsageBillingParams{
+		Cost: &CostBreakdown{TotalCost: 2}, User: &User{ID: 7}, APIKey: &APIKey{ID: 13},
 		Account:               &Account{ID: 9, Platform: PlatformGemini, Type: AccountTypeServiceAccount, Extra: map[string]any{"quota_limit": 100.0}},
 		AccountRateMultiplier: 1.25,
-	}, &billingDeps{accountRepo: repo})
-
-	require.Len(t, repo.calls, 1)
-	require.InDelta(t, 2.5, repo.calls[0], 1e-9)
+	}, &billingDeps{}, repo)
+	require.NoError(t, err)
+	require.True(t, applied)
+	require.Len(t, repo.cmds, 1)
+	require.InDelta(t, 2.5, repo.cmds[0].AccountQuotaCost, 1e-9)
 }
 
 type settingGetValueCounter struct {
@@ -178,7 +167,7 @@ func TestNotifyAccountQuotaSkipsAccountWithoutLimit(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			settings := &settingGetValueCounter{}
-			notifyAccountQuota(context.Background(), &postUsageBillingParams{
+			notifyAccountQuota(&postUsageBillingParams{
 				Cost:                  &CostBreakdown{TotalCost: 2},
 				Account:               tt.account,
 				AccountRateMultiplier: 1,
@@ -193,7 +182,7 @@ func TestNotifyAccountQuotaSkipsAccountWithoutLimit(t *testing.T) {
 // 账号已删除时计数被跳过、无递增后状态，不应回退到快照做阈值判定。
 func TestNotifyAccountQuotaSkipsWhenQuotaIncrementSkipped(t *testing.T) {
 	settings := &settingGetValueCounter{}
-	notifyAccountQuota(context.Background(), &postUsageBillingParams{
+	notifyAccountQuota(&postUsageBillingParams{
 		Cost:                  &CostBreakdown{TotalCost: 2},
 		Account:               &Account{ID: 9, Platform: PlatformGemini, Type: AccountTypeServiceAccount, Extra: map[string]any{"quota_limit": 100.0}},
 		AccountRateMultiplier: 1,

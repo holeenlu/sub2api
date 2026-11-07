@@ -3,12 +3,12 @@
  * 测试完整的页面导航流程、预加载和错误恢复机制
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { createRouter, createWebHistory, type Router } from 'vue-router'
+import { createRouter, createWebHistory, createMemoryHistory, RouterView, type Router } from 'vue-router'
 import { createPinia, setActivePinia } from 'pinia'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
-import { useNavigationLoadingState, _resetNavigationLoadingInstance } from '@/composables/useNavigationLoading'
-import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
+import { useNavigationLoadingState, _resetNavigationLoadingInstance } from '@/app/router/loading'
+import { installRoutePrefetch } from '@/app/router/useRoutePrefetch'
 
 // Mock 视图组件
 const MockDashboard = defineComponent({
@@ -33,7 +33,7 @@ const MockUsage = defineComponent({
 })
 
 // Mock stores
-vi.mock('@/stores/auth', () => ({
+vi.mock('@/features/identity', () => ({
   useAuthStore: () => ({
     isAuthenticated: true,
     isAdmin: false,
@@ -42,7 +42,7 @@ vi.mock('@/stores/auth', () => ({
   })
 }))
 
-vi.mock('@/stores/app', () => ({
+vi.mock('@/app/model/app', () => ({
   useAppStore: () => ({
     siteName: 'Test Site'
   })
@@ -83,7 +83,7 @@ function createTestRouter(): Router {
 const TestApp = defineComponent({
   name: 'TestApp',
   setup() {
-    return () => h('div', { id: 'app' }, [h('router-view')])
+    return () => h('div', { id: 'app' }, [h(RouterView)])
   }
 })
 
@@ -192,81 +192,39 @@ describe('Navigation Integration Tests', () => {
   })
 
   describe('路由预加载', () => {
-    it('导航后应该触发相关路由预加载', async () => {
-      const routePrefetch = useRoutePrefetch()
-      const triggerSpy = vi.spyOn(routePrefetch, 'triggerPrefetch')
-
-      // 设置 afterEach 守卫
-      router.afterEach((to) => {
-        routePrefetch.triggerPrefetch(to)
-      })
-
-      const wrapper = mount(TestApp, {
-        global: {
-          plugins: [router]
-        }
-      })
-
-      await router.isReady()
-      await router.push('/dashboard')
-      await flushPromises()
-
-      // 应该触发预加载
-      expect(triggerSpy).toHaveBeenCalled()
-
-      wrapper.unmount()
-    })
-
-    it('已预加载的路由不应重复预加载', async () => {
-      const routePrefetch = useRoutePrefetch()
-
-      const wrapper = mount(TestApp, {
-        global: {
-          plugins: [router]
-        }
-      })
-
-      await router.isReady()
-      await router.push('/dashboard')
-      await flushPromises()
-
-      // 手动触发预加载
-      routePrefetch.triggerPrefetch(router.currentRoute.value)
-      await new Promise((resolve) => setTimeout(resolve, 100))
-
-      const prefetchedCount = routePrefetch.prefetchedRoutes.value.size
-
-      // 再次触发相同路由预加载
-      routePrefetch.triggerPrefetch(router.currentRoute.value)
-      await new Promise((resolve) => setTimeout(resolve, 100))
-
-      // 预加载数量不应增加
-      expect(routePrefetch.prefetchedRoutes.value.size).toBe(prefetchedCount)
-
-      wrapper.unmount()
-    })
-
-    it('路由变化时应取消之前的预加载任务', async () => {
-      const routePrefetch = useRoutePrefetch()
-
-      const wrapper = mount(TestApp, {
-        global: {
-          plugins: [router]
-        }
-      })
-
-      await router.isReady()
-
-      // 触发预加载
-      routePrefetch.triggerPrefetch(router.currentRoute.value)
-
-      // 立即导航到新路由（这会在内部调用 cancelPendingPrefetch）
-      routePrefetch.triggerPrefetch({ path: '/keys' } as any)
-
-      // 由于 triggerPrefetch 内部调用 cancelPendingPrefetch，检查是否有预加载被正确管理
-      expect(routePrefetch.prefetchedRoutes.value.size).toBeLessThanOrEqual(2)
-
-      wrapper.unmount()
+    it('由真实导航装配启动，卸载后不再预取相邻页面', async () => {
+      vi.useFakeTimers()
+      vi.stubGlobal('requestIdleCallback', undefined)
+      vi.stubGlobal('cancelIdleCallback', undefined)
+      const keys = vi.fn(async () => MockKeys)
+      const usage = vi.fn(async () => MockUsage)
+      const navigation = createRouter({ history: createMemoryHistory(), routes: [
+        { path: '/dashboard', component: MockDashboard },
+        { path: '/keys', component: keys },
+        { path: '/usage', component: usage },
+        { path: '/profile', component: MockDashboard }
+      ] })
+      const dispose = installRoutePrefetch(navigation)
+      const wrapper = mount(TestApp, { global: { plugins: [navigation] } })
+      try {
+        await navigation.push('/dashboard')
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(keys).toHaveBeenCalledOnce()
+        expect(usage).toHaveBeenCalledOnce()
+        await navigation.push('/profile')
+        dispose()
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(keys).toHaveBeenCalledOnce()
+        await navigation.push('/dashboard')
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(usage).toHaveBeenCalledOnce()
+      } finally {
+        dispose()
+        wrapper.unmount()
+        vi.clearAllTimers()
+        vi.useRealTimers()
+        vi.unstubAllGlobals()
+      }
     })
   })
 

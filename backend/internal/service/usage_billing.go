@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/shopspring/decimal"
+
+	"github.com/Wei-Shaw/sub2api/internal/billing"
 )
 
 var ErrUsageBillingRequestIDRequired = errors.New("usage billing request_id is required")
@@ -17,6 +20,13 @@ var ErrUsageBillingRequestConflict = errors.New("usage billing request fingerpri
 
 // UsageBillingCommand describes one billable request that must be applied at most once.
 type UsageBillingCommand struct {
+	PayloadVersion int // Persisted event schema; unknown versions must never debit.
+	// Only immutable billing facts are serialized; never Account/APIKey credentials.
+	UsageLog  *UsageLog
+	UsageLogs []*UsageLog
+	Pricing   *UsageBillingPricingSnapshot
+	Platform  string
+
 	RequestID          string
 	APIKeyID           int64
 	RequestFingerprint string
@@ -37,6 +47,8 @@ type UsageBillingCommand struct {
 	ImageCount          int
 	MediaType           string
 
+	// BalanceExempt freezes the key owner policy, including durable repricing.
+	BalanceExempt       bool
 	BalanceCost         float64
 	SubscriptionCost    float64
 	APIKeyQuotaCost     float64
@@ -47,6 +59,14 @@ type UsageBillingCommand struct {
 	// 只用于选择账号配额累加语句，不参与幂等指纹；实际累加哪些维度以数据库中的账号配置为准。
 	AccountQuotaHasDailyLimit  bool
 	AccountQuotaHasWeeklyLimit bool
+}
+
+// UserPlatformQuotaCost keeps platform usage metered when only the personal balance is exempt.
+func (c *UsageBillingCommand) UserPlatformQuotaCost() float64 {
+	if c.BalanceExempt && c.UsageLog != nil {
+		return c.UsageLog.ActualCost
+	}
+	return c.BalanceCost
 }
 
 func (c *UsageBillingCommand) Normalize() {
@@ -91,6 +111,20 @@ func (c *UsageBillingCommand) quantizeMonetaryFields() {
 	c.APIKeyQuotaCost = QuantizeUsageBillingAmount(c.APIKeyQuotaCost)
 	c.APIKeyRateLimitCost = QuantizeUsageBillingAmount(c.APIKeyRateLimitCost)
 	c.AccountQuotaCost = QuantizeUsageBillingAmount(c.AccountQuotaCost)
+	if c.UsageLog != nil {
+		// ActualCost records charged money; theoretical token costs retain their
+		// existing precision. Allocate the same rounded total across supply rows.
+		c.UsageLog.ActualCost = QuantizeUsageBillingAmount(c.UsageLog.ActualCost)
+		if len(c.UsageLogs) > 0 {
+			rows := make([]*UsageLog, 0, len(c.UsageLogs))
+			for _, row := range c.UsageLogs {
+				if row != nil {
+					rows = append(rows, row)
+				}
+			}
+			allocateAuthorizationUsageRows(c.UsageLog, rows)
+		}
+	}
 }
 
 // QuantizeUsageBillingAmount 把金额舍入到 UsageBillingMonetaryScale 位小数，
@@ -134,6 +168,9 @@ func buildUsageBillingFingerprint(c *UsageBillingCommand) string {
 		c.APIKeyRateLimitCost,
 		c.AccountQuotaCost,
 	)
+	if c.BalanceExempt {
+		raw += "|balance_exempt"
+	}
 	if payloadHash := strings.TrimSpace(c.RequestPayloadHash); payloadHash != "" {
 		raw += "|" + payloadHash
 	}
@@ -185,6 +222,7 @@ type BatchImageBalanceHoldCommand struct {
 	BatchID            string
 	HoldAmount         float64
 	ActualAmount       float64
+	MonetaryVersion    int // Version 2 requires an individually owned durable hold.
 }
 
 func (c *BatchImageBalanceHoldCommand) Normalize() {
@@ -229,3 +267,41 @@ type UsageBillingRepository interface {
 	CaptureBatchImageBalance(ctx context.Context, cmd *BatchImageBalanceHoldCommand) (*BatchImageBalanceHoldResult, error)
 	ReleaseBatchImageBalance(ctx context.Context, cmd *BatchImageBalanceHoldCommand) (*BatchImageBalanceHoldResult, error)
 }
+
+// UsageBillingPricingSnapshot preserves allocation policy while an unknown price
+// awaits repair. It is not permission to replace an explicitly configured zero price.
+type UsageBillingPricingSnapshot struct {
+	Pending               bool
+	Model                 string
+	PricingAt             time.Time
+	Balance               bool
+	Subscription          bool
+	KeyQuota              bool
+	KeyRateLimit          bool
+	AccountQuota          bool
+	AccountRateMultiplier float64
+	Request               *UsagePricingRequest
+}
+
+type UsageBillingRecoveryRepository interface {
+	ConfigureUsageBillingRecovery(reprice func(context.Context, *UsageBillingCommand) error, invalidate func(context.Context, *UsageBillingCommand) error)
+	RecoverPendingUsageBilling(context.Context, int, func(context.Context, *UsageBillingCommand) error) (int, error)
+}
+
+// Preserve the public service error identity while its decision owner is billing.
+var ErrUsagePricingPending = billing.ErrPricingPending
+var ErrUsageBillingRecordRequired = billing.ErrUsageRequired
+
+// BillingIdentity supplies the unchanged durable key to the settlement owner.
+func (c *UsageBillingCommand) BillingIdentity() billing.Identity {
+	return billing.Identity{RequestID: c.RequestID, APIKeyID: c.APIKeyID}
+}
+
+// NeedsPricing distinguishes an unresolved price from an explicit free price.
+func (c *UsageBillingCommand) NeedsPricing() bool { return c.Pricing != nil && c.Pricing.Pending }
+
+// HasUsageRecord selects the existing journaled settlement contract. Unknown
+// Cloud evidence remains in its archive and must not be represented as zero usage.
+func (c *UsageBillingCommand) HasUsageRecord() bool { return c != nil && c.UsageLog != nil }
+
+var _ billing.Command = (*UsageBillingCommand)(nil)

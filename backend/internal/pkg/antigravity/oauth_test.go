@@ -403,7 +403,10 @@ func TestURLAvailability_GetAvailableURLsWithBase_LastSuccess不在列表中(t *
 
 func TestNewSessionStore(t *testing.T) {
 	store := NewSessionStore()
-	defer store.Stop()
+	if err := store.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer store.Stop(context.Background())
 
 	if store == nil {
 		t.Fatal("NewSessionStore 返回 nil")
@@ -415,7 +418,10 @@ func TestNewSessionStore(t *testing.T) {
 
 func TestSessionStore_SetAndGet(t *testing.T) {
 	store := NewSessionStore()
-	defer store.Stop()
+	if err := store.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer store.Stop(context.Background())
 
 	session := &OAuthSession{
 		State:        "test-state",
@@ -443,7 +449,10 @@ func TestSessionStore_SetAndGet(t *testing.T) {
 
 func TestSessionStore_Get_不存在(t *testing.T) {
 	store := NewSessionStore()
-	defer store.Stop()
+	if err := store.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer store.Stop(context.Background())
 
 	_, ok := store.Get("nonexistent")
 	if ok {
@@ -453,7 +462,10 @@ func TestSessionStore_Get_不存在(t *testing.T) {
 
 func TestSessionStore_Get_过期(t *testing.T) {
 	store := NewSessionStore()
-	defer store.Stop()
+	if err := store.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer store.Stop(context.Background())
 
 	session := &OAuthSession{
 		State:     "expired-state",
@@ -470,7 +482,10 @@ func TestSessionStore_Get_过期(t *testing.T) {
 
 func TestSessionStore_Delete(t *testing.T) {
 	store := NewSessionStore()
-	defer store.Stop()
+	if err := store.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer store.Stop(context.Background())
 
 	session := &OAuthSession{
 		State:     "to-delete",
@@ -488,7 +503,10 @@ func TestSessionStore_Delete(t *testing.T) {
 
 func TestSessionStore_Delete_不存在(t *testing.T) {
 	store := NewSessionStore()
-	defer store.Stop()
+	if err := store.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer store.Stop(context.Background())
 
 	// 删除不存在的 session 不应 panic
 	store.Delete("nonexistent")
@@ -496,15 +514,21 @@ func TestSessionStore_Delete_不存在(t *testing.T) {
 
 func TestSessionStore_Stop(t *testing.T) {
 	store := NewSessionStore()
-	store.Stop()
+	if err := store.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	store.Stop(context.Background())
 
 	// 多次 Stop 不应 panic
-	store.Stop()
+	store.Stop(context.Background())
 }
 
 func TestSessionStore_多个Session(t *testing.T) {
 	store := NewSessionStore()
-	defer store.Stop()
+	if err := store.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer store.Stop(context.Background())
 
 	for i := 0; i < 10; i++ {
 		session := &OAuthSession{

@@ -24,7 +24,7 @@ func TestBuildOAuthMetadataUserID_FallbackWithoutAccountUUID(t *testing.T) {
 
 	fp := &Fingerprint{ClientID: "deadbeef"} // should be used as user id in legacy format
 
-	got := svc.buildOAuthMetadataUserID(parsed, account, fp)
+	got := svc.buildOAuthMetadataUserID(nil, parsed, account, fp)
 	require.NotEmpty(t, got)
 
 	// Legacy format: user_{client}_account__session_{uuid}
@@ -51,7 +51,7 @@ func TestBuildOAuthMetadataUserID_UsesAccountUUIDWhenPresent(t *testing.T) {
 		},
 	}
 
-	got := svc.buildOAuthMetadataUserID(parsed, account, nil)
+	got := svc.buildOAuthMetadataUserID(nil, parsed, account, nil)
 	require.NotEmpty(t, got)
 
 	// New format: user_{client}_account_{account_uuid}_session_{uuid}
@@ -87,9 +87,9 @@ func TestBuildOAuthMetadataUserID_SessionIDStableAcrossTurns(t *testing.T) {
 		`{"role":"assistant","content":"answer 2"},` +
 		`{"role":"user","content":"third question"}]}`)
 
-	id1 := svc.buildOAuthMetadataUserID(round1, account, fp)
-	id2 := svc.buildOAuthMetadataUserID(round2, account, fp)
-	id3 := svc.buildOAuthMetadataUserID(round3, account, fp)
+	id1 := svc.buildOAuthMetadataUserID(nil, round1, account, fp)
+	id2 := svc.buildOAuthMetadataUserID(nil, round2, account, fp)
+	id3 := svc.buildOAuthMetadataUserID(nil, round3, account, fp)
 
 	require.NotEmpty(t, id1)
 	require.Equal(t, id1, id2, "session_id 应随对话增长保持不变")
@@ -98,6 +98,6 @@ func TestBuildOAuthMetadataUserID_SessionIDStableAcrossTurns(t *testing.T) {
 	// 不同的首条 user 消息应派生出不同的 session_id（不同会话）。
 	other := mustParse(`{"model":"claude-sonnet-4-5","system":"sys","messages":[` +
 		`{"role":"user","content":"a completely different opener"}]}`)
-	idOther := svc.buildOAuthMetadataUserID(other, account, fp)
+	idOther := svc.buildOAuthMetadataUserID(nil, other, account, fp)
 	require.NotEqual(t, id1, idOther, "不同首条消息应派生不同 session_id")
 }

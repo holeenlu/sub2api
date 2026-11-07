@@ -166,14 +166,20 @@ func liveCallIdentity(
 		value := subscription.ID
 		subscriptionID = &value
 	}
+	var groupNameSnapshot *string
+	if apiKey.Group != nil {
+		name := apiKey.Group.Name
+		groupNameSnapshot = &name
+	}
 	return service.LiveCallIdentity{
-		APIKeyID:        apiKey.ID,
-		UserID:          userID,
-		GroupID:         apiKey.GroupID,
-		SubscriptionID:  subscriptionID,
-		UserAgent:       c.GetHeader("User-Agent"),
-		IPAddress:       ip.GetClientIP(c),
-		InboundEndpoint: GetInboundEndpoint(c),
+		GroupNameSnapshot: groupNameSnapshot,
+		APIKeyID:          apiKey.ID,
+		UserID:            userID,
+		GroupID:           apiKey.GroupID,
+		SubscriptionID:    subscriptionID,
+		UserAgent:         c.GetHeader("User-Agent"),
+		IPAddress:         ip.GetClientIP(c),
+		InboundEndpoint:   GetInboundEndpoint(c),
 	}
 }
 

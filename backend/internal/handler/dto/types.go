@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/authz"
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 type User struct {
+	*authz.Snapshot
 	ID            int64      `json:"id"`
 	Email         string     `json:"email"`
 	Username      string     `json:"username"`
@@ -42,6 +45,10 @@ type User struct {
 // 注意：普通用户接口不得返回 notes 等管理员备注信息。
 type AdminUser struct {
 	User
+	CreatedBy     *int64     `json:"created_by,omitempty"`
+	CreatedByName string     `json:"created_by_name,omitempty"`
+	LastLoginAt   *time.Time `json:"last_login_at"`
+	TotpEnabled   bool       `json:"totp_enabled"`
 
 	Notes      string     `json:"notes"`
 	LastUsedAt *time.Time `json:"last_used_at"`
@@ -194,7 +201,7 @@ type AdminGroup struct {
 	// OpenAI Messages 调度配置（仅 openai 平台使用）
 	DefaultMappedModel          string                                   `json:"default_mapped_model"`
 	MessagesDispatchModelConfig domain.OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config"`
-	ModelAllowlist              service.GroupModelAllowlist              `json:"model_allowlist"`
+	ModelAllowlist              catalog.ModelAllowlist                   `json:"model_allowlist"`
 	// 固定账号获取 Codex Model Manifest 配置（仅 openai 平台使用）。
 	CodexModelsManifestConfig domain.GroupCodexModelsManifestConfig `json:"codex_models_manifest_config"`
 
@@ -210,6 +217,16 @@ type AdminGroup struct {
 }
 
 type Account struct {
+	ExcelBPS403Recovery *service.ExcelBPS403RecoveryStatus `json:"excel_bps_403_recovery,omitempty"`
+	AuthorizationModes  []string                           `json:"authorization_modes,omitempty"`
+	CreatedBy           *int64                             `json:"created_by"`
+	CreatedByName       string                             `json:"created_by_name"`
+	CreatedByRole       string                             `json:"created_by_role"`
+	AnthropicStatus     *service.AnthropicAccountStatus    `json:"anthropic_status,omitempty"`
+	VendorID            *int64                             `json:"vendor_id,omitempty"`
+	VendorPausedAt      *time.Time                         `json:"vendor_paused_at,omitempty"`
+	VendorNotes         string                             `json:"vendor_notes,omitempty"`
+
 	ID       int64   `json:"id"`
 	Name     string  `json:"name"`
 	Notes    *string `json:"notes"`
@@ -328,9 +345,6 @@ type Account struct {
 
 	GroupIDs []int64  `json:"group_ids,omitempty"`
 	Groups   []*Group `json:"groups,omitempty"`
-
-	// 仅账号详情填充。列表和公共 mapper 不计算，避免把目录诊断扩散到调度响应。
-	GrokModelDiagnostics *service.GrokModelDiagnostics `json:"grok_model_diagnostics,omitempty"`
 }
 
 // AccountListItem is the compact representation returned by the admin account
@@ -339,6 +353,16 @@ type Account struct {
 // repeated account_groups and groups object graphs. Fetch /admin/accounts/:id
 // for the complete Account DTO when editing or inspecting an account.
 type AccountListItem struct {
+	ExcelBPS403Recovery *service.ExcelBPS403RecoveryStatus `json:"excel_bps_403_recovery,omitempty"`
+	AuthorizationModes  []string                           `json:"authorization_modes,omitempty"`
+	CreatedBy           *int64                             `json:"created_by"`
+	CreatedByName       string                             `json:"created_by_name"`
+	CreatedByRole       string                             `json:"created_by_role"`
+	AnthropicStatus     *service.AnthropicAccountStatus    `json:"anthropic_status,omitempty"`
+	VendorID            *int64                             `json:"vendor_id,omitempty"`
+	VendorPausedAt      *time.Time                         `json:"vendor_paused_at,omitempty"`
+	VendorNotes         string                             `json:"vendor_notes,omitempty"`
+
 	ID       int64   `json:"id"`
 	Name     string  `json:"name"`
 	Notes    *string `json:"notes"`
@@ -476,11 +500,11 @@ type ProxyWithAccountCount struct {
 	QualityChecked *int64 `json:"quality_checked,omitempty"`
 }
 
-// AdminProxy 是管理员接口使用的 proxy DTO（包含密码等敏感字段）。
+// AdminProxy only describes whether credentials are configured; stored passwords are never returned.
 // 注意：普通接口不得使用此 DTO。
 type AdminProxy struct {
 	Proxy
-	Password string `json:"password,omitempty"`
+	HasPassword bool `json:"has_password"`
 }
 
 // AdminProxyWithAccountCount 是管理员接口使用的带账号统计的 proxy DTO。
@@ -595,12 +619,12 @@ type BatchUpdateRedeemCodesRequest struct {
 
 // UsageLog 是普通用户接口使用的 usage log DTO（不包含管理员字段）。
 type UsageLog struct {
-	ID        int64  `json:"id"`
-	UserID    int64  `json:"user_id"`
-	APIKeyID  int64  `json:"api_key_id"`
-	AccountID int64  `json:"account_id"`
-	RequestID string `json:"request_id"`
-	Model     string `json:"model"`
+	BillingStatus string `json:"billing_status"`
+	ID            int64  `json:"id"`
+	UserID        int64  `json:"user_id"`
+	APIKeyID      int64  `json:"api_key_id"`
+	RequestID     string `json:"request_id"`
+	Model         string `json:"model"`
 	// ServiceTier records the OpenAI service tier used for billing, e.g. "priority" / "flex".
 	ServiceTier *string `json:"service_tier,omitempty"`
 	// ReasoningEffort is the client-requested effort (mapping-hidden, like Model).
@@ -620,8 +644,10 @@ type UsageLog struct {
 	CacheCreationTokens int `json:"cache_creation_tokens"`
 	CacheReadTokens     int `json:"cache_read_tokens"`
 
-	CacheCreation5mTokens int `json:"cache_creation_5m_tokens"`
-	CacheCreation1hTokens int `json:"cache_creation_1h_tokens"`
+	CacheCreation5mTokens  int `json:"cache_creation_5m_tokens"`
+	CacheCreation1hTokens  int `json:"cache_creation_1h_tokens"`
+	CacheCreation30mTokens int `json:"cache_creation_30m_tokens"`
+	CacheCreation12hTokens int `json:"cache_creation_12h_tokens"`
 
 	InputCost                 float64 `json:"input_cost"`
 	OutputCost                float64 `json:"output_cost"`
@@ -638,9 +664,11 @@ type UsageLog struct {
 	OpenAIWSMode bool   `json:"openai_ws_mode"`
 	// NativeCompactionV2 is true only for requests positively identified at
 	// runtime as the native OpenAI remote compaction v2 wire.
-	NativeCompactionV2 bool `json:"native_compaction_v2"`
-	DurationMs         *int `json:"duration_ms"`
-	FirstTokenMs       *int `json:"first_token_ms"`
+	NativeCompactionV2 bool                          `json:"native_compaction_v2"`
+	DurationMs         *int                          `json:"duration_ms"`
+	FirstTokenMs       *int                          `json:"first_token_ms"`
+	LatencyMetrics     *service.UsageLatencyMetrics  `json:"latency_metrics"`
+	SamplingDetails    *service.UsageSamplingDetails `json:"sampling_details,omitempty"`
 
 	// 图片生成字段
 	ImageCount         int            `json:"image_count"`
@@ -680,6 +708,8 @@ type UsageLog struct {
 // AdminUsageLog 是管理员接口使用的 usage log DTO（包含管理员字段）。
 type AdminUsageLog struct {
 	UsageLog
+	AccountID         int64  `json:"account_id"`
+	AuthorizationMode string `json:"authorization_mode"`
 
 	// UpstreamModel is the actual model sent to the upstream provider after mapping.
 	// Omitted when no mapping was applied (requested model was used as-is).
@@ -800,29 +830,4 @@ type BulkAssignResult struct {
 	Subscriptions []AdminUserSubscription `json:"subscriptions"`
 	Errors        []string                `json:"errors"`
 	Statuses      map[string]string       `json:"statuses,omitempty"`
-}
-
-// PromoCode 注册优惠码
-type PromoCode struct {
-	ID          int64      `json:"id"`
-	Code        string     `json:"code"`
-	BonusAmount float64    `json:"bonus_amount"`
-	MaxUses     int        `json:"max_uses"`
-	UsedCount   int        `json:"used_count"`
-	Status      string     `json:"status"`
-	ExpiresAt   *time.Time `json:"expires_at"`
-	Notes       string     `json:"notes"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
-}
-
-// PromoCodeUsage 优惠码使用记录
-type PromoCodeUsage struct {
-	ID          int64     `json:"id"`
-	PromoCodeID int64     `json:"promo_code_id"`
-	UserID      int64     `json:"user_id"`
-	BonusAmount float64   `json:"bonus_amount"`
-	UsedAt      time.Time `json:"used_at"`
-
-	User *User `json:"user,omitempty"`
 }

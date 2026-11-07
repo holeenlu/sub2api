@@ -93,7 +93,7 @@ func TestSubscriptionBulkAction_ReplaysPartialResultWithoutRepeatingExtension(t 
 	expiresAt := time.Now().AddDate(0, 0, 30)
 	repo := &bulkActionHandlerSubscriptionRepo{sub: &service.UserSubscription{ID: 1, UserID: 1, GroupID: 10, ExpiresAt: expiresAt}}
 	svc := service.NewSubscriptionService(nil, repo, nil, nil, nil)
-	t.Cleanup(svc.Stop)
+	startAdminFixtureService(t, svc)
 	h := NewSubscriptionHandler(svc)
 	router := gin.New()
 	path := "/api/v1/admin/subscriptions/bulk-action"
@@ -139,7 +139,7 @@ func TestSubscriptionBulkAction_ClientCancellationStillPersistsReplay(t *testing
 		cancelRequest:                     cancel,
 	}
 	svc := service.NewSubscriptionService(nil, repo, nil, nil, nil)
-	t.Cleanup(svc.Stop)
+	startAdminFixtureService(t, svc)
 	router := gin.New()
 	path := "/api/v1/admin/subscriptions/bulk-action"
 	router.POST(path, NewSubscriptionHandler(svc).BulkAction)

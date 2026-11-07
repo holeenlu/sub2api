@@ -43,6 +43,9 @@ func TestListModelAvailabilityCandidates_GroupQueryIgnoresTransientState(t *test
 	_, whereClause, found := strings.Cut(normalized, " WHERE ")
 	require.True(t, found, "expected WHERE clause in query: %s", normalized)
 	whereClause, _, _ = strings.Cut(whereClause, " ORDER BY ")
+	// Supplier proxy expiry is a security qualification, independent of the
+	// transient account cooldown/expiry diagnosis this test protects.
+	whereClause = strings.ReplaceAll(whereClause, "vp.expires_at", "supplier_proxy_expiry")
 	for _, configuredPredicate := range []string{"group_id", "status", "schedulable", "platform"} {
 		require.Contains(t, whereClause, configuredPredicate)
 	}

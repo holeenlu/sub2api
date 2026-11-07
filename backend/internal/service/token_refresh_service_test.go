@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -115,6 +116,72 @@ func (r *tokenRefreshAccountRepo) SetTempUnschedulable(ctx context.Context, id i
 	r.setTempUnschedCalls++
 	r.lastTempUnschedReason = reason
 	return r.setTempUnschedErr
+}
+
+func (r *tokenRefreshAccountRepo) UpdateOpenAIOAuthCredentialsIfUnchanged(_ context.Context, expected *Account, credentials map[string]any) (bool, error) {
+	r.conditionalSuccessCalls++
+	if r.conditionalSuccessErr != nil {
+		return false, r.conditionalSuccessErr
+	}
+	if r.updateErr != nil {
+		return false, r.updateErr
+	}
+	account := r.accountsByID[expected.ID]
+	if r.mutateSchedulingOnSuccessCAS && account != nil {
+		account.Status, account.Schedulable = StatusDisabled, false
+		until := time.Now().Add(time.Hour)
+		account.TempUnschedulableUntil, account.TempUnschedulableReason = &until, "new cooldown"
+	}
+	if !nativeRefreshTestGrantMatches(account, expected) {
+		return false, nil
+	}
+	applyNativeRefreshTestPatch(account, expected, credentials)
+	r.updateCalls++
+	r.updateCredentialsCalls++
+	r.lastAccount = account
+	if r.cancelOnUpdate != nil {
+		r.cancelOnUpdate()
+	}
+	return true, nil
+}
+
+func (r *tokenRefreshAccountRepo) SetOpenAIOAuthRefreshErrorIfUnchanged(_ context.Context, expected *Account, reason string) (bool, error) {
+	r.conditionalErrorCalls++
+	if r.conditionalErrorErr != nil {
+		return false, r.conditionalErrorErr
+	}
+	account := r.accountsByID[expected.ID]
+	if account != nil && r.reauthorizeOnErrorCAS {
+		account.Credentials = map[string]any{"access_token": "reauthorized-at", "refresh_token": "reauthorized-rt"}
+	}
+	if !nativeRefreshTestGrantMatches(account, expected) || !account.IsActive() {
+		return false, nil
+	}
+	r.setErrorCalls++
+	r.lastErrorMessage = reason
+	account.Status, account.Schedulable, account.ErrorMessage = StatusError, false, reason
+	return true, nil
+}
+
+func (r *tokenRefreshAccountRepo) SetOpenAIOAuthRefreshTempUnschedulableIfUnchanged(_ context.Context, expected *Account, until time.Time, reason string) (bool, error) {
+	r.conditionalTempCalls++
+	if r.conditionalTempErr != nil {
+		return false, r.conditionalTempErr
+	}
+	account := r.accountsByID[expected.ID]
+	if account != nil && r.reauthorizeOnTempCAS {
+		account.Credentials = map[string]any{"access_token": "reauthorized-at", "refresh_token": "reauthorized-rt"}
+	}
+	if !nativeRefreshTestGrantMatches(account, expected) || !account.IsActive() {
+		return false, nil
+	}
+	if account.TempUnschedulableUntil != nil && !account.TempUnschedulableUntil.Before(until) {
+		return false, nil
+	}
+	r.setTempUnschedCalls++
+	r.lastTempUnschedReason = reason
+	account.TempUnschedulableUntil, account.TempUnschedulableReason = &until, reason
+	return true, nil
 }
 
 func (r *tokenRefreshAccountRepo) SetGrokCredentialErrorIfMatch(
@@ -673,6 +740,10 @@ func TestTokenRefreshService_RefreshWithRetry_OtherPlatformOAuth(t *testing.T) {
 		},
 	}
 
+	account.Status = StatusActive
+	repo.accountsByID = map[int64]*Account{account.ID: account}
+	service.SetRefreshAPI(NewOAuthRefreshAPI(repo, nil))
+
 	err := service.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
 	require.NoError(t, err)
 	require.Equal(t, 1, repo.updateCalls)
@@ -704,6 +775,10 @@ func TestTokenRefreshService_RefreshWithRetry_UsesCredentialsUpdater(t *testing.
 			"access_token": "new-token",
 		},
 	}
+
+	account.Status = StatusActive
+	repo.accountsByID = map[int64]*Account{account.ID: account}
+	service.SetRefreshAPI(NewOAuthRefreshAPI(repo, nil))
 
 	err := service.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
 	require.NoError(t, err)
@@ -887,6 +962,10 @@ func TestTokenRefreshService_RefreshWithRetry_NonRetryableErrorAllPlatforms(t *t
 				err: errors.New("invalid_grant: token revoked"),
 			}
 
+			account.Status = StatusActive
+			repo.accountsByID = map[int64]*Account{account.ID: account}
+			service.SetRefreshAPI(NewOAuthRefreshAPI(repo, nil))
+
 			err := service.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
 			require.Error(t, err)
 			require.Equal(t, 1, repo.setErrorCalls) // 所有平台不可重试错误都应 SetError
@@ -911,6 +990,10 @@ func TestTokenRefreshService_RefreshWithRetry_NoRefreshTokenDoesNotTempUnschedul
 	refresher := &tokenRefresherStub{
 		err: errors.New("no refresh token available"),
 	}
+
+	account.Status = StatusActive
+	repo.accountsByID = map[int64]*Account{account.ID: account}
+	service.SetRefreshAPI(NewOAuthRefreshAPI(repo, nil))
 
 	err := service.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
 	require.Error(t, err)
@@ -1627,4 +1710,73 @@ func TestPathA_DBUpdateFailed(t *testing.T) {
 	require.ErrorIs(t, err, errOAuthRefreshCredentialPersist)
 	require.Equal(t, 1, repo.updateCalls)  // DB 更新被尝试
 	require.Equal(t, 0, invalidator.calls) // DB 失败时不应触发缓存失效
+}
+
+func TestPathA_NativeOpenAIFailureCASProtectsNewGrant(t *testing.T) {
+	for _, permanent := range []bool{true, false} {
+		for _, reauthorize := range []bool{true, false} {
+			name := fmt.Sprintf("permanent=%t/reauthorize=%t", permanent, reauthorize)
+			t.Run(name, func(t *testing.T) {
+				account := nativeRefreshTestAccount()
+				repo := &tokenRefreshAccountRepo{snapshotReads: true, reauthorizeOnErrorCAS: reauthorize, reauthorizeOnTempCAS: reauthorize}
+				repo.accountsByID = map[int64]*Account{account.ID: account}
+				invalidator := &tokenCacheInvalidatorStub{}
+				svc, _ := buildPathAService(repo, nil, invalidator)
+				blocker := &tokenRefreshRuntimeBlocker{}
+				svc.SetAccountRuntimeBlocker(blocker)
+				failure := errors.New("temporary network failure")
+				if permanent {
+					failure = errors.New("invalid_grant: revoked")
+				}
+				refresher := &tokenRefresherStub{err: failure}
+				err := svc.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
+				if reauthorize {
+					require.ErrorIs(t, err, errRefreshSkipped)
+					require.Zero(t, repo.setErrorCalls)
+					require.Zero(t, repo.setTempUnschedCalls)
+					require.Zero(t, blocker.blockCalls)
+					require.Zero(t, invalidator.calls)
+					require.Equal(t, "reauthorized-rt", account.GetCredential("refresh_token"))
+				} else {
+					require.ErrorIs(t, err, failure)
+					require.Equal(t, 1, blocker.blockCalls)
+					if permanent {
+						require.Equal(t, StatusError, account.Status)
+					} else {
+						require.Equal(t, StatusActive, account.Status)
+						require.NotNil(t, account.TempUnschedulableUntil)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestPathA_NativeOpenAISuccessRetainsNewSchedulingState(t *testing.T) {
+	account := nativeRefreshTestAccount()
+	repo := &tokenRefreshAccountRepo{snapshotReads: true, mutateSchedulingOnSuccessCAS: true}
+	repo.accountsByID = map[int64]*Account{account.ID: account}
+	invalidator := &tokenCacheInvalidatorStub{}
+	svc, _ := buildPathAService(repo, nil, invalidator)
+	blocker := &tokenRefreshRuntimeBlocker{}
+	svc.SetAccountRuntimeBlocker(blocker)
+	refresher := &tokenRefresherStub{credentials: map[string]any{"access_token": "rotated-at", "refresh_token": "rotated-rt"}}
+	err := svc.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
+	require.NoError(t, err)
+	require.Equal(t, StatusDisabled, account.Status)
+	require.Equal(t, "new cooldown", account.TempUnschedulableReason)
+	require.Equal(t, "rotated-rt", account.GetCredential("refresh_token"))
+	require.Zero(t, repo.clearTempCalls)
+	require.Zero(t, blocker.clearCalls)
+	require.Equal(t, 1, invalidator.calls)
+}
+
+func TestTokenRefreshService_NativeOpenAIRequiresUnifiedRefresh(t *testing.T) {
+	repo := &tokenRefreshAccountRepo{}
+	svc := NewTokenRefreshService(repo, nil, nil, nil, nil, nil, nil, &config.Config{}, nil)
+	refresher := &tokenRefresherStub{}
+	err := svc.refreshWithRetry(context.Background(), nativeRefreshTestAccount(), refresher, refresher, time.Minute)
+	var configuration *providerConfigurationRefreshError
+	require.ErrorAs(t, err, &configuration)
+	require.Zero(t, refresher.calls)
 }

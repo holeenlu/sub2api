@@ -74,6 +74,8 @@ func runAntigravityGeminiStreamWithIdle(t *testing.T, userAgent string, idle tim
 	)
 	require.NoError(t, err)
 	time.Sleep(idle)
+	_, err = io.WriteString(writer, `data: {"response":{"candidates":[{"finishReason":"STOP"}]}}`+"\n\n")
+	require.NoError(t, err)
 	require.NoError(t, writer.Close())
 	require.NoError(t, <-done)
 	require.NoError(t, reader.Close())

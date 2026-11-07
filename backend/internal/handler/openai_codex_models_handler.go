@@ -18,8 +18,9 @@ import (
 // GET /backend-api/codex/models (chatgpt_base_url mode). Both routes land
 // here. Pinned discovery takes precedence over local account model mappings;
 // when disabled, groups with explicit mappings are generated locally;
-// otherwise ChatGPT manifests are proxied verbatim and custom API key manifests
-// receive provider-compatibility normalization plus short-lived caching.
+// otherwise fetched manifests retain upstream metadata with group route
+// capability restrictions; custom API key manifests also receive provider
+// compatibility normalization plus short-lived caching.
 func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 	if c.Request.Context().Err() != nil {
 		return

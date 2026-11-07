@@ -1,0 +1,977 @@
+group	feature	kind	status	added_lines	deleted_lines	path
+11	构建、手动发布与在线更新	tooling/config	M	16	3	.dockerignore
+11	构建、手动发布与在线更新	documentation	M	6	13	.github/release-tools/README.md
+11	构建、手动发布与在线更新	tooling/config	M	14	5	.github/release-tools/release-images.sh
+11	构建、手动发布与在线更新	tooling/config	M	27	6	.github/release-tools/release_matrix.py
+11	构建、手动发布与在线更新	test	M	75	4	.github/release-tools/test_release_matrix.py
+11	构建、手动发布与在线更新	tooling/config	A	282	0	.github/workflows/automatic-release.yml
+11	构建、手动发布与在线更新	tooling/config	D	0	95	.github/workflows/backend-ci.yml
+11	构建、手动发布与在线更新	tooling/config	D	0	69	.github/workflows/cla.yml
+11	构建、手动发布与在线更新	tooling/config	A	56	0	.github/workflows/quality-gate.yml
+11	构建、手动发布与在线更新	tooling/config	D	0	408	.github/workflows/release.yml
+11	构建、手动发布与在线更新	tooling/config	D	0	58	.github/workflows/security-scan.yml
+11	构建、手动发布与在线更新	tooling/config	M	28	1	.gitignore
+11	构建、手动发布与在线更新	tooling/config	M	9	9	.goreleaser.simple.yaml
+11	构建、手动发布与在线更新	tooling/config	M	37	37	.goreleaser.yaml
+13	需求、历史说明与工程规范	documentation	A	27	0	AGENTS.md
+09	品牌界面、文档站与用户体验	documentation	M	5	5	DEV_GUIDE.md
+11	构建、手动发布与在线更新	tooling/config	M	53	23	Dockerfile
+11	构建、手动发布与在线更新	tooling/config	M	16	14	Dockerfile.goreleaser
+11	构建、手动发布与在线更新	tooling/config	M	23	3	Makefile
+09	品牌界面、文档站与用户体验	documentation	M	45	274	README.md
+09	品牌界面、文档站与用户体验	documentation	M	35	268	README_CN.md
+09	品牌界面、文档站与用户体验	documentation	M	33	266	README_JA.md
+09	品牌界面、文档站与用户体验	asset	M	22	11	assets/logo.svg
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/RoxyBrowser.png
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/aigocode.png
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/aimzoon.jpg
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/apikey-fun.png
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/apimart.jpg
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/axisnow.jpg
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/bestproxy.png
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/bmoplus.jpg
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/cctk.jpg
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/codex-everywhere.jpg
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/ctok.png
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/duckip.png
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/etok.png
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/fastaitoken.jpg
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/fennoai.jpg
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/haoai.png
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/lanox.jpg
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/nagora.png
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/openmodel.jpg
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/pateway.png
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/pincc-logo.png
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/poixe.png
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/pptoken.png
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/proxy4free.png
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/qiniu.jpg
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/rapidproxy.jpg
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/runapi.png
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/silkapi.png
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/swiftprox.png
+09	品牌界面、文档站与用户体验	asset	D	-	-	assets/partners/logos/veilx.png
+09	品牌界面、文档站与用户体验	asset	A	38	0	assets/wordmark.svg
+11	构建、手动发布与在线更新	tooling/config	M	19	2	backend/Makefile
+02	三级角色、会话与管理授权	business	M	1	1	backend/cmd/jwtgen/main.go
+12	跨功能设置、路由与依赖装配	business	M	63	5	backend/cmd/server/main.go
+12	跨功能设置、路由与依赖装配	test	A	25	0	backend/cmd/server/upstream_version_test.go
+12	跨功能设置、路由与依赖装配	business	M	4	2	backend/cmd/server/wire.go
+12	跨功能设置、路由与依赖装配	generated	M	16	14	backend/cmd/server/wire_gen.go
+01	数据库升级与历史兼容	generated	M	2	1	backend/ent/migrate/schema.go
+01	数据库升级与历史兼容	generated	M	88	1	backend/ent/mutation.go
+01	数据库升级与历史兼容	generated	M	19	15	backend/ent/runtime/runtime.go
+01	数据库升级与历史兼容	generated	M	1	0	backend/ent/schema/pending_auth_session.go
+01	数据库升级与历史兼容	generated	M	1	0	backend/ent/schema/user.go
+01	数据库升级与历史兼容	generated	M	12	1	backend/ent/user.go
+01	数据库升级与历史兼容	generated	M	10	0	backend/ent/user/user.go
+01	数据库升级与历史兼容	generated	M	45	0	backend/ent/user/where.go
+01	数据库升级与历史兼容	generated	M	85	0	backend/ent/user_create.go
+01	数据库升级与历史兼容	generated	M	54	0	backend/ent/user_update.go
+12	跨功能设置、路由与依赖装配	tooling/config	M	1	1	backend/go.mod
+12	跨功能设置、路由与依赖装配	tooling/config	M	37	25	backend/go.sum
+02	三级角色、会话与管理授权	business	A	245	0	backend/internal/authz/fields.go
+02	三级角色、会话与管理授权	business	A	132	0	backend/internal/authz/financial_fields.go
+02	三级角色、会话与管理授权	business	A	53	0	backend/internal/authz/lifecycle.go
+02	三级角色、会话与管理授权	business	A	122	0	backend/internal/authz/mutation.go
+02	三级角色、会话与管理授权	business	A	311	0	backend/internal/authz/policy.go
+02	三级角色、会话与管理授权	test	A	96	0	backend/internal/authz/policy_test.go
+02	三级角色、会话与管理授权	business	A	237	0	backend/internal/authz/request_fields.go
+02	三级角色、会话与管理授权	business	A	498	0	backend/internal/authz/routes.go
+12	跨功能设置、路由与依赖装配	business	M	58	7	backend/internal/config/config.go
+12	跨功能设置、路由与依赖装配	test	M	58	1	backend/internal/config/config_test.go
+12	跨功能设置、路由与依赖装配	business	M	3	2	backend/internal/domain/constants.go
+12	跨功能设置、路由与依赖装配	business	A	29	0	backend/internal/domain/credential_keys.go
+04	账号、Anthropic 授权与调度	business	M	17	17	backend/internal/handler/admin/account_codex_import.go
+04	账号、Anthropic 授权与调度	business	M	20	20	backend/internal/handler/admin/account_data.go
+04	账号、Anthropic 授权与调度	business	M	120	79	backend/internal/handler/admin/account_handler.go
+04	账号、Anthropic 授权与调度	test	M	102	0	backend/internal/handler/admin/account_handler_list_test.go
+04	账号、Anthropic 授权与调度	test	M	27	0	backend/internal/handler/admin/account_handler_long_context_billing_test.go
+12	跨功能设置、路由与依赖装配	test	M	53	53	backend/internal/handler/admin/admin_basic_handlers_test.go
+02	三级角色、会话与管理授权	test	M	2	0	backend/internal/handler/admin/admin_service_stub_test.go
+02	三级角色、会话与管理授权	test	A	133	0	backend/internal/handler/admin/auth_lifecycle_security_test.go
+02	三级角色、会话与管理授权	business	M	23	23	backend/internal/handler/admin/channel_handler.go
+07	Codex 降智检测与定时诊断	business	A	177	0	backend/internal/handler/admin/codex_diagnostic_handler.go
+07	Codex 降智检测与定时诊断	test	A	93	0	backend/internal/handler/admin/codex_diagnostic_handler_test.go
+06	用量排行与页面加载	business	M	50	15	backend/internal/handler/admin/dashboard_handler.go
+06	用量排行与页面加载	test	A	151	0	backend/internal/handler/admin/dashboard_handler_api_key_breakdown_test.go
+02	三级角色、会话与管理授权	business	M	14	14	backend/internal/handler/admin/grok_oauth_handler.go
+02	三级角色、会话与管理授权	business	M	121	121	backend/internal/handler/admin/group_handler.go
+02	三级角色、会话与管理授权	business	M	15	15	backend/internal/handler/admin/openai_oauth_handler.go
+06	用量排行与页面加载	business	M	6	0	backend/internal/handler/admin/ops_ws_handler.go
+05	支付、退款与返利完整性	business	M	26	0	backend/internal/handler/admin/payment_handler.go
+02	三级角色、会话与管理授权	business	A	23	0	backend/internal/handler/admin/request_field_schemas.go
+02	三级角色、会话与管理授权	test	A	132	0	backend/internal/handler/admin/request_field_schemas_test.go
+02	三级角色、会话与管理授权	business	A	64	0	backend/internal/handler/admin/role_handler.go
+12	跨功能设置、路由与依赖装配	business	M	2	1	backend/internal/handler/admin/setting_handler.go
+12	跨功能设置、路由与依赖装配	business	M	0	3	backend/internal/handler/admin/setting_handler_audit.go
+12	跨功能设置、路由与依赖装配	business	M	26	0	backend/internal/handler/admin/setting_handler_email.go
+12	跨功能设置、路由与依赖装配	business	M	4	0	backend/internal/handler/admin/setting_handler_runtime.go
+12	跨功能设置、路由与依赖装配	test	M	71	0	backend/internal/handler/admin/setting_handler_stepup_switch_test.go
+12	跨功能设置、路由与依赖装配	business	M	10	4	backend/internal/handler/admin/setting_handler_update.go
+12	跨功能设置、路由与依赖装配	business	M	22	5	backend/internal/handler/admin/system_handler.go
+06	用量排行与页面加载	business	M	4	0	backend/internal/handler/admin/usage_handler.go
+06	用量排行与页面加载	test	M	24	0	backend/internal/handler/admin/usage_handler_request_type_test.go
+02	三级角色、会话与管理授权	business	M	40	7	backend/internal/handler/admin/user_handler.go
+02	三级角色、会话与管理授权	test	M	1	1	backend/internal/handler/admin/user_handler_role_stepup_test.go
+02	三级角色、会话与管理授权	business	M	1	1	backend/internal/handler/auth_dingtalk_oauth.go
+02	三级角色、会话与管理授权	business	M	41	14	backend/internal/handler/auth_handler.go
+02	三级角色、会话与管理授权	test	A	23	0	backend/internal/handler/auth_legacy_bind_cookie_test.go
+02	三级角色、会话与管理授权	test	A	242	0	backend/internal/handler/auth_lifecycle_security_test.go
+02	三级角色、会话与管理授权	business	M	106	64	backend/internal/handler/auth_linuxdo_oauth.go
+02	三级角色、会话与管理授权	test	M	6	6	backend/internal/handler/auth_linuxdo_oauth_test.go
+02	三级角色、会话与管理授权	business	M	86	14	backend/internal/handler/auth_oauth_pending_flow.go
+02	三级角色、会话与管理授权	test	M	17	6	backend/internal/handler/auth_oauth_pending_flow_test.go
+02	三级角色、会话与管理授权	business	M	1	1	backend/internal/handler/auth_oidc_oauth.go
+02	三级角色、会话与管理授权	test	M	5	4	backend/internal/handler/auth_oidc_oauth_test.go
+02	三级角色、会话与管理授权	test	M	7	5	backend/internal/handler/auth_session_revocation_test.go
+02	三级角色、会话与管理授权	test	A	292	0	backend/internal/handler/auth_totp_proof_race_test.go
+02	三级角色、会话与管理授权	business	M	16	11	backend/internal/handler/auth_wechat_oauth.go
+02	三级角色、会话与管理授权	test	M	11	7	backend/internal/handler/auth_wechat_oauth_test.go
+09	品牌界面、文档站与用户体验	business	M	3	2	backend/internal/handler/channel_monitor_v2_handler.go
+12	跨功能设置、路由与依赖装配	business	M	7	4	backend/internal/handler/dto/mappers.go
+12	跨功能设置、路由与依赖装配	business	M	23	23	backend/internal/handler/dto/settings.go
+12	跨功能设置、路由与依赖装配	business	M	7	2	backend/internal/handler/dto/types.go
+03	原生网关与多媒体安全	business	M	23	3	backend/internal/handler/gateway_handler.go
+03	原生网关与多媒体安全	business	M	1	1	backend/internal/handler/gateway_handler_chat_completions.go
+03	原生网关与多媒体安全	business	M	1	1	backend/internal/handler/gateway_handler_responses.go
+04	账号、Anthropic 授权与调度	test	A	53	0	backend/internal/handler/gateway_sticky_bind_context_test.go
+03	原生网关与多媒体安全	business	M	1	1	backend/internal/handler/gemini_v1beta_handler.go
+03	原生网关与多媒体安全	business	M	152	34	backend/internal/handler/grok_audio.go
+03	原生网关与多媒体安全	test	M	44	0	backend/internal/handler/grok_audio_billing_test.go
+12	跨功能设置、路由与依赖装配	business	M	4	2	backend/internal/handler/handler.go
+03	原生网关与多媒体安全	business	M	1	1	backend/internal/handler/openai_gateway_handler.go
+03	原生网关与多媒体安全	test	M	6	9	backend/internal/handler/openai_gateway_ws_model_allowlist_test.go
+12	跨功能设置、路由与依赖装配	business	M	1	1	backend/internal/handler/page_handler.go
+02	三级角色、会话与管理授权	business	M	1	1	backend/internal/handler/passkey_handler.go
+12	跨功能设置、路由与依赖装配	business	M	0	1	backend/internal/handler/setting_handler.go
+02	三级角色、会话与管理授权	business	M	1	1	backend/internal/handler/totp_handler.go
+06	用量排行与页面加载	business	M	81	0	backend/internal/handler/usage_handler.go
+06	用量排行与页面加载	test	M	56	9	backend/internal/handler/usage_handler_request_type_test.go
+02	三级角色、会话与管理授权	test	M	1	1	backend/internal/handler/user_handler_test.go
+12	跨功能设置、路由与依赖装配	business	M	3	0	backend/internal/handler/wire.go
+05	支付、退款与返利完整性	business	M	81	16	backend/internal/payment/provider/easypay.go
+05	支付、退款与返利完整性	test	M	12	0	backend/internal/payment/provider/easypay_notify_security_test.go
+05	支付、退款与返利完整性	test	M	35	0	backend/internal/payment/provider/easypay_refund_test.go
+05	支付、退款与返利完整性	test	A	92	0	backend/internal/payment/provider/easypay_security_test.go
+04	账号、Anthropic 授权与调度	business	M	6	4	backend/internal/pkg/antigravity/oauth.go
+04	账号、Anthropic 授权与调度	business	M	7	5	backend/internal/pkg/geminicli/oauth.go
+03	原生网关与多媒体安全	business	M	4	11	backend/internal/pkg/ip/ip.go
+03	原生网关与多媒体安全	test	M	7	7	backend/internal/pkg/ip/ip_test.go
+11	构建、手动发布与在线更新	business	M	4	4	backend/internal/pkg/logger/options.go
+11	构建、手动发布与在线更新	test	M	2	2	backend/internal/pkg/logger/options_test.go
+04	账号、Anthropic 授权与调度	business	M	7	5	backend/internal/pkg/oauth/oauth.go
+08	API Key 客户端配置与下载工具	business	M	11	11	backend/internal/pkg/openai/instructions_gpt6_astra.txt
+04	账号、Anthropic 授权与调度	business	M	8	6	backend/internal/pkg/openai/oauth.go
+12	跨功能设置、路由与依赖装配	business	M	30	3	backend/internal/pkg/response/response.go
+11	构建、手动发布与在线更新	business	M	1	1	backend/internal/pkg/sysutil/restart.go
+06	用量排行与页面加载	business	M	42	1	backend/internal/pkg/usagestats/usage_log_types.go
+04	账号、Anthropic 授权与调度	business	M	10	8	backend/internal/pkg/xai/oauth.go
+11	构建、手动发布与在线更新	business	M	2	2	backend/internal/platform/liveattestation/attestation.go
+04	账号、Anthropic 授权与调度	business	M	217	41	backend/internal/repository/account_repo.go
+04	账号、Anthropic 授权与调度	test	M	87	0	backend/internal/repository/account_repo_integration_test.go
+02	三级角色、会话与管理授权	test	A	391	0	backend/internal/repository/admin_authorization_integration_test.go
+02	三级角色、会话与管理授权	business	A	180	0	backend/internal/repository/admin_object_scope.go
+02	三级角色、会话与管理授权	business	A	88	0	backend/internal/repository/admin_role_policy.go
+05	支付、退款与返利完整性	business	A	125	0	backend/internal/repository/affiliate_refund.go
+05	支付、退款与返利完整性	business	M	85	35	backend/internal/repository/affiliate_repo.go
+05	支付、退款与返利完整性	test	A	225	0	backend/internal/repository/affiliate_security_integration_test.go
+02	三级角色、会话与管理授权	business	M	57	10	backend/internal/repository/audit_log_repo.go
+02	三级角色、会话与管理授权	test	A	229	0	backend/internal/repository/auth_lifecycle_integration_test.go
+02	三级角色、会话与管理授权	test	A	225	0	backend/internal/repository/auth_lifecycle_security_test.go
+11	构建、手动发布与在线更新	business	M	3	0	backend/internal/repository/backup_pg_dumper.go
+04	账号、Anthropic 授权与调度	business	M	62	0	backend/internal/repository/gateway_cache.go
+04	账号、Anthropic 授权与调度	test	A	147	0	backend/internal/repository/gateway_cache_sticky_history_test.go
+12	跨功能设置、路由与依赖装配	test	M	5	3	backend/internal/repository/integration_harness_test.go
+12	跨功能设置、路由与依赖装配	test	M	61	0	backend/internal/repository/migrations_schema_integration_test.go
+03	原生网关与多媒体安全	business	A	48	0	backend/internal/repository/model_policy_preflight.go
+02	三级角色、会话与管理授权	business	M	22	1	backend/internal/repository/proxy_repo.go
+02	三级角色、会话与管理授权	business	M	3	1	backend/internal/repository/redeem_code_repo.go
+02	三级角色、会话与管理授权	business	M	66	24	backend/internal/repository/refresh_token_cache.go
+07	Codex 降智检测与定时诊断	test	A	348	0	backend/internal/repository/scheduled_test_diagnostic_integration_test.go
+07	Codex 降智检测与定时诊断	business	A	311	0	backend/internal/repository/scheduled_test_diagnostic_repo.go
+07	Codex 降智检测与定时诊断	business	M	73	41	backend/internal/repository/scheduled_test_repo.go
+04	账号、Anthropic 授权与调度	business	M	3	3	backend/internal/repository/scheduler_cache.go
+04	账号、Anthropic 授权与调度	test	M	10	0	backend/internal/repository/scheduler_cache_test.go
+12	跨功能设置、路由与依赖装配	business	M	10	0	backend/internal/repository/setting_repo.go
+02	三级角色、会话与管理授权	business	M	1	1	backend/internal/repository/simple_mode_admin_concurrency.go
+06	用量排行与页面加载	test	M	177	0	backend/internal/repository/usage_log_repo_breakdown_test.go
+06	用量排行与页面加载	test	M	3	3	backend/internal/repository/usage_log_repo_request_type_test.go
+06	用量排行与页面加载	business	M	3	11	backend/internal/repository/usage_log_repo_stats.go
+06	用量排行与页面加载	business	M	114	29	backend/internal/repository/usage_log_repo_trend.go
+02	三级角色、会话与管理授权	business	M	4	0	backend/internal/repository/user_attribute_repo.go
+02	三级角色、会话与管理授权	business	M	183	108	backend/internal/repository/user_group_rate_repo.go
+02	三级角色、会话与管理授权	business	M	7	0	backend/internal/repository/user_platform_quota_repo.go
+02	三级角色、会话与管理授权	business	M	7	0	backend/internal/repository/user_profile_identity_repo.go
+02	三级角色、会话与管理授权	business	M	208	92	backend/internal/repository/user_repo.go
+02	三级角色、会话与管理授权	test	M	14	14	backend/internal/repository/user_repo_integration_test.go
+02	三级角色、会话与管理授权	business	M	120	102	backend/internal/repository/user_subscription_repo.go
+12	跨功能设置、路由与依赖装配	test	M	62	7	backend/internal/server/api_contract_test.go
+12	跨功能设置、路由与依赖装配	test	A	43	0	backend/internal/server/management_route_coverage_test.go
+02	三级角色、会话与管理授权	business	M	27	8	backend/internal/server/middleware/admin_auth.go
+02	三级角色、会话与管理授权	test	M	8	8	backend/internal/server/middleware/admin_auth_test.go
+02	三级角色、会话与管理授权	business	A	559	0	backend/internal/server/middleware/admin_authorization.go
+02	三级角色、会话与管理授权	test	A	214	0	backend/internal/server/middleware/admin_authorization_test.go
+02	三级角色、会话与管理授权	business	D	0	27	backend/internal/server/middleware/admin_only.go
+02	三级角色、会话与管理授权	business	A	83	0	backend/internal/server/middleware/admin_response.go
+02	三级角色、会话与管理授权	test	M	6	4	backend/internal/server/middleware/audit_log_test.go
+02	三级角色、会话与管理授权	business	M	1	1	backend/internal/server/middleware/backend_mode_guard.go
+02	三级角色、会话与管理授权	business	M	1	1	backend/internal/server/middleware/cors.go
+02	三级角色、会话与管理授权	business	M	16	2	backend/internal/server/middleware/jwt_auth.go
+02	三级角色、会话与管理授权	test	M	1	1	backend/internal/server/middleware/jwt_auth_test.go
+02	三级角色、会话与管理授权	business	M	1	1	backend/internal/server/middleware/panel_rate_limit.go
+02	三级角色、会话与管理授权	test	M	7	3	backend/internal/server/middleware/panel_rate_limit_test.go
+02	三级角色、会话与管理授权	business	M	1	1	backend/internal/server/middleware/server_timing.go
+02	三级角色、会话与管理授权	business	M	9	4	backend/internal/server/middleware/session_binding.go
+02	三级角色、会话与管理授权	test	M	3	3	backend/internal/server/middleware/session_binding_test.go
+02	三级角色、会话与管理授权	test	M	11	0	backend/internal/server/middleware/step_up_test.go
+12	跨功能设置、路由与依赖装配	business	M	3	1	backend/internal/server/router.go
+12	跨功能设置、路由与依赖装配	business	M	11	0	backend/internal/server/routes/admin.go
+02	三级角色、会话与管理授权	test	A	46	0	backend/internal/server/routes/admin_authorization_coverage_test.go
+12	跨功能设置、路由与依赖装配	business	M	3	0	backend/internal/server/routes/payment.go
+05	支付、退款与返利完整性	test	M	1	0	backend/internal/server/routes/payment_public_rate_limit_test.go
+02	三级角色、会话与管理授权	business	M	1	0	backend/internal/server/routes/user.go
+04	账号、Anthropic 授权与调度	business	M	4	25	backend/internal/service/account_credentials_redact.go
+04	账号、Anthropic 授权与调度	business	M	155	44	backend/internal/service/account_scheduling_threshold_eval.go
+04	账号、Anthropic 授权与调度	test	M	16	1	backend/internal/service/account_scheduling_threshold_eval_test.go
+04	账号、Anthropic 授权与调度	business	M	8	3	backend/internal/service/account_scheduling_threshold_reason.go
+04	账号、Anthropic 授权与调度	business	M	4	3	backend/internal/service/account_service.go
+04	账号、Anthropic 授权与调度	business	M	10	0	backend/internal/service/account_usage_service.go
+04	账号、Anthropic 授权与调度	test	M	4	0	backend/internal/service/account_usage_service_batch_test.go
+02	三级角色、会话与管理授权	business	M	4	4	backend/internal/service/admin_compliance.go
+02	三级角色、会话与管理授权	business	M	106	102	backend/internal/service/admin_group.go
+02	三级角色、会话与管理授权	business	A	169	0	backend/internal/service/admin_mutation.go
+02	三级角色、会话与管理授权	business	A	194	0	backend/internal/service/admin_object_scope.go
+02	三级角色、会话与管理授权	business	A	134	0	backend/internal/service/admin_role_policy.go
+02	三级角色、会话与管理授权	test	A	71	0	backend/internal/service/admin_security_notice_test.go
+02	三级角色、会话与管理授权	business	M	5	0	backend/internal/service/admin_service.go
+02	三级角色、会话与管理授权	test	M	1	1	backend/internal/service/admin_service_apikey_test.go
+02	三级角色、会话与管理授权	test	M	26	10	backend/internal/service/admin_service_delete_test.go
+02	三级角色、会话与管理授权	test	M	2	2	backend/internal/service/admin_service_email_identity_sync_test.go
+02	三级角色、会话与管理授权	test	M	4	5	backend/internal/service/admin_service_role_test.go
+02	三级角色、会话与管理授权	business	M	348	170	backend/internal/service/admin_user.go
+05	支付、退款与返利完整性	business	M	26	13	backend/internal/service/affiliate_service.go
+02	三级角色、会话与管理授权	business	M	9	4	backend/internal/service/antigravity_oauth_service.go
+12	跨功能设置、路由与依赖装配	business	M	1	1	backend/internal/service/api_key_auth_cache_impl.go
+12	跨功能设置、路由与依赖装配	business	M	9	0	backend/internal/service/api_key_auth_cache_invalidate.go
+02	三级角色、会话与管理授权	business	M	28	3	backend/internal/service/audit_log.go
+02	三级角色、会话与管理授权	business	M	22	4	backend/internal/service/audit_log_service.go
+02	三级角色、会话与管理授权	business	A	12	0	backend/internal/service/auth_admin_policy.go
+02	三级角色、会话与管理授权	business	M	1	1	backend/internal/service/auth_email_binding.go
+02	三级角色、会话与管理授权	test	A	62	0	backend/internal/service/auth_lifecycle_security_test.go
+02	三级角色、会话与管理授权	business	M	1	1	backend/internal/service/auth_oauth_email_flow.go
+02	三级角色、会话与管理授权	business	M	41	2	backend/internal/service/auth_pending_identity_service.go
+02	三级角色、会话与管理授权	business	M	89	49	backend/internal/service/auth_service.go
+02	三级角色、会话与管理授权	test	M	16	3	backend/internal/service/auth_service_email_bind_test.go
+11	构建、手动发布与在线更新	business	M	17	3	backend/internal/service/backup_service.go
+11	构建、手动发布与在线更新	test	M	20	3	backend/internal/service/backup_service_test.go
+09	品牌界面、文档站与用户体验	business	A	32	0	backend/internal/service/brand.go
+07	Codex 降智检测与定时诊断	test	A	260	0	backend/internal/service/codex_diagnostic_gateway_policy_test.go
+07	Codex 降智检测与定时诊断	business	A	210	0	backend/internal/service/codex_diagnostic_probe.go
+07	Codex 降智检测与定时诊断	business	A	353	0	backend/internal/service/codex_fingerprint.go
+07	Codex 降智检测与定时诊断	test	A	43	0	backend/internal/service/codex_fingerprint_test.go
+07	Codex 降智检测与定时诊断	business	A	114	0	backend/internal/service/codex_fingerprint_update.go
+07	Codex 降智检测与定时诊断	test	A	152	0	backend/internal/service/codex_probe_gateway_test.go
+07	Codex 降智检测与定时诊断	business	A	370	0	backend/internal/service/codex_probe_template.go
+07	Codex 降智检测与定时诊断	runtime-data	A	7	0	backend/internal/service/codex_probe_template.jsonl
+07	Codex 降智检测与定时诊断	test	A	216	0	backend/internal/service/codex_probe_template_test.go
+02	三级角色、会话与管理授权	business	M	1	1	backend/internal/service/content_moderation.go
+02	三级角色、会话与管理授权	test	M	37	32	backend/internal/service/content_moderation_test.go
+06	用量排行与页面加载	business	M	9	0	backend/internal/service/dashboard_service.go
+11	构建、手动发布与在线更新	business	M	1	1	backend/internal/service/data_management_service.go
+12	跨功能设置、路由与依赖装配	business	M	17	3	backend/internal/service/domain_constants.go
+02	三级角色、会话与管理授权	business	M	24	7	backend/internal/service/email_queue_service.go
+02	三级角色、会话与管理授权	business	M	14	4	backend/internal/service/email_service.go
+02	三级角色、会话与管理授权	test	M	22	1	backend/internal/service/email_service_reset_token_test.go
+04	账号、Anthropic 授权与调度	test	M	11	0	backend/internal/service/gateway_multiplatform_test.go
+04	账号、Anthropic 授权与调度	business	M	54	19	backend/internal/service/gateway_scheduling.go
+04	账号、Anthropic 授权与调度	business	M	199	9	backend/internal/service/gateway_service.go
+04	账号、Anthropic 授权与调度	test	A	686	0	backend/internal/service/gateway_sticky_session_ttl_test.go
+03	原生网关与多媒体安全	test	M	11	0	backend/internal/service/gemini_multiplatform_test.go
+02	三级角色、会话与管理授权	business	M	13	8	backend/internal/service/gemini_oauth_service.go
+04	账号、Anthropic 授权与调度	test	M	13	0	backend/internal/service/generate_session_hash_test.go
+03	原生网关与多媒体安全	business	M	298	4	backend/internal/service/grok_audio.go
+03	原生网关与多媒体安全	test	M	151	0	backend/internal/service/grok_audio_test.go
+02	三级角色、会话与管理授权	business	M	5	0	backend/internal/service/grok_oauth_service.go
+03	原生网关与多媒体安全	business	M	53	20	backend/internal/service/image_storage.go
+03	原生网关与多媒体安全	test	M	53	7	backend/internal/service/image_storage_test.go
+09	品牌界面、文档站与用户体验	business	M	64	7	backend/internal/service/model_plaza_service.go
+09	品牌界面、文档站与用户体验	test	M	45	0	backend/internal/service/model_plaza_service_test.go
+04	账号、Anthropic 授权与调度	business	M	27	0	backend/internal/service/model_rate_limit.go
+07	Codex 降智检测与定时诊断	documentation	A	21	0	backend/internal/service/modeltrace_LICENSE
+07	Codex 降智检测与定时诊断	business	A	79	0	backend/internal/service/modeltrace_challenge.go
+07	Codex 降智检测与定时诊断	test	A	75	0	backend/internal/service/modeltrace_challenge_test.go
+07	Codex 降智检测与定时诊断	runtime-data	A	29460	0	backend/internal/service/modeltrace_unified_bank.json
+02	三级角色、会话与管理授权	business	M	27	0	backend/internal/service/notification_email_service.go
+02	三级角色、会话与管理授权	test	M	33	0	backend/internal/service/notification_email_service_test.go
+02	三级角色、会话与管理授权	business	M	10	5	backend/internal/service/oauth_service.go
+04	账号、Anthropic 授权与调度	business	M	27	0	backend/internal/service/openai_account_scheduler.go
+04	账号、Anthropic 授权与调度	test	M	11	0	backend/internal/service/openai_account_scheduler_test.go
+03	原生网关与多媒体安全	test	M	11	0	backend/internal/service/openai_cyber_session_block_test.go
+03	原生网关与多媒体安全	business	M	120	0	backend/internal/service/openai_gateway_response_handling.go
+03	原生网关与多媒体安全	business	M	40	0	backend/internal/service/openai_gateway_service.go
+03	原生网关与多媒体安全	test	M	11	0	backend/internal/service/openai_gateway_service_test.go
+02	三级角色、会话与管理授权	business	M	11	6	backend/internal/service/openai_oauth_service.go
+03	原生网关与多媒体安全	test	M	1	1	backend/internal/service/openai_plugin_account_directory_test.go
+03	原生网关与多媒体安全	test	M	5	0	backend/internal/service/openai_responses_rejected_field_retry_test.go
+03	原生网关与多媒体安全	business	M	11	0	backend/internal/service/openai_ws_execution_scope.go
+03	原生网关与多媒体安全	business	M	27	3	backend/internal/service/openai_ws_forwarder_ingress.go
+03	原生网关与多媒体安全	test	M	12	10	backend/internal/service/openai_ws_forwarder_ingress_session_test.go
+03	原生网关与多媒体安全	test	M	283	0	backend/internal/service/openai_ws_forwarder_ingress_test.go
+03	原生网关与多媒体安全	business	M	4	3	backend/internal/service/openai_ws_forwarder_v2.go
+03	原生网关与多媒体安全	business	M	14	6	backend/internal/service/openai_ws_pool.go
+03	原生网关与多媒体安全	test	M	33	0	backend/internal/service/openai_ws_state_store_test.go
+03	原生网关与多媒体安全	business	M	15	0	backend/internal/service/openai_ws_v2_passthrough_adapter.go
+06	用量排行与页面加载	business	M	1	1	backend/internal/service/ops_scheduled_report_service.go
+05	支付、退款与返利完整性	business	A	135	0	backend/internal/service/payment_allowance.go
+05	支付、退款与返利完整性	test	A	191	0	backend/internal/service/payment_allowance_test.go
+05	支付、退款与返利完整性	business	M	24	24	backend/internal/service/payment_config_service.go
+05	支付、退款与返利完整性	business	M	82	42	backend/internal/service/payment_fulfillment.go
+05	支付、退款与返利完整性	business	M	15	24	backend/internal/service/payment_order.go
+05	支付、退款与返利完整性	business	M	7	1	backend/internal/service/payment_order_expiry_service.go
+05	支付、退款与返利完整性	business	M	4	1	backend/internal/service/payment_order_lifecycle.go
+05	支付、退款与返利完整性	test	M	3	2	backend/internal/service/payment_order_result_test.go
+05	支付、退款与返利完整性	business	M	152	271	backend/internal/service/payment_refund.go
+05	支付、退款与返利完整性	business	A	292	0	backend/internal/service/payment_refund_reservation.go
+05	支付、退款与返利完整性	test	M	65	44	backend/internal/service/payment_refund_test.go
+05	支付、退款与返利完整性	business	M	5	2	backend/internal/service/payment_resume_service.go
+05	支付、退款与返利完整性	test	M	2	2	backend/internal/service/payment_resume_service_test.go
+05	支付、退款与返利完整性	test	A	145	0	backend/internal/service/payment_security_postgres_test.go
+05	支付、退款与返利完整性	test	A	286	0	backend/internal/service/payment_security_test.go
+05	支付、退款与返利完整性	business	M	1	1	backend/internal/service/payment_service.go
+04	账号、Anthropic 授权与调度	business	M	73	4	backend/internal/service/ratelimit_service.go
+04	账号、Anthropic 授权与调度	test	M	25	0	backend/internal/service/ratelimit_service_scheduling_threshold_test.go
+02	三级角色、会话与管理授权	business	M	8	7	backend/internal/service/refresh_token_cache.go
+07	Codex 降智检测与定时诊断	business	A	45	0	backend/internal/service/scheduled_test_authorization.go
+07	Codex 降智检测与定时诊断	business	A	437	0	backend/internal/service/scheduled_test_diagnostic.go
+07	Codex 降智检测与定时诊断	business	M	19	12	backend/internal/service/scheduled_test_port.go
+07	Codex 降智检测与定时诊断	business	M	25	5	backend/internal/service/scheduled_test_runner_service.go
+07	Codex 降智检测与定时诊断	business	M	30	9	backend/internal/service/scheduled_test_service.go
+07	Codex 降智检测与定时诊断	business	A	50	0	backend/internal/service/setting_codex_probe_template.go
+12	跨功能设置、路由与依赖装配	business	M	39	23	backend/internal/service/setting_features.go
+03	原生网关与多媒体安全	business	M	1	0	backend/internal/service/setting_gateway_runtime.go
+12	跨功能设置、路由与依赖装配	business	M	5	5	backend/internal/service/setting_parse.go
+12	跨功能设置、路由与依赖装配	business	M	0	4	backend/internal/service/setting_public.go
+12	跨功能设置、路由与依赖装配	business	M	5	7	backend/internal/service/setting_service.go
+12	跨功能设置、路由与依赖装配	test	M	15	13	backend/internal/service/setting_service_platform_threshold_test.go
+12	跨功能设置、路由与依赖装配	test	M	3	4	backend/internal/service/setting_service_update_test.go
+12	跨功能设置、路由与依赖装配	business	M	14	6	backend/internal/service/setting_update.go
+12	跨功能设置、路由与依赖装配	business	M	1	2	backend/internal/service/settings_view.go
+05	支付、退款与返利完整性	business	M	9	1	backend/internal/service/subscription_service.go
+07	Codex 降智检测与定时诊断	test	A	65	0	backend/internal/service/testdata/modeltrace_challenges.json
+07	Codex 降智检测与定时诊断	test	A	1	0	backend/internal/service/testdata/modeltrace_gpt_reference.json
+02	三级角色、会话与管理授权	business	M	99	38	backend/internal/service/totp_service.go
+11	构建、手动发布与在线更新	business	A	75	0	backend/internal/service/update_compose.go
+11	构建、手动发布与在线更新	test	A	82	0	backend/internal/service/update_release_channel_test.go
+11	构建、手动发布与在线更新	business	M	239	44	backend/internal/service/update_service.go
+11	构建、手动发布与在线更新	test	M	112	4	backend/internal/service/update_service_test.go
+06	用量排行与页面加载	business	M	10	0	backend/internal/service/usage_service.go
+02	三级角色、会话与管理授权	business	M	6	2	backend/internal/service/user.go
+02	三级角色、会话与管理授权	business	M	32	6	backend/internal/service/user_service.go
+02	三级角色、会话与管理授权	test	M	1	1	backend/internal/service/user_service_test.go
+12	跨功能设置、路由与依赖装配	business	M	17	8	backend/internal/service/wire.go
+09	品牌界面、文档站与用户体验	test	A	73	0	backend/internal/setup/bootstrap_security_test.go
+09	品牌界面、文档站与用户体验	business	M	3	3	backend/internal/setup/cli.go
+09	品牌界面、文档站与用户体验	business	M	24	4	backend/internal/setup/handler.go
+09	品牌界面、文档站与用户体验	business	M	4	4	backend/internal/setup/setup.go
+09	品牌界面、文档站与用户体验	test	M	22	10	backend/internal/setup/setup_test.go
+12	跨功能设置、路由与依赖装配	business	M	9	0	backend/internal/testutil/stubs.go
+12	跨功能设置、路由与依赖装配	business	A	13	0	backend/internal/testutil/transport.go
+03	原生网关与多媒体安全	business	A	307	0	backend/internal/util/urlvalidator/public_transport.go
+03	原生网关与多媒体安全	test	A	293	0	backend/internal/util/urlvalidator/public_transport_test.go
+09	品牌界面、文档站与用户体验	business	M	8	1	backend/internal/web/embed_on.go
+09	品牌界面、文档站与用户体验	test	M	13	13	backend/internal/web/embed_test.go
+01	数据库升级与历史兼容	migration	A	7	0	backend/migrations/234_ops_job_heartbeats_add_expected_interval.sql
+01	数据库升级与历史兼容	migration	A	9	0	backend/migrations/235_group_no_account_fallback.sql
+01	数据库升级与历史兼容	migration	A	15	0	backend/migrations/236_ops_metric_thresholds_ttft_default.sql
+01	数据库升级与历史兼容	migration	A	5	0	backend/migrations/237_add_api_key_concurrency_limit.sql
+01	数据库升级与历史兼容	migration	A	52	0	backend/migrations/239_codex_ticket_attempts.sql
+01	数据库升级与历史兼容	migration	A	5	0	backend/migrations/241_add_account_group_rate_multiplier.sql
+01	数据库升级与历史兼容	migration	A	55	0	backend/migrations/241_codex_ticket_lifecycle.sql
+01	数据库升级与历史兼容	migration	A	39	0	backend/migrations/242_prune_openai_request_timezones.sql
+01	数据库升级与历史兼容	migration	A	10	0	backend/migrations/242_request_timing_details.sql
+01	数据库升级与历史兼容	migration	A	6	0	backend/migrations/243_codex_ticket_oailb_invalidation.sql
+01	数据库升级与历史兼容	migration	A	4	0	backend/migrations/243_pelican_scheduled_tests.sql
+01	数据库升级与历史兼容	migration	A	7	0	backend/migrations/244_account_group_allowed_models.sql
+01	数据库升级与历史兼容	migration	A	7	0	backend/migrations/244_disable_codex_ticket_harvesting.sql
+01	数据库升级与历史兼容	migration	A	17	0	backend/migrations/245_openai_bps_platform.sql
+01	数据库升级与历史兼容	migration	A	7	0	backend/migrations/245_user_group_denied_models.sql
+01	数据库升级与历史兼容	migration	A	6	0	backend/migrations/246_group_stream_only.sql
+01	数据库升级与历史兼容	migration	A	8	0	backend/migrations/247_account_quality_ops.sql
+01	数据库升级与历史兼容	migration	A	2	0	backend/migrations/248_account_quality_judgment.sql
+01	数据库升级与历史兼容	migration	A	19	0	backend/migrations/249_account_ops_alerts.sql
+01	数据库升级与历史兼容	migration	A	23	0	backend/migrations/249_pelican_showcase_items.sql
+01	数据库升级与历史兼容	migration	A	37	0	backend/migrations/250_account_token_guard.sql
+01	数据库升级与历史兼容	migration	A	18	0	backend/migrations/251_request_captures.sql
+01	数据库升级与历史兼容	migration	A	1	0	backend/migrations/252_user_observer_groups.sql
+01	数据库升级与历史兼容	migration	A	66	0	backend/migrations/253_retire_fork_features.sql
+01	数据库升级与历史兼容	migration	A	45	0	backend/migrations/254_openai_oauth_reauth.sql
+01	数据库升级与历史兼容	migration	A	7	0	backend/migrations/254_quality_bps_coexist.sql
+01	数据库升级与历史兼容	migration	A	31	0	backend/migrations/254_retire_standalone_bps.sql
+01	数据库升级与历史兼容	migration	A	61	0	backend/migrations/255_account_token_guard_v2.sql
+01	数据库升级与历史兼容	migration	A	3	0	backend/migrations/256_openai_oauth_reauth_proxy_override.sql
+01	数据库升级与历史兼容	migration	A	22	0	backend/migrations/257_openai_oauth_reauth_proxy_source.sql
+01	数据库升级与历史兼容	migration	A	8	0	backend/migrations/258_security_auth_lifecycle.sql
+01	数据库升级与历史兼容	migration	A	23	0	backend/migrations/259_security_gateway_media.sql
+01	数据库升级与历史兼容	migration	A	78	0	backend/migrations/260_security_payment_invariants.sql
+01	数据库升级与历史兼容	migration	A	76	0	backend/migrations/261_model_catalog_registry.sql
+01	数据库升级与历史兼容	migration	A	3	0	backend/migrations/262_model_catalog_global_sync_jobs.sql
+01	数据库升级与历史兼容	migration	A	91	0	backend/migrations/263_model_catalog_candidates_only.sql
+01	数据库升级与历史兼容	migration	A	36	0	backend/migrations/264_codex_diagnostic_monitor.sql
+01	数据库升级与历史兼容	migration	A	25	0	backend/migrations/265_prepare_bps_provider_constraints.sql
+01	数据库升级与历史兼容	migration	A	119	0	backend/migrations/265_remove_bps_protocols.sql
+01	数据库升级与历史兼容	migration	A	32	0	backend/migrations/266_remove_companion_account_extensions.sql
+01	数据库升级与历史兼容	migration	A	20	0	backend/migrations/267_preserve_fable_threshold.sql
+01	数据库升级与历史兼容	migration	A	34	0	backend/migrations/267_unify_diagnostic_scheduled_tests.sql
+01	数据库升级与历史兼容	migration	A	60	0	backend/migrations/268_retire_fork_gateway_runtime.sql
+01	数据库升级与历史兼容	migration	A	20	0	backend/migrations/269_restore_fable_threshold.sql
+01	数据库升级与历史兼容	migration	A	43	0	backend/migrations/270_three_tier_roles.sql
+01	数据库升级与历史兼容	test	A	22	0	backend/migrations/codex_ticket_oailb_invalidation_migration_test.go
+01	数据库升级与历史兼容	test	A	21	0	backend/migrations/group_no_account_fallback_migration_test.go
+01	数据库升级与历史兼容	test	A	22	0	backend/migrations/openai_bps_platform_migration_test.go
+01	数据库升级与历史兼容	test	A	18	0	backend/migrations/ops_job_heartbeats_expected_interval_migration_test.go
+01	数据库升级与历史兼容	test	A	20	0	backend/migrations/ops_metric_thresholds_ttft_default_migration_test.go
+01	数据库升级与历史兼容	test	A	27	0	backend/migrations/prune_openai_request_timezones_migration_test.go
+12	跨功能设置、路由与依赖装配	documentation	M	9	9	backend/pkg/pluginapi/README.md
+12	跨功能设置、路由与依赖装配	documentation	M	1	1	backend/pkg/pluginapi/docs/development.md
+12	跨功能设置、路由与依赖装配	documentation	M	1	1	backend/pkg/pluginapi/docs/package-format.md
+12	跨功能设置、路由与依赖装配	documentation	M	2	2	backend/pkg/pluginapi/docs/security.md
+12	跨功能设置、路由与依赖装配	business	M	1	1	backend/pkg/pluginapi/v1/manifest.schema.json
+11	构建、手动发布与在线更新	tooling/config	M	39	15	deploy/.env.example
+11	构建、手动发布与在线更新	tooling/config	M	1	1	deploy/.gitignore
+11	构建、手动发布与在线更新	documentation	M	38	38	deploy/APPLE_CONTAINER.md
+11	构建、手动发布与在线更新	documentation	A	115	0	deploy/AUTOMATIC_RELEASE.md
+11	构建、手动发布与在线更新	tooling/config	M	2	2	deploy/Caddyfile
+11	构建、手动发布与在线更新	documentation	M	17	17	deploy/DATAMANAGEMENTD_CN.md
+11	构建、手动发布与在线更新	documentation	M	14	12	deploy/DOCKER.md
+11	构建、手动发布与在线更新	tooling/config	M	20	16	deploy/Dockerfile
+11	构建、手动发布与在线更新	documentation	M	54	46	deploy/EDGE_SECURITY.md
+11	构建、手动发布与在线更新	documentation	M	70	93	deploy/README.md
+11	构建、手动发布与在线更新	tooling/config	M	39	39	deploy/apple-container.sh
+11	构建、手动发布与在线更新	tooling/config	M	2	1	deploy/build_image.sh
+11	构建、手动发布与在线更新	tooling/config	A	14	0	deploy/compose-updater.example.json
+11	构建、手动发布与在线更新	tooling/config	A	18	0	deploy/compose-updater@.service
+11	构建、手动发布与在线更新	tooling/config	A	9	0	deploy/compose.updater-socket.yml
+11	构建、手动发布与在线更新	tooling/config	A	299	0	deploy/compose_updater.py
+11	构建、手动发布与在线更新	tooling/config	M	51	24	deploy/config.example.yaml
+11	构建、手动发布与在线更新	tooling/config	M	24	19	deploy/docker-compose.dev.yml
+11	构建、手动发布与在线更新	tooling/config	M	113	20	deploy/docker-compose.local.yml
+11	构建、手动发布与在线更新	tooling/config	M	41	10	deploy/docker-compose.standalone.yml
+11	构建、手动发布与在线更新	tooling/config	A	30	0	deploy/docker-compose.wsl.yml
+11	构建、手动发布与在线更新	tooling/config	M	51	20	deploy/docker-compose.yml
+11	构建、手动发布与在线更新	tooling/config	M	6	6	deploy/docker-deploy.sh
+11	构建、手动发布与在线更新	tooling/config	M	6	6	deploy/docker-entrypoint.sh
+11	构建、手动发布与在线更新	tooling/config	A	85	0	deploy/install-compose-updater.py
+11	构建、手动发布与在线更新	tooling/config	M	16	16	deploy/install-datamanagementd.sh
+11	构建、手动发布与在线更新	tooling/config	M	119	76	deploy/install.sh
+11	构建、手动发布与在线更新	tooling/config	A	22	0	deploy/kdan-datamanagementd.service
+11	构建、手动发布与在线更新	tooling/config	A	33	0	deploy/kdan.service
+11	构建、手动发布与在线更新	tooling/config	A	43	0	deploy/release_metadata.py
+11	构建、手动发布与在线更新	tooling/config	D	0	22	deploy/sub2api-datamanagementd.service
+11	构建、手动发布与在线更新	tooling/config	D	0	33	deploy/sub2api.service
+11	构建、手动发布与在线更新	test	M	31	31	deploy/tests/apple-container-test.sh
+11	构建、手动发布与在线更新	test	M	1	1	deploy/tests/docker-compose-gateway-env-test.sh
+11	构建、手动发布与在线更新	test	M	2	2	deploy/tests/docker-compose-security-test.sh
+11	构建、手动发布与在线更新	test	M	4	1	deploy/tests/docker-compose-simple-mode-env-test.sh
+11	构建、手动发布与在线更新	test	M	2	2	deploy/tests/docker-runtime-resources-test.sh
+11	构建、手动发布与在线更新	test	M	4	4	deploy/tests/fixtures/bin/container
+11	构建、手动发布与在线更新	test	M	8	8	deploy/tests/install-github-token-test.sh
+11	构建、手动发布与在线更新	test	A	278	0	deploy/tests/test_auto_release.py
+11	构建、手动发布与在线更新	test	A	62	0	deploy/tests/test_auto_release_compose.py
+11	构建、手动发布与在线更新	test	A	87	0	deploy/tests/test_auto_release_installer.py
+11	构建、手动发布与在线更新	test	A	84	0	deploy/tests/test_auto_release_workflow.py
+11	构建、手动发布与在线更新	test	A	169	0	deploy/tests/test_brand_release.py
+11	构建、手动发布与在线更新	test	A	25	0	deploy/tests/test_runtime_permissions.py
+11	构建、手动发布与在线更新	tooling/config	A	39	0	deploy/upstream_sync_instructions.py
+13	需求、历史说明与工程规范	documentation	M	8	8	docs/ADMIN_PAYMENT_INTEGRATION_API.md
+13	需求、历史说明与工程规范	documentation	A	33	0	docs/API_KEY_CONCURRENCY.md
+13	需求、历史说明与工程规范	documentation	M	9	9	docs/BATCH_IMAGE_MVP.md
+13	需求、历史说明与工程规范	documentation	A	131	0	docs/BPS_REMOVAL.md
+13	需求、历史说明与工程规范	documentation	A	42	0	docs/BRANCH_STRUCTURE.md
+13	需求、历史说明与工程规范	documentation	A	29	0	docs/BRAND_TOOLING_PARITY.md
+13	需求、历史说明与工程规范	documentation	A	86	0	docs/CHANGE_DELIVERY.md
+13	需求、历史说明与工程规范	documentation	A	49	0	docs/CODEX_DIAGNOSTIC_MONITOR.md
+13	需求、历史说明与工程规范	documentation	A	14	0	docs/CODEX_MODEL_CATALOG_REFRESH.md
+13	需求、历史说明与工程规范	documentation	A	73	0	docs/CODEX_PROBE_TEMPLATE.md
+13	需求、历史说明与工程规范	documentation	A	166	0	docs/FORK_FEATURE_RETIREMENT.md
+13	需求、历史说明与工程规范	documentation	A	75	0	docs/I18N_COMPLETENESS_AUDIT.md
+13	需求、历史说明与工程规范	documentation	A	491	0	docs/KEYS_PAGE_AND_BRANDING_PLAN.md
+13	需求、历史说明与工程规范	documentation	A	55	0	docs/MODEL_CATALOG.md
+13	需求、历史说明与工程规范	documentation	A	33	0	docs/MODEL_CATALOG_CASCADING.md
+13	需求、历史说明与工程规范	documentation	A	80	0	docs/MODEL_CATALOG_INCIDENT_2026-10-01.md
+09	品牌界面、文档站与用户体验	documentation	A	49	0	docs/MODEL_PLAZA_CATALOG.md
+13	需求、历史说明与工程规范	documentation	A	15	0	docs/OPS_FEATURE_RETIREMENT_2026_09_29.md
+13	需求、历史说明与工程规范	documentation	M	8	8	docs/PAYMENT.md
+13	需求、历史说明与工程规范	documentation	M	8	8	docs/PAYMENT_CN.md
+13	需求、历史说明与工程规范	documentation	M	11	11	docs/PLUGIN_DEVELOPMENT.md
+13	需求、历史说明与工程规范	documentation	A	96	0	docs/PRIVATE_REPOSITORY_SYNC.md
+13	需求、历史说明与工程规范	documentation	A	40	0	docs/account-token-guard-v2.md
+13	需求、历史说明与工程规范	documentation	A	100	0	docs/audit/2026-10-07-rbac-v03-review-fixes.md
+13	需求、历史说明与工程规范	documentation	A	414	0	docs/design/2026-10-06-three-tier-roles-permissions.md
+13	需求、历史说明与工程规范	documentation	A	36	0	docs/kdan-ci.md
+09	品牌界面、文档站与用户体验	documentation	M	5	5	docs/legal/admin-compliance.en.md
+09	品牌界面、文档站与用户体验	documentation	A	49	0	docs/legal/admin-compliance.ja.md
+09	品牌界面、文档站与用户体验	generated	A	49	0	docs/legal/admin-compliance.zh-TW.md
+09	品牌界面、文档站与用户体验	documentation	M	5	5	docs/legal/admin-compliance.zh.md
+13	需求、历史说明与工程规范	documentation	A	28	0	docs/openai-transports.md
+13	需求、历史说明与工程规范	documentation	A	15	0	docs/openai-ws-sse-acceleration.md
+09	品牌界面、文档站与用户体验	business	M	1	1	frontend/index.html
+12	跨功能设置、路由与依赖装配	tooling/config	M	4	1	frontend/package.json
+12	跨功能设置、路由与依赖装配	tooling/config	M	20	0	frontend/pnpm-lock.yaml
+09	品牌界面、文档站与用户体验	documentation	A	13	0	frontend/public/docs-assets/README.md
+09	品牌界面、文档站与用户体验	asset	A	-	-	frontend/public/docs-assets/client-claude-en.png
+09	品牌界面、文档站与用户体验	asset	A	-	-	frontend/public/docs-assets/client-claude-windows.png
+09	品牌界面、文档站与用户体验	asset	A	-	-	frontend/public/docs-assets/client-claude-zh-TW.png
+09	品牌界面、文档站与用户体验	asset	A	-	-	frontend/public/docs-assets/client-claude-zh.png
+09	品牌界面、文档站与用户体验	asset	A	-	-	frontend/public/docs-assets/client-claude.png
+09	品牌界面、文档站与用户体验	asset	A	-	-	frontend/public/docs-assets/client-codex-apikey.png
+09	品牌界面、文档站与用户体验	asset	A	-	-	frontend/public/docs-assets/client-codex-en.png
+09	品牌界面、文档站与用户体验	asset	A	-	-	frontend/public/docs-assets/client-codex-zh-TW.png
+09	品牌界面、文档站与用户体验	asset	A	-	-	frontend/public/docs-assets/client-codex-zh.png
+09	品牌界面、文档站与用户体验	asset	A	-	-	frontend/public/docs-assets/client-codex.png
+09	品牌界面、文档站与用户体验	asset	A	-	-	frontend/public/docs-assets/create-api-key-en.png
+09	品牌界面、文档站与用户体验	asset	A	-	-	frontend/public/docs-assets/create-api-key-zh-TW.png
+09	品牌界面、文档站与用户体验	asset	A	-	-	frontend/public/docs-assets/create-api-key-zh.png
+09	品牌界面、文档站与用户体验	asset	A	-	-	frontend/public/docs-assets/create-api-key.png
+08	API Key 客户端配置与下载工具	business	A	4	0	frontend/public/downloads/SHA256SUMS.txt
+08	API Key 客户端配置与下载工具	asset	A	-	-	frontend/public/downloads/gpt-image-flare.zip
+08	API Key 客户端配置与下载工具	asset	A	-	-	frontend/public/downloads/gpt-image-sunburst.zip
+08	API Key 客户端配置与下载工具	asset	A	-	-	frontend/public/downloads/kdan-claude-session-recovery.zip
+08	API Key 客户端配置与下载工具	business	A	22	0	frontend/public/downloads/kdan-claude-session-recovery/Find-ClaudeSessions.ps1
+08	API Key 客户端配置与下载工具	documentation	A	60	0	frontend/public/downloads/kdan-claude-session-recovery/README.md
+08	API Key 客户端配置与下载工具	business	A	11	0	frontend/public/downloads/kdan-claude-session-recovery/find-claude-sessions.sh
+08	API Key 客户端配置与下载工具	business	A	213	0	frontend/public/downloads/kdan-claude-session-recovery/find_claude_sessions.py
+08	API Key 客户端配置与下载工具	asset	A	-	-	frontend/public/downloads/kdan-codex-session-repair.zip
+08	API Key 客户端配置与下载工具	documentation	A	78	0	frontend/public/downloads/kdan-codex-session-repair/README.md
+08	API Key 客户端配置与下载工具	business	A	40	0	frontend/public/downloads/kdan-codex-session-repair/RepairSessions.ps1
+08	API Key 客户端配置与下载工具	business	A	11	0	frontend/public/downloads/kdan-codex-session-repair/repair-sessions.sh
+08	API Key 客户端配置与下载工具	business	A	714	0	frontend/public/downloads/kdan-codex-session-repair/repair_sessions.py
+08	API Key 客户端配置与下载工具	business	A	125	0	frontend/public/downloads/kdan-codex-session-repair/resume_sessions.py
+08	API Key 客户端配置与下载工具	documentation	A	38	0	frontend/public/downloads/kdan-image-skills/gpt-image-flare/SKILL.md
+08	API Key 客户端配置与下载工具	tooling/config	A	4	0	frontend/public/downloads/kdan-image-skills/gpt-image-flare/agents/openai.yaml
+08	API Key 客户端配置与下载工具	business	A	1	0	frontend/public/downloads/kdan-image-skills/gpt-image-flare/requirements.txt
+08	API Key 客户端配置与下载工具	business	A	285	0	frontend/public/downloads/kdan-image-skills/gpt-image-flare/scripts/generate.py
+08	API Key 客户端配置与下载工具	documentation	A	38	0	frontend/public/downloads/kdan-image-skills/gpt-image-sunburst/SKILL.md
+08	API Key 客户端配置与下载工具	tooling/config	A	4	0	frontend/public/downloads/kdan-image-skills/gpt-image-sunburst/agents/openai.yaml
+08	API Key 客户端配置与下载工具	business	A	1	0	frontend/public/downloads/kdan-image-skills/gpt-image-sunburst/requirements.txt
+08	API Key 客户端配置与下载工具	business	A	285	0	frontend/public/downloads/kdan-image-skills/gpt-image-sunburst/scripts/generate.py
+08	API Key 客户端配置与下载工具	documentation	A	11	0	frontend/public/install/README.md
+08	API Key 客户端配置与下载工具	business	A	23	0	frontend/public/install/claude-code.sh
+08	API Key 客户端配置与下载工具	business	A	25	0	frontend/public/install/codex.sh
+08	API Key 客户端配置与下载工具	business	A	138	0	frontend/public/install/update-codex-models.py
+09	品牌界面、文档站与用户体验	asset	M	22	11	frontend/public/logo.svg
+12	跨功能设置、路由与依赖装配	business	M	8	2	frontend/src/App.vue
+06	用量排行与页面加载	test	M	3	0	frontend/src/__tests__/integration/usage-reasoning-effort.spec.ts
+02	三级角色、会话与管理授权	test	M	1	0	frontend/src/api/__tests__/client.spec.ts
+12	跨功能设置、路由与依赖装配	test	M	7	4	frontend/src/api/__tests__/settings.authSourceDefaults.spec.ts
+12	跨功能设置、路由与依赖装配	test	M	6	12	frontend/src/api/__tests__/settings.paymentVisibleMethods.spec.ts
+07	Codex 降智检测与定时诊断	business	A	100	0	frontend/src/api/admin/codexDiagnostics.ts
+06	用量排行与页面加载	business	M	23	4	frontend/src/api/admin/dashboard.ts
+02	三级角色、会话与管理授权	business	A	35	0	frontend/src/api/admin/roles.ts
+12	跨功能设置、路由与依赖装配	business	M	32	26	frontend/src/api/admin/settings.ts
+12	跨功能设置、路由与依赖装配	business	M	16	2	frontend/src/api/admin/system.ts
+06	用量排行与页面加载	business	M	3	2	frontend/src/api/admin/usage.ts
+02	三级角色、会话与管理授权	business	M	7	2	frontend/src/api/admin/users.ts
+02	三级角色、会话与管理授权	business	M	74	9	frontend/src/api/client.ts
+12	跨功能设置、路由与依赖装配	business	M	12	6	frontend/src/api/setup.ts
+06	用量排行与页面加载	business	M	26	6	frontend/src/api/usage.ts
+09	品牌界面、文档站与用户体验	business	M	10	1	frontend/src/components/AliyunCaptchaWidget.vue
+09	品牌界面、文档站与用户体验	business	M	10	1	frontend/src/components/TencentCaptchaGate.vue
+04	账号、Anthropic 授权与调度	business	M	25	22	frontend/src/components/account/BulkEditAccountModal.vue
+04	账号、Anthropic 授权与调度	business	M	124	154	frontend/src/components/account/CreateAccountModal.vue
+04	账号、Anthropic 授权与调度	business	M	169	51	frontend/src/components/account/EditAccountModal.vue
+04	账号、Anthropic 授权与调度	business	M	54	2	frontend/src/components/account/OAuthAuthorizationFlow.vue
+04	账号、Anthropic 授权与调度	business	M	55	10	frontend/src/components/account/ReAuthAccountModal.vue
+04	账号、Anthropic 授权与调度	test	M	4	3	frontend/src/components/account/__tests__/BulkEditAccountModal.spec.ts
+04	账号、Anthropic 授权与调度	test	M	23	0	frontend/src/components/account/__tests__/CreateAccountModal.spec.ts
+04	账号、Anthropic 授权与调度	test	M	44	1	frontend/src/components/account/__tests__/EditAccountModal.spec.ts
+04	账号、Anthropic 授权与调度	test	M	10	1	frontend/src/components/account/__tests__/OpenAIReferralCell.transport.spec.ts
+02	三级角色、会话与管理授权	business	M	17	3	frontend/src/components/admin/AdminComplianceDialog.vue
+02	三级角色、会话与管理授权	business	A	156	0	frontend/src/components/admin/AdminRolePermissions.vue
+02	三级角色、会话与管理授权	business	A	75	0	frontend/src/components/admin/DelegatedSettings.vue
+02	三级角色、会话与管理授权	test	A	105	0	frontend/src/components/admin/__tests__/AdminRolePermissions.spec.ts
+04	账号、Anthropic 授权与调度	business	M	14	10	frontend/src/components/admin/account/AccountActionMenu.vue
+04	账号、Anthropic 授权与调度	business	M	2	2	frontend/src/components/admin/account/AccountTableActions.vue
+07	Codex 降智检测与定时诊断	business	A	24	0	frontend/src/components/admin/account/CodexDiagnosticBadge.vue
+07	Codex 降智检测与定时诊断	business	A	257	0	frontend/src/components/admin/account/CodexDiagnosticModal.vue
+07	Codex 降智检测与定时诊断	business	A	51	0	frontend/src/components/admin/account/CodexDiagnosticModelPicker.vue
+04	账号、Anthropic 授权与调度	business	M	55	4	frontend/src/components/admin/account/ReAuthAccountModal.vue
+04	账号、Anthropic 授权与调度	test	M	3	0	frontend/src/components/admin/account/__tests__/AccountActionMenu.position.spec.ts
+04	账号、Anthropic 授权与调度	test	M	3	0	frontend/src/components/admin/account/__tests__/AccountActionMenu.spark_shadow.spec.ts
+07	Codex 降智检测与定时诊断	test	A	167	0	frontend/src/components/admin/account/__tests__/CodexDiagnosticModal.spec.ts
+07	Codex 降智检测与定时诊断	test	A	46	0	frontend/src/components/admin/account/__tests__/CodexDiagnosticModelPicker.spec.ts
+06	用量排行与页面加载	business	A	87	0	frontend/src/components/admin/usage/APIKeyTokenRanking.vue
+06	用量排行与页面加载	business	A	266	0	frontend/src/components/admin/usage/BreakdownRanking.vue
+06	用量排行与页面加载	business	M	27	5	frontend/src/components/admin/usage/UsageFilters.vue
+06	用量排行与页面加载	business	M	2	2	frontend/src/components/admin/usage/UsageTable.vue
+06	用量排行与页面加载	business	M	38	153	frontend/src/components/admin/usage/UserTokenRanking.vue
+06	用量排行与页面加载	test	A	172	0	frontend/src/components/admin/usage/__tests__/APIKeyTokenRanking.spec.ts
+06	用量排行与页面加载	test	A	166	0	frontend/src/components/admin/usage/__tests__/BreakdownRanking.spec.ts
+06	用量排行与页面加载	test	M	21	0	frontend/src/components/admin/usage/__tests__/UsageFilters.spec.ts
+02	三级角色、会话与管理授权	business	M	9	5	frontend/src/components/admin/user/UserCreateModal.vue
+02	三级角色、会话与管理授权	business	M	15	5	frontend/src/components/admin/user/UserEditModal.vue
+02	三级角色、会话与管理授权	test	M	3	0	frontend/src/components/admin/user/__tests__/UserEditModal.spec.ts
+09	品牌界面、文档站与用户体验	business	M	7	21	frontend/src/components/auth/LoginAgreementPrompt.vue
+09	品牌界面、文档站与用户体验	business	M	2	8	frontend/src/components/auth/WechatOAuthSection.vue
+09	品牌界面、文档站与用户体验	test	M	0	1	frontend/src/components/auth/__tests__/WechatOAuthSection.spec.ts
+09	品牌界面、文档站与用户体验	business	M	20	13	frontend/src/components/common/BaseDialog.vue
+09	品牌界面、文档站与用户体验	business	M	2	1	frontend/src/components/common/DateRangePicker.vue
+10	多语言与繁体生成	business	M	6	4	frontend/src/components/common/LocaleSwitcher.vue
+09	品牌界面、文档站与用户体验	business	M	1	1	frontend/src/components/common/PlatformIcon.vue
+09	品牌界面、文档站与用户体验	business	M	1	0	frontend/src/components/common/PlatformTypeBadge.vue
+09	品牌界面、文档站与用户体验	business	D	0	18	frontend/src/components/common/ProxyAdBanner.vue
+09	品牌界面、文档站与用户体验	business	M	1	1	frontend/src/components/common/Select.vue
+09	品牌界面、文档站与用户体验	business	M	3	1	frontend/src/components/common/Toast.vue
+11	构建、手动发布与在线更新	business	M	519	464	frontend/src/components/common/VersionBadge.vue
+09	品牌界面、文档站与用户体验	test	M	3	1	frontend/src/components/common/__tests__/BaseDialog.ids.spec.ts
+09	品牌界面、文档站与用户体验	test	M	2	1	frontend/src/components/common/__tests__/BaseDialog.scrollLock.spec.ts
+09	品牌界面、文档站与用户体验	test	M	14	1	frontend/src/components/common/__tests__/BaseDialog.spec.ts
+11	构建、手动发布与在线更新	test	A	140	0	frontend/src/components/common/__tests__/VersionBadge.spec.ts
+11	构建、手动发布与在线更新	test	A	55	0	frontend/src/components/common/__tests__/VersionBadgeCompose.spec.ts
+09	品牌界面、文档站与用户体验	business	A	53	0	frontend/src/components/docs/DocsCodeTabs.vue
+09	品牌界面、文档站与用户体验	business	A	25	0	frontend/src/components/docs/DocsGroupSelect.vue
+09	品牌界面、文档站与用户体验	business	A	26	0	frontend/src/components/docs/DocsPricingTable.vue
+09	品牌界面、文档站与用户体验	business	A	36	0	frontend/src/components/docs/DocsSidebar.vue
+09	品牌界面、文档站与用户体验	test	A	31	0	frontend/src/components/docs/__tests__/DocsPricingTable.spec.ts
+09	品牌界面、文档站与用户体验	business	A	44	0	frontend/src/components/home/AgentToolCards.vue
+09	品牌界面、文档站与用户体验	business	A	203	0	frontend/src/components/home/ArchitectureDiagram.vue
+09	品牌界面、文档站与用户体验	business	A	41	0	frontend/src/components/home/DiagramNode.vue
+09	品牌界面、文档站与用户体验	business	A	160	0	frontend/src/components/home/GatewayShowcase.vue
+09	品牌界面、文档站与用户体验	business	A	37	0	frontend/src/components/home/MechanismList.vue
+09	品牌界面、文档站与用户体验	business	A	94	0	frontend/src/components/home/ModelShowcase.vue
+09	品牌界面、文档站与用户体验	test	A	41	0	frontend/src/components/home/__tests__/ArchitectureDiagram.spec.ts
+09	品牌界面、文档站与用户体验	test	A	86	0	frontend/src/components/home/__tests__/ModelShowcase.spec.ts
+09	品牌界面、文档站与用户体验	business	A	42	0	frontend/src/components/home/mechanisms.ts
+09	品牌界面、文档站与用户体验	business	A	49	0	frontend/src/components/home/officialModels.ts
+08	API Key 客户端配置与下载工具	business	M	167	101	frontend/src/components/keys/UseKeyModal.vue
+08	API Key 客户端配置与下载工具	test	M	205	24	frontend/src/components/keys/__tests__/UseKeyModal.spec.ts
+09	品牌界面、文档站与用户体验	business	M	7	6	frontend/src/components/layout/AppHeader.vue
+09	品牌界面、文档站与用户体验	business	M	8	2	frontend/src/components/layout/AppLayout.vue
+09	品牌界面、文档站与用户体验	business	M	13	3	frontend/src/components/layout/AppSidebar.vue
+09	品牌界面、文档站与用户体验	business	M	6	3	frontend/src/components/layout/AuthLayout.vue
+09	品牌界面、文档站与用户体验	documentation	M	1	1	frontend/src/components/layout/README.md
+09	品牌界面、文档站与用户体验	test	M	0	9	frontend/src/components/layout/__tests__/docUrlSanitization.spec.ts
+09	品牌界面、文档站与用户体验	business	M	1	1	frontend/src/components/modelPlaza/PlazaNavBar.vue
+05	支付、退款与返利完整性	test	M	9	9	frontend/src/components/payment/__tests__/SubscriptionPlanCard.spec.ts
+09	品牌界面、文档站与用户体验	business	M	2	2	frontend/src/components/user/profile/ProfileInfoCard.vue
+09	品牌界面、文档站与用户体验	test	M	0	1	frontend/src/components/user/profile/__tests__/ProfileIdentityBindingsSection.spec.ts
+04	账号、Anthropic 授权与调度	test	A	30	0	frontend/src/composables/__tests__/useAccountOAuth.spec.ts
+02	三级角色、会话与管理授权	test	A	76	0	frontend/src/composables/__tests__/useHiddenColumns.spec.ts
+02	三级角色、会话与管理授权	test	M	18	0	frontend/src/composables/__tests__/useStepUp.spec.ts
+04	账号、Anthropic 授权与调度	business	M	22	1	frontend/src/composables/useAccountOAuth.ts
+02	三级角色、会话与管理授权	business	A	74	0	frontend/src/composables/useHiddenColumns.ts
+09	品牌界面、文档站与用户体验	business	A	38	0	frontend/src/composables/useModelPlaza.ts
+12	跨功能设置、路由与依赖装配	business	M	8	6	frontend/src/composables/useModelWhitelist.ts
+12	跨功能设置、路由与依赖装配	business	M	2	2	frontend/src/composables/useOnboardingTour.ts
+02	三级角色、会话与管理授权	business	M	18	0	frontend/src/composables/useStepUp.ts
+09	品牌界面、文档站与用户体验	business	A	74	0	frontend/src/config/brand.ts
+12	跨功能设置、路由与依赖装配	business	A	21	0	frontend/src/config/openaiModels.ts
+09	品牌界面、文档站与用户体验	test	A	20	0	frontend/src/content/docs/__tests__/examples.spec.ts
+09	品牌界面、文档站与用户体验	test	A	21	0	frontend/src/content/docs/__tests__/navigation.spec.ts
+09	品牌界面、文档站与用户体验	test	A	44	0	frontend/src/content/docs/__tests__/pricingSnapshot.spec.ts
+09	品牌界面、文档站与用户体验	documentation	A	102	0	frontend/src/content/docs/en/api/chat/anthropic-messages.md
+09	品牌界面、文档站与用户体验	documentation	A	64	0	frontend/src/content/docs/en/api/chat/gemini-native.md
+09	品牌界面、文档站与用户体验	documentation	A	47	0	frontend/src/content/docs/en/api/chat/grok-native.md
+09	品牌界面、文档站与用户体验	documentation	A	105	0	frontend/src/content/docs/en/api/chat/openai-chat.md
+09	品牌界面、文档站与用户体验	documentation	A	107	0	frontend/src/content/docs/en/api/chat/openai-responses.md
+09	品牌界面、文档站与用户体验	documentation	A	112	0	frontend/src/content/docs/en/api/image/openai-image.md
+09	品牌界面、文档站与用户体验	documentation	A	27	0	frontend/src/content/docs/en/api/protocols.md
+09	品牌界面、文档站与用户体验	documentation	A	34	0	frontend/src/content/docs/en/api/query/embeddings.md
+09	品牌界面、文档站与用户体验	documentation	A	44	0	frontend/src/content/docs/en/api/query/models.md
+09	品牌界面、文档站与用户体验	documentation	A	59	0	frontend/src/content/docs/en/api/query/token-count.md
+03	原生网关与多媒体安全	documentation	A	93	0	frontend/src/content/docs/en/apps/claude-code.md
+03	原生网关与多媒体安全	documentation	A	30	0	frontend/src/content/docs/en/apps/claude-desktop.md
+09	品牌界面、文档站与用户体验	documentation	A	113	0	frontend/src/content/docs/en/apps/codex.md
+09	品牌界面、文档站与用户体验	documentation	A	70	0	frontend/src/content/docs/en/apps/console.md
+09	品牌界面、文档站与用户体验	documentation	A	80	0	frontend/src/content/docs/en/apps/image-skills.md
+09	品牌界面、文档站与用户体验	documentation	A	27	0	frontend/src/content/docs/en/apps/index.md
+09	品牌界面、文档站与用户体验	documentation	A	58	0	frontend/src/content/docs/en/apps/session-recovery-claude.md
+09	品牌界面、文档站与用户体验	documentation	A	76	0	frontend/src/content/docs/en/apps/session-recovery-codex.md
+09	品牌界面、文档站与用户体验	documentation	A	21	0	frontend/src/content/docs/en/authentication.md
+09	品牌界面、文档站与用户体验	documentation	A	18	0	frontend/src/content/docs/en/downloads.md
+09	品牌界面、文档站与用户体验	documentation	A	15	0	frontend/src/content/docs/en/errors.md
+09	品牌界面、文档站与用户体验	documentation	A	9	0	frontend/src/content/docs/en/limits.md
+09	品牌界面、文档站与用户体验	documentation	A	24	0	frontend/src/content/docs/en/pricing.md
+09	品牌界面、文档站与用户体验	documentation	A	20	0	frontend/src/content/docs/en/quickstart.md
+09	品牌界面、文档站与用户体验	business	A	38	0	frontend/src/content/docs/examples.ts
+09	品牌界面、文档站与用户体验	documentation	A	102	0	frontend/src/content/docs/ja/api/chat/anthropic-messages.md
+09	品牌界面、文档站与用户体验	documentation	A	64	0	frontend/src/content/docs/ja/api/chat/gemini-native.md
+09	品牌界面、文档站与用户体验	documentation	A	47	0	frontend/src/content/docs/ja/api/chat/grok-native.md
+09	品牌界面、文档站与用户体验	documentation	A	105	0	frontend/src/content/docs/ja/api/chat/openai-chat.md
+09	品牌界面、文档站与用户体验	documentation	A	107	0	frontend/src/content/docs/ja/api/chat/openai-responses.md
+09	品牌界面、文档站与用户体验	documentation	A	112	0	frontend/src/content/docs/ja/api/image/openai-image.md
+09	品牌界面、文档站与用户体验	documentation	A	27	0	frontend/src/content/docs/ja/api/protocols.md
+09	品牌界面、文档站与用户体验	documentation	A	34	0	frontend/src/content/docs/ja/api/query/embeddings.md
+09	品牌界面、文档站与用户体验	documentation	A	44	0	frontend/src/content/docs/ja/api/query/models.md
+09	品牌界面、文档站与用户体验	documentation	A	59	0	frontend/src/content/docs/ja/api/query/token-count.md
+03	原生网关与多媒体安全	documentation	A	92	0	frontend/src/content/docs/ja/apps/claude-code.md
+03	原生网关与多媒体安全	documentation	A	30	0	frontend/src/content/docs/ja/apps/claude-desktop.md
+09	品牌界面、文档站与用户体验	documentation	A	113	0	frontend/src/content/docs/ja/apps/codex.md
+09	品牌界面、文档站与用户体验	documentation	A	70	0	frontend/src/content/docs/ja/apps/console.md
+09	品牌界面、文档站与用户体验	documentation	A	80	0	frontend/src/content/docs/ja/apps/image-skills.md
+09	品牌界面、文档站与用户体验	documentation	A	27	0	frontend/src/content/docs/ja/apps/index.md
+09	品牌界面、文档站与用户体验	documentation	A	58	0	frontend/src/content/docs/ja/apps/session-recovery-claude.md
+09	品牌界面、文档站与用户体验	documentation	A	76	0	frontend/src/content/docs/ja/apps/session-recovery-codex.md
+09	品牌界面、文档站与用户体验	documentation	A	21	0	frontend/src/content/docs/ja/authentication.md
+09	品牌界面、文档站与用户体验	documentation	A	18	0	frontend/src/content/docs/ja/downloads.md
+09	品牌界面、文档站与用户体验	documentation	A	15	0	frontend/src/content/docs/ja/errors.md
+09	品牌界面、文档站与用户体验	documentation	A	9	0	frontend/src/content/docs/ja/limits.md
+09	品牌界面、文档站与用户体验	documentation	A	24	0	frontend/src/content/docs/ja/pricing.md
+09	品牌界面、文档站与用户体验	documentation	A	20	0	frontend/src/content/docs/ja/quickstart.md
+09	品牌界面、文档站与用户体验	business	A	92	0	frontend/src/content/docs/modelCatalog.ts
+09	品牌界面、文档站与用户体验	business	A	73	0	frontend/src/content/docs/nav.ts
+09	品牌界面、文档站与用户体验	business	A	9	0	frontend/src/content/docs/pricingSnapshot.ts
+09	品牌界面、文档站与用户体验	business	A	64	0	frontend/src/content/docs/types.ts
+09	品牌界面、文档站与用户体验	generated	A	127	0	frontend/src/content/docs/zh-TW/api/chat/anthropic-messages.md
+09	品牌界面、文档站与用户体验	generated	A	64	0	frontend/src/content/docs/zh-TW/api/chat/gemini-native.md
+09	品牌界面、文档站与用户体验	generated	A	47	0	frontend/src/content/docs/zh-TW/api/chat/grok-native.md
+09	品牌界面、文档站与用户体验	generated	A	140	0	frontend/src/content/docs/zh-TW/api/chat/openai-chat.md
+09	品牌界面、文档站与用户体验	generated	A	150	0	frontend/src/content/docs/zh-TW/api/chat/openai-responses.md
+09	品牌界面、文档站与用户体验	generated	A	150	0	frontend/src/content/docs/zh-TW/api/image/openai-image.md
+09	品牌界面、文档站与用户体验	generated	A	27	0	frontend/src/content/docs/zh-TW/api/protocols.md
+09	品牌界面、文档站与用户体验	generated	A	34	0	frontend/src/content/docs/zh-TW/api/query/embeddings.md
+09	品牌界面、文档站与用户体验	generated	A	51	0	frontend/src/content/docs/zh-TW/api/query/models.md
+09	品牌界面、文档站与用户体验	generated	A	59	0	frontend/src/content/docs/zh-TW/api/query/token-count.md
+03	原生网关与多媒体安全	generated	A	93	0	frontend/src/content/docs/zh-TW/apps/claude-code.md
+03	原生网关与多媒体安全	generated	A	30	0	frontend/src/content/docs/zh-TW/apps/claude-desktop.md
+09	品牌界面、文档站与用户体验	generated	A	119	0	frontend/src/content/docs/zh-TW/apps/codex.md
+09	品牌界面、文档站与用户体验	generated	A	70	0	frontend/src/content/docs/zh-TW/apps/console.md
+09	品牌界面、文档站与用户体验	generated	A	87	0	frontend/src/content/docs/zh-TW/apps/image-skills.md
+09	品牌界面、文档站与用户体验	generated	A	27	0	frontend/src/content/docs/zh-TW/apps/index.md
+09	品牌界面、文档站与用户体验	generated	A	58	0	frontend/src/content/docs/zh-TW/apps/session-recovery-claude.md
+09	品牌界面、文档站与用户体验	generated	A	76	0	frontend/src/content/docs/zh-TW/apps/session-recovery-codex.md
+09	品牌界面、文档站与用户体验	generated	A	26	0	frontend/src/content/docs/zh-TW/authentication.md
+09	品牌界面、文档站与用户体验	generated	A	18	0	frontend/src/content/docs/zh-TW/downloads.md
+09	品牌界面、文档站与用户体验	generated	A	21	0	frontend/src/content/docs/zh-TW/errors.md
+09	品牌界面、文档站与用户体验	generated	A	19	0	frontend/src/content/docs/zh-TW/limits.md
+09	品牌界面、文档站与用户体验	generated	A	24	0	frontend/src/content/docs/zh-TW/pricing.md
+09	品牌界面、文档站与用户体验	generated	A	34	0	frontend/src/content/docs/zh-TW/quickstart.md
+09	品牌界面、文档站与用户体验	documentation	A	127	0	frontend/src/content/docs/zh/api/chat/anthropic-messages.md
+09	品牌界面、文档站与用户体验	documentation	A	64	0	frontend/src/content/docs/zh/api/chat/gemini-native.md
+09	品牌界面、文档站与用户体验	documentation	A	47	0	frontend/src/content/docs/zh/api/chat/grok-native.md
+09	品牌界面、文档站与用户体验	documentation	A	140	0	frontend/src/content/docs/zh/api/chat/openai-chat.md
+09	品牌界面、文档站与用户体验	documentation	A	150	0	frontend/src/content/docs/zh/api/chat/openai-responses.md
+09	品牌界面、文档站与用户体验	documentation	A	150	0	frontend/src/content/docs/zh/api/image/openai-image.md
+09	品牌界面、文档站与用户体验	documentation	A	27	0	frontend/src/content/docs/zh/api/protocols.md
+09	品牌界面、文档站与用户体验	documentation	A	34	0	frontend/src/content/docs/zh/api/query/embeddings.md
+09	品牌界面、文档站与用户体验	documentation	A	51	0	frontend/src/content/docs/zh/api/query/models.md
+09	品牌界面、文档站与用户体验	documentation	A	59	0	frontend/src/content/docs/zh/api/query/token-count.md
+03	原生网关与多媒体安全	documentation	A	93	0	frontend/src/content/docs/zh/apps/claude-code.md
+03	原生网关与多媒体安全	documentation	A	30	0	frontend/src/content/docs/zh/apps/claude-desktop.md
+09	品牌界面、文档站与用户体验	documentation	A	119	0	frontend/src/content/docs/zh/apps/codex.md
+09	品牌界面、文档站与用户体验	documentation	A	70	0	frontend/src/content/docs/zh/apps/console.md
+09	品牌界面、文档站与用户体验	documentation	A	87	0	frontend/src/content/docs/zh/apps/image-skills.md
+09	品牌界面、文档站与用户体验	documentation	A	27	0	frontend/src/content/docs/zh/apps/index.md
+09	品牌界面、文档站与用户体验	documentation	A	58	0	frontend/src/content/docs/zh/apps/session-recovery-claude.md
+09	品牌界面、文档站与用户体验	documentation	A	76	0	frontend/src/content/docs/zh/apps/session-recovery-codex.md
+09	品牌界面、文档站与用户体验	documentation	A	26	0	frontend/src/content/docs/zh/authentication.md
+09	品牌界面、文档站与用户体验	documentation	A	18	0	frontend/src/content/docs/zh/downloads.md
+09	品牌界面、文档站与用户体验	documentation	A	21	0	frontend/src/content/docs/zh/errors.md
+09	品牌界面、文档站与用户体验	documentation	A	19	0	frontend/src/content/docs/zh/limits.md
+09	品牌界面、文档站与用户体验	documentation	A	24	0	frontend/src/content/docs/zh/pricing.md
+09	品牌界面、文档站与用户体验	documentation	A	34	0	frontend/src/content/docs/zh/quickstart.md
+09	品牌界面、文档站与用户体验	business	M	1	1	frontend/src/features/channel-monitor-v2/RelayPulseMatrix.vue
+02	三级角色、会话与管理授权	business	M	6	2	frontend/src/features/prompt-audit/PromptAuditView.vue
+02	三级角色、会话与管理授权	test	M	2	0	frontend/src/features/prompt-audit/__tests__/PromptAuditView.spec.ts
+02	三级角色、会话与管理授权	business	M	7	6	frontend/src/features/prompt-audit/components/EventWorkspace.vue
+10	多语言与繁体生成	test	A	6	0	frontend/src/i18n/__tests__/hardcodedLocaleUsage.baseline.json
+10	多语言与繁体生成	test	A	100	0	frontend/src/i18n/__tests__/hardcodedLocaleUsage.spec.ts
+10	多语言与繁体生成	test	M	47	3	frontend/src/i18n/__tests__/localeKeyCompleteness.spec.ts
+10	多语言与繁体生成	test	M	4	0	frontend/src/i18n/__tests__/localesMessageCompile.spec.ts
+10	多语言与繁体生成	test	M	2	2	frontend/src/i18n/__tests__/openaiFastPolicyLocales.spec.ts
+10	多语言与繁体生成	test	A	85	0	frontend/src/i18n/__tests__/siteNameLinked.spec.ts
+10	多语言与繁体生成	test	A	50	0	frontend/src/i18n/__tests__/taiwanLocalization.spec.ts
+10	多语言与繁体生成	test	A	94	0	frontend/src/i18n/__tests__/zhTwLocale.spec.ts
+10	多语言与繁体生成	business	M	56	16	frontend/src/i18n/index.ts
+10	多语言与繁体生成	business	A	44	0	frontend/src/i18n/localeUtils.ts
+10	多语言与繁体生成	business	M	193	9	frontend/src/i18n/locales/en/admin/accounts.ts
+10	多语言与繁体生成	business	M	78	3	frontend/src/i18n/locales/en/admin/overview.ts
+10	多语言与繁体生成	business	M	5	5	frontend/src/i18n/locales/en/admin/plugins.ts
+10	多语言与繁体生成	business	M	9	0	frontend/src/i18n/locales/en/admin/resources.ts
+10	多语言与繁体生成	business	M	33	14	frontend/src/i18n/locales/en/admin/settings.ts
+10	多语言与繁体生成	business	M	6	2	frontend/src/i18n/locales/en/common.ts
+10	多语言与繁体生成	business	M	81	32	frontend/src/i18n/locales/en/dashboard.ts
+10	多语言与繁体生成	business	A	73	0	frontend/src/i18n/locales/en/docs.ts
+10	多语言与繁体生成	business	M	4	0	frontend/src/i18n/locales/en/index.ts
+10	多语言与繁体生成	business	M	162	88	frontend/src/i18n/locales/en/landing.ts
+10	多语言与繁体生成	business	M	11	5	frontend/src/i18n/locales/en/misc.ts
+10	多语言与繁体生成	business	A	164	0	frontend/src/i18n/locales/en/ui.ts
+10	多语言与繁体生成	business	A	1933	0	frontend/src/i18n/locales/ja/admin/accounts.ts
+10	多语言与繁体生成	business	A	52	0	frontend/src/i18n/locales/ja/admin/audit.ts
+10	多语言与繁体生成	business	A	830	0	frontend/src/i18n/locales/ja/admin/channels.ts
+10	多语言与繁体生成	business	A	21	0	frontend/src/i18n/locales/ja/admin/index.ts
+10	多语言与繁体生成	business	A	839	0	frontend/src/i18n/locales/ja/admin/ops.ts
+10	多语言与繁体生成	business	A	1405	0	frontend/src/i18n/locales/ja/admin/overview.ts
+10	多语言与繁体生成	business	A	50	0	frontend/src/i18n/locales/ja/admin/plugins.ts
+10	多语言与繁体生成	business	A	100	0	frontend/src/i18n/locales/ja/admin/promptAudit.ts
+10	多语言与繁体生成	business	A	619	0	frontend/src/i18n/locales/ja/admin/resources.ts
+10	多语言与繁体生成	business	A	1465	0	frontend/src/i18n/locales/ja/admin/settings.ts
+10	多语言与繁体生成	business	A	212	0	frontend/src/i18n/locales/ja/batchImage.ts
+10	多语言与繁体生成	business	A	147	0	frontend/src/i18n/locales/ja/channelMonitorV2.ts
+10	多语言与繁体生成	business	A	464	0	frontend/src/i18n/locales/ja/common.ts
+10	多语言与繁体生成	business	A	1107	0	frontend/src/i18n/locales/ja/dashboard.ts
+10	多语言与繁体生成	business	A	73	0	frontend/src/i18n/locales/ja/docs.ts
+10	多语言与繁体生成	business	A	21	0	frontend/src/i18n/locales/ja/index.ts
+10	多语言与繁体生成	business	A	332	0	frontend/src/i18n/locales/ja/landing.ts
+10	多语言与繁体生成	business	A	638	0	frontend/src/i18n/locales/ja/misc.ts
+10	多语言与繁体生成	business	A	164	0	frontend/src/i18n/locales/ja/ui.ts
+10	多语言与繁体生成	generated	A	1904	0	frontend/src/i18n/locales/zh-TW/admin/accounts.ts
+10	多语言与繁体生成	generated	A	54	0	frontend/src/i18n/locales/zh-TW/admin/audit.ts
+10	多语言与繁体生成	generated	A	830	0	frontend/src/i18n/locales/zh-TW/admin/channels.ts
+10	多语言与繁体生成	generated	A	23	0	frontend/src/i18n/locales/zh-TW/admin/index.ts
+10	多语言与繁体生成	generated	A	842	0	frontend/src/i18n/locales/zh-TW/admin/ops.ts
+10	多语言与繁体生成	generated	A	1406	0	frontend/src/i18n/locales/zh-TW/admin/overview.ts
+10	多语言与繁体生成	generated	A	52	0	frontend/src/i18n/locales/zh-TW/admin/plugins.ts
+10	多语言与繁体生成	generated	A	102	0	frontend/src/i18n/locales/zh-TW/admin/promptAudit.ts
+10	多语言与繁体生成	generated	A	617	0	frontend/src/i18n/locales/zh-TW/admin/resources.ts
+10	多语言与繁体生成	generated	A	1459	0	frontend/src/i18n/locales/zh-TW/admin/settings.ts
+10	多语言与繁体生成	generated	A	214	0	frontend/src/i18n/locales/zh-TW/batchImage.ts
+10	多语言与繁体生成	generated	A	144	0	frontend/src/i18n/locales/zh-TW/channelMonitorV2.ts
+10	多语言与繁体生成	generated	A	465	0	frontend/src/i18n/locales/zh-TW/common.ts
+10	多语言与繁体生成	generated	A	1112	0	frontend/src/i18n/locales/zh-TW/dashboard.ts
+10	多语言与繁体生成	generated	A	123	0	frontend/src/i18n/locales/zh-TW/docs.ts
+10	多语言与繁体生成	generated	A	23	0	frontend/src/i18n/locales/zh-TW/index.ts
+10	多语言与繁体生成	generated	A	324	0	frontend/src/i18n/locales/zh-TW/landing.ts
+10	多语言与繁体生成	generated	A	665	0	frontend/src/i18n/locales/zh-TW/misc.ts
+10	多语言与繁体生成	generated	A	166	0	frontend/src/i18n/locales/zh-TW/ui.ts
+10	多语言与繁体生成	business	M	193	9	frontend/src/i18n/locales/zh/admin/accounts.ts
+10	多语言与繁体生成	business	M	78	3	frontend/src/i18n/locales/zh/admin/overview.ts
+10	多语言与繁体生成	business	M	5	5	frontend/src/i18n/locales/zh/admin/plugins.ts
+10	多语言与繁体生成	business	M	9	0	frontend/src/i18n/locales/zh/admin/resources.ts
+10	多语言与繁体生成	business	M	33	14	frontend/src/i18n/locales/zh/admin/settings.ts
+10	多语言与繁体生成	business	M	6	2	frontend/src/i18n/locales/zh/common.ts
+10	多语言与繁体生成	business	M	82	34	frontend/src/i18n/locales/zh/dashboard.ts
+10	多语言与繁体生成	business	A	121	0	frontend/src/i18n/locales/zh/docs.ts
+10	多语言与繁体生成	business	M	4	0	frontend/src/i18n/locales/zh/index.ts
+10	多语言与繁体生成	business	M	152	88	frontend/src/i18n/locales/zh/landing.ts
+10	多语言与繁体生成	business	M	11	5	frontend/src/i18n/locales/zh/misc.ts
+10	多语言与繁体生成	business	A	164	0	frontend/src/i18n/locales/zh/ui.ts
+12	跨功能设置、路由与依赖装配	business	M	3	2	frontend/src/main.ts
+12	跨功能设置、路由与依赖装配	documentation	M	1	1	frontend/src/router/README.md
+12	跨功能设置、路由与依赖装配	test	M	16	0	frontend/src/router/__tests__/feature-access.spec.ts
+12	跨功能设置、路由与依赖装配	test	M	105	12	frontend/src/router/__tests__/title.spec.ts
+12	跨功能设置、路由与依赖装配	business	M	61	13	frontend/src/router/index.ts
+12	跨功能设置、路由与依赖装配	business	M	12	0	frontend/src/router/meta.d.ts
+12	跨功能设置、路由与依赖装配	business	M	43	4	frontend/src/router/title.ts
+12	跨功能设置、路由与依赖装配	documentation	M	1	1	frontend/src/stores/README.md
+02	三级角色、会话与管理授权	test	M	2	0	frontend/src/stores/__tests__/adminSettings.retry.spec.ts
+12	跨功能设置、路由与依赖装配	test	M	0	2	frontend/src/stores/__tests__/app.spec.ts
+02	三级角色、会话与管理授权	test	A	48	0	frontend/src/stores/__tests__/auth.permissions.spec.ts
+02	三级角色、会话与管理授权	business	M	40	8	frontend/src/stores/adminCompliance.ts
+12	跨功能设置、路由与依赖装配	business	M	15	0	frontend/src/stores/adminSettings.ts
+12	跨功能设置、路由与依赖装配	business	M	38	5	frontend/src/stores/app.ts
+02	三级角色、会话与管理授权	business	M	37	2	frontend/src/stores/auth.ts
+12	跨功能设置、路由与依赖装配	business	M	31	4	frontend/src/types/index.ts
+04	账号、Anthropic 授权与调度	test	M	3	1	frontend/src/utils/__tests__/accountSelection.spec.ts
+08	API Key 客户端配置与下载工具	test	D	0	22	frontend/src/utils/__tests__/ccswitchImport.antigravityUrl.spec.ts
+08	API Key 客户端配置与下载工具	test	D	0	138	frontend/src/utils/__tests__/ccswitchImport.spec.ts
+08	API Key 客户端配置与下载工具	test	M	16	0	frontend/src/utils/__tests__/codexCatalogConfig.spec.ts
+04	账号、Anthropic 授权与调度	business	M	6	1	frontend/src/utils/accountSelection.ts
+08	API Key 客户端配置与下载工具	business	D	0	115	frontend/src/utils/ccswitchImport.ts
+08	API Key 客户端配置与下载工具	business	M	16	0	frontend/src/utils/codexCatalogConfig.ts
+09	品牌界面、文档站与用户体验	business	A	37	0	frontend/src/utils/legalDocumentIcon.ts
+09	品牌界面、文档站与用户体验	business	M	251	269	frontend/src/views/HomeView.vue
+06	用量排行与页面加载	business	M	10	7	frontend/src/views/KeyUsageView.vue
+09	品牌界面、文档站与用户体验	business	M	5	5	frontend/src/views/NotFoundView.vue
+09	品牌界面、文档站与用户体验	test	M	50	3	frontend/src/views/__tests__/HomeView.compact.spec.ts
+04	账号、Anthropic 授权与调度	business	M	35	16	frontend/src/views/admin/AccountsView.vue
+02	三级角色、会话与管理授权	business	M	7	4	frontend/src/views/admin/AnnouncementsView.vue
+02	三级角色、会话与管理授权	business	M	5	3	frontend/src/views/admin/AuditLogView.vue
+02	三级角色、会话与管理授权	business	M	16	13	frontend/src/views/admin/ChannelsView.vue
+02	三级角色、会话与管理授权	business	M	103	99	frontend/src/views/admin/GroupsView.vue
+02	三级角色、会话与管理授权	business	M	8	5	frontend/src/views/admin/PromoCodesView.vue
+02	三级角色、会话与管理授权	business	M	55	71	frontend/src/views/admin/ProxiesView.vue
+02	三级角色、会话与管理授权	business	M	8	4	frontend/src/views/admin/RedeemView.vue
+02	三级角色、会话与管理授权	business	M	6	4	frontend/src/views/admin/RiskControlView.vue
+12	跨功能设置、路由与依赖装配	business	M	171	219	frontend/src/views/admin/SettingsView.vue
+05	支付、退款与返利完整性	business	M	11	8	frontend/src/views/admin/SubscriptionsView.vue
+06	用量排行与页面加载	business	M	119	66	frontend/src/views/admin/UsageView.vue
+02	三级角色、会话与管理授权	business	M	36	35	frontend/src/views/admin/UsersView.vue
+04	账号、Anthropic 授权与调度	test	M	1	1	frontend/src/views/admin/__tests__/AccountsView.bulkEdit.spec.ts
+04	账号、Anthropic 授权与调度	test	M	18	1	frontend/src/views/admin/__tests__/AccountsView.lite.spec.ts
+04	账号、Anthropic 授权与调度	test	M	1	1	frontend/src/views/admin/__tests__/AccountsView.priorityColumn.spec.ts
+04	账号、Anthropic 授权与调度	test	M	1	1	frontend/src/views/admin/__tests__/AccountsView.schedulerScore.spec.ts
+04	账号、Anthropic 授权与调度	test	M	1	1	frontend/src/views/admin/__tests__/AccountsView.selectAllResults.spec.ts
+04	账号、Anthropic 授权与调度	test	M	1	1	frontend/src/views/admin/__tests__/AccountsView.sparkShadow.spec.ts
+04	账号、Anthropic 授权与调度	test	M	1	1	frontend/src/views/admin/__tests__/AccountsView.usageWindowsHint.spec.ts
+02	三级角色、会话与管理授权	test	M	3	0	frontend/src/views/admin/__tests__/GroupsView.codexManifest.spec.ts
+02	三级角色、会话与管理授权	test	M	1	1	frontend/src/views/admin/__tests__/GroupsView.columnSettings.spec.ts
+02	三级角色、会话与管理授权	test	M	1	1	frontend/src/views/admin/__tests__/GroupsView.duplicate.spec.ts
+02	三级角色、会话与管理授权	test	M	14	3	frontend/src/views/admin/__tests__/ProxiesView.credentials.spec.ts
+02	三级角色、会话与管理授权	test	M	3	0	frontend/src/views/admin/__tests__/ProxiesView.filters.spec.ts
+02	三级角色、会话与管理授权	test	M	3	0	frontend/src/views/admin/__tests__/RedeemView.batchUpdate.spec.ts
+02	三级角色、会话与管理授权	test	M	3	0	frontend/src/views/admin/__tests__/RiskControlView.spec.ts
+12	跨功能设置、路由与依赖装配	test	M	77	7	frontend/src/views/admin/__tests__/SettingsView.spec.ts
+05	支付、退款与返利完整性	test	M	3	0	frontend/src/views/admin/__tests__/SubscriptionsView.bulkActions.spec.ts
+05	支付、退款与返利完整性	test	M	3	0	frontend/src/views/admin/__tests__/SubscriptionsView.userUsageLink.spec.ts
+06	用量排行与页面加载	test	M	200	19	frontend/src/views/admin/__tests__/UsageView.spec.ts
+02	三级角色、会话与管理授权	test	M	18	10	frontend/src/views/admin/__tests__/UsersView.spec.ts
+05	支付、退款与返利完整性	business	M	4	2	frontend/src/views/admin/affiliates/AdminAffiliateRecordsTable.vue
+05	支付、退款与返利完整性	test	M	1	0	frontend/src/views/admin/affiliates/__tests__/AdminAffiliateRecordsTable.spec.ts
+06	用量排行与页面加载	business	M	22	13	frontend/src/views/admin/ops/OpsDashboard.vue
+06	用量排行与页面加载	test	A	47	0	frontend/src/views/admin/ops/__tests__/OpsDashboard.spec.ts
+06	用量排行与页面加载	business	M	3	1	frontend/src/views/admin/ops/components/OpsAlertEventsCard.vue
+06	用量排行与页面加载	business	M	5	3	frontend/src/views/admin/ops/components/OpsDashboardHeader.vue
+05	支付、退款与返利完整性	business	M	9	6	frontend/src/views/admin/orders/AdminOrdersView.vue
+05	支付、退款与返利完整性	business	M	9	5	frontend/src/views/admin/orders/AdminPaymentPlansView.vue
+05	支付、退款与返利完整性	business	M	10	7	frontend/src/views/admin/orders/PlanEditDialog.vue
+02	三级角色、会话与管理授权	business	M	38	146	frontend/src/views/admin/settings/EmailTemplateEditor.vue
+09	品牌界面、文档站与用户体验	business	M	5	3	frontend/src/views/auth/EmailVerifyView.vue
+09	品牌界面、文档站与用户体验	business	M	3	3	frontend/src/views/auth/LoginView.vue
+12	跨功能设置、路由与依赖装配	documentation	M	1	1	frontend/src/views/auth/README.md
+09	品牌界面、文档站与用户体验	business	M	5	3	frontend/src/views/auth/RegisterView.vue
+06	用量排行与页面加载	documentation	M	2	2	frontend/src/views/auth/USAGE_EXAMPLES.md
+12	跨功能设置、路由与依赖装配	documentation	M	4	4	frontend/src/views/auth/VISUAL_GUIDE.md
+09	品牌界面、文档站与用户体验	business	A	202	0	frontend/src/views/docs/DocsArticleView.vue
+09	品牌界面、文档站与用户体验	business	A	89	0	frontend/src/views/docs/DocsHomeView.vue
+09	品牌界面、文档站与用户体验	business	A	108	0	frontend/src/views/docs/DocsModelView.vue
+09	品牌界面、文档站与用户体验	business	A	52	0	frontend/src/views/docs/DocsModelsView.vue
+09	品牌界面、文档站与用户体验	business	A	166	0	frontend/src/views/docs/DocsView.vue
+09	品牌界面、文档站与用户体验	business	M	15	17	frontend/src/views/public/LegalDocumentView.vue
+09	品牌界面、文档站与用户体验	business	M	27	8	frontend/src/views/setup/SetupWizardView.vue
+05	支付、退款与返利完整性	business	M	14	1	frontend/src/views/user/AirwallexPaymentView.vue
+09	品牌界面、文档站与用户体验	business	M	20	68	frontend/src/views/user/BatchImageGuideView.vue
+09	品牌界面、文档站与用户体验	business	M	1	1	frontend/src/views/user/ChannelStatusV2View.vue
+08	API Key 客户端配置与下载工具	business	M	6	122	frontend/src/views/user/KeysView.vue
+06	用量排行与页面加载	business	M	95	32	frontend/src/views/user/UsageView.vue
+08	API Key 客户端配置与下载工具	test	M	35	1	frontend/src/views/user/__tests__/KeysView.spec.ts
+06	用量排行与页面加载	test	M	45	7	frontend/src/views/user/__tests__/UsageView.spec.ts
+12	跨功能设置、路由与依赖装配	business	M	7	1	frontend/vite.config.ts
+12	跨功能设置、路由与依赖装配	business	M	5	0	frontend/vitest.config.ts
+13	需求、历史说明与工程规范	documentation	A	37	0	openspec/changes/unify-model-catalog-and-pricing/design.md
+13	需求、历史说明与工程规范	documentation	A	22	0	openspec/changes/unify-model-catalog-and-pricing/proposal.md
+13	需求、历史说明与工程规范	documentation	A	17	0	openspec/changes/unify-model-catalog-and-pricing/tasks.md
+13	需求、历史说明与工程规范	documentation	A	32	0	openspec/changes/unify-model-catalog-and-pricing/verification.md
+11	构建、手动发布与在线更新	tooling/config	A	21	0	scripts/release/channels.json
+11	构建、手动发布与在线更新	tooling/config	A	17	0	scripts/release/notes.py
+11	构建、手动发布与在线更新	tooling/config	A	171	0	scripts/release/plan.py
+08	API Key 客户端配置与下载工具	documentation	M	7	7	skills/sub2api-admin/SKILL.md
+08	API Key 客户端配置与下载工具	tooling/config	M	3	3	skills/sub2api-admin/agents/openai.yaml
+08	API Key 客户端配置与下载工具	documentation	M	9	4	skills/sub2api-admin/references/admin-cli.md
+08	API Key 客户端配置与下载工具	business	M	44	6	skills/sub2api-admin/scripts/sub2api-admin.js
+08	API Key 客户端配置与下载工具	tooling/config	A	64	0	tools/build_docs_downloads.py
+11	构建、手动发布与在线更新	tooling/config	A	89	0	tools/change_delivery.py
+11	构建、手动发布与在线更新	test	A	82	0	tools/tests/test_change_delivery.py
+08	API Key 客户端配置与下载工具	test	A	90	0	tools/tests/test_claude_session_recovery.py
+08	API Key 客户端配置与下载工具	test	A	78	0	tools/tests/test_codex_catalog_updater.py
+08	API Key 客户端配置与下载工具	test	A	101	0	tools/tests/test_docs_downloads.py
+08	API Key 客户端配置与下载工具	test	A	258	0	tools/tests/test_image_skills.py
+08	API Key 客户端配置与下载工具	test	A	137	0	tools/tests/test_session_recovery_commands.py
+08	API Key 客户端配置与下载工具	test	A	440	0	tools/tests/test_session_repair.py
+10	多语言与繁体生成	documentation	A	122	0	tools/zh-tw/README.md
+10	多语言与繁体生成	tooling/config	A	71	0	tools/zh-tw/audit-locale.mjs
+10	多语言与繁体生成	tooling/config	A	73	0	tools/zh-tw/audit-ui.mjs
+10	多语言与繁体生成	tooling/config	A	60	0	tools/zh-tw/audit.mjs
+10	多语言与繁体生成	tooling/config	A	131	0	tools/zh-tw/audit2.mjs
+10	多语言与繁体生成	tooling/config	A	45	0	tools/zh-tw/audit3.mjs
+10	多语言与繁体生成	tooling/config	A	64	0	tools/zh-tw/classify.mjs
+10	多语言与繁体生成	tooling/config	A	178	0	tools/zh-tw/convert-go.mjs
+10	多语言与繁体生成	tooling/config	A	383	0	tools/zh-tw/convert.mjs
+10	多语言与繁体生成	tooling/config	A	103	0	tools/zh-tw/gen-locale.mjs
+10	多语言与繁体生成	tooling/config	A	19	0	tools/zh-tw/package-lock.json
+10	多语言与繁体生成	tooling/config	A	9	0	tools/zh-tw/package.json
+10	多语言与繁体生成	tooling/config	A	26	0	tools/zh-tw/remaining.mjs
+10	多语言与繁体生成	tooling/config	A	78	0	tools/zh-tw/scan-go.mjs
+10	多语言与繁体生成	tooling/config	A	52	0	tools/zh-tw/trap-scan.mjs
+10	多语言与繁体生成	tooling/config	A	87	0	tools/zh-tw/verify-matchers.mjs

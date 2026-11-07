@@ -8,11 +8,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -148,7 +148,7 @@ func (h *BatchImageHandler) Models(c *gin.Context) {
 
 // filterBatchImageModelsByAllowlist 按分组模型白名单过滤批量生图模型列表。
 // 白名单未开启时原样返回。
-func filterBatchImageModelsByAllowlist(models []service.BatchImagePublicModel, allowlist service.GroupModelAllowlist) []service.BatchImagePublicModel {
+func filterBatchImageModelsByAllowlist(models []service.BatchImagePublicModel, allowlist catalog.ModelAllowlist) []service.BatchImagePublicModel {
 	if !allowlist.Enabled {
 		return models
 	}

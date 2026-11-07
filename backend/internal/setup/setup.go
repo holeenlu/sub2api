@@ -426,7 +426,7 @@ func bootstrapAdminUser(ctx context.Context, db *sql.DB, cfg *SetupConfig) (bool
 		return false, "", err
 	}
 	var adminUsers int64
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(1) FROM users WHERE role = $1", service.RoleAdmin).Scan(&adminUsers); err != nil {
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(1) FROM users WHERE role = $1", service.RoleSuperAdmin).Scan(&adminUsers); err != nil {
 		return false, "", err
 	}
 	decision := decideAdminBootstrap(totalUsers, adminUsers)
@@ -448,7 +448,7 @@ func bootstrapAdminUser(ctx context.Context, db *sql.DB, cfg *SetupConfig) (bool
 
 	admin := &service.User{
 		Email:       cfg.Admin.Email,
-		Role:        service.RoleAdmin,
+		Role:        service.RoleSuperAdmin,
 		Status:      service.StatusActive,
 		Balance:     0,
 		Concurrency: setupDefaultAdminConcurrency(),
@@ -517,7 +517,7 @@ func generateAdminEmail() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to generate admin email: %w", err)
 	}
-	return fmt.Sprintf("admin-%s@sub2api.local", suffix), nil
+	return fmt.Sprintf("admin-%s@%s.local", suffix, strings.ToLower(service.DefaultSiteName)), nil
 }
 
 func writeConfigFile(cfg *SetupConfig) error {
@@ -631,7 +631,7 @@ func AutoSetupFromEnv() error {
 			Port:     getEnvIntOrDefault("DATABASE_PORT", 5432),
 			User:     getEnvOrDefault("DATABASE_USER", "postgres"),
 			Password: getEnvOrDefault("DATABASE_PASSWORD", ""),
-			DBName:   getEnvOrDefault("DATABASE_DBNAME", "sub2api"),
+			DBName:   getEnvOrDefault("DATABASE_DBNAME", "kdan"),
 			SSLMode:  getEnvOrDefault("DATABASE_SSLMODE", "disable"),
 		},
 		Redis: RedisConfig{

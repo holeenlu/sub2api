@@ -121,13 +121,13 @@ func (r *opsRepository) ListIngressRejects(ctx context.Context, filter *service.
 	where := "WHERE " + strings.Join(clauses, " AND ")
 
 	var total int
-	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM ops_ingress_reject_aggregates "+where, args...).Scan(&total); err != nil {
+	if err := r.queryOpsRow(ctx, "SELECT COUNT(*) FROM ops_ingress_reject_aggregates "+where, args...).Scan(&total); err != nil {
 		return nil, err
 	}
 	args = append(args, pageSize, (page-1)*pageSize)
 	query := fmt.Sprintf(`SELECT id,bucket_start,reject_reason,route_family,protocol,host(client_ip),user_id,api_key_id,request_count,first_seen,last_seen
 FROM ops_ingress_reject_aggregates %s ORDER BY bucket_start DESC,id DESC LIMIT $%d OFFSET $%d`, where, len(args)-1, len(args))
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	rows, err := r.queryOpsRows(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

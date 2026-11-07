@@ -251,3 +251,62 @@ func pairCodexIdentityHeaders(h http.Header) {
 		h.Set("version", resolveCodexOutboundIdentity("").version)
 	}
 }
+
+// copyCodexCallerIntentHeaders keeps verified business intent independent of
+// transport. Parent identity is scoped by the existing metadata projection.
+func copyCodexCallerIntentHeaders(dst, src http.Header, account *Account) {
+	if dst == nil || account == nil || !account.UsesOpenAICodexProtocol() {
+		return
+	}
+	for _, name := range [...]string{"x-codex-parent-thread-id", "x-openai-subagent", "x-openai-memgen-request", "x-responsesapi-include-timing-metrics"} {
+		if values := src.Values(name); len(values) != 0 {
+			dst[http.CanonicalHeaderKey(name)] = append([]string(nil), values...)
+		}
+	}
+}
+
+// projectCodexOutboundHeaders is the last wire projection, after account scoping,
+// convergence, metadata and header overrides. Adapted from sub4api a3eaf63's
+// projection: keep the B-scheme migration guard and never invent a thread from
+// the cache-affinity session. Missing namespaces retain legacy isolation.
+func projectCodexOutboundHeaders(h http.Header, account *Account, websocket bool) {
+	if h == nil || account == nil || !account.UsesOpenAICodexProtocol() {
+		return
+	}
+	if !websocket {
+		// Transport negotiation is independent of identity migration. Keep native
+		// compaction and other caller betas; HTTP must not advertise WS support.
+		var retained []string
+		for key, values := range h {
+			if !strings.EqualFold(key, "OpenAI-Beta") {
+				continue
+			}
+			for _, value := range values {
+				for _, token := range strings.Split(value, ",") {
+					token = strings.TrimSpace(token)
+					name, _, _ := strings.Cut(strings.ToLower(token), "=")
+					if strings.TrimSpace(name) != "responses_websockets" && !strings.EqualFold(token, "responses=experimental") && token != "" {
+						retained = append(retained, token)
+					}
+				}
+			}
+			delete(h, key)
+		}
+		for _, token := range retained {
+			// Preserve the multi-value contract established by the legacy-beta
+			// filter; independent feature tokens must not become one header value.
+			h.Add("OpenAI-Beta", token)
+		}
+	}
+	// Callers must have established this value through the scoped helpers. A
+	// UUID-shaped client input alone is never evidence of account scoping.
+	if codexAccountIdentityNamespace(account) == "" || strings.TrimSpace(h.Get("session-id")) == "" {
+		return
+	}
+	for key := range h {
+		switch strings.ToLower(key) {
+		case "session_id", "conversation_id", "installation_id", "x-codex-installation-id", "accept-language":
+			delete(h, key)
+		}
+	}
+}

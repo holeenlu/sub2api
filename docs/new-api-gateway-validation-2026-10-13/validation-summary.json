@@ -1,0 +1,19 @@
+{
+  "completed_date": "2026-10-14",
+  "backend_unit": "pass",
+  "packages_with_tests": 60,
+  "backend_build": "pass",
+  "backend_vet": "pass",
+  "targeted_race": "pass",
+  "database_integration": "pass",
+  "frontend_tests": 95,
+  "frontend_test_files": 8,
+  "frontend_typecheck": "pass",
+  "frontend_eslint": "pass",
+  "frontend_build": "pass",
+  "new_lint_issues": 0,
+  "existing_lint_issues_uncapped": 194,
+  "default_limited_lint_issues": 53,
+  "gofmt": "pass",
+  "diff_check": "pass"
+}

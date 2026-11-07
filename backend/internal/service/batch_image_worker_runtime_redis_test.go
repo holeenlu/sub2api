@@ -42,9 +42,9 @@ func TestBatchImageWorkerRuntime_StartupDoesNotCreateRedisBatchImageKeys(t *test
 	worker := service.NewBatchImageWorker(queue, noopBatchImageProcessor{}, service.NewBatchImageWorkerOptionsFromConfig(cfg))
 	runtime := service.NewBatchImageWorkerRuntime(worker, cfg)
 
-	runtime.Start()
+	runtime.Start(context.Background())
 	require.Eventually(t, runtime.Running, time.Second, 10*time.Millisecond)
-	runtime.Stop()
+	runtime.Stop(context.Background())
 
 	for _, key := range mr.Keys() {
 		require.False(t, strings.HasPrefix(key, "batch_image:"), "unexpected Redis key created at startup: %s", key)

@@ -6,8 +6,6 @@ import (
 	"context"
 	"testing"
 
-	dbent "github.com/Wei-Shaw/sub2api/ent"
-	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/stretchr/testify/require"
 )
 
@@ -172,7 +170,7 @@ func TestParsePaymentConfigRechargeBonus(t *testing.T) {
 	})
 }
 
-func TestUpdatePaymentConfigRechargeBonus(t *testing.T) {
+func TestPaymentConfigPreparedValuesRechargeBonus(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("persists normalized tiers and trimmed notice", func(t *testing.T) {
@@ -180,7 +178,7 @@ func TestUpdatePaymentConfigRechargeBonus(t *testing.T) {
 		svc := &PaymentConfigService{settingRepo: repo}
 		tiers := []RechargeBonusTier{{MinAmount: 500, BonusPercent: 30}, {MinAmount: 100, BonusPercent: 20}}
 		notice := "  活动文案  "
-		require.NoError(t, svc.UpdatePaymentConfig(ctx, UpdatePaymentConfigRequest{
+		require.NoError(t, storePreparedPaymentForTest(svc, ctx, UpdatePaymentConfigRequest{
 			RechargeBonusTiers:  &tiers,
 			RechargeBonusNotice: &notice,
 		}))
@@ -199,7 +197,7 @@ func TestUpdatePaymentConfigRechargeBonus(t *testing.T) {
 		}}
 		svc := &PaymentConfigService{settingRepo: repo}
 		empty := []RechargeBonusTier{}
-		require.NoError(t, svc.UpdatePaymentConfig(ctx, UpdatePaymentConfigRequest{RechargeBonusTiers: &empty}))
+		require.NoError(t, storePreparedPaymentForTest(svc, ctx, UpdatePaymentConfigRequest{RechargeBonusTiers: &empty}))
 		value, ok := repo.updates[SettingRechargeBonusTiers]
 		require.True(t, ok)
 		require.Equal(t, "", value)
@@ -212,27 +210,10 @@ func TestUpdatePaymentConfigRechargeBonus(t *testing.T) {
 		repo := &paymentConfigSettingRepoStub{values: map[string]string{}}
 		svc := &PaymentConfigService{settingRepo: repo}
 		bad := []RechargeBonusTier{{MinAmount: 100, BonusPercent: 20}, {MinAmount: 100, BonusPercent: 30}}
-		err := svc.UpdatePaymentConfig(ctx, UpdatePaymentConfigRequest{RechargeBonusTiers: &bad})
+		err := storePreparedPaymentForTest(svc, ctx, UpdatePaymentConfigRequest{RechargeBonusTiers: &bad})
 		require.Error(t, err)
 		require.Nil(t, repo.updates)
 	})
-}
-
-func TestAffiliateRebateBaseAmountExcludesRechargeBonus(t *testing.T) {
-	require.Equal(t, 100.0, affiliateRebateBaseAmount(&dbent.PaymentOrder{
-		OrderType: payment.OrderTypeBalance, Amount: 130, BonusAmount: 30,
-	}))
-	require.Equal(t, 130.0, affiliateRebateBaseAmount(&dbent.PaymentOrder{
-		OrderType: payment.OrderTypeBalance, Amount: 130,
-	}))
-	// 订阅订单不受 bonus 字段影响
-	require.Equal(t, 50.0, affiliateRebateBaseAmount(&dbent.PaymentOrder{
-		OrderType: payment.OrderTypeSubscription, Amount: 50, BonusAmount: 30,
-	}))
-	// 异常数据：赠送大于总额时钳到 0
-	require.Equal(t, 0.0, affiliateRebateBaseAmount(&dbent.PaymentOrder{
-		OrderType: payment.OrderTypeBalance, Amount: 10, BonusAmount: 30,
-	}))
 }
 
 func TestNormalizeRechargeBonusMode(t *testing.T) {
@@ -303,7 +284,7 @@ func TestParsePaymentConfigRechargeBonusMode(t *testing.T) {
 	require.Equal(t, RechargeBonusModeBonus, svc.parsePaymentConfig(map[string]string{SettingRechargeBonusMode: "junk"}).RechargeBonusMode)
 }
 
-func TestUpdatePaymentConfigRechargeBonusMode(t *testing.T) {
+func TestPaymentConfigPreparedValuesRechargeBonusMode(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("persists discount mode with valid tiers", func(t *testing.T) {
@@ -311,7 +292,7 @@ func TestUpdatePaymentConfigRechargeBonusMode(t *testing.T) {
 		svc := &PaymentConfigService{settingRepo: repo}
 		mode := "discount"
 		tiers := []RechargeBonusTier{{MinAmount: 100, BonusPercent: 20}}
-		require.NoError(t, svc.UpdatePaymentConfig(ctx, UpdatePaymentConfigRequest{RechargeBonusTiers: &tiers, RechargeBonusMode: &mode}))
+		require.NoError(t, storePreparedPaymentForTest(svc, ctx, UpdatePaymentConfigRequest{RechargeBonusTiers: &tiers, RechargeBonusMode: &mode}))
 		require.Equal(t, "discount", repo.updates[SettingRechargeBonusMode])
 		cfg, err := svc.GetPaymentConfig(ctx)
 		require.NoError(t, err)
@@ -322,7 +303,7 @@ func TestUpdatePaymentConfigRechargeBonusMode(t *testing.T) {
 		repo := &paymentConfigSettingRepoStub{values: map[string]string{}}
 		svc := &PaymentConfigService{settingRepo: repo}
 		mode := "cashback"
-		require.Error(t, svc.UpdatePaymentConfig(ctx, UpdatePaymentConfigRequest{RechargeBonusMode: &mode}))
+		require.Error(t, storePreparedPaymentForTest(svc, ctx, UpdatePaymentConfigRequest{RechargeBonusMode: &mode}))
 		require.Nil(t, repo.updates)
 	})
 
@@ -332,7 +313,7 @@ func TestUpdatePaymentConfigRechargeBonusMode(t *testing.T) {
 		}}
 		svc := &PaymentConfigService{settingRepo: repo}
 		mode := "discount"
-		require.Error(t, svc.UpdatePaymentConfig(ctx, UpdatePaymentConfigRequest{RechargeBonusMode: &mode}))
+		require.Error(t, storePreparedPaymentForTest(svc, ctx, UpdatePaymentConfigRequest{RechargeBonusMode: &mode}))
 		require.Nil(t, repo.updates)
 	})
 
@@ -340,10 +321,10 @@ func TestUpdatePaymentConfigRechargeBonusMode(t *testing.T) {
 		repo := &paymentConfigSettingRepoStub{values: map[string]string{SettingRechargeBonusMode: "discount"}}
 		svc := &PaymentConfigService{settingRepo: repo}
 		tiers := []RechargeBonusTier{{MinAmount: 100, BonusPercent: 100}}
-		require.Error(t, svc.UpdatePaymentConfig(ctx, UpdatePaymentConfigRequest{RechargeBonusTiers: &tiers}))
+		require.Error(t, storePreparedPaymentForTest(svc, ctx, UpdatePaymentConfigRequest{RechargeBonusTiers: &tiers}))
 		require.Nil(t, repo.updates)
 		// 同样的档位在赠金模式下合法
 		repo.values[SettingRechargeBonusMode] = "bonus"
-		require.NoError(t, svc.UpdatePaymentConfig(ctx, UpdatePaymentConfigRequest{RechargeBonusTiers: &tiers}))
+		require.NoError(t, storePreparedPaymentForTest(svc, ctx, UpdatePaymentConfigRequest{RechargeBonusTiers: &tiers}))
 	})
 }

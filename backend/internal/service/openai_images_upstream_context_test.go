@@ -72,14 +72,19 @@ func TestForwardOpenAIImagesAPIKey_NonStreamDetachesUpstreamContext(t *testing.T
 	c, _ := newOpenAIImagesTestContext(t, body)
 
 	recorder := &httpUpstreamRecorder{resp: openAIImagesJSONResponse()}
-	svc := newOpenAIImagesTestService(recorder)
+	ctx, cancel := context.WithCancel(c.Request.Context())
+	defer cancel()
+	c.Request = c.Request.WithContext(ctx)
+	svc := newOpenAIImagesTestService(&codexModelsHTTPUpstreamStub{do: func(req *http.Request, proxy string, id int64, concurrency int) (*http.Response, error) {
+		resp, err := recorder.Do(req, proxy, id, concurrency)
+		cancel() // Cancel only after the upstream generation has started.
+		require.NoError(t, req.Context().Err())
+		return resp, err
+	}})
 
 	parsed, err := svc.ParseOpenAIImagesRequest(c, body)
 	require.NoError(t, err)
 	require.False(t, parsed.Stream, "本用例覆盖非流式生图")
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // 客户端已断开
 
 	result, err := svc.ForwardImages(ctx, c, newOpenAIImagesAPIKeyAccount(), body, parsed, "")
 
@@ -88,8 +93,11 @@ func TestForwardOpenAIImagesAPIKey_NonStreamDetachesUpstreamContext(t *testing.T
 	require.Equal(t, 1, result.ImageCount, "图片已产出，必须带回结果供计费")
 
 	require.NotNil(t, recorder.lastReq)
-	require.NoError(t, recorder.lastReq.Context().Err(),
-		"交给上游的请求 context 必须已脱钩，不随客户端断开取消")
+	require.Len(t, recorder.requests, 1)
+	require.NoError(t, recorder.contextErrAtDo)
+	require.Equal(t, 10, result.Usage.InputTokens)
+	require.Equal(t, 20, result.Usage.OutputTokens)
+	require.ErrorIs(t, recorder.lastReq.Context().Err(), context.Canceled, "完成后释放上游 context")
 }
 
 // 流式路径本来就脱钩，这条守卫防止对齐时把它改坏。
@@ -104,25 +112,67 @@ func TestForwardOpenAIImagesAPIKey_StreamKeepsDetachedUpstreamContext(t *testing
 			"X-Request-Id": []string{"req_img_ctx_stream"},
 		},
 		Body: io.NopCloser(strings.NewReader(
-			"data: {\"type\":\"response.created\",\"response\":{\"created_at\":1710000000}}\n\n" +
-				"data: {\"type\":\"response.image_generation_call.completed\",\"result\":\"aGVsbG8=\"}\n\n" +
-				"data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":20}}}\n\n",
+			"data: " + `{"type":"image_generation.completed","b64_json":"aGVsbG8=","usage":{"input_tokens":10,"output_tokens":20}}` + "\n\n",
 		)),
 	}}
-	svc := newOpenAIImagesTestService(recorder)
+	ctx, cancel := context.WithCancel(c.Request.Context())
+	defer cancel()
+	c.Request = c.Request.WithContext(ctx)
+	svc := newOpenAIImagesTestService(&codexModelsHTTPUpstreamStub{do: func(req *http.Request, proxy string, id int64, concurrency int) (*http.Response, error) {
+		resp, err := recorder.Do(req, proxy, id, concurrency)
+		cancel() // Cancel only after the upstream generation has started.
+		require.NoError(t, req.Context().Err())
+		return resp, err
+	}})
 
 	parsed, err := svc.ParseOpenAIImagesRequest(c, body)
 	require.NoError(t, err)
 	require.True(t, parsed.Stream)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	result, err := svc.ForwardImages(ctx, c, newOpenAIImagesAPIKeyAccount(), body, parsed, "")
 
-	_, _ = svc.ForwardImages(ctx, c, newOpenAIImagesAPIKeyAccount(), body, parsed, "")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 1, result.ImageCount)
+	require.Equal(t, 10, result.Usage.InputTokens)
+	require.Equal(t, 20, result.Usage.OutputTokens)
+	require.Len(t, recorder.requests, 1)
+	require.NoError(t, recorder.contextErrAtDo)
+	require.ErrorIs(t, recorder.lastReq.Context().Err(), context.Canceled, "完成后释放上游 context")
+}
 
-	require.NotNil(t, recorder.lastReq)
-	require.NoError(t, recorder.lastReq.Context().Err(),
-		"流式路径原本就脱钩，不能被改回随客户端取消")
+func TestForwardImagesCanceledBeforeDispatchDoesNotStartGeneration(t *testing.T) {
+	for _, mode := range []string{"bps", "apikey", "apikey_stream", "oauth_direct"} {
+		t.Run(mode, func(t *testing.T) {
+			body := []byte(`{"model":"gpt-image-2","prompt":"draw"}`)
+			if mode == "apikey_stream" {
+				body = []byte(`{"model":"gpt-image-2","prompt":"draw","stream":true}`)
+			}
+			c, _ := newOpenAIImagesTestContext(t, body)
+			ctx, cancel := context.WithCancel(c.Request.Context())
+			c.Request = c.Request.WithContext(ctx)
+			cancel()
+			upstream := &httpUpstreamRecorder{resp: openAIImagesJSONResponse()}
+			svc := newOpenAIImagesTestService(upstream)
+			account := newOpenAIImagesAPIKeyAccount()
+			if mode == "bps" {
+				svc = excelBPSImagesTestService(upstream)
+				account = excelBPSImagesAccount()
+			}
+			if mode == "oauth_direct" {
+				account = directImagesTestAccount()
+			}
+			parsed, err := svc.ParseOpenAIImagesRequest(c, body)
+			require.NoError(t, err)
+			result, err := svc.ForwardImages(ctx, c, account, body, parsed, "")
+			require.ErrorContains(t, err, context.Canceled.Error())
+			require.Nil(t, result)
+			require.Empty(t, upstream.requests)
+			if mode == "bps" {
+				require.ErrorIs(t, err, context.Canceled)
+			}
+		})
+	}
 }
 
 // 两个 detach 辅助函数的语义差异是本次修复的根据，锁死它们防止被悄悄改动。

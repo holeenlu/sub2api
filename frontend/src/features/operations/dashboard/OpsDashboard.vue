@@ -1,0 +1,1047 @@
+<template>
+  <div :class="isFullscreen ? 'flex min-h-screen flex-col justify-center bg-gray-50 dark:bg-dark-950' : ''">
+    <div :class="[isFullscreen ? 'p-4 md:p-6' : '', 'space-y-6 pb-12']">
+      <div
+        v-if="errorMessage"
+        class="rounded-2xl bg-red-50 p-4 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400"
+      >
+        {{ errorMessage }}
+      </div>
+
+      <OpsDashboardSkeleton v-if="loading && !hasLoadedOnce" :fullscreen="isFullscreen" />
+
+      <OpsDashboardHeader :can-configure="permissions.isSuperAdmin"
+        v-else-if="opsEnabled"
+        :overview="overview"
+        :platform="platform"
+        :group-id="groupId"
+        :time-range="timeRange"
+        :query-mode="queryMode"
+        :loading="loading"
+        :last-updated="lastUpdated"
+        :thresholds="metricThresholds"
+        :auto-refresh-enabled="autoRefreshEnabled"
+        :auto-refresh-countdown="autoRefreshCountdown"
+        :fullscreen="isFullscreen"
+        :custom-start-time="customStartTime"
+        :custom-end-time="customEndTime"
+        @update:time-range="onTimeRangeChange"
+        @update:platform="onPlatformChange"
+        @update:group="onGroupChange"
+        @update:query-mode="onQueryModeChange"
+        @update:custom-time-range="onCustomTimeRangeChange"
+        @refresh="fetchData"
+        @open-request-details="handleOpenRequestDetails"
+        @open-error-details="openErrorDetails"
+        @open-settings="permissions.isSuperAdmin && (showSettingsDialog = true)"
+        @open-alert-rules="showAlertRulesCard = true"
+        @enter-fullscreen="enterFullscreen"
+        @exit-fullscreen="exitFullscreen"
+      />
+
+      <!-- Row: Concurrency + Throughput -->
+      <div v-if="opsEnabled && !(loading && !hasLoadedOnce)" class="grid grid-cols-1 gap-6 lg:grid-cols-4">
+        <div class="lg:col-span-1 min-h-[360px]">
+          <OpsConcurrencyCard :platform-filter="platform" :group-id-filter="groupId" :refresh-token="dashboardRefreshToken" />
+        </div>
+        <div class="lg:col-span-1 h-[360px]">
+          <OpsSwitchRateTrendChart
+            :points="switchTrend?.points ?? []"
+            :loading="loadingSwitchTrend"
+            :time-range="switchTrendTimeRange"
+            :fullscreen="isFullscreen"
+          />
+        </div>
+        <div class="lg:col-span-2 h-[360px]">
+          <OpsThroughputTrendChart
+            :points="throughputTrend?.points ?? []"
+            :by-platform="throughputTrend?.by_platform ?? []"
+            :top-groups="throughputTrend?.top_groups ?? []"
+            :loading="loadingTrend"
+            :time-range="timeRange"
+            :fullscreen="isFullscreen"
+            @select-platform="handleThroughputSelectPlatform"
+            @select-group="handleThroughputSelectGroup"
+            @open-details="handleOpenRequestDetails"
+          />
+        </div>
+      </div>
+
+      <!-- Row: Visual Analysis (baseline 3-up grid) -->
+      <div v-if="opsEnabled && !(loading && !hasLoadedOnce)" class="grid grid-cols-1 gap-6 md:grid-cols-3">
+        <OpsLatencyChart :latency-data="latencyHistogram" :loading="loadingLatency" />
+        <OpsErrorDistributionChart
+          :data="errorDistribution"
+          :loading="loadingErrorDistribution"
+          @open-details="openErrorDetails('request')"
+        />
+        <OpsErrorTrendChart
+          :points="errorTrend?.points ?? []"
+          :loading="loadingErrorTrend"
+          :time-range="timeRange"
+          @open-request-errors="openErrorDetails('request')"
+          @open-upstream-errors="openErrorDetails('upstream')"
+        />
+      </div>
+
+      <!-- Row: Token Stats -->
+      <div v-if="opsEnabled && showOpenAITokenStats && !(loading && !hasLoadedOnce)" class="grid grid-cols-1 gap-6">
+        <OpsOpenAITokenStatsCard
+          :platform-filter="platform"
+          :group-id-filter="groupId"
+          :refresh-token="dashboardRefreshToken"
+        />
+      </div>
+
+      <!-- Alert Events -->
+      <OpsAlertEventsCard v-if="opsEnabled && showAlertEvents && !(loading && !hasLoadedOnce)" />
+
+      <!-- System Logs -->
+      <OpsSystemLogTable
+        v-if="permissions.isSuperAdmin && opsEnabled && !(loading && !hasLoadedOnce)"
+        :platform-filter="platform"
+        :refresh-token="dashboardRefreshToken"
+      />
+
+
+      <!-- Settings Dialog (hidden in fullscreen mode) -->
+      <template v-if="!isFullscreen">
+        <OpsSettingsDialog v-if="permissions.isSuperAdmin" :show="showSettingsDialog" @close="showSettingsDialog = false" @saved="onSettingsSaved" />
+
+        <BaseDialog :show="showAlertRulesCard" :title="t('admin.ops.alertRules.title')" width="extra-wide" @close="showAlertRulesCard = false">
+          <OpsAlertRulesCard />
+        </BaseDialog>
+
+        <OpsErrorDetailsModal
+          :show="showErrorDetails"
+          :time-range="timeRange"
+          :custom-start-time="customStartTime"
+          :custom-end-time="customEndTime"
+          :platform="platform"
+          :group-id="groupId"
+          :error-type="errorDetailsType"
+          :resume-state="resumeListState"
+          @update:show="showErrorDetails = $event"
+          @openErrorDetail="openError"
+        />
+
+        <OpsErrorDetailModal v-model:show="showErrorModal" :error-id="selectedErrorId" :error-type="errorDetailsType" :back-to-list="detailReturnTarget !== null" @back="handleBackToList" />
+
+        <OpsRequestDetailsModal
+          v-model="showRequestDetails"
+          :time-range="timeRange"
+          :preset="requestDetailsPreset"
+          :platform="platform"
+          :group-id="groupId"
+          :resume-state="resumeListState"
+          @openErrorDetail="openError"
+        />
+      </template>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { readApiError } from '@/shared/lib/apiError'
+
+import { useOperationsRequest } from '@/features/operations/queries/useOperationsRequest'
+const operationsRequests = useOperationsRequest()
+
+import { useOperationsServices } from '@/features/operations/services'
+const services = useOperationsServices()
+const permissions = services.permissions
+
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useDebounceFn, useIntervalFn } from '@vueuse/core'
+import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
+import type { LocationQuery } from 'vue-router'
+import BaseDialog from '@/shared/ui/BaseDialog.vue'
+import {
+  opsAPI,
+  type OpsDashboardOverview,
+  type OpsErrorDistributionResponse,
+  type OpsErrorTrendResponse,
+  type OpsLatencyHistogramResponse,
+  type OpsThroughputTrendResponse,
+  type OpsMetricThresholds
+} from '@/features/operations/api/ops'
+import OpsDashboardHeader from './components/OpsDashboardHeader.vue'
+import OpsDashboardSkeleton from './components/OpsDashboardSkeleton.vue'
+import OpsConcurrencyCard from './components/OpsConcurrencyCard.vue'
+import OpsErrorDetailModal from './components/OpsErrorDetailModal.vue'
+import OpsErrorDistributionChart from './components/OpsErrorDistributionChart.vue'
+import OpsErrorDetailsModal from './components/OpsErrorDetailsModal.vue'
+import OpsErrorTrendChart from './components/OpsErrorTrendChart.vue'
+import OpsLatencyChart from './components/OpsLatencyChart.vue'
+import OpsThroughputTrendChart from './components/OpsThroughputTrendChart.vue'
+import OpsSwitchRateTrendChart from './components/OpsSwitchRateTrendChart.vue'
+import OpsAlertEventsCard from './components/OpsAlertEventsCard.vue'
+import OpsOpenAITokenStatsCard from './components/OpsOpenAITokenStatsCard.vue'
+import OpsSystemLogTable from './components/OpsSystemLogTable.vue'
+import OpsRequestDetailsModal, { type OpsRequestDetailsPreset } from './components/OpsRequestDetailsModal.vue'
+import OpsSettingsDialog from './components/OpsSettingsDialog.vue'
+import OpsAlertRulesCard from './components/OpsAlertRulesCard.vue'
+
+const route = useRoute()
+const router = useRouter()
+const { t } = useI18n()
+
+const opsEnabled = computed(() => services.monitoring.value.enabled)
+
+type TimeRange = '5m' | '30m' | '1h' | '6h' | '24h' | 'custom'
+const allowedTimeRanges = new Set<TimeRange>(['5m', '30m', '1h', '6h', '24h', 'custom'])
+
+type QueryMode = 'auto' | 'raw' | 'preagg'
+const allowedQueryModes = new Set<QueryMode>(['auto', 'raw', 'preagg'])
+
+const loading = ref(true)
+const hasLoadedOnce = ref(false)
+const errorMessage = ref('')
+const lastUpdated = ref<Date | null>(new Date())
+
+const timeRange = ref<TimeRange>('1h')
+const platform = ref<string>('')
+const groupId = ref<number | null>(null)
+const queryMode = ref<QueryMode>('auto')
+const customStartTime = ref<string | null>(null)
+const customEndTime = ref<string | null>(null)
+const switchTrendWindowHours = 5
+const switchTrendTimeRange = `${switchTrendWindowHours}h`
+const switchTrendWindowMs = switchTrendWindowHours * 60 * 60 * 1000
+
+const QUERY_KEYS = {
+  timeRange: 'tr',
+  platform: 'platform',
+  groupId: 'group_id',
+  queryMode: 'mode',
+  fullscreen: 'fullscreen',
+
+  // Deep links
+  openErrorDetails: 'open_error_details',
+  errorType: 'error_type',
+  alertRuleId: 'alert_rule_id',
+  openAlertRules: 'open_alert_rules'
+} as const
+
+const isApplyingRouteQuery = ref(false)
+const isSyncingRouteQuery = ref(false)
+
+// Fullscreen mode
+const isFullscreen = computed(() => {
+  const val = route.query[QUERY_KEYS.fullscreen]
+  return val === '1' || val === 'true'
+})
+
+function exitFullscreen() {
+  const nextQuery = { ...route.query }
+  delete nextQuery[QUERY_KEYS.fullscreen]
+  router.replace({ query: nextQuery })
+}
+
+function enterFullscreen() {
+  const nextQuery = { ...route.query, [QUERY_KEYS.fullscreen]: '1' }
+  router.replace({ query: nextQuery })
+}
+
+function handleKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && isFullscreen.value) {
+    exitFullscreen()
+  }
+}
+
+let dashboardFetchController: AbortController | null = null
+let dashboardFetchSeq = 0
+let disposed = false
+let resumeStateTimer: ReturnType<typeof setTimeout> | undefined
+
+function isCanceledRequest(err: unknown): boolean {
+  return (
+    !!err &&
+    typeof err === 'object' &&
+    'code' in err &&
+    (err as Record<string, unknown>).code === 'ERR_CANCELED'
+  )
+}
+
+function abortDashboardFetch() {
+  if (dashboardFetchController) {
+    dashboardFetchController.abort()
+    dashboardFetchController = null
+  }
+}
+
+const readQueryString = (key: string): string => {
+  const value = route.query[key]
+  if (typeof value === 'string') return value
+  if (Array.isArray(value) && typeof value[0] === 'string') return value[0]
+  return ''
+}
+
+const readQueryNumber = (key: string): number | null => {
+  const raw = readQueryString(key)
+  if (!raw) return null
+  const n = Number.parseInt(raw, 10)
+  return Number.isFinite(n) ? n : null
+}
+
+const applyRouteQueryToState = () => {
+  const nextTimeRange = readQueryString(QUERY_KEYS.timeRange)
+  if (nextTimeRange && allowedTimeRanges.has(nextTimeRange as TimeRange)) {
+    timeRange.value = nextTimeRange as TimeRange
+  }
+
+  platform.value = readQueryString(QUERY_KEYS.platform) || ''
+
+  const groupIdRaw = readQueryNumber(QUERY_KEYS.groupId)
+  groupId.value = typeof groupIdRaw === 'number' && groupIdRaw > 0 ? groupIdRaw : null
+
+  const nextMode = readQueryString(QUERY_KEYS.queryMode)
+  if (nextMode && allowedQueryModes.has(nextMode as QueryMode)) {
+    queryMode.value = nextMode as QueryMode
+  } else {
+    const fallback = services.monitoring.value.queryModeDefault || 'auto'
+    queryMode.value = allowedQueryModes.has(fallback as QueryMode) ? (fallback as QueryMode) : 'auto'
+  }
+
+  // Deep links
+  const openRules = readQueryString(QUERY_KEYS.openAlertRules)
+  if (openRules === '1' || openRules === 'true') {
+    showAlertRulesCard.value = true
+  }
+
+  const ruleID = readQueryNumber(QUERY_KEYS.alertRuleId)
+  if (typeof ruleID === 'number' && ruleID > 0) {
+    showAlertRulesCard.value = true
+  }
+
+  const openErr = readQueryString(QUERY_KEYS.openErrorDetails)
+  if (openErr === '1' || openErr === 'true') {
+    const typ = readQueryString(QUERY_KEYS.errorType)
+    errorDetailsType.value = typ === 'upstream' ? 'upstream' : 'request'
+    showErrorDetails.value = true
+  }
+}
+
+const buildQueryFromState = () => {
+  const next: LocationQuery = { ...route.query }
+
+  Object.values(QUERY_KEYS).forEach((k) => {
+    delete next[k]
+  })
+
+  if (timeRange.value !== '1h') next[QUERY_KEYS.timeRange] = timeRange.value
+  if (platform.value) next[QUERY_KEYS.platform] = platform.value
+  if (typeof groupId.value === 'number' && groupId.value > 0) next[QUERY_KEYS.groupId] = String(groupId.value)
+  if (queryMode.value !== 'auto') next[QUERY_KEYS.queryMode] = queryMode.value
+
+  return next
+}
+
+const syncQueryToRoute = useDebounceFn(async () => {
+  if (isApplyingRouteQuery.value) return
+  const nextQuery = buildQueryFromState()
+
+  const curr = route.query
+  const nextKeys = Object.keys(nextQuery)
+  const currKeys = Object.keys(curr)
+  const sameLength = nextKeys.length === currKeys.length
+  const sameValues = sameLength && nextKeys.every((k) => String(curr[k] ?? '') === String(nextQuery[k] ?? ''))
+  if (sameValues) return
+
+  try {
+    isSyncingRouteQuery.value = true
+    await router.replace({ query: nextQuery })
+  } finally {
+    isSyncingRouteQuery.value = false
+  }
+}, 250)
+
+const overview = ref<OpsDashboardOverview | null>(null)
+const metricThresholds = ref<OpsMetricThresholds | null>(null)
+
+const throughputTrend = ref<OpsThroughputTrendResponse | null>(null)
+const loadingTrend = ref(false)
+
+const switchTrend = ref<OpsThroughputTrendResponse | null>(null)
+const loadingSwitchTrend = ref(false)
+
+const latencyHistogram = ref<OpsLatencyHistogramResponse | null>(null)
+const loadingLatency = ref(false)
+
+const errorTrend = ref<OpsErrorTrendResponse | null>(null)
+const loadingErrorTrend = ref(false)
+
+const errorDistribution = ref<OpsErrorDistributionResponse | null>(null)
+const loadingErrorDistribution = ref(false)
+
+const selectedErrorId = ref<number | null>(null)
+const showErrorModal = ref(false)
+
+const showErrorDetails = ref(false)
+const errorDetailsType = ref<'request' | 'upstream'>('request')
+
+const showRequestDetails = ref(false)
+const requestDetailsPreset = ref<OpsRequestDetailsPreset>({
+  title: '',
+  kind: 'all',
+  sort: 'created_at_desc'
+})
+
+// 记录单条错误详情来自哪个列表，便于"返回列表"时重新打开对应弹窗并保留状态。
+type DetailReturnTarget = 'errorList' | 'requestList' | null
+const detailReturnTarget = ref<DetailReturnTarget>(null)
+
+// 从详情返回时，列表弹窗应保留上一次的筛选/分页状态而非重置。
+const resumeListState = ref(false)
+
+const showSettingsDialog = ref(false)
+const showAlertRulesCard = ref(false)
+
+applyRouteQueryToState()
+
+// Auto refresh settings
+const showAlertEvents = ref(true)
+const showOpenAITokenStats = ref(false)
+const autoRefreshEnabled = ref(false)
+const autoRefreshIntervalMs = ref(30000) // default 30 seconds
+const autoRefreshCountdown = ref(0)
+
+// Used to trigger child component refreshes in a single shared cadence.
+const dashboardRefreshToken = ref(0)
+
+// Countdown timer (drives auto refresh; updates every second)
+const { pause: pauseCountdown, resume: resumeCountdown } = useIntervalFn(
+  () => {
+    if (!autoRefreshEnabled.value) return
+    if (!opsEnabled.value) return
+    if (loading.value) return
+
+    autoRefreshCountdown.value = Math.max(0, autoRefreshCountdown.value - 1)
+    if (autoRefreshCountdown.value === 0) {
+      void fetchData()
+    }
+  },
+  1000,
+  { immediate: false }
+)
+
+// Load ops dashboard presentation settings from backend.
+async function loadDashboardAdvancedSettings() {
+  if (!services.permissions.value.isSuperAdmin) return
+
+  const operation = operationsRequests.begin('loadDashboardAdvancedSettings')
+  if (!operation.isCurrent()) return
+
+
+  try {
+    const settings = await operation.wait(opsAPI.getAdvancedSettings({ signal: operation.signal }))
+    if (disposed) return
+    showAlertEvents.value = settings.display_alert_events
+    showOpenAITokenStats.value = settings.display_openai_token_stats
+    autoRefreshEnabled.value = settings.auto_refresh_enabled
+    autoRefreshIntervalMs.value = settings.auto_refresh_interval_seconds * 1000
+    autoRefreshCountdown.value = settings.auto_refresh_interval_seconds
+  } catch (err) {
+    if (!operation.isCurrent()) return
+
+    if (disposed) return
+    console.error('[OpsDashboard] Failed to load dashboard advanced settings', err)
+    showAlertEvents.value = true
+    showOpenAITokenStats.value = false
+    autoRefreshEnabled.value = false
+    autoRefreshIntervalMs.value = 30000
+    autoRefreshCountdown.value = 0
+  }
+
+}
+
+function handleThroughputSelectPlatform(nextPlatform: string) {
+  platform.value = nextPlatform || ''
+  groupId.value = null
+}
+
+function handleThroughputSelectGroup(nextGroupId: number) {
+  const id = Number.isFinite(nextGroupId) && nextGroupId > 0 ? nextGroupId : null
+  groupId.value = id
+}
+
+function handleOpenRequestDetails(preset?: OpsRequestDetailsPreset) {
+  const basePreset: OpsRequestDetailsPreset = {
+    title: t('admin.ops.requestDetails.title'),
+    kind: 'all',
+    sort: 'created_at_desc'
+  }
+
+  requestDetailsPreset.value = { ...basePreset, ...(preset ?? {}) }
+  if (!requestDetailsPreset.value.title) requestDetailsPreset.value.title = basePreset.title
+  // Ensure only one modal visible at a time.
+  showErrorDetails.value = false
+  showErrorModal.value = false
+  showRequestDetails.value = true
+}
+
+function openErrorDetails(kind: 'request' | 'upstream') {
+  errorDetailsType.value = kind
+  // Ensure only one modal visible at a time.
+  showRequestDetails.value = false
+  showErrorModal.value = false
+  showErrorDetails.value = true
+}
+
+function onTimeRangeChange(v: string | number | boolean | null) {
+  if (typeof v !== 'string') return
+  if (!allowedTimeRanges.has(v as TimeRange)) return
+  timeRange.value = v as TimeRange
+}
+
+function onCustomTimeRangeChange(startTime: string, endTime: string) {
+  customStartTime.value = startTime
+  customEndTime.value = endTime
+}
+
+async function onSettingsSaved() {
+  const operation = operationsRequests.begin('onSettingsSaved')
+  if (!operation.isCurrent()) return
+  try {
+
+    await operation.wait(loadDashboardAdvancedSettings())
+    loadThresholds()
+    fetchData()
+
+  } catch (error) {
+    if (!operation.isCurrent()) return
+    throw error
+  }
+}
+
+function onPlatformChange(v: string | number | boolean | null) {
+  platform.value = typeof v === 'string' ? v : ''
+}
+
+function onGroupChange(v: string | number | boolean | null) {
+  if (v === null) {
+    groupId.value = null
+    return
+  }
+  if (typeof v === 'number') {
+    groupId.value = v > 0 ? v : null
+    return
+  }
+  if (typeof v === 'string') {
+    const n = Number.parseInt(v, 10)
+    groupId.value = Number.isFinite(n) && n > 0 ? n : null
+  }
+}
+
+function onQueryModeChange(v: string | number | boolean | null) {
+  if (typeof v !== 'string') return
+  if (!allowedQueryModes.has(v as QueryMode)) return
+  queryMode.value = v as QueryMode
+}
+
+function openError(id: number) {
+  selectedErrorId.value = id
+  // 记录来源列表，便于详情页"返回列表"。
+  detailReturnTarget.value = showRequestDetails.value ? 'requestList' : showErrorDetails.value ? 'errorList' : null
+  // Ensure only one modal visible at a time.
+  showErrorDetails.value = false
+  showRequestDetails.value = false
+  showErrorModal.value = true
+}
+
+// 从单条错误详情返回其来源列表，重新打开关联弹窗（保留筛选/分页状态）。
+function handleBackToList() {
+  const target = detailReturnTarget.value
+  resumeListState.value = true
+  if (target === 'requestList') {
+    showErrorModal.value = false
+    showErrorDetails.value = false
+    showRequestDetails.value = true
+  } else if (target === 'errorList') {
+    showErrorModal.value = false
+    showRequestDetails.value = false
+    showErrorDetails.value = true
+  }
+  detailReturnTarget.value = null
+  // 子组件 watch 在本次 show 变化中消费 resumeState 后复位，保证下次手动打开仍会重置筛选。
+  clearTimeout(resumeStateTimer)
+  resumeStateTimer = setTimeout(() => {
+    if (disposed) return
+    resumeListState.value = false
+  }, 0)
+}
+
+function buildApiParams(): Parameters<typeof opsAPI.getDashboardOverview>[0] {
+  const params: Parameters<typeof opsAPI.getDashboardOverview>[0] = {
+    platform: platform.value || undefined,
+    group_id: groupId.value ?? undefined,
+    mode: queryMode.value
+  }
+
+  if (timeRange.value === 'custom') {
+    if (customStartTime.value && customEndTime.value) {
+      params.start_time = customStartTime.value
+      params.end_time = customEndTime.value
+    } else {
+      // Safety fallback: avoid sending time_range=custom (backend may not support it)
+      params.time_range = '1h'
+    }
+  } else {
+    params.time_range = timeRange.value
+  }
+
+  return params
+}
+
+function buildSwitchTrendParams(): Parameters<typeof opsAPI.getThroughputTrend>[0] {
+  const params: Parameters<typeof opsAPI.getThroughputTrend>[0] = {
+    platform: platform.value || undefined,
+    group_id: groupId.value ?? undefined,
+    mode: queryMode.value
+  }
+  const endTime = new Date()
+  const startTime = new Date(endTime.getTime() - switchTrendWindowMs)
+  params.start_time = startTime.toISOString()
+  params.end_time = endTime.toISOString()
+  return params
+}
+
+async function refreshOverviewWithCancel(fetchSeq: number, signal: AbortSignal) {
+  if (!opsEnabled.value) return
+
+  const operation = operationsRequests.begin('refreshOverviewWithCancel')
+  if (!operation.isCurrent()) return
+
+
+  try {
+    const data = await operation.wait(opsAPI.getDashboardOverview(buildApiParams(), { signal }))
+    if (fetchSeq !== dashboardFetchSeq) return
+    overview.value = data
+  } catch (err: unknown) {
+    const errorDetails = readApiError(err)
+    if (!operation.isCurrent()) return
+
+    if (fetchSeq !== dashboardFetchSeq || isCanceledRequest(err)) return
+    overview.value = null
+    services.notifyError(errorDetails?.message || t('admin.ops.failedToLoadOverview'))
+  }
+
+}
+
+async function refreshSwitchTrendWithCancel(fetchSeq: number, signal: AbortSignal) {
+  if (!opsEnabled.value) return
+
+  const operation = operationsRequests.begin('refreshSwitchTrendWithCancel')
+  if (!operation.isCurrent()) return
+
+
+  loadingSwitchTrend.value = true
+  try {
+    const data = await operation.wait(opsAPI.getThroughputTrend(buildSwitchTrendParams(), { signal }))
+    if (fetchSeq !== dashboardFetchSeq) return
+    switchTrend.value = data
+  } catch (err: unknown) {
+    const errorDetails = readApiError(err)
+    if (!operation.isCurrent()) return
+
+    if (fetchSeq !== dashboardFetchSeq || isCanceledRequest(err)) return
+    switchTrend.value = null
+    services.notifyError(errorDetails?.message || t('admin.ops.failedToLoadSwitchTrend'))
+  } finally {
+    if (operation.isCurrent()) {
+
+      if (fetchSeq === dashboardFetchSeq) {
+        loadingSwitchTrend.value = false
+      }
+
+    }
+  }
+
+}
+
+async function refreshThroughputTrendWithCancel(fetchSeq: number, signal: AbortSignal) {
+  if (!opsEnabled.value) return
+
+  const operation = operationsRequests.begin('refreshThroughputTrendWithCancel')
+  if (!operation.isCurrent()) return
+
+
+  loadingTrend.value = true
+  try {
+    const data = await operation.wait(opsAPI.getThroughputTrend(buildApiParams(), { signal }))
+    if (fetchSeq !== dashboardFetchSeq) return
+    throughputTrend.value = data
+  } catch (err: unknown) {
+    const errorDetails = readApiError(err)
+    if (!operation.isCurrent()) return
+
+    if (fetchSeq !== dashboardFetchSeq || isCanceledRequest(err)) return
+    throughputTrend.value = null
+    services.notifyError(errorDetails?.message || t('admin.ops.failedToLoadThroughputTrend'))
+  } finally {
+    if (operation.isCurrent()) {
+
+      if (fetchSeq === dashboardFetchSeq) {
+        loadingTrend.value = false
+      }
+
+    }
+  }
+
+}
+
+async function refreshCoreSnapshotWithCancel(fetchSeq: number, signal: AbortSignal) {
+  if (!opsEnabled.value) return
+
+  const operation = operationsRequests.begin('refreshCoreSnapshotWithCancel')
+  if (!operation.isCurrent()) return
+
+
+  loadingTrend.value = true
+  loadingErrorTrend.value = true
+  try {
+    const data = await operation.wait(opsAPI.getDashboardSnapshotV2(buildApiParams(), { signal }))
+    if (fetchSeq !== dashboardFetchSeq) return
+    overview.value = data.overview
+    throughputTrend.value = data.throughput_trend
+    errorTrend.value = data.error_trend
+  } catch (err: unknown) {
+    if (!operation.isCurrent()) return
+
+    if (fetchSeq !== dashboardFetchSeq || isCanceledRequest(err)) return
+    // Fallback to legacy split endpoints when snapshot endpoint is unavailable.
+    await operation.wait(Promise.all([
+      refreshOverviewWithCancel(fetchSeq, signal),
+      refreshThroughputTrendWithCancel(fetchSeq, signal),
+      refreshErrorTrendWithCancel(fetchSeq, signal)
+    ]))
+  } finally {
+    if (operation.isCurrent()) {
+
+      if (fetchSeq === dashboardFetchSeq) {
+        loadingTrend.value = false
+        loadingErrorTrend.value = false
+      }
+
+    }
+  }
+
+}
+
+async function refreshLatencyHistogramWithCancel(fetchSeq: number, signal: AbortSignal) {
+  if (!opsEnabled.value) return
+
+  const operation = operationsRequests.begin('refreshLatencyHistogramWithCancel')
+  if (!operation.isCurrent()) return
+
+
+  loadingLatency.value = true
+  try {
+    const data = await operation.wait(opsAPI.getLatencyHistogram(buildApiParams(), { signal }))
+    if (fetchSeq !== dashboardFetchSeq) return
+    latencyHistogram.value = data
+  } catch (err: unknown) {
+    const errorDetails = readApiError(err)
+    if (!operation.isCurrent()) return
+
+    if (fetchSeq !== dashboardFetchSeq || isCanceledRequest(err)) return
+    latencyHistogram.value = null
+    services.notifyError(errorDetails?.message || t('admin.ops.failedToLoadLatencyHistogram'))
+  } finally {
+    if (operation.isCurrent()) {
+
+      if (fetchSeq === dashboardFetchSeq) {
+        loadingLatency.value = false
+      }
+
+    }
+  }
+
+}
+
+async function refreshErrorTrendWithCancel(fetchSeq: number, signal: AbortSignal) {
+  if (!opsEnabled.value) return
+
+  const operation = operationsRequests.begin('refreshErrorTrendWithCancel')
+  if (!operation.isCurrent()) return
+
+
+  loadingErrorTrend.value = true
+  try {
+    const data = await operation.wait(opsAPI.getErrorTrend(buildApiParams(), { signal }))
+    if (fetchSeq !== dashboardFetchSeq) return
+    errorTrend.value = data
+  } catch (err: unknown) {
+    const errorDetails = readApiError(err)
+    if (!operation.isCurrent()) return
+
+    if (fetchSeq !== dashboardFetchSeq || isCanceledRequest(err)) return
+    errorTrend.value = null
+    services.notifyError(errorDetails?.message || t('admin.ops.failedToLoadErrorTrend'))
+  } finally {
+    if (operation.isCurrent()) {
+
+      if (fetchSeq === dashboardFetchSeq) {
+        loadingErrorTrend.value = false
+      }
+
+    }
+  }
+
+}
+
+async function refreshErrorDistributionWithCancel(fetchSeq: number, signal: AbortSignal) {
+  if (!opsEnabled.value) return
+
+  const operation = operationsRequests.begin('refreshErrorDistributionWithCancel')
+  if (!operation.isCurrent()) return
+
+
+  loadingErrorDistribution.value = true
+  try {
+    const data = await operation.wait(opsAPI.getErrorDistribution(buildApiParams(), { signal }))
+    if (fetchSeq !== dashboardFetchSeq) return
+    errorDistribution.value = data
+  } catch (err: unknown) {
+    const errorDetails = readApiError(err)
+    if (!operation.isCurrent()) return
+
+    if (fetchSeq !== dashboardFetchSeq || isCanceledRequest(err)) return
+    errorDistribution.value = null
+    services.notifyError(errorDetails?.message || t('admin.ops.failedToLoadErrorDistribution'))
+  } finally {
+    if (operation.isCurrent()) {
+
+      if (fetchSeq === dashboardFetchSeq) {
+        loadingErrorDistribution.value = false
+      }
+
+    }
+  }
+
+}
+
+async function refreshDeferredPanels(fetchSeq: number, signal: AbortSignal) {
+  if (!opsEnabled.value) return
+
+  const operation = operationsRequests.begin('refreshDeferredPanels')
+  if (!operation.isCurrent()) return
+  try {
+
+    await operation.wait(Promise.all([
+      refreshLatencyHistogramWithCancel(fetchSeq, signal),
+      refreshErrorDistributionWithCancel(fetchSeq, signal)
+    ]))
+
+  } catch (error) {
+    if (!operation.isCurrent()) return
+    throw error
+  }
+}
+
+function isOpsDisabledError(err: unknown): boolean {
+  return (
+    !!err &&
+    typeof err === 'object' &&
+    'code' in err &&
+    typeof (err as Record<string, unknown>).code === 'string' &&
+    (err as Record<string, unknown>).code === 'OPS_DISABLED'
+  )
+}
+
+async function fetchData() {
+  if (disposed || !opsEnabled.value) return
+
+  const operation = operationsRequests.begin('fetchData')
+  if (!operation.isCurrent()) return
+
+
+
+  abortDashboardFetch()
+  dashboardFetchSeq += 1
+  const fetchSeq = dashboardFetchSeq
+  dashboardFetchController = new AbortController()
+
+  loading.value = true
+  errorMessage.value = ''
+  try {
+    // The switch trend has its own loading state; do not hide the entire dashboard behind it.
+    void refreshSwitchTrendWithCancel(fetchSeq, dashboardFetchController.signal)
+    await operation.wait(refreshCoreSnapshotWithCancel(fetchSeq, dashboardFetchController.signal))
+    if (fetchSeq !== dashboardFetchSeq) return
+
+    lastUpdated.value = new Date()
+
+    // Trigger child component refreshes using the same cadence as the header.
+    dashboardRefreshToken.value += 1
+
+    // Defer non-core visual panels to reduce initial blocking.
+    void refreshDeferredPanels(fetchSeq, dashboardFetchController.signal)
+  } catch (err) {
+    if (!operation.isCurrent()) return
+
+    if (!isOpsDisabledError(err)) {
+      console.error('[ops] failed to fetch dashboard data', err)
+      errorMessage.value = t('admin.ops.failedToLoadData')
+    }
+  } finally {
+    if (operation.isCurrent()) {
+
+      if (fetchSeq === dashboardFetchSeq) {
+        loading.value = false
+        hasLoadedOnce.value = true
+        // Failed requests use the same interval instead of retrying every second.
+        if (autoRefreshEnabled.value) {
+          autoRefreshCountdown.value = Math.floor(autoRefreshIntervalMs.value / 1000)
+        }
+      }
+
+    }
+  }
+
+}
+
+watch(
+  () => [timeRange.value, platform.value, groupId.value, queryMode.value] as const,
+  () => {
+    if (isApplyingRouteQuery.value) return
+    if (opsEnabled.value) {
+      fetchData()
+    }
+    syncQueryToRoute()
+  }
+)
+
+watch(
+  () => route.query,
+  () => {
+    if (isSyncingRouteQuery.value) return
+
+    const prevTimeRange = timeRange.value
+    const prevPlatform = platform.value
+    const prevGroupId = groupId.value
+
+    isApplyingRouteQuery.value = true
+    applyRouteQueryToState()
+    isApplyingRouteQuery.value = false
+
+    const changed =
+      prevTimeRange !== timeRange.value || prevPlatform !== platform.value || prevGroupId !== groupId.value
+    if (changed) {
+      if (opsEnabled.value) {
+        fetchData()
+      }
+    }
+  }
+)
+
+onMounted(async () => {
+  const operation = operationsRequests.begin('onMounted0')
+  if (!operation.isCurrent()) return
+  try {
+
+    // Fullscreen mode: listen for ESC key
+    window.addEventListener('keydown', handleKeydown)
+
+    await operation.wait(services.loadMonitoringSettings({ signal: operation.signal }))
+    if (disposed) return
+    if (!services.monitoring.value.enabled) {
+      await operation.wait(router.replace('/admin/settings'))
+      return
+    }
+
+    // Load thresholds configuration
+    loadThresholds()
+
+    // Presentation preferences must not delay the first data request.
+    await operation.wait(Promise.all([
+      loadDashboardAdvancedSettings(),
+      opsEnabled.value ? fetchData() : Promise.resolve()
+    ]))
+
+    if (disposed) return
+
+    // Start auto refresh if enabled
+    if (autoRefreshEnabled.value) {
+      resumeCountdown()
+    }
+
+  } catch (error) {
+    if (!operation.isCurrent()) return
+    throw error
+  }
+})
+
+async function loadThresholds() {
+  const operation = operationsRequests.begin('loadThresholds')
+  if (!operation.isCurrent()) return
+
+  try {
+    const thresholds = await operation.wait(opsAPI.getMetricThresholds({ signal: operation.signal }))
+    metricThresholds.value = thresholds || null
+  } catch (err) {
+    if (!operation.isCurrent()) return
+
+    console.warn('[OpsDashboard] Failed to load thresholds', err)
+    metricThresholds.value = null
+  }
+
+}
+
+onUnmounted(() => {
+  clearTimeout(resumeStateTimer)
+  disposed = true
+  dashboardFetchSeq += 1
+  window.removeEventListener('keydown', handleKeydown)
+  abortDashboardFetch()
+  pauseCountdown()
+})
+
+// Watch auto refresh settings changes
+watch(autoRefreshEnabled, (enabled) => {
+  if (enabled) {
+    autoRefreshCountdown.value = Math.floor(autoRefreshIntervalMs.value / 1000)
+    resumeCountdown()
+  } else {
+    pauseCountdown()
+    autoRefreshCountdown.value = 0
+  }
+})
+
+operationsRequests.onScopeChange(() => {
+  clearTimeout(resumeStateTimer)
+  loading.value = false
+  errorMessage.value = ''
+  platform.value = ''
+  groupId.value = null
+  customStartTime.value = null
+  customEndTime.value = null
+  overview.value = null
+  metricThresholds.value = null
+  throughputTrend.value = null
+  loadingTrend.value = false
+  switchTrend.value = null
+  loadingSwitchTrend.value = false
+  latencyHistogram.value = null
+  loadingLatency.value = false
+  errorTrend.value = null
+  loadingErrorTrend.value = false
+  errorDistribution.value = null
+  loadingErrorDistribution.value = false
+  selectedErrorId.value = null
+  showErrorModal.value = false
+  showErrorDetails.value = false
+  showRequestDetails.value = false
+  detailReturnTarget.value = null
+  showSettingsDialog.value = false
+  showAlertRulesCard.value = false
+  showAlertEvents.value = false
+  showOpenAITokenStats.value = false
+  autoRefreshCountdown.value = 0
+  dashboardFetchController?.abort()
+  dashboardFetchSeq++
+  pauseCountdown()
+  if (operationsRequests.scopeKey.value !== null) void fetchData()
+})
+</script>

@@ -15,12 +15,6 @@ import (
 	"time"
 )
 
-type scopedContentPromoRepo struct{ service.PromoCodeRepository }
-
-func (scopedContentPromoRepo) ListUsagesByPromoCode(context.Context, int64, pagination.PaginationParams) ([]service.PromoCodeUsage, *pagination.PaginationResult, error) {
-	return []service.PromoCodeUsage{{ID: 1, PromoCodeID: 2, UserID: 3, BonusAmount: 4, User: &service.User{ID: 3, Email: "private@example.com", Balance: 999, FrozenBalance: 888, TotalRecharged: 777}}}, &pagination.PaginationResult{Total: 1}, nil
-}
-
 type scopedContentUsers struct{ service.UserRepository }
 
 func (scopedContentUsers) ListWithFilters(context.Context, pagination.PaginationParams, service.UserListFilters) ([]service.User, *pagination.PaginationResult, error) {
@@ -44,18 +38,17 @@ func (scopedContentReads) GetReadMapByUsers(context.Context, int64, []int64) (ma
 }
 func TestScopedAdminContentHandlersResponseBoundary(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	promo := NewPromoHandler(service.NewPromoService(scopedContentPromoRepo{}, nil, nil, nil, nil))
 	announcement := NewAnnouncementHandler(service.NewAnnouncementService(&announcementRepoCapture{}, scopedContentReads{}, scopedContentUsers{}, scopedContentSubs{}))
 	for _, endpoint := range []struct {
 		name, path, request string
 		handler             gin.HandlerFunc
-	}{{"优惠码", "/promo-codes/:id/usages", "/promo-codes/2/usages", promo.GetUsages}, {"公告", "/announcements/:id/read-status", "/announcements/2/read-status", announcement.ListReadStatus}} {
+	}{{"公告", "/announcements/:id/read-status", "/announcements/2/read-status", announcement.ListReadStatus}} {
 		for _, scoped := range []bool{false, true} {
 			t.Run(endpoint.name+map[bool]string{true: "受限", false: "普通"}[scoped], func(t *testing.T) {
 				r := gin.New()
 				r.Use(func(c *gin.Context) {
 					if scoped {
-						c.Request = c.Request.WithContext(adminaccess.WithPrincipal(c.Request.Context(), &adminaccess.Principal{Policy: adminaccess.Policy{GlobalPermissions: []string{"promo.read", "announcements.read"}}}))
+						c.Request = c.Request.WithContext(adminaccess.WithPrincipal(c.Request.Context(), &adminaccess.Principal{Policy: adminaccess.Policy{GlobalPermissions: []string{"announcements.read"}}}))
 					}
 					c.Next()
 				})
@@ -77,13 +70,8 @@ func TestScopedAdminContentHandlersResponseBoundary(t *testing.T) {
 					require.NotContains(t, item, "user")
 					require.NotContains(t, item, "balance")
 					require.Contains(t, item, "user_id")
-					if endpoint.name == "优惠码" {
-						require.Contains(t, item, "bonus_amount")
-						require.Contains(t, item, "used_at")
-					} else {
-						require.Contains(t, item, "eligible")
-						require.Contains(t, item, "read_at")
-					}
+					require.Contains(t, item, "eligible")
+					require.Contains(t, item, "read_at")
 				} else {
 					require.Contains(t, w.Body.String(), "private@example.com")
 					require.Contains(t, w.Body.String(), "999")

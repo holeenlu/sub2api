@@ -578,6 +578,11 @@ func buildOpenAIAutoResetUsageUpdates(usage *OpenAIQuotaUsage, now time.Time) ma
 		}
 		used := window.UsedPercent
 		resetAfter := int(window.ResetAfterSeconds)
+		// Some usage responses supply only the absolute reset time. Treating a
+		// missing relative duration as zero would immediately expire a live window.
+		if resetAfter <= 0 && window.ResetAt > now.Unix() {
+			resetAfter = int(window.ResetAt - now.Unix())
+		}
 		windowMinutes := int(window.LimitWindowSeconds / 60)
 		if primary {
 			snapshot.PrimaryUsedPercent = &used

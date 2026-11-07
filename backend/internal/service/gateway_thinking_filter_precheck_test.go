@@ -49,13 +49,13 @@ func TestThinkingBlocksNeedFilteringMatchesDecodingPath(t *testing.T) {
 	}
 	for _, body := range bodies {
 		for _, alwaysThinking := range []bool{false, true} {
-			decoded := filterThinkingBlocksDecoded([]byte(body), alwaysThinking)
+			decoded := filterThinkingBlocksDecoded([]byte(body), thinkingPrecheckModel(alwaysThinking))
 			changed := !bytes.Equal(decoded, []byte(body))
 			needs, decided := thinkingBlocksNeedFiltering([]byte(body), alwaysThinking)
 			if decided && json.Valid([]byte(body)) {
 				require.Equal(t, changed, needs, "alwaysThinking=%v body=%s", alwaysThinking, body)
 			}
-			require.Equal(t, string(decoded), string(filterThinkingBlocksInternal([]byte(body), alwaysThinking)), "alwaysThinking=%v body=%s", alwaysThinking, body)
+			require.Equal(t, string(decoded), string(filterThinkingBlocksInternal([]byte(body), thinkingPrecheckModel(alwaysThinking))), "alwaysThinking=%v body=%s", alwaysThinking, body)
 		}
 	}
 }
@@ -77,7 +77,7 @@ func signedThinkingHistoryBody() []byte {
 func TestFilterThinkingBlocksSignedHistorySkipsDecode(t *testing.T) {
 	body := signedThinkingHistoryBody()
 	allocs := testing.AllocsPerRun(5, func() {
-		got := filterThinkingBlocksInternal(body, false)
+		got := filterThinkingBlocksInternal(body, "claude-sonnet-4-5")
 		if &got[0] != &body[0] {
 			t.Fatal("valid signed history must be returned unchanged")
 		}
@@ -91,9 +91,9 @@ func FuzzThinkingBlocksNeedFiltering(f *testing.F) {
 	f.Add([]byte(`{"messages":[{"role":"user","role":"assistant","content":[{"type":"thinking","signature":"","signature":"s"}]}]}`), true)
 	f.Fuzz(func(t *testing.T, body []byte, alwaysThinking bool) {
 		original := append([]byte(nil), body...)
-		decoded := filterThinkingBlocksDecoded(original, alwaysThinking)
+		decoded := filterThinkingBlocksDecoded(original, thinkingPrecheckModel(alwaysThinking))
 		needs, decided := thinkingBlocksNeedFiltering(body, alwaysThinking)
-		if !bytes.Equal(filterThinkingBlocksInternal(body, alwaysThinking), decoded) {
+		if !bytes.Equal(filterThinkingBlocksInternal(body, thinkingPrecheckModel(alwaysThinking)), decoded) {
 			t.Fatalf("filter output differs from decoding path for %q", body)
 		}
 		if decided && json.Valid(original) && needs == bytes.Equal(decoded, original) {
@@ -110,14 +110,21 @@ func BenchmarkFilterThinkingBlocksSignedHistory(b *testing.B) {
 		b.ReportAllocs()
 		b.SetBytes(int64(len(body)))
 		for i := 0; i < b.N; i++ {
-			_ = filterThinkingBlocksDecoded(body, false)
+			_ = filterThinkingBlocksDecoded(body, "claude-sonnet-4-5")
 		}
 	})
 	b.Run("Precheck", func(b *testing.B) {
 		b.ReportAllocs()
 		b.SetBytes(int64(len(body)))
 		for i := 0; i < b.N; i++ {
-			_ = filterThinkingBlocksInternal(body, false)
+			_ = filterThinkingBlocksInternal(body, "claude-sonnet-4-5")
 		}
 	})
+}
+
+func thinkingPrecheckModel(always bool) string {
+	if always {
+		return "claude-opus-5-5"
+	}
+	return "claude-sonnet-4-5"
 }
