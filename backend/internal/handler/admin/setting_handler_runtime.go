@@ -5,6 +5,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -43,6 +44,9 @@ func (h *SettingHandler) RegenerateAdminAPIKey(c *gin.Context) {
 		response.Error(c, 403, "旧版密钥已停止新建，请创建权限管理密钥")
 		return
 	}
+	if !middleware.EnforceStepUp(c, h.totpService, h.userService, h.settingService) {
+		return
+	}
 	key, err := h.settingService.GenerateAdminAPIKey(c.Request.Context())
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -58,6 +62,9 @@ func (h *SettingHandler) RegenerateAdminAPIKey(c *gin.Context) {
 // DELETE /api/v1/admin/settings/admin-api-key
 func (h *SettingHandler) DeleteAdminAPIKey(c *gin.Context) {
 	if !requireAdminKeyJWT(c) {
+		return
+	}
+	if !middleware.EnforceStepUp(c, h.totpService, h.userService, h.settingService) {
 		return
 	}
 	if err := h.settingService.DeleteAdminAPIKey(c.Request.Context()); err != nil {

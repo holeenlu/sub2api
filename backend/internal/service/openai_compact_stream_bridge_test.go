@@ -242,6 +242,7 @@ func TestHandleSSEToJSON_CompactClientStreamBridgesToSSE(t *testing.T) {
 	upstreamSSE := strings.Join([]string{
 		`data: {"type":"response.completed","response":{"id":"resp_compact_sse","object":"response","model":"gpt-5.1-codex","status":"completed","output":[{"id":"cmp_sse_1","type":"compaction","status":"completed","encrypted_content":"compact-sse-payload"}],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}}`,
 		"",
+		"",
 	}, "\n")
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
@@ -274,6 +275,7 @@ func TestHandleSSEToJSON_CompactRawOutputItemDoneRepairsEmptyTerminalOutput(t *t
 		`data: {"type":"response.output_item.done","output_index":0,"item":{"id":"cmp_1","type":"compaction_summary","status":"completed","summary":[{"type":"summary_text","text":"compact summary"}],"encrypted_content":"compact-payload","opaque":{"kept":true}}}`,
 		``,
 		`data: {"type":"response.completed","response":{"id":"resp_compact","object":"response","model":"gpt-5.1-codex","status":"completed","output":[],"usage":{"input_tokens":9,"output_tokens":4,"total_tokens":13}}}`,
+		``,
 		``,
 	}, "\n")
 	resp := &http.Response{
@@ -315,6 +317,7 @@ func TestHandlePassthroughSSEToJSON_CompactRawOutputItemDoneRepairsEmptyTerminal
 		``,
 		`data: {"type":"response.completed","response":{"id":"resp_compact_pt_raw","object":"response","status":"completed","output":[],"usage":{"input_tokens":6,"output_tokens":2,"total_tokens":8}}}`,
 		``,
+		``,
 	}, "\n")
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
@@ -344,6 +347,7 @@ func TestHandleSSEToJSON_PathBasedCompactRawOutputItemDoneRepairsJSON(t *testing
 		``,
 		`data: {"type":"response.completed","response":{"id":"resp_compact_v1","object":"response","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":1,"total_tokens":6}}}`,
 		``,
+		``,
 	}, "\n")
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
@@ -371,7 +375,7 @@ func TestReconstructResponseOutputFromSSE_PrefersRawDoneItems(t *testing.T) {
 		`data: {"type":"response.output_text.delta","delta":"lo"}`,
 		`data: {"type":"response.output_item.done","output_index":0,"item":{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"hello"}]}}`,
 		`data: {"type":"response.completed","response":{"id":"resp_1","output":[]}}`,
-	}, "\n")
+	}, "\n\n") + "\n\n"
 
 	outputJSON, ok := reconstructResponseOutputFromSSE(bodyText)
 	require.True(t, ok)
@@ -386,7 +390,7 @@ func TestReconstructResponseOutputFromSSE_CompactionAddedFallback(t *testing.T) 
 	bodyText := strings.Join([]string{
 		`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"cmp_add","type":"compaction","encrypted_content":"added-only"}}`,
 		`data: {"type":"response.completed","response":{"id":"resp_1","output":[]}}`,
-	}, "\n")
+	}, "\n\n") + "\n\n"
 
 	outputJSON, ok := reconstructResponseOutputFromSSE(bodyText)
 	require.True(t, ok)
@@ -403,7 +407,7 @@ func TestReconstructResponseOutputFromSSE_MixedDoneAndCompactionAdded(t *testing
 		`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"cmp_mixed","type":"compaction","encrypted_content":"mixed"}}`,
 		`data: {"type":"response.output_item.done","output_index":1,"item":{"id":"msg_1","type":"message","content":[{"type":"output_text","text":"hi"}]}}`,
 		`data: {"type":"response.completed","response":{"id":"resp_1","output":[]}}`,
-	}, "\n")
+	}, "\n\n") + "\n\n"
 
 	outputJSON, ok := reconstructResponseOutputFromSSE(bodyText)
 	require.True(t, ok)
@@ -418,7 +422,7 @@ func TestReconstructResponseOutputFromSSE_MixedDoneAndCompactionAdded(t *testing
 		`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"compaction","status":"in_progress"}}`,
 		`data: {"type":"response.output_item.done","output_index":0,"item":{"type":"compaction","status":"completed","encrypted_content":"final"}}`,
 		`data: {"type":"response.completed","response":{"id":"resp_1","output":[]}}`,
-	}, "\n")
+	}, "\n\n") + "\n\n"
 	outputJSON, ok = reconstructResponseOutputFromSSE(bodyText)
 	require.True(t, ok)
 	items = gjson.ParseBytes(outputJSON).Array()
@@ -436,6 +440,7 @@ func TestHandleSSEToJSON_CompactSupplementsMissingCompactionIntoNonEmptyOutput(t
 		`data: {"type":"response.output_item.done","output_index":0,"item":{"id":"cmp_sup","type":"compaction","encrypted_content":"supplement"}}`,
 		``,
 		`data: {"type":"response.completed","response":{"id":"resp_sup","object":"response","status":"completed","output":[{"id":"msg_sup","type":"message","role":"assistant","content":[{"type":"output_text","text":"note"}]}],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}}`,
+		``,
 		``,
 	}, "\n")
 	resp := &http.Response{
@@ -462,7 +467,7 @@ func TestHandleSSEToJSON_CompactSupplementsMissingCompactionIntoNonEmptyOutput(t
 
 // 补全逻辑的门控：非 compact 请求原样返回；终态已含 compaction 不重复补入。
 func TestSupplementCompactionItemFromSSE_Gating(t *testing.T) {
-	bodyText := `data: {"type":"response.output_item.done","item":{"id":"cmp_g","type":"compaction","encrypted_content":"g"}}` + "\n"
+	bodyText := `data: {"type":"response.output_item.done","item":{"id":"cmp_g","type":"compaction","encrypted_content":"g"}}` + "\n\n"
 
 	// 非 compact 路径：不补入。
 	gin.SetMode(gin.TestMode)
@@ -493,7 +498,7 @@ func TestReconstructResponseOutputFromSSE_NonCompactionAddedStillUsesDeltas(t *t
 		`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"msg_1","type":"message","content":[]}}`,
 		`data: {"type":"response.output_text.delta","delta":"hi"}`,
 		`data: {"type":"response.completed","response":{"id":"resp_1","output":[]}}`,
-	}, "\n")
+	}, "\n\n") + "\n\n"
 
 	outputJSON, ok := reconstructResponseOutputFromSSE(bodyText)
 	require.True(t, ok)

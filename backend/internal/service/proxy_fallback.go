@@ -12,7 +12,7 @@ import "time"
 func ResolveProxyFallbackTarget(start Proxy, byID map[int64]Proxy, now time.Time) (*int64, bool) {
 	switch start.FallbackMode {
 	case FallbackModeDirect:
-		return nil, true
+		return nil, start.VendorID == nil
 	case FallbackModeProxy:
 		visited := map[int64]struct{}{start.ID: {}}
 		curID := start.BackupProxyID
@@ -24,7 +24,7 @@ func ResolveProxyFallbackTarget(start Proxy, byID map[int64]Proxy, now time.Time
 				return nil, false
 			}
 			p, ok := byID[*curID]
-			if !ok {
+			if !ok || !SameProxyOwner(start.VendorID, p.VendorID) {
 				return nil, false
 			}
 			// Disabled nodes may define a fallback, but cannot be selected as targets.
@@ -35,7 +35,7 @@ func ResolveProxyFallbackTarget(start Proxy, byID map[int64]Proxy, now time.Time
 			visited[*curID] = struct{}{}
 			switch p.FallbackMode {
 			case FallbackModeDirect:
-				return nil, true
+				return nil, start.VendorID == nil
 			case FallbackModeProxy:
 				curID = p.BackupProxyID
 			default:

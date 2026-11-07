@@ -8,11 +8,12 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"sync"
+
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"golang.org/x/sync/singleflight"
-	"sync"
 )
 
 const (
@@ -117,6 +118,12 @@ type WebSearchManagerBuilder func(cfg *WebSearchEmulationConfig, proxyURLs map[i
 
 // SettingService 系统设置服务
 type SettingService struct {
+	// modelSettings is the short lived cache for the unified model-management
+	// sections. It avoids turning every policy read into a database round trip;
+	// CAS writes invalidate the affected section.
+	modelSettings               modelSettingsCache
+	codexProbeTemplateMu        sync.Mutex
+	codexProbeTemplateCache     *cachedCodexProbeTemplate
 	scopedAdminKeyRepo          ScopedAdminKeyRepository
 	settingRepo                 SettingRepository
 	defaultSubGroupReader       DefaultSubscriptionGroupReader
@@ -135,6 +142,7 @@ type SettingService struct {
 	claudeCodeVersionSF         singleflight.Group
 	codexRestrictionPolicyCache atomic.Value // *cachedCodexRestrictionPolicy
 	codexRestrictionPolicySF    singleflight.Group
+	excelBPSEnabledCache        atomic.Value // *cachedExcelBPSEnabled
 
 	cyberSessionBlockRuntimeMu    sync.Mutex
 	cyberSessionBlockRuntimeCache atomic.Value // *cachedCyberSessionBlockRuntime
@@ -145,23 +153,15 @@ type SettingService struct {
 	panelRateLimitCache atomic.Value
 	panelRateLimitSF    singleflight.Group
 
-	// registrationEmailBlacklistCache 精确邮箱黑名单进程内缓存（*registrationEmailBlacklistIndex，60s TTL）。
-	// 公开的注册与发码接口每次请求都会读取，禁止在热路径上直接访问 DB。
-	// registrationEmailBlacklistMu 串行化刷新时的「读 DB + 写缓存」与保存后的写缓存，
-	// 避免进行中的刷新用旧名单覆盖刚保存的名单。
-	registrationEmailBlacklistMu    sync.Mutex
-	registrationEmailBlacklistCache atomic.Value
-	registrationEmailBlacklistSF    singleflight.Group
-
-	// openAIQuotaAutoPauseSettingsCache holds the most recently observed quota auto-pause
+	// schedulingQuotaSettingsCache holds the most recently observed quota auto-pause
 	// settings. GetOpenAIQuotaAutoPauseSettings reads this atomic.Value on the request hot
 	// path without ever blocking on the DB; when the cached entry expires, a background
-	// goroutine refreshes it via openAIQuotaAutoPauseSettingsSF (stale-while-revalidate).
+	// goroutine refreshes it via schedulingQuotaSettingsSF (stale-while-revalidate).
 	// This per-service field also gives tests natural isolation — each SettingService
 	// instance owns its own cache, no shared package-level state.
-	openAIQuotaAutoPauseSettingsCache atomic.Value // *cachedOpenAIQuotaAutoPauseSettings
-	openAIQuotaAutoPauseSettingsSF    singleflight.Group
-	openAIAPIKeyHealthBreakerCache    atomic.Value // *cachedOpenAIAPIKeyHealthBreakerSettings
+	schedulingQuotaSettingsCache   atomic.Value // *cachedSchedulingQuotaSettings
+	schedulingQuotaSettingsSF      singleflight.Group
+	openAIAPIKeyHealthBreakerCache atomic.Value // *cachedOpenAIAPIKeyHealthBreakerSettings
 
 	channelMonitorRuntimeListenersMu sync.Mutex
 	channelMonitorRuntimeListeners   []func()
@@ -360,12 +360,7 @@ func (s *SettingService) LoadForwardedClientIPSettings(ctx context.Context) erro
 	}
 	if values[settingKeyForwardedClientIPModeV2] != "true" {
 		updates[settingKeyForwardedClientIPModeV2] = "true"
-		// Before this migration, new installations persisted false by default.
-		// Restore compatibility only when no trusted-proxy policy was configured.
-		if headersErr == nil && hasStoredValue && !enabled && !s.cfg.Server.TrustedProxiesConfigured {
-			enabled = true
-			updates[SettingKeyAPIKeyACLTrustForwardedIP] = "true"
-		}
+		// Preserve a saved opt-out when upgrading an existing installation.
 	}
 	if len(updates) > 0 {
 		if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {

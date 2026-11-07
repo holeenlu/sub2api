@@ -31,18 +31,6 @@ func (s *BillingCacheSuite) TestUserBalance() {
 			},
 		},
 		{
-			name: "deduct_on_nonexistent_is_noop",
-			fn: func(ctx context.Context, rdb *redis.Client, cache service.BillingCache) {
-				userID := int64(1)
-				balanceKey := fmt.Sprintf("%s%d", billingBalanceKeyPrefix, userID)
-
-				require.NoError(s.T(), cache.DeductUserBalance(ctx, userID, 1), "DeductUserBalance should not error")
-
-				_, err := rdb.Get(ctx, balanceKey).Result()
-				require.ErrorIs(s.T(), err, redis.Nil, "expected missing key after deduct on non-existent")
-			},
-		},
-		{
 			name: "set_and_get_with_ttl",
 			fn: func(ctx context.Context, rdb *redis.Client, cache service.BillingCache) {
 				userID := int64(2)
@@ -57,19 +45,6 @@ func (s *BillingCacheSuite) TestUserBalance() {
 				ttl, err := rdb.TTL(ctx, balanceKey).Result()
 				require.NoError(s.T(), err, "TTL")
 				s.AssertTTLWithin(ttl, 1*time.Second, billingCacheTTL)
-			},
-		},
-		{
-			name: "deduct_reduces_balance",
-			fn: func(ctx context.Context, rdb *redis.Client, cache service.BillingCache) {
-				userID := int64(3)
-
-				require.NoError(s.T(), cache.SetUserBalance(ctx, userID, 10.5), "SetUserBalance")
-				require.NoError(s.T(), cache.DeductUserBalance(ctx, userID, 2.25), "DeductUserBalance")
-
-				got, err := cache.GetUserBalance(ctx, userID)
-				require.NoError(s.T(), err, "GetUserBalance after deduct")
-				require.Equal(s.T(), 8.25, got, "deduct mismatch")
 			},
 		},
 		{
@@ -92,29 +67,6 @@ func (s *BillingCacheSuite) TestUserBalance() {
 
 				_, err = cache.GetUserBalance(ctx, userID)
 				require.ErrorIs(s.T(), err, redis.Nil, "expected redis.Nil after invalidate")
-			},
-		},
-		{
-			name: "deduct_refreshes_ttl",
-			fn: func(ctx context.Context, rdb *redis.Client, cache service.BillingCache) {
-				userID := int64(103)
-				balanceKey := fmt.Sprintf("%s%d", billingBalanceKeyPrefix, userID)
-
-				require.NoError(s.T(), cache.SetUserBalance(ctx, userID, 100.0), "SetUserBalance")
-
-				ttl1, err := rdb.TTL(ctx, balanceKey).Result()
-				require.NoError(s.T(), err, "TTL before deduct")
-				s.AssertTTLWithin(ttl1, 1*time.Second, billingCacheTTL)
-
-				require.NoError(s.T(), cache.DeductUserBalance(ctx, userID, 25.0), "DeductUserBalance")
-
-				balance, err := cache.GetUserBalance(ctx, userID)
-				require.NoError(s.T(), err, "GetUserBalance")
-				require.Equal(s.T(), 75.0, balance, "expected balance 75.0")
-
-				ttl2, err := rdb.TTL(ctx, balanceKey).Result()
-				require.NoError(s.T(), err, "TTL after deduct")
-				s.AssertTTLWithin(ttl2, 1*time.Second, billingCacheTTL)
 			},
 		},
 	}
@@ -146,20 +98,6 @@ func (s *BillingCacheSuite) TestSubscriptionCache() {
 			},
 		},
 		{
-			name: "update_usage_on_nonexistent_is_noop",
-			fn: func(ctx context.Context, rdb *redis.Client, cache service.BillingCache) {
-				userID := int64(11)
-				groupID := int64(21)
-				subKey := fmt.Sprintf("%s%d:%d", billingSubKeyPrefix, userID, groupID)
-
-				require.NoError(s.T(), cache.UpdateSubscriptionUsage(ctx, userID, groupID, 1.0), "UpdateSubscriptionUsage should not error")
-
-				exists, err := rdb.Exists(ctx, subKey).Result()
-				require.NoError(s.T(), err, "Exists")
-				require.Equal(s.T(), int64(0), exists, "expected missing subscription key after UpdateSubscriptionUsage on non-existent")
-			},
-		},
-		{
 			name: "set_and_get_with_ttl",
 			fn: func(ctx context.Context, rdb *redis.Client, cache service.BillingCache) {
 				userID := int64(12)
@@ -185,31 +123,6 @@ func (s *BillingCacheSuite) TestSubscriptionCache() {
 				ttl, err := rdb.TTL(ctx, subKey).Result()
 				require.NoError(s.T(), err, "TTL subKey")
 				s.AssertTTLWithin(ttl, 1*time.Second, billingCacheTTL)
-			},
-		},
-		{
-			name: "update_usage_increments_all_fields",
-			fn: func(ctx context.Context, rdb *redis.Client, cache service.BillingCache) {
-				userID := int64(13)
-				groupID := int64(23)
-
-				data := &service.SubscriptionCacheData{
-					Status:       "active",
-					ExpiresAt:    time.Now().Add(1 * time.Hour),
-					DailyUsage:   1.0,
-					WeeklyUsage:  2.0,
-					MonthlyUsage: 3.0,
-					Version:      1,
-				}
-				require.NoError(s.T(), cache.SetSubscriptionCache(ctx, userID, groupID, data), "SetSubscriptionCache")
-
-				require.NoError(s.T(), cache.UpdateSubscriptionUsage(ctx, userID, groupID, 0.5), "UpdateSubscriptionUsage")
-
-				gotSub, err := cache.GetSubscriptionCache(ctx, userID, groupID)
-				require.NoError(s.T(), err, "GetSubscriptionCache after update")
-				require.Equal(s.T(), 1.5, gotSub.DailyUsage)
-				require.Equal(s.T(), 2.5, gotSub.WeeklyUsage)
-				require.Equal(s.T(), 3.5, gotSub.MonthlyUsage)
 			},
 		},
 		{
@@ -276,90 +189,6 @@ func (s *BillingCacheSuite) TestSubscriptionCache() {
 			tt.fn(ctx, rdb, cache)
 		})
 	}
-}
-
-// TestDeductUserBalance_ErrorPropagation 验证 P2-12 修复：
-// Redis 真实错误应传播，key 不存在（redis.Nil）应返回 nil。
-func (s *BillingCacheSuite) TestDeductUserBalance_ErrorPropagation() {
-	tests := []struct {
-		name      string
-		fn        func(ctx context.Context, cache service.BillingCache)
-		expectErr bool
-	}{
-		{
-			name: "key_not_exists_returns_nil",
-			fn: func(ctx context.Context, cache service.BillingCache) {
-				// key 不存在时，Lua 脚本返回 0（redis.Nil），应返回 nil 而非错误
-				err := cache.DeductUserBalance(ctx, 99999, 1.0)
-				require.NoError(s.T(), err, "DeductUserBalance on non-existent key should return nil")
-			},
-		},
-		{
-			name: "existing_key_deducts_successfully",
-			fn: func(ctx context.Context, cache service.BillingCache) {
-				require.NoError(s.T(), cache.SetUserBalance(ctx, 200, 50.0))
-				err := cache.DeductUserBalance(ctx, 200, 10.0)
-				require.NoError(s.T(), err, "DeductUserBalance should succeed")
-
-				bal, err := cache.GetUserBalance(ctx, 200)
-				require.NoError(s.T(), err)
-				require.Equal(s.T(), 40.0, bal, "余额应为 40.0")
-			},
-		},
-		{
-			name: "cancelled_context_propagates_error",
-			fn: func(ctx context.Context, cache service.BillingCache) {
-				require.NoError(s.T(), cache.SetUserBalance(ctx, 201, 50.0))
-
-				cancelCtx, cancel := context.WithCancel(ctx)
-				cancel() // 立即取消
-
-				err := cache.DeductUserBalance(cancelCtx, 201, 10.0)
-				require.Error(s.T(), err, "cancelled context should propagate error")
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		s.Run(tt.name, func() {
-			rdb := testRedis(s.T())
-			cache := NewBillingCache(rdb)
-			ctx := context.Background()
-			tt.fn(ctx, cache)
-		})
-	}
-}
-
-// TestUpdateSubscriptionUsage_ErrorPropagation 验证 P2-12 修复：
-// Redis 真实错误应传播，key 不存在（redis.Nil）应返回 nil。
-func (s *BillingCacheSuite) TestUpdateSubscriptionUsage_ErrorPropagation() {
-	s.Run("key_not_exists_returns_nil", func() {
-		rdb := testRedis(s.T())
-		cache := NewBillingCache(rdb)
-		ctx := context.Background()
-
-		err := cache.UpdateSubscriptionUsage(ctx, 88888, 77777, 1.0)
-		require.NoError(s.T(), err, "UpdateSubscriptionUsage on non-existent key should return nil")
-	})
-
-	s.Run("cancelled_context_propagates_error", func() {
-		rdb := testRedis(s.T())
-		cache := NewBillingCache(rdb)
-		ctx := context.Background()
-
-		data := &service.SubscriptionCacheData{
-			Status:    "active",
-			ExpiresAt: time.Now().Add(1 * time.Hour),
-			Version:   1,
-		}
-		require.NoError(s.T(), cache.SetSubscriptionCache(ctx, 301, 401, data))
-
-		cancelCtx, cancel := context.WithCancel(ctx)
-		cancel()
-
-		err := cache.UpdateSubscriptionUsage(cancelCtx, 301, 401, 1.0)
-		require.Error(s.T(), err, "cancelled context should propagate error")
-	})
 }
 
 func TestBillingCacheSuite(t *testing.T) {

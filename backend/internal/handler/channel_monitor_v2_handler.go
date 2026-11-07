@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"net/http"
 	"strconv"
 	"strings"
@@ -29,8 +30,8 @@ func NewChannelMonitorV2Handler(svc *service.ChannelMonitorV2Service, apiKeyServ
 // channelMonitorV2IsAdmin is true when the request already passed admin auth
 // (shared Dimensions/Errors handlers serve both user and admin route groups).
 func channelMonitorV2IsAdmin(c *gin.Context) bool {
-	role, ok := middleware.GetUserRoleFromContext(c)
-	return ok && role == service.RoleAdmin
+	actor, ok := authz.FromContext(c.Request.Context())
+	return ok && actor.ManagementRequest && actor.Can("channel_monitor.read")
 }
 
 func (h *ChannelMonitorV2Handler) GetConfig(c *gin.Context) {

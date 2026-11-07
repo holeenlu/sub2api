@@ -1,0 +1,1224 @@
+{
+ "source": "ChatGPT desktop bundled codex-cli 0.164.0-alpha.11.1 against a loopback server serving the gateway's Cloud-account catalog (2026-10-24). Request bodies are real; developer/user text, tool descriptions and client metadata values are replaced.",
+ "requests": {
+  "history_turn": {
+   "model": "gpt-6-astra",
+   "stream": true,
+   "input": [
+    {
+     "type": "message",
+     "id": "msg_b0dcb210-d7c6-582b-a8d7-dbd90e57d8c8",
+     "role": "developer",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "redacted developer text"
+      }
+     ],
+     "internal_chat_message_metadata_passthrough": {
+      "content_item_kinds": [
+       "model.base_instructions"
+      ]
+     }
+    },
+    {
+     "type": "message",
+     "id": "msg_01a16dcb-baca-7a12-a2dd-01dec235dbb9",
+     "role": "developer",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "redacted developer text"
+      },
+      {
+       "type": "input_text",
+       "text": "redacted developer text"
+      }
+     ],
+     "internal_chat_message_metadata_passthrough": {
+      "turn_id": "01a16dcb-babe-75c3-86f3-1e848cf6397b",
+      "create_time": 1792843430.602163,
+      "content_item_kinds": [
+       "host_skills.instructions",
+       "permissions.instructions"
+      ]
+     }
+    },
+    {
+     "type": "message",
+     "id": "msg_01a16dcb-baca-7a12-a2dd-01ec7f3f653a",
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "redacted user text"
+      }
+     ],
+     "internal_chat_message_metadata_passthrough": {
+      "turn_id": "01a16dcb-babe-75c3-86f3-1e848cf6397b",
+      "create_time": 1792843430.602166,
+      "content_item_kinds": [
+       "environments.environment_context"
+      ]
+     }
+    },
+    {
+     "type": "message",
+     "id": "msg_01a16dcb-bad0-70a3-926b-34a87e0213fc",
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "redacted user text"
+      }
+     ],
+     "internal_chat_message_metadata_passthrough": {
+      "turn_id": "01a16dcb-babe-75c3-86f3-1e848cf6397b",
+      "create_time": 1792843430.608043,
+      "content_item_kinds": [
+       "user.text"
+      ]
+     }
+    },
+    {
+     "type": "reasoning",
+     "id": "rs_fake_1",
+     "summary": [
+      {
+       "type": "summary_text",
+       "text": "Thinking about it."
+      }
+     ],
+     "content": null,
+     "encrypted_content": "gAAAAAfake-reasoning-ciphertext",
+     "internal_chat_message_metadata_passthrough": {
+      "turn_id": "01a16dcb-babe-75c3-86f3-1e848cf6397b"
+     }
+    },
+    {
+     "type": "web_search_call",
+     "id": "ws_fake_1",
+     "status": "completed",
+     "action": {
+      "type": "search",
+      "query": "sub2api"
+     },
+     "internal_chat_message_metadata_passthrough": {
+      "turn_id": "01a16dcb-babe-75c3-86f3-1e848cf6397b"
+     }
+    },
+    {
+     "type": "message",
+     "status": "completed",
+     "id": "msg_fake_1",
+     "role": "assistant",
+     "content": [
+      {
+       "type": "output_text",
+       "text": "First answer.",
+       "annotations": []
+      }
+     ],
+     "internal_chat_message_metadata_passthrough": {
+      "turn_id": "01a16dcb-babe-75c3-86f3-1e848cf6397b",
+      "content_item_kinds": [
+       "unknown"
+      ]
+     }
+    },
+    {
+     "type": "message",
+     "id": "msg_01a16dcb-be30-75e3-b993-d1bc59c01cf1",
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "redacted user text"
+      }
+     ],
+     "internal_chat_message_metadata_passthrough": {
+      "turn_id": "01a16dcb-be26-7f50-94f8-adeb15ed7716",
+      "create_time": 1792843431.472834,
+      "content_item_kinds": [
+       "user.text"
+      ]
+     }
+    }
+   ],
+   "tools": [
+    {
+     "type": "function",
+     "name": "exec_command",
+     "description": "redacted",
+     "strict": false,
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "cmd": {
+        "type": "string",
+        "description": "Shell command to execute."
+       },
+       "justification": {
+        "type": "string",
+        "description": "User-facing approval question for `require_escalated`; omit otherwise."
+       },
+       "login": {
+        "type": "boolean",
+        "description": "True runs the shell with -l/-i semantics; false disables them. Defaults to true."
+       },
+       "max_output_tokens": {
+        "type": "number",
+        "description": "Output token budget. Defaults to 10000 tokens; larger requests may be capped by policy."
+       },
+       "prefix_rule": {
+        "type": "array",
+        "description": "Reusable approval prefix for `cmd`, only with `sandbox_permissions: \"require_escalated\"`; for example [\"git\", \"pull\"].",
+        "items": {
+         "type": "string"
+        }
+       },
+       "sandbox_permissions": {
+        "type": "string",
+        "description": "Per-command sandbox override. Defaults to `use_default`; use `require_escalated` for unsandboxed execution.",
+        "enum": [
+         "use_default",
+         "require_escalated"
+        ]
+       },
+       "shell": {
+        "type": "string",
+        "description": "Shell binary to launch. Defaults to the user's default shell."
+       },
+       "tty": {
+        "type": "boolean",
+        "description": "True allocates a PTY for the command; false or omitted uses plain pipes."
+       },
+       "workdir": {
+        "type": "string",
+        "description": "Working directory for the command. Defaults to the turn cwd."
+       },
+       "yield_time_ms": {
+        "type": "number",
+        "description": "Wait before yielding output. Defaults to 10000 ms; effective range is 250-30000 ms."
+       }
+      },
+      "required": [
+       "cmd"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "type": "function",
+     "name": "write_stdin",
+     "description": "redacted",
+     "strict": false,
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "chars": {
+        "type": "string",
+        "description": "Bytes to write to stdin. Defaults to empty, which polls without writing."
+       },
+       "max_output_tokens": {
+        "type": "number",
+        "description": "Output token budget. Defaults to 10000 tokens; larger requests may be capped by policy."
+       },
+       "session_id": {
+        "type": "number",
+        "description": "Identifier of the running unified exec session."
+       },
+       "yield_time_ms": {
+        "type": "number",
+        "description": "Wait before yielding output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait 5000-300000 ms by default."
+       }
+      },
+      "required": [
+       "session_id"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "type": "function",
+     "name": "request_user_input",
+     "description": "redacted",
+     "strict": false,
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "questions": {
+        "type": "array",
+        "description": "Questions to show the user. Prefer 1 and do not exceed 3",
+        "items": {
+         "type": "object",
+         "properties": {
+          "header": {
+           "type": "string",
+           "description": "Short header label shown in the UI (12 or fewer chars)."
+          },
+          "id": {
+           "type": "string",
+           "description": "Stable identifier for mapping answers (snake_case)."
+          },
+          "options": {
+           "type": "array",
+           "description": "Provide 2-3 mutually exclusive choices. Put the recommended option first and suffix its label with \"(Recommended)\". Do not include an \"Other\" option in this list; the client will add a free-form \"Other\" option automatically.",
+           "items": {
+            "type": "object",
+            "properties": {
+             "description": {
+              "type": "string",
+              "description": "One short sentence explaining impact/tradeoff if selected."
+             },
+             "label": {
+              "type": "string",
+              "description": "User-facing label (1-5 words)."
+             }
+            },
+            "required": [
+             "label",
+             "description"
+            ],
+            "additionalProperties": false
+           }
+          },
+          "question": {
+           "type": "string",
+           "description": "Single-sentence prompt shown to the user."
+          }
+         },
+         "required": [
+          "id",
+          "header",
+          "question",
+          "options"
+         ],
+         "additionalProperties": false
+        }
+       }
+      },
+      "required": [
+       "questions"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "type": "custom",
+     "name": "apply_patch",
+     "description": "redacted",
+     "format": {
+      "type": "grammar",
+      "syntax": "lark",
+      "definition": "start: begin_patch hunk+ end_patch\nbegin_patch: \"*** Begin Patch\" LF\nend_patch: \"*** End Patch\" LF?\n\nhunk: add_hunk | delete_hunk | update_hunk\nadd_hunk: \"*** Add File: \" filename LF add_line+\ndelete_hunk: \"*** Delete File: \" filename LF\nupdate_hunk: \"*** Update File: \" filename LF change_move? change?\n\nfilename: /(.+)/\nadd_line: \"+\" /(.*)/ LF -> line\n\nchange_move: \"*** Move to: \" filename LF\nchange: (change_context | change_line)+ eof_line?\nchange_context: (\"@@\" | \"@@ \" /(.+)/) LF\nchange_line: (\"+\" | \"-\" | \" \") /(.*)/ LF\neof_line: \"*** End of File\" LF\n\n%import common.LF\n"
+     }
+    },
+    {
+     "type": "function",
+     "name": "view_image",
+     "description": "redacted",
+     "strict": false,
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string",
+        "description": "Local filesystem path to an image file."
+       }
+      },
+      "required": [
+       "path"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "type": "namespace",
+     "name": "multi_agent_v1",
+     "description": "redacted",
+     "tools": [
+      {
+       "type": "function",
+       "name": "close_agent",
+       "description": "redacted",
+       "strict": false,
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "target": {
+          "type": "string",
+          "description": "Agent id to close (from spawn_agent)."
+         }
+        },
+        "required": [
+         "target"
+        ],
+        "additionalProperties": false
+       }
+      },
+      {
+       "type": "function",
+       "name": "resume_agent",
+       "description": "redacted",
+       "strict": false,
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "id": {
+          "type": "string",
+          "description": "Agent id to resume."
+         }
+        },
+        "required": [
+         "id"
+        ],
+        "additionalProperties": false
+       }
+      },
+      {
+       "type": "function",
+       "name": "send_input",
+       "description": "redacted",
+       "strict": false,
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "interrupt": {
+          "type": "boolean",
+          "description": "True interrupts the current task and handles this message immediately; false or omitted queues it."
+         },
+         "items": {
+          "type": "array",
+          "description": "Structured input items. Use this to pass explicit mentions (for example app:// connector paths).",
+          "items": {
+           "type": "object",
+           "properties": {
+            "audio_url": {
+             "type": "string",
+             "description": "Audio data URL when type is audio."
+            },
+            "image_url": {
+             "type": "string",
+             "description": "Image URL when type is image."
+            },
+            "name": {
+             "type": "string",
+             "description": "Display name when type is skill or mention."
+            },
+            "path": {
+             "type": "string",
+             "description": "Path when type is local_image/local_audio/skill, or structured mention target such as app://<connector-id> or plugin://<plugin-name>@<marketplace-name> when type is mention."
+            },
+            "text": {
+             "type": "string",
+             "description": "Text content when type is text."
+            },
+            "type": {
+             "type": "string",
+             "description": "Input item type: text, image, local_image, audio, local_audio, skill, or mention."
+            }
+           },
+           "additionalProperties": false
+          }
+         },
+         "message": {
+          "type": "string",
+          "description": "Legacy plain-text message to send to the agent. Use either message or items."
+         },
+         "target": {
+          "type": "string",
+          "description": "Agent id to message (from spawn_agent)."
+         }
+        },
+        "required": [
+         "target"
+        ],
+        "additionalProperties": false
+       }
+      },
+      {
+       "type": "function",
+       "name": "spawn_agent",
+       "description": "redacted",
+       "strict": false,
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "fork_context": {
+          "type": "boolean",
+          "description": "True forks the current thread history into the new agent; false or omitted starts with only the initial prompt."
+         },
+         "items": {
+          "type": "array",
+          "description": "Structured input items. Use this to pass explicit mentions (for example app:// connector paths).",
+          "items": {
+           "type": "object",
+           "properties": {
+            "audio_url": {
+             "type": "string",
+             "description": "Audio data URL when type is audio."
+            },
+            "image_url": {
+             "type": "string",
+             "description": "Image URL when type is image."
+            },
+            "name": {
+             "type": "string",
+             "description": "Display name when type is skill or mention."
+            },
+            "path": {
+             "type": "string",
+             "description": "Path when type is local_image/local_audio/skill, or structured mention target such as app://<connector-id> or plugin://<plugin-name>@<marketplace-name> when type is mention."
+            },
+            "text": {
+             "type": "string",
+             "description": "Text content when type is text."
+            },
+            "type": {
+             "type": "string",
+             "description": "Input item type: text, image, local_image, audio, local_audio, skill, or mention."
+            }
+           },
+           "additionalProperties": false
+          }
+         },
+         "message": {
+          "type": "string",
+          "description": "Initial plain-text task for the new agent. Use either message or items."
+         },
+         "model": {
+          "type": "string",
+          "description": "Model override for the new agent. Omit unless an explicit override is needed."
+         },
+         "reasoning_effort": {
+          "type": "string",
+          "description": "Reasoning effort override for the new agent. Omit to inherit the parent effort."
+         }
+        },
+        "additionalProperties": false
+       }
+      },
+      {
+       "type": "function",
+       "name": "wait_agent",
+       "description": "redacted",
+       "strict": false,
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "targets": {
+          "type": "array",
+          "description": "Agent ids to wait on. Pass multiple ids to wait for whichever finishes first.",
+          "items": {
+           "type": "string"
+          }
+         },
+         "timeout_ms": {
+          "type": "number",
+          "description": "Timeout in milliseconds. Defaults to 30000, min 10000, max 3600000. Prefer longer waits (minutes) to avoid busy polling."
+         }
+        },
+        "required": [
+         "targets"
+        ],
+        "additionalProperties": false
+       }
+      }
+     ]
+    },
+    {
+     "type": "function",
+     "name": "get_goal",
+     "description": "redacted",
+     "strict": false,
+     "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+     }
+    },
+    {
+     "type": "function",
+     "name": "create_goal",
+     "description": "redacted",
+     "strict": false,
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "objective": {
+        "type": "string",
+        "description": "Required. The concrete objective to start pursuing. This starts a new active goal when no goal exists or replaces the current goal when it is complete."
+       },
+       "token_budget": {
+        "type": "integer",
+        "description": "Positive token budget for the new goal. Omit unless explicitly requested."
+       }
+      },
+      "required": [
+       "objective"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "type": "function",
+     "name": "update_goal",
+     "description": "redacted",
+     "strict": false,
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "status": {
+        "type": "string",
+        "description": "Required. `paused` requires an explicit user request. Set to `complete` only when the objective is achieved and no required work remains. Set to `blocked` only after the same blocking condition has recurred for at least three consecutive goal turns and the agent is at an impasse. After a previously blocked goal is resumed, the resumed run starts a fresh blocked audit.",
+        "enum": [
+         "complete",
+         "blocked",
+         "paused"
+        ]
+       }
+      },
+      "required": [
+       "status"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "type": "web_search",
+     "external_web_access": false
+    }
+   ],
+   "tool_choice": "auto",
+   "parallel_tool_calls": true,
+   "reasoning": {
+    "effort": "high"
+   },
+   "store": false,
+   "include": [
+    "reasoning.encrypted_content"
+   ],
+   "prompt_cache_key": "redacted-cache-key",
+   "text": {
+    "verbosity": "low"
+   },
+   "client_metadata": {
+    "x-codex-turn-metadata": "redacted",
+    "session_id": "redacted",
+    "x-codex-installation-id": "redacted",
+    "x-codex-window-id": "redacted",
+    "turn_id": "redacted",
+    "thread_id": "redacted",
+    "root_turn_id": "redacted"
+   }
+  },
+  "tool_replay": {
+   "model": "gpt-6-astra",
+   "stream": true,
+   "input": [
+    {
+     "type": "message",
+     "id": "msg_9eeb6775-9d9a-53e9-9977-1c969151644b",
+     "role": "developer",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "redacted developer text"
+      }
+     ],
+     "internal_chat_message_metadata_passthrough": {
+      "content_item_kinds": [
+       "model.base_instructions"
+      ]
+     }
+    },
+    {
+     "type": "message",
+     "id": "msg_01a16dca-f947-7721-9183-9b101e3a5ce6",
+     "role": "developer",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "redacted developer text"
+      },
+      {
+       "type": "input_text",
+       "text": "redacted developer text"
+      }
+     ],
+     "internal_chat_message_metadata_passthrough": {
+      "turn_id": "01a16dca-f939-71f0-b9b2-39dfd93eee2c",
+      "create_time": 1792843381.063591,
+      "content_item_kinds": [
+       "host_skills.instructions",
+       "permissions.instructions"
+      ]
+     }
+    },
+    {
+     "type": "message",
+     "id": "msg_01a16dca-f947-7721-9183-9b28fe42aea7",
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "redacted user text"
+      }
+     ],
+     "internal_chat_message_metadata_passthrough": {
+      "turn_id": "01a16dca-f939-71f0-b9b2-39dfd93eee2c",
+      "create_time": 1792843381.063595,
+      "content_item_kinds": [
+       "environments.environment_context"
+      ]
+     }
+    },
+    {
+     "type": "message",
+     "id": "msg_01a16dca-f94d-73e3-8a74-68dfae058372",
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "redacted user text"
+      }
+     ],
+     "internal_chat_message_metadata_passthrough": {
+      "turn_id": "01a16dca-f939-71f0-b9b2-39dfd93eee2c",
+      "create_time": 1792843381.069996,
+      "content_item_kinds": [
+       "user.text"
+      ]
+     }
+    },
+    {
+     "type": "reasoning",
+     "id": "rs_tool_1",
+     "summary": [
+      {
+       "type": "summary_text",
+       "text": "Plan then patch."
+      }
+     ],
+     "content": null,
+     "encrypted_content": "gAAAAAfake-tool-reasoning",
+     "internal_chat_message_metadata_passthrough": {
+      "turn_id": "01a16dca-f939-71f0-b9b2-39dfd93eee2c"
+     }
+    },
+    {
+     "type": "function_call",
+     "status": "completed",
+     "id": "fc_tool_1",
+     "name": "update_plan",
+     "arguments": "{\"plan\": [{\"step\": \"Say hi\", \"status\": \"in_progress\"}]}",
+     "call_id": "call_plan_1",
+     "internal_chat_message_metadata_passthrough": {
+      "turn_id": "01a16dca-f939-71f0-b9b2-39dfd93eee2c"
+     }
+    },
+    {
+     "type": "custom_tool_call",
+     "id": "ctc_tool_1",
+     "status": "completed",
+     "call_id": "call_patch_1",
+     "name": "apply_patch",
+     "input": "*** Begin Patch\n*** Add File: capture.txt\n+hi\n*** End Patch",
+     "internal_chat_message_metadata_passthrough": {
+      "turn_id": "01a16dca-f939-71f0-b9b2-39dfd93eee2c"
+     }
+    },
+    {
+     "type": "function_call_output",
+     "id": "fco_01a16dca-f95a-71e2-9012-2b70ea9244bd",
+     "call_id": "call_plan_1",
+     "output": "unsupported call: update_plan",
+     "internal_chat_message_metadata_passthrough": {
+      "turn_id": "01a16dca-f939-71f0-b9b2-39dfd93eee2c",
+      "create_time": 1792843381.082052
+     }
+    },
+    {
+     "type": "custom_tool_call_output",
+     "id": "ctco_01a16dca-f95e-7822-9cf4-a63661daf3c2",
+     "call_id": "call_patch_1",
+     "output": "patch rejected: writing is blocked by read-only sandbox; rejected by user approval settings",
+     "internal_chat_message_metadata_passthrough": {
+      "turn_id": "01a16dca-f939-71f0-b9b2-39dfd93eee2c",
+      "create_time": 1792843381.086595
+     }
+    }
+   ],
+   "tools": [
+    {
+     "type": "function",
+     "name": "exec_command",
+     "description": "redacted",
+     "strict": false,
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "cmd": {
+        "type": "string",
+        "description": "Shell command to execute."
+       },
+       "justification": {
+        "type": "string",
+        "description": "User-facing approval question for `require_escalated`; omit otherwise."
+       },
+       "login": {
+        "type": "boolean",
+        "description": "True runs the shell with -l/-i semantics; false disables them. Defaults to true."
+       },
+       "max_output_tokens": {
+        "type": "number",
+        "description": "Output token budget. Defaults to 10000 tokens; larger requests may be capped by policy."
+       },
+       "prefix_rule": {
+        "type": "array",
+        "description": "Reusable approval prefix for `cmd`, only with `sandbox_permissions: \"require_escalated\"`; for example [\"git\", \"pull\"].",
+        "items": {
+         "type": "string"
+        }
+       },
+       "sandbox_permissions": {
+        "type": "string",
+        "description": "Per-command sandbox override. Defaults to `use_default`; use `require_escalated` for unsandboxed execution.",
+        "enum": [
+         "use_default",
+         "require_escalated"
+        ]
+       },
+       "shell": {
+        "type": "string",
+        "description": "Shell binary to launch. Defaults to the user's default shell."
+       },
+       "tty": {
+        "type": "boolean",
+        "description": "True allocates a PTY for the command; false or omitted uses plain pipes."
+       },
+       "workdir": {
+        "type": "string",
+        "description": "Working directory for the command. Defaults to the turn cwd."
+       },
+       "yield_time_ms": {
+        "type": "number",
+        "description": "Wait before yielding output. Defaults to 10000 ms; effective range is 250-30000 ms."
+       }
+      },
+      "required": [
+       "cmd"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "type": "function",
+     "name": "write_stdin",
+     "description": "redacted",
+     "strict": false,
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "chars": {
+        "type": "string",
+        "description": "Bytes to write to stdin. Defaults to empty, which polls without writing."
+       },
+       "max_output_tokens": {
+        "type": "number",
+        "description": "Output token budget. Defaults to 10000 tokens; larger requests may be capped by policy."
+       },
+       "session_id": {
+        "type": "number",
+        "description": "Identifier of the running unified exec session."
+       },
+       "yield_time_ms": {
+        "type": "number",
+        "description": "Wait before yielding output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait 5000-300000 ms by default."
+       }
+      },
+      "required": [
+       "session_id"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "type": "function",
+     "name": "request_user_input",
+     "description": "redacted",
+     "strict": false,
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "questions": {
+        "type": "array",
+        "description": "Questions to show the user. Prefer 1 and do not exceed 3",
+        "items": {
+         "type": "object",
+         "properties": {
+          "header": {
+           "type": "string",
+           "description": "Short header label shown in the UI (12 or fewer chars)."
+          },
+          "id": {
+           "type": "string",
+           "description": "Stable identifier for mapping answers (snake_case)."
+          },
+          "options": {
+           "type": "array",
+           "description": "Provide 2-3 mutually exclusive choices. Put the recommended option first and suffix its label with \"(Recommended)\". Do not include an \"Other\" option in this list; the client will add a free-form \"Other\" option automatically.",
+           "items": {
+            "type": "object",
+            "properties": {
+             "description": {
+              "type": "string",
+              "description": "One short sentence explaining impact/tradeoff if selected."
+             },
+             "label": {
+              "type": "string",
+              "description": "User-facing label (1-5 words)."
+             }
+            },
+            "required": [
+             "label",
+             "description"
+            ],
+            "additionalProperties": false
+           }
+          },
+          "question": {
+           "type": "string",
+           "description": "Single-sentence prompt shown to the user."
+          }
+         },
+         "required": [
+          "id",
+          "header",
+          "question",
+          "options"
+         ],
+         "additionalProperties": false
+        }
+       }
+      },
+      "required": [
+       "questions"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "type": "custom",
+     "name": "apply_patch",
+     "description": "redacted",
+     "format": {
+      "type": "grammar",
+      "syntax": "lark",
+      "definition": "start: begin_patch hunk+ end_patch\nbegin_patch: \"*** Begin Patch\" LF\nend_patch: \"*** End Patch\" LF?\n\nhunk: add_hunk | delete_hunk | update_hunk\nadd_hunk: \"*** Add File: \" filename LF add_line+\ndelete_hunk: \"*** Delete File: \" filename LF\nupdate_hunk: \"*** Update File: \" filename LF change_move? change?\n\nfilename: /(.+)/\nadd_line: \"+\" /(.*)/ LF -> line\n\nchange_move: \"*** Move to: \" filename LF\nchange: (change_context | change_line)+ eof_line?\nchange_context: (\"@@\" | \"@@ \" /(.+)/) LF\nchange_line: (\"+\" | \"-\" | \" \") /(.*)/ LF\neof_line: \"*** End of File\" LF\n\n%import common.LF\n"
+     }
+    },
+    {
+     "type": "function",
+     "name": "view_image",
+     "description": "redacted",
+     "strict": false,
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string",
+        "description": "Local filesystem path to an image file."
+       }
+      },
+      "required": [
+       "path"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "type": "namespace",
+     "name": "multi_agent_v1",
+     "description": "redacted",
+     "tools": [
+      {
+       "type": "function",
+       "name": "close_agent",
+       "description": "redacted",
+       "strict": false,
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "target": {
+          "type": "string",
+          "description": "Agent id to close (from spawn_agent)."
+         }
+        },
+        "required": [
+         "target"
+        ],
+        "additionalProperties": false
+       }
+      },
+      {
+       "type": "function",
+       "name": "resume_agent",
+       "description": "redacted",
+       "strict": false,
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "id": {
+          "type": "string",
+          "description": "Agent id to resume."
+         }
+        },
+        "required": [
+         "id"
+        ],
+        "additionalProperties": false
+       }
+      },
+      {
+       "type": "function",
+       "name": "send_input",
+       "description": "redacted",
+       "strict": false,
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "interrupt": {
+          "type": "boolean",
+          "description": "True interrupts the current task and handles this message immediately; false or omitted queues it."
+         },
+         "items": {
+          "type": "array",
+          "description": "Structured input items. Use this to pass explicit mentions (for example app:// connector paths).",
+          "items": {
+           "type": "object",
+           "properties": {
+            "audio_url": {
+             "type": "string",
+             "description": "Audio data URL when type is audio."
+            },
+            "image_url": {
+             "type": "string",
+             "description": "Image URL when type is image."
+            },
+            "name": {
+             "type": "string",
+             "description": "Display name when type is skill or mention."
+            },
+            "path": {
+             "type": "string",
+             "description": "Path when type is local_image/local_audio/skill, or structured mention target such as app://<connector-id> or plugin://<plugin-name>@<marketplace-name> when type is mention."
+            },
+            "text": {
+             "type": "string",
+             "description": "Text content when type is text."
+            },
+            "type": {
+             "type": "string",
+             "description": "Input item type: text, image, local_image, audio, local_audio, skill, or mention."
+            }
+           },
+           "additionalProperties": false
+          }
+         },
+         "message": {
+          "type": "string",
+          "description": "Legacy plain-text message to send to the agent. Use either message or items."
+         },
+         "target": {
+          "type": "string",
+          "description": "Agent id to message (from spawn_agent)."
+         }
+        },
+        "required": [
+         "target"
+        ],
+        "additionalProperties": false
+       }
+      },
+      {
+       "type": "function",
+       "name": "spawn_agent",
+       "description": "redacted",
+       "strict": false,
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "fork_context": {
+          "type": "boolean",
+          "description": "True forks the current thread history into the new agent; false or omitted starts with only the initial prompt."
+         },
+         "items": {
+          "type": "array",
+          "description": "Structured input items. Use this to pass explicit mentions (for example app:// connector paths).",
+          "items": {
+           "type": "object",
+           "properties": {
+            "audio_url": {
+             "type": "string",
+             "description": "Audio data URL when type is audio."
+            },
+            "image_url": {
+             "type": "string",
+             "description": "Image URL when type is image."
+            },
+            "name": {
+             "type": "string",
+             "description": "Display name when type is skill or mention."
+            },
+            "path": {
+             "type": "string",
+             "description": "Path when type is local_image/local_audio/skill, or structured mention target such as app://<connector-id> or plugin://<plugin-name>@<marketplace-name> when type is mention."
+            },
+            "text": {
+             "type": "string",
+             "description": "Text content when type is text."
+            },
+            "type": {
+             "type": "string",
+             "description": "Input item type: text, image, local_image, audio, local_audio, skill, or mention."
+            }
+           },
+           "additionalProperties": false
+          }
+         },
+         "message": {
+          "type": "string",
+          "description": "Initial plain-text task for the new agent. Use either message or items."
+         },
+         "model": {
+          "type": "string",
+          "description": "Model override for the new agent. Omit unless an explicit override is needed."
+         },
+         "reasoning_effort": {
+          "type": "string",
+          "description": "Reasoning effort override for the new agent. Omit to inherit the parent effort."
+         }
+        },
+        "additionalProperties": false
+       }
+      },
+      {
+       "type": "function",
+       "name": "wait_agent",
+       "description": "redacted",
+       "strict": false,
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "targets": {
+          "type": "array",
+          "description": "Agent ids to wait on. Pass multiple ids to wait for whichever finishes first.",
+          "items": {
+           "type": "string"
+          }
+         },
+         "timeout_ms": {
+          "type": "number",
+          "description": "Timeout in milliseconds. Defaults to 30000, min 10000, max 3600000. Prefer longer waits (minutes) to avoid busy polling."
+         }
+        },
+        "required": [
+         "targets"
+        ],
+        "additionalProperties": false
+       }
+      }
+     ]
+    },
+    {
+     "type": "function",
+     "name": "get_goal",
+     "description": "redacted",
+     "strict": false,
+     "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+     }
+    },
+    {
+     "type": "function",
+     "name": "create_goal",
+     "description": "redacted",
+     "strict": false,
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "objective": {
+        "type": "string",
+        "description": "Required. The concrete objective to start pursuing. This starts a new active goal when no goal exists or replaces the current goal when it is complete."
+       },
+       "token_budget": {
+        "type": "integer",
+        "description": "Positive token budget for the new goal. Omit unless explicitly requested."
+       }
+      },
+      "required": [
+       "objective"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "type": "function",
+     "name": "update_goal",
+     "description": "redacted",
+     "strict": false,
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "status": {
+        "type": "string",
+        "description": "Required. `paused` requires an explicit user request. Set to `complete` only when the objective is achieved and no required work remains. Set to `blocked` only after the same blocking condition has recurred for at least three consecutive goal turns and the agent is at an impasse. After a previously blocked goal is resumed, the resumed run starts a fresh blocked audit.",
+        "enum": [
+         "complete",
+         "blocked",
+         "paused"
+        ]
+       }
+      },
+      "required": [
+       "status"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "type": "web_search",
+     "external_web_access": false
+    }
+   ],
+   "tool_choice": "auto",
+   "parallel_tool_calls": true,
+   "reasoning": {
+    "effort": "high"
+   },
+   "store": false,
+   "include": [
+    "reasoning.encrypted_content"
+   ],
+   "prompt_cache_key": "redacted-cache-key",
+   "text": {
+    "verbosity": "low"
+   },
+   "client_metadata": {
+    "turn_id": "redacted",
+    "root_turn_id": "redacted",
+    "thread_id": "redacted",
+    "x-codex-window-id": "redacted",
+    "x-codex-installation-id": "redacted",
+    "x-codex-turn-metadata": "redacted",
+    "session_id": "redacted"
+   }
+  }
+ }
+}

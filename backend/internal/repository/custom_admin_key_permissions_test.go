@@ -6,7 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	"os"
 	"strings"
 	"testing"
@@ -40,6 +40,7 @@ func scopedPermissionsTestDB(t *testing.T, options ...dbent.Option) (*dbent.Clie
 	CREATE TABLE account_groups(account_id BIGINT, group_id BIGINT, priority INT DEFAULT 50, created_at TIMESTAMPTZ DEFAULT NOW());
 	INSERT INTO groups(id,platform,status) VALUES (1,'openai','active'),(2,'openai','active'),(3,'anthropic','active'),(4,'openai','inactive');
 	INSERT INTO accounts(id,credentials,extra) VALUES (1,'{"email":"test@example.com","access_token":"SECRET"}','{}'),(2,'{}','{"email":"test@example.com"}'),(3,'{"email":"test@example.com"}','{}');
+	UPDATE accounts SET platform='anthropic' WHERE id=3;
 	INSERT INTO account_groups(account_id,group_id) VALUES (1,1),(1,9),(2,2),(3,3);`)
 	require.NoError(t, err)
 	return client, db
@@ -48,7 +49,7 @@ func scopedPermissionsTestDB(t *testing.T, options ...dbent.Option) (*dbent.Clie
 func TestScopedAdminPermissionsPostgresFilters(t *testing.T) {
 	client, db := scopedPermissionsTestDB(t)
 	policy := adminaccess.Policy{Rules: []adminaccess.Rule{
-		{Permissions: []string{"accounts.read", "groups.list.read", "groups.capacity.read"}, GroupIDs: []int64{1, 2, 3, 4}, AccountTypes: []string{"oauth"}, Platforms: []string{"openai"}},
+		{Permissions: []string{"accounts.read", "groups.list.read", "groups.models.read", "groups.capacity.read"}, GroupIDs: []int64{1, 2, 3, 4}, AccountTypes: []string{"oauth"}, Platforms: []string{"openai"}},
 		{Permissions: []string{"accounts.identity.read"}, GroupIDs: []int64{1}, AccountTypes: []string{"oauth"}, Platforms: []string{"openai"}},
 		{Permissions: []string{"groups.capacity.read"}, GroupIDs: []int64{2}, Platforms: []string{"anthropic"}},
 	}}
@@ -61,28 +62,23 @@ func TestScopedAdminPermissionsPostgresFilters(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 2, total)
 	require.Len(t, rows, 1)
-	require.Equal(t, "active", rows[0].Status)
+	require.EqualValues(t, 1, rows[0].ID)
 	accounts := newAccountRepositoryWithSQL(client, db, nil)
 	for _, tc := range []struct {
-		group  int64
 		search string
 		ids    []int64
 	}{
-		{2, "", []int64{2}}, {1, "TEST@example.com", []int64{1}}, {2, "test@example.com", []int64{}}, {0, "test@example.com", []int64{1}}, {9, "", []int64{}},
+		{"", []int64{1, 2}}, {"账户", []int64{1, 2}}, {"TEST@example.com", []int64{}},
 	} {
-		rows, total, err := accounts.ScopedAdminList(ctx, pagination.PaginationParams{Page: 1, PageSize: 100}, "openai", "oauth", "", tc.search, tc.group)
+		rows, total, err := accounts.ScopedAdminList(ctx, pagination.PaginationParams{Page: 1, PageSize: 100}, "openai", "oauth", "", tc.search)
 		require.NoError(t, err)
 		require.EqualValues(t, len(tc.ids), total)
 		ids := []int64{}
 		for _, row := range rows {
 			ids = append(ids, row.ID)
 			require.NotContains(t, row.Credentials, "access_token")
-			if row.ID == 1 {
-				require.Equal(t, "test@example.com", row.Credentials["email"])
-				require.False(t, row.CreatedAt.IsZero())
-			} else {
-				require.NotContains(t, row.Credentials, "email")
-			}
+			require.NotContains(t, row.Credentials, "email", "账号列表只投影模型引用，不借身份权限恢复旧查询")
+			require.True(t, row.CreatedAt.IsZero())
 		}
 
 		require.Equal(t, tc.ids, ids)
@@ -91,7 +87,7 @@ func TestScopedAdminPermissionsPostgresFilters(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestScopedAdminPermissionsWeeklySnapshotPostgres(t *testing.T) {
+func TestScopedAdminModelListDoesNotLoadWeeklySnapshotPostgres(t *testing.T) {
 	client, db := scopedPermissionsTestDB(t)
 	_, err := db.Exec(`UPDATE accounts SET credentials = '{"email":"test@example.com","access_token":"SECRET"}', extra = '{"email":"test@example.com","codex_usage_updated_at":"2026-10-25T00:00:00Z","codex_7d_used_percent":90,"codex_7d_reset_at":"2026-10-30T00:00:00Z","private":"SECRET"}'`)
 	require.NoError(t, err)
@@ -100,12 +96,11 @@ func TestScopedAdminPermissionsWeeklySnapshotPostgres(t *testing.T) {
 		name     string
 		usage    adminaccess.Rule
 		identity bool
-		want     bool
 	}{
 		{name: "无额度权限"},
 		{name: "仅身份权限", identity: true},
-		{name: "仅额度权限", usage: adminaccess.Rule{Permissions: []string{"accounts.usage.read"}, GroupIDs: []int64{1}, AccountTypes: []string{"oauth"}, Platforms: []string{"openai"}}, want: true},
-		{name: "身份和额度权限", identity: true, usage: adminaccess.Rule{Permissions: []string{"accounts.usage.read"}, GroupIDs: []int64{1}, AccountTypes: []string{"oauth"}, Platforms: []string{"openai"}}, want: true},
+		{name: "仅额度权限", usage: adminaccess.Rule{Permissions: []string{"accounts.usage.read"}, GroupIDs: []int64{1}, AccountTypes: []string{"oauth"}, Platforms: []string{"openai"}}},
+		{name: "身份和额度权限", identity: true, usage: adminaccess.Rule{Permissions: []string{"accounts.usage.read"}, GroupIDs: []int64{1}, AccountTypes: []string{"oauth"}, Platforms: []string{"openai"}}},
 		{name: "额度分组不匹配", usage: adminaccess.Rule{Permissions: []string{"accounts.usage.read"}, GroupIDs: []int64{99}, AccountTypes: []string{"oauth"}, Platforms: []string{"openai"}}},
 		{name: "额度类型不匹配", usage: adminaccess.Rule{Permissions: []string{"accounts.usage.read"}, GroupIDs: []int64{1}, AccountTypes: []string{"apikey"}, Platforms: []string{"openai"}}},
 		{name: "额度平台不匹配", usage: adminaccess.Rule{Permissions: []string{"accounts.usage.read"}, GroupIDs: []int64{1}, AccountTypes: []string{"oauth"}, Platforms: []string{"anthropic"}}},
@@ -120,33 +115,20 @@ func TestScopedAdminPermissionsWeeklySnapshotPostgres(t *testing.T) {
 				policy.Rules = append(policy.Rules, tc.usage)
 			}
 			ctx := adminaccess.WithPrincipal(context.Background(), &adminaccess.Principal{Policy: policy})
-			rows, total, err := repo.ScopedAdminList(ctx, pagination.PaginationParams{Page: 1, PageSize: 100}, "openai", "oauth", "", "", 0)
+			rows, total, err := repo.ScopedAdminList(ctx, pagination.PaginationParams{Page: 1, PageSize: 100}, "openai", "oauth", "", "")
 			require.NoError(t, err)
 			require.EqualValues(t, 2, total)
 			require.Len(t, rows, 2)
 			for _, row := range rows {
-				want := map[string]any{}
-				if tc.identity {
-					want["email"] = "test@example.com"
-					require.Equal(t, "test@example.com", row.Credentials["email"])
-				}
-				if tc.want && row.ID == 1 {
-					want["codex_usage_updated_at"] = "2026-10-25T00:00:00Z"
-					want["codex_7d_used_percent"] = float64(90)
-					want["codex_7d_reset_at"] = "2026-10-30T00:00:00Z"
-				}
-				if len(want) == 0 {
-					require.Empty(t, row.Extra)
-				} else {
-					require.Equal(t, want, row.Extra, "列表必须保留已授权的周额度快照，必须按行应用额度权限")
-				}
+				require.Empty(t, row.Extra, "模型列表不读取额度快照；额度由独立 usage 查询授权")
+				require.NotContains(t, row.Credentials, "email")
 				require.NotContains(t, row.Credentials, "access_token")
 			}
 		})
 	}
 }
 
-func TestScopedAdminPermissionBasicGroupRepositoryRedactsModels(t *testing.T) {
+func TestScopedAdminModelListRequiresExplicitModelPermission(t *testing.T) {
 	client, db := scopedPermissionsTestDB(t)
 	_, err := db.Exec(`UPDATE groups SET model_allowlist='{"enabled":true,"models":["private-model"]}'`)
 	require.NoError(t, err)
@@ -157,10 +139,10 @@ func TestScopedAdminPermissionBasicGroupRepositoryRedactsModels(t *testing.T) {
 	}}}
 	rows, total, err := repo.ScopedAdminListGroupModels(adminaccess.WithPrincipal(context.Background(), p), pagination.DefaultPagination(), false, "", "", "")
 	require.NoError(t, err)
-	require.EqualValues(t, 2, total)
-	require.Len(t, rows, 2)
-	require.Empty(t, rows[0].ModelAllowlist.Models, "基本分组权限不能加载模型配置")
-	require.Equal(t, []string{"private-model"}, rows[1].ModelAllowlist.Models)
+	require.EqualValues(t, 1, total)
+	require.Len(t, rows, 1)
+	require.EqualValues(t, 2, rows[0].ID, "基本分组权限不能出现在模型配置列表")
+	require.Equal(t, []string{"private-model"}, rows[0].ModelAllowlist.Models)
 }
 
 func TestScopedAdminGroupModelsUpdatePreservesStatusPostgres(t *testing.T) {
@@ -171,14 +153,15 @@ func TestScopedAdminGroupModelsUpdatePreservesStatusPostgres(t *testing.T) {
 	require.NoError(t, err)
 	repo := newGroupRepositoryWithSQL(client, db)
 	ctx := adminaccess.WithPrincipal(context.Background(), &adminaccess.Principal{Policy: adminaccess.Policy{Rules: []adminaccess.Rule{{Permissions: []string{"groups.models.write"}, GroupIDs: []int64{1}, Platforms: []string{"openai"}}}}})
-	cfg := service.GroupModelAllowlist{Enabled: true, Models: []string{"model"}}
+	cfg := catalog.ModelAllowlist{Enabled: true, Models: []string{"model"}}
 	for _, status := range []string{"active", "inactive"} {
 		t.Run(status, func(t *testing.T) {
 			_, err := db.Exec(`UPDATE groups SET status=$1 WHERE id=1`, status)
 			require.NoError(t, err)
 			updated, err := repo.ScopedAdminUpdateGroupModels(ctx, 1, cfg)
 			require.NoError(t, err)
-			require.Equal(t, status, updated.Status)
+			require.EqualValues(t, 1, updated.ID)
+			require.Equal(t, cfg.Models, updated.ModelAllowlist.Models)
 			var stored string
 			require.NoError(t, db.QueryRow(`SELECT status FROM groups WHERE id=1`).Scan(&stored))
 			require.Equal(t, status, stored)
@@ -186,7 +169,7 @@ func TestScopedAdminGroupModelsUpdatePreservesStatusPostgres(t *testing.T) {
 	}
 }
 
-func TestScopedAdminIdentityProjectionBatchesAuthorizedPagePostgres(t *testing.T) {
+func TestScopedAdminModelListDoesNotLoadIdentityProjectionPostgres(t *testing.T) {
 	identityQueries := []string{}
 	client, db := scopedPermissionsTestDB(t, dbent.Debug(), dbent.Log(func(args ...any) {
 		query := fmt.Sprint(args...)
@@ -204,27 +187,19 @@ func TestScopedAdminIdentityProjectionBatchesAuthorizedPagePostgres(t *testing.T
 	}}
 	ctx := adminaccess.WithPrincipal(context.Background(), &adminaccess.Principal{Policy: policy})
 	repo := newAccountRepositoryWithSQL(client, db, nil)
-	rows, total, err := repo.ScopedAdminList(ctx, pagination.PaginationParams{Page: 1, PageSize: 100}, "openai", "oauth", "", "", 0)
+	rows, total, err := repo.ScopedAdminList(ctx, pagination.PaginationParams{Page: 1, PageSize: 100}, "openai", "oauth", "", "")
 	require.NoError(t, err)
 	require.EqualValues(t, 102, total)
 	require.Len(t, rows, 100)
 	for _, row := range rows {
-		resource := adminaccess.Account{ID: row.ID, Type: row.Type, Platform: row.Platform, GroupIDs: row.GroupIDs}
-		if policy.AllowsAccount("accounts.identity.read", resource) {
-			require.Contains(t, row.Credentials, "email")
-			require.False(t, row.CreatedAt.IsZero())
-		} else {
-			require.NotContains(t, row.Credentials, "email")
-			require.NotContains(t, row.Extra, "email")
-			require.True(t, row.CreatedAt.IsZero())
-		}
+		require.NotContains(t, row.Credentials, "email")
+		require.True(t, row.CreatedAt.IsZero())
+		require.Empty(t, row.Extra)
 		if row.ID >= 100 {
 			require.Equal(t, map[string]string{"alias": "target"}, row.Credentials["model_mapping"])
-			require.Equal(t, policy.AllowsAccount("accounts.usage.read", resource), row.Extra["codex_7d_used_percent"] != nil)
 		}
 		require.NotContains(t, row.Credentials, "access_token")
 		require.NotContains(t, row.Extra, "private")
 	}
-	require.Equal(t, 1, len(identityQueries), "同一分页的身份信息必须单次批量读取")
-	require.Contains(t, identityQueries[0], `"accounts"."id" IN (`)
+	require.Empty(t, identityQueries, "模型列表不再执行已退役的身份投影查询")
 }

@@ -576,11 +576,14 @@ func TestUsageCleanupServiceExecuteTaskDashboardRecomputeError(t *testing.T) {
 	}
 
 	svc.executeTask(context.Background(), task)
+	joined, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	require.NoError(t, dashboard.work.join(joined))
 
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
 	require.Len(t, repo.markSucceeded, 1)
-	require.Eventually(t, func() bool { return dashboardRepo.recomputeCalls == 1 }, time.Second, 10*time.Millisecond)
+	require.Equal(t, 1, dashboardRepo.recomputeCalls)
 }
 
 func TestUsageCleanupServiceExecuteTaskDashboardRecomputeSuccess(t *testing.T) {
@@ -604,11 +607,14 @@ func TestUsageCleanupServiceExecuteTaskDashboardRecomputeSuccess(t *testing.T) {
 	}
 
 	svc.executeTask(context.Background(), task)
+	joined, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	require.NoError(t, dashboard.work.join(joined))
 
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
 	require.Len(t, repo.markSucceeded, 1)
-	require.Eventually(t, func() bool { return dashboardRepo.recomputeCalls == 1 }, time.Second, 10*time.Millisecond)
+	require.Equal(t, 1, dashboardRepo.recomputeCalls)
 }
 
 func TestUsageCleanupServiceExecuteTaskCanceled(t *testing.T) {
@@ -798,23 +804,25 @@ func TestUsageCleanupServiceDefaultsAndLifecycle(t *testing.T) {
 	require.Equal(t, 5000, nilSvc.batchSize())
 	require.Equal(t, 10*time.Second, nilSvc.workerInterval())
 	require.Equal(t, 30*time.Minute, nilSvc.taskTimeout())
-	nilSvc.Start()
-	nilSvc.Stop()
+	require.NoError(t, nilSvc.Start(t.Context()))
+	require.NoError(t, nilSvc.Stop(t.Context()))
 
 	repo := &cleanupRepoStub{}
 	cfgDisabled := &config.Config{UsageCleanup: config.UsageCleanupConfig{Enabled: false}}
 	svcDisabled := NewUsageCleanupService(repo, nil, nil, cfgDisabled)
-	svcDisabled.Start()
-	svcDisabled.Stop()
+	require.NoError(t, svcDisabled.Start(t.Context()))
+	require.NoError(t, svcDisabled.Stop(t.Context()))
 
 	timingWheel, err := NewTimingWheelService()
 	require.NoError(t, err)
+	require.NoError(t, timingWheel.Start(t.Context()))
+	t.Cleanup(func() { require.NoError(t, timingWheel.Stop(context.Background())) })
 
 	cfg := &config.Config{UsageCleanup: config.UsageCleanupConfig{Enabled: true, WorkerIntervalSeconds: 5}}
 	svc := NewUsageCleanupService(repo, timingWheel, nil, cfg)
 	require.Equal(t, 5*time.Second, svc.workerInterval())
-	svc.Start()
-	svc.Stop()
+	require.NoError(t, svc.Start(t.Context()))
+	require.NoError(t, svc.Stop(t.Context()))
 
 	cfgFallback := &config.Config{UsageCleanup: config.UsageCleanupConfig{Enabled: true}}
 	svcFallback := NewUsageCleanupService(repo, timingWheel, nil, cfgFallback)
@@ -823,7 +831,7 @@ func TestUsageCleanupServiceDefaultsAndLifecycle(t *testing.T) {
 	require.Equal(t, 10*time.Second, svcFallback.workerInterval())
 
 	svcMissingDeps := NewUsageCleanupService(nil, nil, nil, cfgFallback)
-	svcMissingDeps.Start()
+	require.NoError(t, svcMissingDeps.Start(t.Context()))
 }
 
 func TestSanitizeUsageCleanupFiltersModelEmpty(t *testing.T) {

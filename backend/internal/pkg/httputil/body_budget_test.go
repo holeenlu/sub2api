@@ -114,7 +114,7 @@ func TestRequestBodyMemoryBudgetUnknownLengthAndConcurrency(t *testing.T) {
 func TestDecompressRequestBodyRejectsExcessiveZstdWindow(t *testing.T) {
 	for _, exponent := range []byte{20, 24, 29} {
 		raw := []byte{0x28, 0xb5, 0x2f, 0xfd, 0, (exponent - 10) << 3, 9, 0, 0, 'x'}
-		decoded, err := decompressRequestBody("zstd", raw)
+		decoded, err := decompressRequestBodyLimit(context.Background(), "zstd", raw, maxDecompressedBodySize)
 		if exponent == 20 {
 			if err != nil || string(decoded) != "x" {
 				t.Fatalf("small window: %q %v", decoded, err)

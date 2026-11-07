@@ -616,7 +616,7 @@ func TestCNProviderBalanceCheckRunOnceProbesClineUsage(t *testing.T) {
 		cfg:            cfg,
 	}
 
-	svc.runOnce()
+	svc.runOnce(t.Context())
 
 	require.Len(t, upstream.requests, 6, "usage-limits + me + balance for each official account")
 	require.Len(t, repo.extraWrites, 2)
@@ -635,7 +635,7 @@ func TestCNProviderBalanceCheckRunOnceDispatchesAccountProbesByPlatform(t *testi
 	prober := &commandCodeBalanceProber{balance: 0.2}
 	svc := &CNProviderBalanceCheckService{accountRepo: repo, quotaService: prober, cfg: clineUsageTestConfig()}
 
-	svc.runOnce()
+	svc.runOnce(t.Context())
 
 	require.ElementsMatch(t, []int64{1, 2}, prober.probed)
 	require.Equal(t, []int64{1}, repo.paused)

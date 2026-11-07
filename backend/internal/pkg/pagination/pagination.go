@@ -1,10 +1,7 @@
 // Package pagination provides types and helpers for paginated responses.
 package pagination
 
-import (
-	"math"
-	"strings"
-)
+import "strings"
 
 const (
 	SortOrderAsc  = "asc"
@@ -13,6 +10,7 @@ const (
 
 // PaginationParams 分页参数
 type PaginationParams struct {
+	Cursor    string
 	Page      int
 	PageSize  int
 	SortBy    string
@@ -21,10 +19,13 @@ type PaginationParams struct {
 
 // PaginationResult 分页结果
 type PaginationResult struct {
-	Total    int64
-	Page     int
-	PageSize int
-	Pages    int
+	NextCursor string
+	HasMore    bool
+	TotalExact bool
+	Total      int64
+	Page       int
+	PageSize   int
+	Pages      int
 }
 
 // DefaultPagination 默认分页参数
@@ -41,12 +42,7 @@ func (p PaginationParams) Offset() int {
 	if p.Page < 1 {
 		p.Page = 1
 	}
-	limit := p.Limit()
-	// Saturate the page so both the offset and offset+limit stay within int.
-	if p.Page > math.MaxInt/limit {
-		p.Page = math.MaxInt / limit
-	}
-	return (p.Page - 1) * limit
+	return (p.Page - 1) * p.Limit()
 }
 
 // Limit 获取限制数

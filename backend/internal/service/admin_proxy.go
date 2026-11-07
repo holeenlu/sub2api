@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -219,6 +220,16 @@ func (s *adminServiceImpl) TestProxy(ctx context.Context, id int64) (*ProxyTestR
 	}
 
 	proxyURL := proxy.URL()
+	if proxy.VendorID != nil && ctx.Value(expectedProxyProbeVersionKey{}) == nil {
+		return nil, ErrVendorProxyWorkbenchRequired
+	}
+	if expected, ok := ctx.Value(expectedProxyProbeVersionKey{}).(int64); ok && expected != proxy.ConfigVersion {
+		return nil, ErrVendorProxyVersion
+	}
+	ctx = context.WithValue(ctx, proxySnapshotVersionKey{}, proxy.ConfigVersion)
+	if s.proxyProber == nil {
+		return nil, infraerrors.ServiceUnavailable("PROXY_PROBER_UNAVAILABLE", "proxy prober unavailable")
+	}
 	exitInfo, latencyMs, err := s.proxyProber.ProbeProxy(ctx, proxyURL)
 	if err != nil {
 		s.saveProxyLatency(ctx, id, &ProxyLatencyInfo{
@@ -261,6 +272,12 @@ func (s *adminServiceImpl) CheckProxyQuality(ctx context.Context, id int64) (*Pr
 	if err != nil {
 		return nil, err
 	}
+	if proxy.VendorID != nil && ctx.Value(expectedProxyProbeVersionKey{}) == nil {
+		return nil, ErrVendorProxyWorkbenchRequired
+	}
+	if expected, ok := ctx.Value(expectedProxyProbeVersionKey{}).(int64); ok && expected != proxy.ConfigVersion {
+		return nil, ErrVendorProxyVersion
+	}
 
 	result := &ProxyQualityCheckResult{
 		ProxyID:   id,
@@ -269,6 +286,7 @@ func (s *adminServiceImpl) CheckProxyQuality(ctx context.Context, id int64) (*Pr
 		CheckedAt: time.Now().Unix(),
 		Items:     make([]ProxyQualityCheckItem, 0, len(proxyQualityTargets)+1),
 	}
+	ctx = context.WithValue(ctx, proxySnapshotVersionKey{}, proxy.ConfigVersion)
 
 	proxyURL := proxy.URL()
 	if s.proxyProber == nil {
@@ -497,6 +515,7 @@ func (s *adminServiceImpl) saveProxyQualitySnapshot(ctx context.Context, proxyID
 	score := result.Score
 	checkedAt := result.CheckedAt
 	info := &ProxyLatencyInfo{
+		Quality:          result,
 		Success:          proxyQualityBaseConnectivityPass(result),
 		Message:          result.Summary,
 		QualityStatus:    proxyQualityOverallStatus(result),
@@ -525,6 +544,7 @@ func (s *adminServiceImpl) probeProxyLatency(ctx context.Context, proxy *Proxy) 
 	if s.proxyProber == nil || proxy == nil {
 		return
 	}
+	ctx = context.WithValue(ctx, proxySnapshotVersionKey{}, proxy.ConfigVersion)
 	exitInfo, latencyMs, err := s.proxyProber.ProbeProxy(ctx, proxy.URL())
 	if err != nil {
 		s.saveProxyLatency(ctx, proxy.ID, &ProxyLatencyInfo{
@@ -570,6 +590,9 @@ func (s *adminServiceImpl) attachProxyLatency(ctx context.Context, proxies []Pro
 		if info == nil {
 			continue
 		}
+		if proxies[i].VendorID != nil && (info.ConfigVersion != proxies[i].ConfigVersion || time.Since(info.UpdatedAt) > 24*time.Hour) {
+			continue
+		}
 		if info.Success {
 			proxies[i].LatencyStatus = "success"
 			proxies[i].LatencyMs = info.LatencyMs
@@ -596,8 +619,27 @@ func (s *adminServiceImpl) saveProxyLatency(ctx context.Context, proxyID int64, 
 	}
 
 	merged := *info
+	if version, ok := ctx.Value(proxySnapshotVersionKey{}).(int64); ok {
+		merged.ConfigVersion = version
+		current, err := s.proxyRepo.GetByID(ctx, proxyID)
+		if err != nil || current.ConfigVersion != version {
+			return
+		}
+		if current.VendorID != nil {
+			if !current.IsActive() || current.IsExpired(time.Now()) || authz.Revalidate(ctx) != nil {
+				return
+			}
+			merged.Message = "Proxy test failed"
+			if merged.Success {
+				merged.Message = "Proxy is accessible"
+			}
+			if merged.Quality != nil {
+				merged.Quality = sanitizeVendorProxyQuality(merged.Quality)
+			}
+		}
+	}
 	if latencies, err := s.proxyLatencyCache.GetProxyLatencies(ctx, []int64{proxyID}); err == nil {
-		if existing := latencies[proxyID]; existing != nil {
+		if existing := latencies[proxyID]; existing != nil && existing.ConfigVersion == merged.ConfigVersion {
 			if merged.QualityCheckedAt == nil &&
 				merged.QualityScore == nil &&
 				merged.QualityGrade == "" &&
@@ -610,6 +652,7 @@ func (s *adminServiceImpl) saveProxyLatency(ctx context.Context, proxyID int64, 
 				merged.QualitySummary = existing.QualitySummary
 				merged.QualityCheckedAt = existing.QualityCheckedAt
 				merged.QualityCFRay = existing.QualityCFRay
+				merged.Quality = existing.Quality
 			}
 		}
 	}
@@ -618,3 +661,6 @@ func (s *adminServiceImpl) saveProxyLatency(ctx context.Context, proxyID int64, 
 		logger.LegacyPrintf("service.admin", "Warning: store proxy latency cache failed: %v", err)
 	}
 }
+
+type proxySnapshotVersionKey struct{}
+type expectedProxyProbeVersionKey struct{}

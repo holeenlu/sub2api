@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/model"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -29,6 +30,10 @@ func TestIsGrokContentPolicyRejection(t *testing.T) {
 			body:   `{"error":{"code":"new_sensitive","message":"image is sensitive"}}`,
 			want:   true,
 		},
+		{name: "chat refusal", status: http.StatusForbidden, body: "{\"code\":\"permission-denied\",\"error\":\"I can't help with that request.\"}", want: true},
+		{name: "curly chat refusal", status: http.StatusForbidden, body: "{\"code\":\"permission-denied\",\"error\":\"I can’t help with that request.\"}", want: true},
+		{name: "refusal wrong status", status: http.StatusBadRequest, body: "I can't help with that request.", want: false},
+		{name: "suspension wins", status: http.StatusForbidden, body: "Account suspended. I can't help with that request.", want: false},
 		{
 			name:   "content policy violation code",
 			status: http.StatusForbidden,
@@ -224,6 +229,35 @@ func TestGrokContentPolicy403SharedErrorFallbackDoesNotMutate(t *testing.T) {
 	require.Zero(t, repo.tempUnschedCalls)
 	require.Zero(t, repo.rateLimitedCalls)
 	require.Zero(t, repo.updateCalls)
+}
+
+func TestGrokChatRefusalHonorsPassthroughWithoutAccountPenalty(t *testing.T) {
+	body := "{\"code\":\"permission-denied\",\"error\":\"I can't help with that request.\"}"
+	for _, compat := range []bool{false, true} {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		status, message := http.StatusBadRequest, "Content declined"
+		rules := &ErrorPassthroughService{}
+		rules.setLocalCache([]*model.ErrorPassthroughRule{{ID: 19, Enabled: true, ErrorCodes: []int{403}, Keywords: []string{"help with that request"}, MatchMode: model.MatchModeAll, ResponseCode: &status, CustomMessage: &message}})
+		BindErrorPassthroughService(c, rules)
+		repo := &grokQuotaAccountRepo{}
+		svc := &OpenAIGatewayService{accountRepo: repo}
+		account := &Account{ID: 19, Platform: PlatformGrok, Type: AccountTypeOAuth}
+		resp := &http.Response{StatusCode: 403, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}
+		var err error
+		if compat {
+			_, err = svc.handleCompatErrorResponse(resp, c, account, writeChatCompletionsError, "grok-4.5")
+		} else {
+			_, err = svc.handleErrorResponse(context.Background(), resp, c, account, nil, "grok-4.5")
+		}
+		require.Error(t, err)
+		require.Equal(t, status, recorder.Code)
+		require.Contains(t, recorder.Body.String(), message)
+		require.False(t, svc.shouldFailoverGrokUpstreamError(403, []byte(body)))
+		require.Zero(t, repo.tempUnschedCalls)
+		require.Zero(t, repo.updateCalls)
+	}
 }
 
 func TestGrokContentPolicy403MediaResponseBypassesCustomErrorCodes(t *testing.T) {

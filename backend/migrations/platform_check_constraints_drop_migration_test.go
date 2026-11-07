@@ -23,10 +23,15 @@ func TestDropPlatformCheckConstraintsMigration(t *testing.T) {
 	require.NotContains(t, sql, "DROP CONSTRAINT IF EXISTS channel_monitor_request_templates_provider_check")
 }
 
-// Platform membership is validated against the application catalog after 242.
+// Platform membership is validated after the final migration. Historical fork
+// migrations after upstream 242 recreate the constraints and remain immutable.
 // A later migration must not restore a database whitelist that can drift from it.
 func TestLaterMigrationsDoNotRestorePlatformCheckConstraints(t *testing.T) {
-	const droppedAt = "242_drop_platform_check_constraints.sql"
+	const droppedAt = "271_finalize_platform_catalog_constraints.sql"
+	finalSQL, err := FS.ReadFile(droppedAt)
+	require.NoError(t, err)
+	require.Contains(t, string(finalSQL), "DROP CONSTRAINT IF EXISTS user_platform_quotas_platform_check")
+	require.Contains(t, string(finalSQL), "DROP CONSTRAINT IF EXISTS composite_model_routes_target_platform_check")
 	entries, err := fs.ReadDir(FS, ".")
 	require.NoError(t, err)
 	comments := regexp.MustCompile(`(?ms)/\*.*?\*/|--[^\n]*`)

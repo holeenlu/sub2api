@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/userattributedefinition"
@@ -218,6 +219,9 @@ func (r *userAttributeValueRepository) UpsertBatch(ctx context.Context, userID i
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := authz.LockManagementWrite(ctx, tx.Client(), []int64{userID}, "", "", false); err != nil {
+		return err
+	}
 
 	for _, input := range inputs {
 		// Use upsert (ON CONFLICT DO UPDATE)

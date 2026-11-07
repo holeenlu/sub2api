@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +32,11 @@ type AntigravityAuthURLResult struct {
 
 // GenerateAuthURL 生成 Google OAuth 授权链接
 func (s *AntigravityOAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64) (*AntigravityAuthURLResult, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	state, err := antigravity.GenerateState()
 	if err != nil {
 		return nil, fmt.Errorf("生成 state 失败: %w", err)
@@ -55,10 +61,11 @@ func (s *AntigravityOAuthService) GenerateAuthURL(ctx context.Context, proxyID *
 	}
 
 	session := &antigravity.OAuthSession{
-		State:        state,
-		CodeVerifier: codeVerifier,
-		ProxyURL:     proxyURL,
-		CreatedAt:    time.Now(),
+		Authorization: authz.CaptureLease(ctx),
+		State:         state,
+		CodeVerifier:  codeVerifier,
+		ProxyURL:      proxyURL,
+		CreatedAt:     time.Now(),
 	}
 	s.sessionStore.Set(sessionID, session)
 
@@ -96,9 +103,17 @@ type AntigravityTokenInfo struct {
 
 // ExchangeCode 用 authorization code 交换 token
 func (s *AntigravityOAuthService) ExchangeCode(ctx context.Context, input *AntigravityExchangeCodeInput) (*AntigravityTokenInfo, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	session, ok := s.sessionStore.Get(input.SessionID)
 	if !ok {
 		return nil, fmt.Errorf("session 不存在或已过期")
+	}
+	if err := authz.CheckLease(ctx, session.Authorization, "accounts.authorize"); err != nil {
+		return nil, err
 	}
 
 	if strings.TrimSpace(input.State) == "" || input.State != session.State {
@@ -168,6 +183,11 @@ func (s *AntigravityOAuthService) ExchangeCode(ctx context.Context, input *Antig
 
 // RefreshToken 刷新 token
 func (s *AntigravityOAuthService) RefreshToken(ctx context.Context, refreshToken, proxyURL string) (*AntigravityTokenInfo, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	var lastErr error
 
 	for attempt := 0; attempt <= 3; attempt++ {
@@ -213,6 +233,11 @@ func (s *AntigravityOAuthService) RefreshToken(ctx context.Context, refreshToken
 
 // ValidateRefreshToken 用 refresh token 验证并获取完整的 token 信息（含 email 和 project_id）
 func (s *AntigravityOAuthService) ValidateRefreshToken(ctx context.Context, refreshToken string, proxyID *int64) (*AntigravityTokenInfo, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	var proxyURL string
 	if proxyID != nil {
 		proxy, err := s.proxyRepo.GetByID(ctx, *proxyID)
@@ -276,6 +301,11 @@ func isNonRetryableAntigravityOAuthError(err error) bool {
 
 // RefreshAccountToken 刷新账户的 token
 func (s *AntigravityOAuthService) RefreshAccountToken(ctx context.Context, account *Account) (*AntigravityTokenInfo, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	if account.Platform != PlatformAntigravity || account.Type != AccountTypeOAuth {
 		return nil, fmt.Errorf("非 Antigravity OAuth 账户")
 	}
@@ -441,6 +471,11 @@ func resolveDefaultTierID(loadRaw map[string]any) string {
 
 // FillProjectID 仅获取 project_id，不刷新 OAuth token
 func (s *AntigravityOAuthService) FillProjectID(ctx context.Context, account *Account, accessToken string) (string, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer finish()
 	var proxyURL string
 	if account.ProxyID != nil {
 		proxy, err := s.proxyRepo.GetByID(ctx, *account.ProxyID)
@@ -480,6 +515,17 @@ func (s *AntigravityOAuthService) BuildAccountCredentials(tokenInfo *Antigravity
 }
 
 // Stop 停止服务
-func (s *AntigravityOAuthService) Stop() {
-	s.sessionStore.Stop()
+// Start explicitly starts the session owner; constructors do not start workers.
+func (s *AntigravityOAuthService) Start(ctx context.Context) error {
+	return s.sessionStore.Start(ctx)
+}
+
+// Drain rejects new OAuth work and waits for admitted operations and the janitor.
+func (s *AntigravityOAuthService) Drain(ctx context.Context) error {
+	return s.sessionStore.Drain(ctx)
+}
+
+// Stop cancels and joins the same owner, retaining join state after a timeout.
+func (s *AntigravityOAuthService) Stop(ctx context.Context) error {
+	return s.sessionStore.Stop(ctx)
 }

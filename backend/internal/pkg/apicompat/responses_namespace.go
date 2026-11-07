@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 )
 
-// ResponsesNamespaceName identifies a function child in a Responses namespace.
+// ResponsesNamespaceName identifies a function or custom child in a Responses namespace.
 // It aliases the chat bridge mapping so both native and bridged paths share one
 // namespace identity contract.
 type ResponsesNamespaceName = NamespacedToolName
@@ -43,6 +44,7 @@ func FlattenResponsesNamespacesExcept(req map[string]any, preserved map[string]b
 	}
 
 	names := make(map[string]ResponsesNamespaceName)
+	definitions := make(map[string]map[string]any)
 	for _, raw := range tools {
 		tool, ok := raw.(map[string]any)
 		if !ok || strings.TrimSpace(stringValue(tool["type"])) != "namespace" {
@@ -54,7 +56,7 @@ func FlattenResponsesNamespacesExcept(req map[string]any, preserved map[string]b
 		}
 		for _, rawChild := range namespaceChildren(tool) {
 			child, ok := rawChild.(map[string]any)
-			if !ok || strings.TrimSpace(stringValue(child["type"])) != "function" {
+			if !ok || !responsesNamespaceCallable(child) {
 				continue
 			}
 			name := strings.TrimSpace(stringValue(child["name"]))
@@ -69,7 +71,11 @@ func FlattenResponsesNamespacesExcept(req map[string]any, preserved map[string]b
 			if prev, exists := names[flat]; exists && prev != entry {
 				return nil, false, fmt.Errorf("namespace tools %q/%q and %q/%q both flatten to %q; this upstream cannot disambiguate them, rename one of the tools", prev.Namespace, prev.Name, namespace, name, flat)
 			}
+			if previous, exists := definitions[flat]; exists && !reflect.DeepEqual(previous, child) {
+				return nil, false, fmt.Errorf("namespace tool %q/%q has conflicting definitions", namespace, name)
+			}
 			names[flat] = entry
+			definitions[flat] = child
 		}
 	}
 	if len(names) == 0 {
@@ -91,7 +97,7 @@ func FlattenResponsesNamespacesExcept(req map[string]any, preserved map[string]b
 		}
 		for _, rawChild := range namespaceChildren(tool) {
 			child, ok := rawChild.(map[string]any)
-			if !ok || strings.TrimSpace(stringValue(child["type"])) != "function" {
+			if !ok || !responsesNamespaceCallable(child) {
 				continue
 			}
 			name := strings.TrimSpace(stringValue(child["name"]))
@@ -121,7 +127,7 @@ func FlattenResponsesNamespacesExcept(req map[string]any, preserved map[string]b
 	return names, true, nil
 }
 
-// RestoreResponsesNamespaceCalls restores flattened function calls in a JSON
+// RestoreResponsesNamespaceCalls restores flattened function/custom calls in a JSON
 // Responses payload to the namespace/name identity expected by Codex.
 func RestoreResponsesNamespaceCalls(payload []byte, names map[string]ResponsesNamespaceName) ([]byte, bool, error) {
 	if len(payload) == 0 || len(names) == 0 {
@@ -152,6 +158,11 @@ func namespaceChildren(tool map[string]any) []any {
 	return children
 }
 
+func responsesNamespaceCallable(tool map[string]any) bool {
+	typ := strings.TrimSpace(stringValue(tool["type"]))
+	return typ == "function" || typ == "custom"
+}
+
 func rewriteNamespaceQualifiedCalls(value any, names map[string]ResponsesNamespaceName) {
 	switch typed := value.(type) {
 	case []any:
@@ -159,7 +170,7 @@ func rewriteNamespaceQualifiedCalls(value any, names map[string]ResponsesNamespa
 			rewriteNamespaceQualifiedCalls(item, names)
 		}
 	case map[string]any:
-		if strings.TrimSpace(stringValue(typed["type"])) == "function_call" {
+		if typ := strings.TrimSpace(stringValue(typed["type"])); typ == "function_call" || typ == "custom_tool_call" {
 			rewriteNamespaceQualifiedCall(typed, names)
 		}
 		for _, child := range typed {
@@ -192,7 +203,7 @@ func restoreResponsesNamespaceValue(value any, names map[string]ResponsesNamespa
 			changed = restoreResponsesNamespaceValue(item, names) || changed
 		}
 	case map[string]any:
-		if strings.TrimSpace(stringValue(typed["type"])) == "function_call" {
+		if typ := strings.TrimSpace(stringValue(typed["type"])); typ == "function_call" || typ == "custom_tool_call" {
 			if entry, ok := names[strings.TrimSpace(stringValue(typed["name"]))]; ok {
 				typed["name"] = entry.Name
 				typed["namespace"] = entry.Namespace

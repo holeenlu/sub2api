@@ -82,3 +82,57 @@ func TestOAuthInputInternalMetadataCompatibility(t *testing.T) {
 	require.True(t, ok)
 	require.NotContains(t, input[0], "internal_chat_message_metadata_passthrough")
 }
+
+func TestOAuthUnsupportedOptionsPreserveEffectiveIntent(t *testing.T) {
+	for _, tc := range []struct{ name, body, output string }{
+		{"rejected defaults", `{"top_p":1,"frequency_penalty":0,"presence_penalty":0,"metadata":{},"user":"x","safety_identifier":"s","chat_template_kwargs":{},"input":"hi"}`, `{"input":"hi"}`},
+		{"native limit wins", `{"max_output_tokens":12,"max_completion_tokens":20,"max_tokens":30}`, `{"max_output_tokens":12}`},
+		{"chat limit fills null", `{"max_output_tokens":null,"max_completion_tokens":20,"max_tokens":30}`, `{"max_output_tokens":20}`},
+		{"empty no-ops", `{"truncation":"disabled","stop_sequences":[],"prompt_cache_options":{},"stream_options":{"include_usage":true,"reasoning_summary":"auto"}}`, `{"stream_options":{"reasoning_summary":"auto"}}`},
+		{"meaningful options and nested content", `{"truncation":"auto","stop_sequences":["STOP"],"prompt_cache_options":{"retention":"24h"},"input":[{"role":"user","content":"metadata","metadata":{"keep":true}}],"future":9007199254740993}`, `{"truncation":"auto","stop_sequences":["STOP"],"prompt_cache_options":{"retention":"24h"},"input":[{"role":"user","content":"metadata","metadata":{"keep":true}}],"future":9007199254740993}`},
+		{"escaped option", `{"top_\u0070":1,"max_tokens":5}`, `{"max_output_tokens":5}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, _, err := normalizeOpenAIOAuthResponsesCompatibilityBody([]byte(tc.body))
+			require.NoError(t, err)
+			require.JSONEq(t, tc.output, string(out))
+			if gjson.GetBytes(out, "future").Exists() {
+				require.Equal(t, "9007199254740993", gjson.GetBytes(out, "future").Raw)
+			}
+			var fields map[string]any
+			require.NoError(t, json.Unmarshal(out, &fields))
+			require.False(t, normalizeOpenAIOAuthResponsesCompatibilityFields(fields))
+			second, changed, err := normalizeOpenAIOAuthResponsesCompatibilityBody(out)
+			require.NoError(t, err)
+			require.False(t, changed)
+			require.Equal(t, string(out), string(second))
+		})
+	}
+}
+
+func TestOAuthEffectivePipelineKeepsSupportedIntent(t *testing.T) {
+	body := []byte(`{"model":"gpt-6.1-terra","input":[{"role":"user","content":"hello"}],"max_output_tokens":77,"max_tokens":120,"truncation":"auto","stop_sequences":["STOP"],"stream_options":{"include_usage":true,"reasoning_summary":"auto"}}`)
+	for _, mode := range []string{"raw", "map"} {
+		t.Run(mode, func(t *testing.T) {
+			var out []byte
+			if mode == "raw" {
+				var err error
+				out, _, err = normalizeOpenAIPassthroughOAuthBody(body, false)
+				require.NoError(t, err)
+			} else {
+				var fields map[string]any
+				require.NoError(t, json.Unmarshal(body, &fields))
+				applyCodexOAuthTransform(fields, false, false)
+				var err error
+				out, err = json.Marshal(fields)
+				require.NoError(t, err)
+			}
+			require.Equal(t, int64(77), gjson.GetBytes(out, "max_output_tokens").Int())
+			require.False(t, gjson.GetBytes(out, "max_tokens").Exists())
+			require.Equal(t, "auto", gjson.GetBytes(out, "truncation").String())
+			require.Equal(t, "STOP", gjson.GetBytes(out, "stop_sequences.0").String())
+			require.False(t, gjson.GetBytes(out, "stream_options.include_usage").Exists())
+			require.Equal(t, "auto", gjson.GetBytes(out, "stream_options.reasoning_summary").String())
+		})
+	}
+}

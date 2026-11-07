@@ -1,0 +1,2024 @@
+{
+  "schema_version": 1,
+  "source_repository": "https://github.com/ranxi2001/sub2api",
+  "source_branch": "production",
+  "source_commit": "1a74ed0e3cc6cf6923ba4747e8147decf15556b0",
+  "latest_observed_commit": "1777b5c4f8953db1d6d1d1b006a7153f59dd0a96",
+  "target_base": "128e28cd7728772bcb7a763450616ec4bdefb023",
+  "date": "2026-10-12",
+  "implementation_commit": "The commit that first adds this manifest (git log --diff-filter=A -- docs/bps/integration-state.json).",
+  "scope": "Shared BPS protocol integration plus explicit client WebSocket bridge, not a merge of the source branch.",
+  "requirements": [
+    "BPS-01",
+    "BPS-02",
+    "BPS-04",
+    "BPS-05",
+    "BPS-06",
+    "BPS-07",
+    "BPS-08",
+    "BPS-09",
+    "BPS-10",
+    "BPS-11",
+    "BPS-12",
+    "BPS-13",
+    "BPS-14",
+    "BPS-16",
+    "BPS-18"
+  ],
+  "partial_requirements": {
+    "BPS-15": "ordinary proxy transport and isolated H2/H1 feedback only"
+  },
+  "excluded": [
+    "BPS-03 automatic credential worker",
+    "BPS-15 Mihomo managed proxy pool",
+    "BPS-17 automatic quality operations",
+    "tickets/cookies",
+    "extra admission/RPM",
+    "independent model catalog governance",
+    "Prism and unrelated operations"
+  ],
+  "local_adaptations": [
+    "Existing WS ingress owner bridges BPS SSE with full history and cancellation ownership",
+    "Private encrypted Excel grants with CAS and existing admin authorization",
+    "No automatic ciphertext removal/replay",
+    "Shared first-output and attempt budgets; actual usage only",
+    "Global BPS, images and encrypted-message omission default off",
+    "Explicit unsupported hosted-tool policy",
+    "Native IP, image egress, WS ownership, Grok, Fable, branding and migration safeguards preserved",
+    "Joined conversion usage snapshot survives withheld repair EOF and cancellation",
+    "BPS model-aware WS admission, refresh, independent sessions and real response lineage",
+    "Messages and Chat compatibility reuse Forward and apicompat; failover retains actual compact cost",
+    "Model permission rejection and replay-safe transient failures reuse the existing account-switch loop; committed output is never replayed",
+    "Model cooldown also filters cached discovery and pinned WS forwarding without penalizing native account health",
+    "Original in-band error fields are retained separately and redacted through existing HTTP Ops diagnostics; failure usage remains billable",
+    "Recoverable BPS terminals preserve the turn deadline; joined diagnostics precede Ops snapshots and follow repair request identity; exhausted streams retain logical failure status",
+    "Exact-first catalog lookup normalizes one host functions prefix consistently across direct, wrapped and repair paths without inferring namespaces",
+    "Local unknown-tool failures reuse pre-freeze Ops snapshots with bounded redacted target and catalog evidence while preserving retry and usage boundaries",
+    "Exact BPS server_is_overloaded and service_unavailable_error identifiers map to 503 and reuse existing safe failover, deadlines, attempt budgets and actual usage accounting",
+    "Complete JSON terminal tails survive late read errors; interrupted BPS streams preserve event sequence and record pre-freeze HTTP identity and bounded stream state without replaying accepted generations",
+    "2026-10-12 ranxi c59fabb39 image admission: gateway middleware only marks public requests; common Forward reserves after BPS account selection. Local HTTP/SSE, per-turn WS, Chat and Messages share the budget. Preserve request-scoped 503/413 diagnostics without fake upstream status or account-health penalty; no new retry loop or configuration.",
+    "2026-10-13 #25584: exact file-ownership failure classification across HTTP/SSE/WS, image compaction and both tool corrections; invalidate only matching gateway attachment IDs in the current credential/session scope for a later explicit request, without replay or scheduling penalties. Preserve original diagnostics and usage. #25587 encrypted-history and new-agent-assignment guards remain intact with WS regression coverage.",
+    "2026-10-13 #25645/#25677: validate and consume completed tool-search call/output history together while preserving discovered client declarations and ordinary tool results. Reject pending/mismatched searches before forwarding; incomplete discoveries never authorize tools. Search history retains no-regeneration and encrypted-assignment boundaries. Keep exact unknown-tool rejection and strengthen catalog guidance; shared JSON/SSE/WS regression coverage, no new execution capability or retry policy.",
+    "2026-10-13 #26318: add bounded, opt-in local file-ownership provenance beside the original sanitized upstream error. Count fresh, reused/shared and unmanaged file references plus inline/remote images in the actual failed generation, compaction or repair request; report successful scoped cache evictions without file IDs, URLs, contents or credentials. Preserve no-replay/account-health boundaries. These diagnostics do not establish the production root cause or repair external file ownership.",
+    "2026-10-14 #26376: BPS HTTP and SSE cyber_policy failures join the native cyber/session-TTL pipeline across Responses, client WS, Chat/Messages, image compaction and tool correction; retain exact-code detection, user exemptions, key/session isolation, redaction and actual usage without replay, account side effects or duplicate billing. No new settings or ingress paths.",
+    "2026-10-14 #26470/#26467: replace the cross-request native attachment-ID cache and shared upload flights with request-local deduplication and the existing global 32-upload bound. Each explicit client request uploads its original message images afresh; no generation replay or account penalty. Preserve legacy reused/invalidated diagnostic counters as zero. Missing tool targets are formatting failures, never unknown-target regeneration; accept exact JSON argument rewrapping and raw command envelopes, reject unverifiable named payloads and changed explicit metadata. Record bounded operation-mismatch evidence through existing Ops snapshots without tool data. Current production logs localize six reused uploads but do not establish the upstream ownership cause or the exact rejected tool operation.",
+    "2026-10-14 #26478: reuse the native named function_call_output-without-call_id classification for standalone external inputs. Lower them in existing BPS message attribution with exact plaintext/image ordering and user authority; no fabricated calls, cache entries or tool privileges. Native attachments, new-turn identity, compaction tails and current encrypted-assignment guards apply. Real call_id outputs still require complete calls or scoped replay data. JSON/SSE/WS and compact regressions reproduce the local index-5 rejection, but the production input item was not supplied.",
+    "2026-10-14 ranxi retained-path update: bounded scheduler Redis pipelines preserve generation fencing, missing-metadata miss and fresh LRU values; Responses no-account diagnosis uses the selected forward model while displaying the client model. No BPS-specific source changes or expanded replay policy.",
+    "2026-10-14 #27195: owner-bound Responses requests may retry one explicitly rate-limited native attachment upload on the same account, credential and proxy, retaining completed parts. Honor Retry-After/existing fallback with a one-to-five-second wait, client cancellation, original turn deadline and shared attempt budget reserving generation. Keep portable-request failover and opaque-context ownership gates, preserve concurrent longer BPS cooldowns, never replay inference or uncertain uploads, and record bounded recovery diagnostics without image/credential content. No new public API or setting; production payload and Retry-After were not available.",
+    "2026-10-14 #27141: retain original raw payload bytes across both raw-marker and ordinary-envelope formatting corrections for declared custom tools and existing eligible code/cmd functions. Keep explicit targets, metadata, schemas, batch identity/order and replay fingerprints unchanged. Raw-marked JSON business fields are literal content, while conflicting targets or broken nested unmarked envelopes cannot be reinterpreted as CUSTOM input. Reuse the existing two-attempt correction path and diagnostics; production before/after payloads were not supplied, so local reproductions do not establish the exact production mismatch.",
+    "2026-10-15 #28237: use the existing bounded transport decoder consistently for unmarked JSON argument objects with fences, prose labels or encoded string layers. Compare exact argument values before any raw binding, for ordinary and raw code/cmd corrections alike; never turn an argument wrapper into executable source or overlook changed metadata. Preserve explicit raw/CUSTOM bytes, named-envelope rejection, catalog/schema/identity checks, replay and two-attempt/account boundaries. Add only structural original-code-shape and corrected-tool-kind evidence to existing private diagnostics. Offline reproductions match raw_payload_changed, but the production build and before/after payloads were not provided.",
+    "2026-10-15: explicitly rejected BPS 429 requests may fall through to the same account's independent native Codex grant before semantic output, using the original portable context, existing execution guards, cancellation/deadline/attempt budgets and usage accounting. Include generation HTTP/in-band 429, attachments, image compaction and cooldown routing; retain Excel-only account failover and bounded nonportable attachment retries. Keep dual-grant accounts schedulable during BPS-only cooldown. Pin native response ownership to the current WS connection/account after fallback. Preserve requested JSON output when Codex requires upstream SSE; probes, opaque context, unsafe execution, tool repair and committed output never gain automatic replay.",
+    "2026-10-15 #29823: preserve owner-bound attachment 429 recovery and native fallback boundaries; expose bounded reasons for skipped or exhausted attachment retries, selected delay source/value, actual retry count and maximum wait. Reuse the native ownership scan to report fixed context field categories and clear them per WS turn. Do not log opaque content or identifiers, change retry/account policy, or infer the production skip reason without Retry-After/configuration/build evidence.",
+    "2026-10-16 #29895: preserve the real provider status, message and detail when logging a frozen WS turn by reusing the HTTP attempt resolver. Keep retry_stopped as diagnostic evidence, preserve final statusless transport and account_auth semantics, and isolate subsequent turns. The reported request already performed one same-owner attachment retry after five seconds; repeated upstream 429 and encrypted_content remain subject to the existing recovery boundary. No retry or account migration policy change.",
+    "2026-10-19 #31791: recover at most eight missing comma/colon separators between whitespace-separated complete JSON tokens in the existing bounded decoder, retaining all keys and values and rejecting duplicates or mixed string/syntax repairs. Compare recovered argument objects before any RAW binding; never execute an undecodable unmarked JSON envelope as code. Distinguish original_payload_unverifiable from changed arguments, retain catalog/schema, batch, replay, usage and two-correction boundaries. Synthetic 3502-byte/offset-3061 and JSON/SSE/WS/Chat regressions reproduce the gap; production payloads were not supplied and missing_separator may also indicate unescaped quotes.",
+    "2026-10-19 #31847: preserve first_output_timeout as semantic 504 across Responses, client WS and Chat, retain the actual BPS HTTP 200 separately, and record retry_stopped/turn_budget when the shared deadline expires. Share the existing gateway-generated terminal provenance key across handler/service and reset it per WS turn; retain safe Chat JSON error code/param. No deadline reset, extra retry, account policy, production setting or upstream call is added. Regressions cover headers and metadata-only stalls, observed usage, client cancellation and subsequent turns. The production upstream stall cause remains unproven.",
+    "2026-10-19 full BPS audit: preserve exact JSON numbers during explicit compact; scope catalog/replay/image and prompt-cache identity to the stable credential namespace without AT refresh churn; inspect joined metered repair usage before any uncertain-stream replay decision; retain separate billing identities for BPS HTTP attempts under the same client correlation. Add real PostgreSQL grant CAS/revocation and real Redis concurrent state tests. No new public API, configuration, migration or upstream request path.",
+    "2026-10-19 #33681: exclude local recovery/protocol-switch events from the existing upstream-attempt resolver while retaining the full diagnostic timeline. Preserve the actual BPS 429 status, detail and failed account when native Codex succeeds; do not manufacture recovered errors when monitoring filters leave only local decisions. Regressions cover HTTP/WS recovery, SLA, next-turn isolation and later statusless transport failures. No scheduling, replay, budget, billing or upstream-request behavior changes.",
+    "2026-10-19 workspace review: retain shared Responses observed-usage settlement, bounded HTTP disconnect drainage and terminal-aware JSON/SSE handling through existing recovery and billing owners. Preserve already-published BPS recovery attribution, WS structural-output diagnostics and Lite search protections; remove only stale local copies during workspace reconciliation. No upstream source baseline, account policy, public interface, configuration or billing ledger is added.",
+    "2026-10-20: user approved bounded unknown-tool continuation adapted from ranxi2001 8c000a3c7204b5034a6ed79c57b12786e2ae5463. Complete verifiable history, one withheld wrapper and no visible output permit one executed:false continuation through the existing same-account repair callback. Reject reused identities, completed operations, bad schema, expanded batches and repeated unknown tools; preserve cancellation, the shared turn budget and all observed usage. Keep compaction_trigger last. Reuse UpstreamFailure trusted local provenance and existing Ops attribution instead of a parallel BridgeFailure protocol. No new public endpoint, configuration or migration. latest_observed_commit records reviewed source availability, not wholesale adoption; selection evidence is in upstream-changes.md.",
+    "2026-10-22 #57778: encrypted-message preflight errors point to the existing per-account historical omission option and report its effective boolean through the common HTTP/SSE/WS error path, retaining the precise param without payloads. This is diagnostic guidance, not decryption or automatic omission/failover; current encrypted assignments still require plaintext. Regressions cover disabled/default/enabled old-history continuation and current-assignment rejection before any upstream submission.",
+    "2026-10-25 six-error review: normalize HTTP200 context failures for SSE/WS; preserve encrypted messages via authorized same-account native routing before BPS send; align high-effort aliases and timeout provenance; use remaining existing tool correction budget only for verifiable argument drift; bound managed-original ownership refresh to one same-account retry without usage/output/opaque context; retain BPS-first 429 pool recovery and reuse safe pre-generation recovery for explicit attachment transient HTTP 5xx. Offline tests only, no provider success claim."
+  ],
+  "files": [
+    {
+      "path": "backend/cmd/server/wire.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "43f38bc74650b1fb751d0abde8bd35147e81d69f",
+      "local_sha256": "ee02f5c04004b77f5009d267af1fd2de67c03a71d5f0e736e2d82177e77bce65"
+    },
+    {
+      "path": "backend/cmd/server/wire_gen.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "60171cbceb6e729fa5e53125c86e0d73affa1411",
+      "local_sha256": "b7ec7fc2506b05abc67ba55eaee6bcf984ce2c10f4a84e1f4efb2b294bc8a14e"
+    },
+    {
+      "path": "backend/go.mod",
+      "classification": "local-adaptation",
+      "source_blob_oid": "aa337889c9e5881945b373c06a3910dcb95188da",
+      "local_sha256": "3a859cf9a31c4f0ab7c8d1001c2a9c3b106507f6aeef2e1443f5145552f8dfba"
+    },
+    {
+      "path": "backend/go.sum",
+      "classification": "local-adaptation",
+      "source_blob_oid": "9233a681767f425816bb5ac898a00cd2b4e79bf7",
+      "local_sha256": "c6f1aec2d56162b16382a5089ae0b083e867f24bca02cfb7ecf3bfd679cd7b28"
+    },
+    {
+      "path": "backend/internal/authz/routes.go",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "8e72e164639329a6b7bc401b73dada3016fda5c72697173f5a80029b7964d631"
+    },
+    {
+      "path": "backend/internal/config/config.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "955cee41baae73c52fbe8ec70c0a94518de62825",
+      "local_sha256": "da85f311bf071e6a79bb4fbe00e1ce1169adfd7731c80c682e1f1844d0b45c94"
+    },
+    {
+      "path": "backend/internal/handler/admin/openai_excel_oauth_handler.go",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "3a3afb5750771607e51f97e636b6ef247c1508c9ebeaa23b9705c72700f1323c"
+    },
+    {
+      "path": "backend/internal/handler/admin/openai_oauth_handler.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "1b40b04b8f8da7549b5897719112e9760e177f9f",
+      "local_sha256": "bac5b13b85e4b66d15352516638ba818b5b978d8a4fc30bdda75734de542f046"
+    },
+    {
+      "path": "backend/internal/handler/admin/setting_handler.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "7baf330470f35ddf3ac456d3f304b33062d673df",
+      "local_sha256": "667727d6583444016be9d1d35c49a4dbf5666332311d667cf41aeb5978574c72"
+    },
+    {
+      "path": "backend/internal/handler/admin/setting_handler_excel_bps_defaults.go",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "8512de94b0d5375034e4d2252ea7df7e7de6159c3dc5a1506f1261f7e97d6853"
+    },
+    {
+      "path": "backend/internal/handler/admin/setting_handler_excel_bps_defaults_test.go",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "9426c70589afcb1438d43ba2c10178f4775f9af139c3c6e04dab947fdcd55f0b"
+    },
+    {
+      "path": "backend/internal/handler/admin/setting_handler_update.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "63567c811d8e314081e872e5a7d1159c7bda79fd",
+      "local_sha256": "3839b82347103a1a68b2ba19ecf8921a202c217b68d38ff41cd71124bddaa73b"
+    },
+    {
+      "path": "backend/internal/handler/dto/settings.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "a5a5239f5f73b1ccb8f8024af0514d24532be09c",
+      "local_sha256": "9212f15af375ede11b809bf49d058676f064148db5b35bd63b96138fa54e9e95"
+    },
+    {
+      "path": "backend/internal/handler/openai_chat_completions.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "788895657f00ffb12adee2240198fff5c3d91d58",
+      "local_sha256": "0c85189b78c97d84e230aaeda2f184c3b0e915336ac34660288fa40de83e73bc"
+    },
+    {
+      "path": "backend/internal/handler/openai_excel_bps_cyber_test.go",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "e2b48525959d93066ca739b74cca3c554324e253826540c3e77aa425b0faf1d0"
+    },
+    {
+      "path": "backend/internal/handler/openai_excel_bps_error_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "be7a41e5c6464cf979aa539dee2f49f29229c7f6",
+      "local_sha256": "0ebe00bf59e36a94f6af0e24a8f66da14fe2507ed972691dade1451717e599f1"
+    },
+    {
+      "path": "backend/internal/handler/openai_excel_bps_failover_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "dba4b6f65fdc817d6b094fcc45a620a6fe4e8a5c",
+      "local_sha256": "ca9b6137c783b083c34cfd593f20391ba5efc64456d94614ab3e21fbb4435df1"
+    },
+    {
+      "path": "backend/internal/handler/openai_excel_bps_image.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "0649377031143ce06045bf41aa43ccf70fd861ca",
+      "local_sha256": "e12c5976de0582ff55807ecb809bc7cd336d1638ce03361f115ceb0fb5b41b32"
+    },
+    {
+      "path": "backend/internal/handler/openai_excel_bps_image_admission_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "3fae05c9b3ee18c1dd273484f50020c262909186",
+      "local_sha256": "cbe4c2aa716eca443566c8d0a4ef725a708e14dd43e21b83147cda2329991189",
+      "source_commit": "c59fabb39b88c1e2e1305f9813806a74fc1b2ba3"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "c90c6546d62dbd311660b549427918429e63c308",
+      "local_sha256": "f67a21bcffafcee6917b3e646852457d062aa810dc691bff18d297033b645ccb",
+      "source_commit": "84f7e99cc509a43a8c2dd4c67fb01fa5aa8ff318"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "778c66e78986d800258c714250ecea82242d3c75",
+      "local_sha256": "1f50acef66028e8e9f281da238a8778caec9cc0949f1da7eff8fed1bac41e16d"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_ws_group_pricing_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "7b1a581532f67ddf7c727b2c15d9f33bc846e259",
+      "local_sha256": "9d866b6b359d947220cd68b88835435fdbfa7fb90ecf17c274be4656d007d837"
+    },
+    {
+      "path": "backend/internal/handler/openai_images.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "c073b1669b41181a5fa96330a513b378c715f4ed",
+      "local_sha256": "2d9705a25067e8c359d79b03d97e755c834bdb7f765350bfaa176bd6fb1d6713"
+    },
+    {
+      "path": "backend/internal/handler/ops_error_logger.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": null,
+      "local_sha256": "2a4a935fec04d809f8a68026d4d55dfbe460e3a652202ef4bda49cdf945faa2a"
+    },
+    {
+      "path": "backend/internal/handler/ops_error_logger_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": null,
+      "local_sha256": "d223e398bb44fa9a9c09b44efdbf53bff5541d12c15054a3cd91234de4de881c"
+    },
+    {
+      "path": "backend/internal/pkg/httputil/body.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "0fe2f3737fe0b12fb8583e655b7a1d56d716b4ef",
+      "local_sha256": "5c67f87b4a9008d608023f49d9168a142173cd0439a6bc26854d7eb514d3f0c8"
+    },
+    {
+      "path": "backend/internal/pkg/openai/constants.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "1a60a9a7dd31ca6416979d9d9b57bbbb3ba480f9",
+      "local_sha256": "afbfe621717af5be8fa1c47b263a56144f20af1ef735e4d5e71c1875d5e1812e"
+    },
+    {
+      "path": "backend/internal/pkg/openai/oauth.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "56d1b889c6d7ebc3d7ea173e9622c623093c3ab6",
+      "local_sha256": "7d13b0f109b34397fd54fcca4e8b83ace4563830eeaeafeb038be2cb26f23d85"
+    },
+    {
+      "path": "backend/internal/pkg/openai/responses_input.go",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "4e6f75f43b23549c74aa56f3f3a22bf90b620488ac4ce3cb0ad474d758c3e291"
+    },
+    {
+      "path": "backend/internal/repository/account_repo.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "080e60270a04365cb78c28481989ef23a0c9a632",
+      "local_sha256": "2d431efef47f83bc003456e8ed8fcb928d3bf211aad20fed2e52a6f585a5df63"
+    },
+    {
+      "path": "backend/internal/repository/account_repo_excel_bps.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "1d2f438cdd27bbaa3078b5b64ef329fe67707042",
+      "local_sha256": "dba5409e261bd5317af016a6c7f07b6ebe49f43dd2f08df3e2339ebcf082590c"
+    },
+    {
+      "path": "backend/internal/repository/account_repo_excel_bps_auto_disable_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "76ca1892eeb2a1ed3728633e981e1703cd12f48a",
+      "local_sha256": "382fd1e9ae3c3df140321b33f8efca8a41272a7c38c1f6bc2c0d422d6a8aa583"
+    },
+    {
+      "path": "backend/internal/repository/account_repo_excel_bps_groups.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "9400a4108e2078a32892b12b78cb97de542c4d57",
+      "local_sha256": "92aa9ef549649717517541334d9982b59193db5158d8d8a93db23d1245a6f993"
+    },
+    {
+      "path": "backend/internal/repository/account_repo_excel_bps_groups_integration_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "50c3265283068b07cc7e4888a927323447553a7c",
+      "local_sha256": "2d596c4c656b9125d30450c09446849fc75091d26d10a8371ef98663eb48f842"
+    },
+    {
+      "path": "backend/internal/repository/account_repo_excel_bps_groups_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "ef57f67326e3899e0308d89604d015e77b624d19",
+      "local_sha256": "620973f5e84304ecacdb5f7d335ee94f7472d9727d95e281cbec306b763fc3a9"
+    },
+    {
+      "path": "backend/internal/repository/account_repo_excel_bps_integration_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "b8fe7c5525d631acf8aaaf453bfc5801acc6ce2b",
+      "local_sha256": "a5c15a32cd2e7e9720fb2448a6d1e4bebe1810fa287535d17e8be1d203df126d"
+    },
+    {
+      "path": "backend/internal/repository/account_repo_excel_bps_recovery.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "b0bd5f8774bc4dde2c7732a072bc67ac1458c1f4",
+      "local_sha256": "cdab7f4c87b3b7a9553780cf7591d0f16d79d795c56c816adc5681e75e1751e4"
+    },
+    {
+      "path": "backend/internal/repository/account_repo_excel_bps_recovery_integration_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "6cac068e7cf8de69bd286d396466dba7e40f7dc7",
+      "local_sha256": "f5e760b3f77fbfe6800e72ad8c37ff3ada66ce2562a5935f168ffa5b11e81182"
+    },
+    {
+      "path": "backend/internal/repository/account_repo_excel_bps_settings.go",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "bf7a632d1197459c767bb7f7f4b67e35fe128cefac716c330b14eced4b733293"
+    },
+    {
+      "path": "backend/internal/repository/account_repo_excel_bps_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "a9f6eb53c91630a71b5b159bdf8c217af103fe9f",
+      "local_sha256": "768f56519d9d038c6ef27fcdc4d4559101227bd1e78e384b3e36d6b8c84077e2"
+    },
+    {
+      "path": "backend/internal/repository/account_repo_excel_credentials.go",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "456ef160f10a14c19c71df51f7db8a82f9d4575cbebb4d708fe167cfb27363ae"
+    },
+    {
+      "path": "backend/internal/repository/account_repo_excel_credentials_test.go",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "cb914e6ea82cf7cd53bcdf75767ba727514f661d8cb1cc881e9d939944390870"
+    },
+    {
+      "path": "backend/internal/repository/account_repo_opencode_go_usage_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "e203e1673dd204c7f69c8e7455091e11afd61964",
+      "local_sha256": "971cc4eb3baaf011f9ef5a19ab5a74c5c8130497e7dfd7fbf4c1162e085f81c2"
+    },
+    {
+      "path": "backend/internal/repository/account_repo_upstream_billing_probe_update_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "5e640d2147ae79b6f3886eb481c4b8fd42bb82e1",
+      "local_sha256": "6fa80753a25ed063a6dc732f60db37dd577b90bcd7e31aa609832d1787d59972"
+    },
+    {
+      "path": "backend/internal/repository/excel_bps_image_policy_cache.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "cd7b5121c6a5d92f61248a616451c86133f57676",
+      "local_sha256": "cc596c8586b4c39cf7f4e400e864bfb585d06f5ce00de28fc0cb4251f8ea0248"
+    },
+    {
+      "path": "backend/internal/repository/excel_bps_image_policy_cache_integration_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "3e1a048d5779c5c4a1fe17225e553de265cdc6d0",
+      "local_sha256": "78dccb9b1972448b6da901eeee6fbf87bbd2e049eeae2107fc1132309ce72fad"
+    },
+    {
+      "path": "backend/internal/repository/excel_bps_image_policy_cache_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "d13545b203df7826b2e69995f5ee34cea9f3e114",
+      "local_sha256": "2ecdda0002313745b41e7531cc001c166a28cf4bb207f29dd2acab2d2b04f129"
+    },
+    {
+      "path": "backend/internal/repository/gateway_cache_bps_state.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "5f2dc0cc5bcee375058a776a2983d537dfece880",
+      "local_sha256": "add450db9ebf8c5e95e84a5ed9ed23e9354425286f63e5d25c5e6ace0a1f078a"
+    },
+    {
+      "path": "backend/internal/repository/gateway_cache_bps_state_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "267917557cc6a2a01d87c1926b76473736759f1a",
+      "local_sha256": "77ffc9df951d2a5d4b2ebc49a251e8e94c77aa1383ceeb3a00350b6cddb6b45b"
+    },
+    {
+      "path": "backend/internal/repository/http_upstream.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "d8edb0ac36aded8a4abaa62ad168ff8602650c4e",
+      "local_sha256": "d0a91a648f379cf6a0198b9b59abbbd6bc72ad5880c71a7fd28434830e941bf7"
+    },
+    {
+      "path": "backend/internal/repository/http_upstream_bps.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "2ce10989b9fb899c9436e8dd62a7ceca752d966f",
+      "local_sha256": "6122f11be2d130436bd2e963c18fbbbb4c08d3bb778fbbc26c3fa332143ba04f"
+    },
+    {
+      "path": "backend/internal/repository/http_upstream_bps_eof_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "7373813984676bb72feb4c33362fdd21ee754f3d",
+      "local_sha256": "744ac76aacd82fbdd2bce543c700f48207f692ab7e4760584a326f4bff4b1279"
+    },
+    {
+      "path": "backend/internal/repository/http_upstream_bps_policy_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "76f21ccda35a514a95d89025a118a4473d9f0772",
+      "local_sha256": "be34ef6ac65e8eabcb46a23cad837fab9d333584bb51b02106630ec1beb1328d"
+    },
+    {
+      "path": "backend/internal/repository/scheduler_cache.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "5f7c1c2dcd63c345c6fafe1c9b459e1859cb4730",
+      "local_sha256": "7331a3d9b650499889179eabe454ae9f3c365da3e808894177eabd9e84e8fd84",
+      "source_commit": "a1221af4f8a4a09c716c0752dccef29ce447050a"
+    },
+    {
+      "path": "backend/internal/server/api_contract_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "a9384a4325a65992fa18f0df493a18922337ca2e",
+      "local_sha256": "40b8823d4accfbed66bfa50e657c0567770ea66b0b237ce4606cf74616487351"
+    },
+    {
+      "path": "backend/internal/server/middleware/excel_bps_image_admission.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "01f928613f40c5f485e28c7e74fe3714123f2a9c",
+      "local_sha256": "72c6c6d33cfed0fcb556dded8967cc85ab7324a43592b04ae55b822d3a30974a",
+      "source_commit": "c59fabb39b88c1e2e1305f9813806a74fc1b2ba3"
+    },
+    {
+      "path": "backend/internal/server/middleware/excel_bps_image_admission_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "51c710f5f6d867d7943419aa0d4d799ccdf7a399",
+      "local_sha256": "62d5c15182c0d4416e90d87e379b5d65e89696d366754f3da9c23762a6ce6823",
+      "source_commit": "c59fabb39b88c1e2e1305f9813806a74fc1b2ba3"
+    },
+    {
+      "path": "backend/internal/server/middleware/request_logger.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "e96385daff339fce74d8bb92deae82bd8634eef8",
+      "local_sha256": "f881b2b354ecdb77a7f3f571ab466c55985b4adeb4f81fd82c55afc38a1069a9"
+    },
+    {
+      "path": "backend/internal/server/routes/admin.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "a4caa18385735d5b9b09fcbc09724d5657fee787",
+      "local_sha256": "8fc29134c85fd7b4e4acb51cedb15b83794eed7d44481075fd4a071efbe7ed88"
+    },
+    {
+      "path": "backend/internal/server/routes/excel_bps_image_admission_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "e1b1d8aad24b4196f414ba8f1db7e3016d709b62",
+      "local_sha256": "030d5c4426e10ccd73170db50231e8dde970960b28597cd811803fd91c8802d7",
+      "source_commit": "c59fabb39b88c1e2e1305f9813806a74fc1b2ba3"
+    },
+    {
+      "path": "backend/internal/server/routes/gateway.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "d26e26ffdfc059284113635ded9ff31c4fd8a40a",
+      "local_sha256": "7fa8714a0f3c366e7ac670eef93cab46d9c132ee582a391029dc011793e2a560",
+      "source_commit": "c59fabb39b88c1e2e1305f9813806a74fc1b2ba3"
+    },
+    {
+      "path": "backend/internal/server/routes/gateway_model_allowlist_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "156333bf48becc9fa155269e0bf02eeeea5ef790",
+      "local_sha256": "cae5aa5454b7ae4743929dd2849fa0964c1232191af3d99f0fc9aecf7b2febcf"
+    },
+    {
+      "path": "backend/internal/service/account.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "b64aa2fd049ad668698120e9eca5eadf88c09448",
+      "local_sha256": "7444d930f5db7152c2479b9c829d0515b9236f208a90ebb01d5b51ef59897e9a"
+    },
+    {
+      "path": "backend/internal/service/account_excel_bps_403_marker.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "55236f9639179ecc4e74e59e6e8b9d17e2d4e20e",
+      "local_sha256": "88860502f959b1ccd573605c7f864e9bc7696242aa83ba703109fa9892120a7a"
+    },
+    {
+      "path": "backend/internal/service/account_excel_bps_403_marker_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "bb4237cf9496cbe25c22a846ef49d4f573051ff9",
+      "local_sha256": "c5da4a1253c4e5de93821b9d4e653bfa5d834b856c17af3322b5027f15d981df"
+    },
+    {
+      "path": "backend/internal/service/account_excel_bps_groups.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "72dafddb8e396e5c23bdc0299f90b90cb493f13f",
+      "local_sha256": "40f2fd5abed4378f60739b7f8a762b279d5d34cd70aa0eb41d0758a78256f3ec"
+    },
+    {
+      "path": "backend/internal/service/account_excel_bps_recovery_settings.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "81b820ea9a49be38270f4eeff254cd24c85b68d6",
+      "local_sha256": "3cca079bcb56ae339948bca692bac543b861205b1dbef708c4896b93037bc4dc"
+    },
+    {
+      "path": "backend/internal/service/account_excel_bps_recovery_settings_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "1083068c78f882e6949f609f8a064ef69b29a7e9",
+      "local_sha256": "1a3623c2eafd63538d47006330109f234b65868047ae8ef629850f53ece40695"
+    },
+    {
+      "path": "backend/internal/service/account_excel_bps_settings.go",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "14e675cae4db4003e02c8c7edd2c5a719b552f6ba881dadc2483e28aef74f447"
+    },
+    {
+      "path": "backend/internal/service/account_excel_bps_tools.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "ea450df12d840fd1740da60c71ced909f6b5afe5",
+      "local_sha256": "b31f2f9d2345fa1599d05da22df6d2c329f30633f5c76dea0d313886315588ba"
+    },
+    {
+      "path": "backend/internal/service/account_test_bps_evidence.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "6503ee2ab3e8002d397693e9ba78c8688b145ea9",
+      "local_sha256": "d6d50b746d6f51f2284ad23ca2edaf240e34f1fdb4cdaf35b360fd837c570d6f"
+    },
+    {
+      "path": "backend/internal/service/account_test_bps_evidence_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "474f30a2425c3b4a0a549c51f4b45c76f4674431",
+      "local_sha256": "1e41426de3bc0773ad07bba6aaac197885d5a3a500ce7ef963065b6278e4d318"
+    },
+    {
+      "path": "backend/internal/service/account_test_service.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "63aff5e7961494cc405cbf189ca184dddafd1c3c",
+      "local_sha256": "e210a8b788b5b046cac08bc46a4e2c28dbfd9d477961724ae69d04519e856c63"
+    },
+    {
+      "path": "backend/internal/service/account_test_service_bps_probe.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "624680b5fcb55898b25b3a21ee433fcf00da9e87",
+      "local_sha256": "9d22db2aa56880e39ade471b187b1f998e8a22cd6e3c1b2f3f1b08b3deba304b"
+    },
+    {
+      "path": "backend/internal/service/account_test_service_bps_probe_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "adeb1fe88addd3513fe758398a50f65d010fa784",
+      "local_sha256": "385c57cda72b5b8d4c7559bed176d56cde1a2dd9ea4f897c98a84fab1350753b"
+    },
+    {
+      "path": "backend/internal/service/account_test_service_excel_bps_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "1a4bdec700d71a84fe4ee8c655b9d68e2d31c39c",
+      "local_sha256": "72a68449b5430247f0970e4fa5310f55b715022aaba7c1f74bbae0cc1d555d4d"
+    },
+    {
+      "path": "backend/internal/service/admin_account.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "5169af8a07fcf56f7cf870361b3c72625a3169bb",
+      "local_sha256": "25ddeffcc9d55701432c6b4f845acad93639c50e42453097f608a71d35d22180"
+    },
+    {
+      "path": "backend/internal/service/basispoints/NOTICE.md",
+      "classification": "local-adaptation",
+      "source_blob_oid": "a036224d150f62d545f52c42efdb9695e1c1e5e8",
+      "local_sha256": "99523ebbb4c914467fad04b83351a78206608214d16edf153f7259d37512051b"
+    },
+    {
+      "path": "backend/internal/service/basispoints/README.md",
+      "classification": "local-adaptation",
+      "source_blob_oid": "979819a9eae09440854297a1f493152268c77a74",
+      "local_sha256": "3e160e878ca0d78449b93e2b8ee140f2af44c2efc019e383b75febfcc5c320d8"
+    },
+    {
+      "path": "backend/internal/service/basispoints/agent_assignment.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "6bdfc654411921418e0da3b6ac9556b46e268e7c",
+      "local_sha256": "589ffdbcdce6a81054070a6ea3fea8ed5f0c033c1ba66221d2bbf6f6278baf8c"
+    },
+    {
+      "path": "backend/internal/service/basispoints/agent_assignment_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "663c7d3ccd0abb6dd3769517a9530d2ff661b2ae",
+      "local_sha256": "2a486a677d011c368b92cb7004e08566451fbf24c5565923ea6c5058ebe6d468"
+    },
+    {
+      "path": "backend/internal/service/basispoints/agent_message_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "4d566304e9780e540f50c5fecb4e6ec32d436398",
+      "local_sha256": "aa3c5d0d366bb1bd22d85bb93325337ed6f067d04352a474ac378b9aaaeffa0b"
+    },
+    {
+      "path": "backend/internal/service/basispoints/attachments.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "aa7139ad423cc67fd1351652b0034ca9608e0562",
+      "local_sha256": "dc58352d518f460871fb861c2a30f1847e589c2368f6298c5678548097eadaef"
+    },
+    {
+      "path": "backend/internal/service/basispoints/attachments_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "02ada8474e19915b9d680cc4b75bb5e5755b4153",
+      "local_sha256": "f38893ca960b045df50872d2baef0d11ed71070ba8c62f5974fc44ddb0ad027e"
+    },
+    {
+      "path": "backend/internal/service/basispoints/basispoints_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "8d4fba70f8da81e0052e24a1ac4fadd34a425612",
+      "local_sha256": "441cbf7dcf48dcf7e66826978c1f9ff3e9650283270a7f9dbece9e4c50c5841c"
+    },
+    {
+      "path": "backend/internal/service/basispoints/catalog.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "a1b0347620cdde8f309711b6319a104d22226d18",
+      "local_sha256": "e0c68f990b9687c5dc206da565cb143684f505b64ff5f4115994b5d9291d574b"
+    },
+    {
+      "path": "backend/internal/service/basispoints/catalog_cache.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "25b55763785e248eee03344b8ab5ea550d21fa42",
+      "local_sha256": "9ed4b2739aaa5d118d72bcc8e67fb8324b7b01b474fb66da1149d41e5ebf29b8"
+    },
+    {
+      "path": "backend/internal/service/basispoints/catalog_compact_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "2e1f299863138a32788228effd656f9fa38b0e2d",
+      "local_sha256": "432adb141dc27a5d1a30e54a48d6e0e4d51221ba6c7c1da4951cdb2075be6442"
+    },
+    {
+      "path": "backend/internal/service/basispoints/catalog_items.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "6fe9eef0acfd7c942595c5e2ad4ca4e8d457108e",
+      "local_sha256": "f1756613a3787e91a91307d1f9560ee92ea2ee0a26b270444611386c06f912c3"
+    },
+    {
+      "path": "backend/internal/service/basispoints/catalog_items_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "a71650e345ac880f9fa768964b5d2ae68572895a",
+      "local_sha256": "f513b39228bf5098ff2d419711d7bd75c78de333da4975e4399380abb8c46ffa"
+    },
+    {
+      "path": "backend/internal/service/basispoints/catalog_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "e3bddca05fce28db7edebd4823b0e2d15aaefbc4",
+      "local_sha256": "71ba1a4651ad7d491c778c6e6cb19a7070ee0a4bc26917b741e75636899e450b"
+    },
+    {
+      "path": "backend/internal/service/basispoints/content.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "c6dcd77d7b5801adfbb905c4493266a5385fdfcf",
+      "local_sha256": "c8b95558000face07c692bb08f484179c72099d26f46f86bfe8f0ccfc024a40a"
+    },
+    {
+      "path": "backend/internal/service/basispoints/content_diagnostics_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "0702f33f79a87603901b901584cc7f2ef55814ed",
+      "local_sha256": "8efdc88ab10ab427ef691547e4c96de55f2fb9eeebb4161035eae5d4627d573f"
+    },
+    {
+      "path": "backend/internal/service/basispoints/content_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "c419c2701a04aa1d8f926d66e81d7dc24e2bbf6d",
+      "local_sha256": "4055b09d7bf9d39ed6e6c27bc381139880e285ef7b2b8450577aa752de1893a7"
+    },
+    {
+      "path": "backend/internal/service/basispoints/custom_history_transport_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "23156103587926536eb5ebe336bee1132d2bd4a8",
+      "local_sha256": "0391f51355bff2895574192956137cccd327cb06439994dfc6e0a5f3244f1aa5"
+    },
+    {
+      "path": "backend/internal/service/basispoints/custom_transport.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "7cb9d295c9b07d5906d4aba5e380bace4c676854",
+      "local_sha256": "6ed8175b451a23da5ca263e5afeedd92d7feecab4075ff0975e672414c6735bf"
+    },
+    {
+      "path": "backend/internal/service/basispoints/custom_transport_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "8f35244b7d14c3be1da2bb8f2151f8caa1652fb0",
+      "local_sha256": "f53fb2b2f79e688ea77c8c85cf68d40738a8844f3c6715bcd5da424b2422a85c"
+    },
+    {
+      "path": "backend/internal/service/basispoints/deep_audit_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "be2c58832f4ad21040a1569a71c7350d74398949",
+      "local_sha256": "b17bf55449e525dc8c136315088b9c3f09eb7db10fdc54e05fe17ef4dd6262e1"
+    },
+    {
+      "path": "backend/internal/service/basispoints/deep_envelope_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "e3f4493c418cddadb2df206eb8e8c2f17e889ca1",
+      "local_sha256": "7d4511b569dfa2fe481532b73a0db811d87b46a72d36369d199e027a276697f2"
+    },
+    {
+      "path": "backend/internal/service/basispoints/direct_call_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "090f36aa8a5f937603a96041a901e18b538c1b8a",
+      "local_sha256": "be9e8debb14ccd506825a33e77a1bc00b79c2a63cc6748f0af14430dbf005f02"
+    },
+    {
+      "path": "backend/internal/service/basispoints/encrypted_content.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "af32d24349793f8bd6ed3f4ff1f80bd55a59128e",
+      "local_sha256": "896d445a7f0abed34894b17f8ac57eee578c9530d803f669106568bd2adbd9d5"
+    },
+    {
+      "path": "backend/internal/service/basispoints/encrypted_content_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "ebc37bdd0c286757cd7d79e7e05fe721e0a5c537",
+      "local_sha256": "d80423836ce108febee855dcadb09131158ffc0dc63b8c4c54767a6e70fc4356"
+    },
+    {
+      "path": "backend/internal/service/basispoints/envelope.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "29676d0c859aa7f2a530c18b9c7526d3c7787b57",
+      "local_sha256": "ea5fbce0525ddccbd05e5c2f944d99c0fca7ac7a5c66d06d103da043a863865c"
+    },
+    {
+      "path": "backend/internal/service/basispoints/envelope_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "886aea016930f3e1b1ea9a4d49ab967b975ec67c",
+      "local_sha256": "4afbc099843822e25432a9a922274c483fc500fb1ad6892553ac70dc982d7da5"
+    },
+    {
+      "path": "backend/internal/service/basispoints/function_cmd_transport.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "8610f8f83fd6cfd58ebc183fa766cf47e18e58df",
+      "local_sha256": "9738ca99d57b022324cdab9b972049b3e3fcffee77395a141954d02ee5af7744"
+    },
+    {
+      "path": "backend/internal/service/basispoints/function_cmd_transport_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "dff3a70a5f8d8a5d4b042036a0403f938e66cf8f",
+      "local_sha256": "3588cf2e1bfb28d8b839d6a21f324940b4c107f88a96f2b26879a5ce77cf43fb"
+    },
+    {
+      "path": "backend/internal/service/basispoints/function_code_transport.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "962b4415fc190cab71b8bf71a1dec02b555ce7a2",
+      "local_sha256": "bb2b60e4d1e083b764dd2d360fb69a8b45934d096bdb770c8cd3c9b7303b2ae8"
+    },
+    {
+      "path": "backend/internal/service/basispoints/function_code_transport_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "dd8d3803bdc4a0e971e89aba32fc015504694bad",
+      "local_sha256": "f6296e41c39be34567545367690ccbe3a91c442cd62f1576f23f70554a970ffd"
+    },
+    {
+      "path": "backend/internal/service/basispoints/history_collision_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "be1f5f6f84cbb6a5b09537f06cbffbfbb46b9313",
+      "local_sha256": "65ef9109ed09033fb8a80ff0a0a03056b95637d6ac4392fd26eaf1ea7b4e17d2"
+    },
+    {
+      "path": "backend/internal/service/basispoints/history_message_id_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "0cb31771763eec4aa084c30306c0289980646cfb",
+      "local_sha256": "f212b16366116830f42e2b772593a339ae9d09993a94702faf5a2557b7e08169"
+    },
+    {
+      "path": "backend/internal/service/basispoints/history_message_images_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "e63d922ab4e329377032a207de4162a474da47cf",
+      "local_sha256": "54101c99a1d891aa625d6eec137ac55f9fb34239ae3192a65a971dc46b4b2f91"
+    },
+    {
+      "path": "backend/internal/service/basispoints/history_messages.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "6e4599b5de121bffff77fda097c7503939ce3c9b",
+      "local_sha256": "5f26287ca70a1784158059386ca861541229af03262bc2d6e1faa7b2d662288b"
+    },
+    {
+      "path": "backend/internal/service/basispoints/history_messages_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "8320cc74e67e3a277b069ae98affb02463553d76",
+      "local_sha256": "52fb16836681e5c618f4f422e5d59f3c12a14e193310d10c39fec7b7465de9ac"
+    },
+    {
+      "path": "backend/internal/service/basispoints/history_recovery_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "c8c4286c30956c7a4e89aa12839c3c9870cecdf0",
+      "local_sha256": "ef9b7116f4ee180d79c79f68eb306a1d4e259a078269a47f6a73d439c929246c"
+    },
+    {
+      "path": "backend/internal/service/basispoints/image_capacity.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "8eab2de0ee44a501223c5ae80737ad1d2f789da1",
+      "local_sha256": "4a6e2338e4eb0fad01990408d6447b306194cc838bea2a370370ca819398cc02"
+    },
+    {
+      "path": "backend/internal/service/basispoints/image_file_reference_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "534fb6970d21f732dd4dbf63c6132919c442fd68",
+      "local_sha256": "14d73af1010759fa93186481b7e85a257934a721fd3eccf985e0c136a7328549"
+    },
+    {
+      "path": "backend/internal/service/basispoints/image_policy.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "cdf763382a388c409e9c265db85dfeaa61a66923",
+      "local_sha256": "afae0e00ca8b57799820d76bdf9bd442b6db2587ce97c4d4914ec342116d7912"
+    },
+    {
+      "path": "backend/internal/service/basispoints/image_policy_stream.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "e5cb3f5733b9fa7a920437c4ce9c8e65037337f5",
+      "local_sha256": "088f06929ee744c65fc47b1ba423631b8484d2cfbdc330ac8b134f68694cebaa"
+    },
+    {
+      "path": "backend/internal/service/basispoints/image_policy_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "3ca9cf20a0d31a985c4d1aad3bef302a8d3b9ea1",
+      "local_sha256": "6ab67e4e3e4c6458dcf8bd589a7602a8f999ce700faf4190d3a71fbf3a27ce04"
+    },
+    {
+      "path": "backend/internal/service/basispoints/image_relay.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "4f5ae596bcb8c2d6a44eb5d0913bf30e21c9f949",
+      "local_sha256": "b5e99a84ab0b498678aaa4f44671691fb27c36d1c4756f5b2f90514a314e185f"
+    },
+    {
+      "path": "backend/internal/service/basispoints/image_relay_disk_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "9d0b089eab36565b52c55d0855d83e6948e0f60c",
+      "local_sha256": "7f90aab40b270ffa0c57ba321d049ab08b281496fb911756534a3e71a956d924"
+    },
+    {
+      "path": "backend/internal/service/basispoints/image_relay_limits.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "e765390164a3b1dc6f12b853f14d240b550d3058",
+      "local_sha256": "1b2f461fbc091b6d798d98d535c4b58a79c8533d9cca0c7fa8f61d5d15ae3822"
+    },
+    {
+      "path": "backend/internal/service/basispoints/image_relay_limits_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "a7068a77ae763150d2d9beb52998b61082a469a4",
+      "local_sha256": "4b261fe10d6cb08cbfa43849057b468db3149fb3b93304a6aac031e350ca00c0"
+    },
+    {
+      "path": "backend/internal/service/basispoints/image_relay_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "bc9ee13ba73988c4cf320673730d177a9a4bf083",
+      "local_sha256": "737890c2d462f315430d7f4734b89ad4efaa85453c5efb2afa819aacc3444797"
+    },
+    {
+      "path": "backend/internal/service/basispoints/images.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "84fe45108ac62250e46fb026258cd2e614f8110f",
+      "local_sha256": "37e1ee5e095a32337c46388fadbf5866a77df5c65730a0ba299fee08ea4e9e74"
+    },
+    {
+      "path": "backend/internal/service/basispoints/images_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "51065ca064fc8a4bbdefe2152e561a7ac8e996f5",
+      "local_sha256": "1711d83a9f303f922fed7a47ee03a5d92631109528656b7d8d3381e431dceee8"
+    },
+    {
+      "path": "backend/internal/service/basispoints/invocation_recovery_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "9abab847ff829fda94213ddd91ce98f433584a5a",
+      "local_sha256": "454a045a18f6aa020a9aec22a574d25d508da17e4b9cc12cf0bc2c02235143b1"
+    },
+    {
+      "path": "backend/internal/service/basispoints/persistent_state.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "839d0ad61bfb0cd2b38ae7a567967a907d27b7dc",
+      "local_sha256": "671816322d39422582ef8a7d1852828a07c91afd8e11641d033fa9c214877dff"
+    },
+    {
+      "path": "backend/internal/service/basispoints/plan.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "4f3ed426d03867593f96e5cfb94e29fb3e9a9b70",
+      "local_sha256": "90d133bc793a19959f9ef71c21478798f5d2f520892a07533b9d05a386ae03c2"
+    },
+    {
+      "path": "backend/internal/service/basispoints/plan_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "6d4c6945d7daa35aa2252be4b6adaf8ccf7aa197",
+      "local_sha256": "5923de25f9f42a72d2270b6ceecc37e8249153b94055047769381815d6efb0cd"
+    },
+    {
+      "path": "backend/internal/service/basispoints/progress_timeout.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "2f9cf1bc54742a563ba730af5365ed09f75b435f",
+      "local_sha256": "70b5df85a7d07a924adb19901110f343d3ce9d8edea2ac28ede1e959abd5595a"
+    },
+    {
+      "path": "backend/internal/service/basispoints/progress_timeout_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "ed790ed53a8f571157565f7368e6504730ae4ca9",
+      "local_sha256": "8af83d85dbcc48b34bf3aecca26cdaee4277dca545afe476ebe80689eeb5f493"
+    },
+    {
+      "path": "backend/internal/service/basispoints/protocol_completion_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "028ce42082fe8a0604dd7c1d601f3aef83a62b8f",
+      "local_sha256": "b66577420a4455715f35d9987727dee8dee1d7a91d7edde64aed6c7be3460bba"
+    },
+    {
+      "path": "backend/internal/service/basispoints/raw_custom_call_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "f2e61c7791480d945ae4bdcce8e639e172c8542b",
+      "local_sha256": "85d765c7428ee7b3327586fed4d4dc7d3cd2d587718f529fd44b12453e1ed934"
+    },
+    {
+      "path": "backend/internal/service/basispoints/replay_cache_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "0107320bd6ed648dd2d4b33d7c9d55f07ec7d5f5",
+      "local_sha256": "788686a7aaafa537fc752aeae01d3622bb45c839d657281526fcea8118a31af3"
+    },
+    {
+      "path": "backend/internal/service/basispoints/request.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "58f53cf1056125bb81fc8738da906a949bc413f6",
+      "local_sha256": "82f3e3bc08b45e3171960ba0454b932f5b2c8c85ddfa058843781776569599ef"
+    },
+    {
+      "path": "backend/internal/service/basispoints/request_compatibility_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "89303add75adececf181aa4050159c2afcbf6c9c",
+      "local_sha256": "8570bd7f093b03fc5a2f569a8464517921ce9de1a856e4c86a967abe55a638fb"
+    },
+    {
+      "path": "backend/internal/service/basispoints/route.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "fe516754b1a28466794a945cd15186966d1af963",
+      "local_sha256": "216039295c11b0103a13ebd67c6049506c2c37370e84ac17345b1d5a98e2c4a2"
+    },
+    {
+      "path": "backend/internal/service/basispoints/route_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "44f480112fbb958a0974f6cbfd15861ff24f75a3",
+      "local_sha256": "616968696905aa0327c8ad902475d3ea9beebc2d40b1ce1bad876f64ac1e2541"
+    },
+    {
+      "path": "backend/internal/service/basispoints/stream.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "8a8f6e2abecc7099f82091bc233d8271edf6ae6d",
+      "local_sha256": "df9889f81146326b82be4ce744be8509f354e7659c84e89ac5610f5017d95471"
+    },
+    {
+      "path": "backend/internal/service/basispoints/stream_repair_boundary_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "952e6f82c71d91e8a2f038d1c3006d4664c72f4e",
+      "local_sha256": "4eb73aa76c5505812a4350572243e5b4bc69c1b2010f0e8a381c0b54c05b947c"
+    },
+    {
+      "path": "backend/internal/service/basispoints/structured_output.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "4e31253e3cf3f8f4df9b253f5b246c11a2131c40",
+      "local_sha256": "0d28fca407c58e1488a6de08e82bbe6a84796ab7aa64f40a19024a57409773a8"
+    },
+    {
+      "path": "backend/internal/service/basispoints/structured_output_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "630e42fc0a88779839c76c670a1ad87e9e1a584c",
+      "local_sha256": "51217ff7fe6873044ecf9426b172e06d3d064e4c18a6e448d2c5e7611b4407ee"
+    },
+    {
+      "path": "backend/internal/service/basispoints/terminal_tools_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "5eb53445f77c2b15ca4166ebf422f785f3eb7d56",
+      "local_sha256": "8f6cd3119be1a0e851136b51d0576fc5661211eb95c8884318710217abe76c77"
+    },
+    {
+      "path": "backend/internal/service/basispoints/tool_duplicates_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "5072f4a6563779da94169142202ae1dafe36bbae",
+      "local_sha256": "4d351cd39c7b2c35eec064dbba05624f8542e5b5df79fa3fbcda7c5f88235dd2"
+    },
+    {
+      "path": "backend/internal/service/basispoints/tool_examples.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "45296c09c32751b8565e15ff1a297dc4c7322d08",
+      "local_sha256": "590cd07ba81b1b9dabe97687d72174d47f2f12cb73511dcb54380644ea1f4fba"
+    },
+    {
+      "path": "backend/internal/service/basispoints/tool_examples_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "76aa67864af7c9dd0b970dc94b891c17b48ab7a5",
+      "local_sha256": "bab559153e3b86f4b15c77a91f38a34e476c312829036139632182e72bf7319b"
+    },
+    {
+      "path": "backend/internal/service/basispoints/tool_images.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "427d27913b5e27a32d8e6e54ad067555f0d872a4",
+      "local_sha256": "976276be49872730a7d66c088bab1c4843dc78ede89631c0181bf524764f3367"
+    },
+    {
+      "path": "backend/internal/service/basispoints/tool_images_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "a223291e2e490ab0cf263241e64ac87805b434aa",
+      "local_sha256": "b7dfefb0a64507acdc75266219be6193d42292cfdd7706f42354cccd08d97e36"
+    },
+    {
+      "path": "backend/internal/service/basispoints/tool_repair.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "77fc982c36053fb8d8f0e3044f0061d0d8d0faa3",
+      "local_sha256": "50afab903fd1cdcc88ebfb69cde943b5b9b3a28c54a3c89ac8f6050d16c464b3"
+    },
+    {
+      "path": "backend/internal/service/basispoints/tool_repair_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "5794ac9dc4dfc0208665d9722985a34937da4d82",
+      "local_sha256": "a332bdcf6b0abb1407b13f56fda3f22e80f49f3ca4cc4f3f2789c8af6cde128c"
+    },
+    {
+      "path": "backend/internal/service/basispoints/tool_schema.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "d15f664fd98e3e56cf6eb757078c24bc98fc664f",
+      "local_sha256": "15a155443c3f971cd24d0c7670cbfbc412e504f590d1b7cb5af3b6079190fb0f"
+    },
+    {
+      "path": "backend/internal/service/basispoints/tools.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "34fc226a7bbc633db9053e002a7bee762ef795dc",
+      "local_sha256": "a03249a06b01556c541e201d3629171042864a5ffe725688e8918a27b83b09da"
+    },
+    {
+      "path": "backend/internal/service/basispoints/unknown_tool_repair.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "651b8e0d34a3124eff8402f9a663c9a4d5e6721a",
+      "local_sha256": "46aa1057df3b22e4dc36894859e92f5e9ead3c174ecfc602cb40435956e2a6d2"
+    },
+    {
+      "path": "backend/internal/service/basispoints/upstream_failure.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "6fae9c768a04d085ea4d128a380e9ceaaa2fdb92",
+      "local_sha256": "4c7149a7053da3c03520ce65d28141ea491089f84892fc608b2c5f2a74ae74a1"
+    },
+    {
+      "path": "backend/internal/service/basispoints/upstream_failure_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "625b60112cd145f66789c6e78a8acda788472c24",
+      "local_sha256": "512c01d6e24399b34d3a2f9f640943f07f65441ec9bb14d7e30f48b43fe0147e"
+    },
+    {
+      "path": "backend/internal/service/content_moderation_cyber_test.go",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "74f0160a4e321af4f6675acd6ceaecb13d1db5f75987bb4b1536743b0b5304c6"
+    },
+    {
+      "path": "backend/internal/service/gateway_service.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "354b8e8b65a50174b2b7b3e6bcf9255ea5026aed",
+      "local_sha256": "c8fe968dcc6108b53bb23892e01dfac08521fc66f1ed441a5248efcc792eaf7c",
+      "source_commit": "c59fabb39b88c1e2e1305f9813806a74fc1b2ba3"
+    },
+    {
+      "path": "backend/internal/service/grok_credential_failure.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "cc3b86b49d94102bdae580bb2a445e1c733b58c7",
+      "local_sha256": "d4f7d19ce7df69e4d55e420892e3054b81f65dea61e21726ea91bf7e5648c86c"
+    },
+    {
+      "path": "backend/internal/service/http_upstream_profile.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "886929b6c88508edf9cd90c87a4830b9c0415b9e",
+      "local_sha256": "920777d2569b73059386be1f4d3c8a365899db2d758ebb96e7c097b7396f11b5"
+    },
+    {
+      "path": "backend/internal/service/openai_account_runtime_block_fastpath.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "2adb089e319f3221152278ae5d47907489465fe8",
+      "local_sha256": "823561428a6c1685955b4603570e0ad72a9cf7511bbf6cab75d835ed8ab4c969"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "a802c44f5f990b2cc3791d1fddb8f66c7e7f3a5b",
+      "local_sha256": "20880e908c197f6f0947e9b51b922d235f55e76bc74988b5af2f42ff66ec3f25"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "9d3caede0b77a8acccbbe025c68a7f58125bc7bc",
+      "local_sha256": "17d99d77aec98da1af2a05ab8c916fc22a45ffad1bed5c366d4295999009d97b"
+    },
+    {
+      "path": "backend/internal/service/openai_bulk_account_settings.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "2b64e9e681872e5c0aea55d38ac29c52888f06e3",
+      "local_sha256": "c83ddce3f7af85bb80600ec1c8ba7a721527b093d110556b2560b76c43770cd7"
+    },
+    {
+      "path": "backend/internal/service/openai_codex_model_metadata.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "766e228bf9476ce43df7f0edb5607cf3c8b58697",
+      "local_sha256": "d4351589f4dc5a7bb2644a48a87d3f69c4bcefaf3854cffa25a2d7438391c29f"
+    },
+    {
+      "path": "backend/internal/service/openai_codex_models_service.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "741dbae6845325f2539e125008bdc668cfbe68d7",
+      "local_sha256": "a736c6ff28125d5be9abdafaa24c06d15c0f619db7060d772834647a5294b2cf"
+    },
+    {
+      "path": "backend/internal/service/openai_compact_probe.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "16dfdd972b92c2ee1af90d45fce9868c0e638d48",
+      "local_sha256": "47da25d2bf8957567d4f65f73d911b7a9d79c8ff679c860bad3a73d02aa4735c"
+    },
+    {
+      "path": "backend/internal/service/openai_compact_stream_bridge.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "a9e8c80eae78c8b33c0d2ce45ecd3b861959498d",
+      "local_sha256": "3e06f4b39a92bf92990a676ba0c6ef7e9c88652a1afd6ddc7bc676fdbafc00bd"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "f15efac8e846b4898fe58499a1cb5ae66c23018c",
+      "local_sha256": "feba9cbe397ca1f16963dd11937489e3168fafb641d65a6fda0230b367ad34ac",
+      "source_commit": "c59fabb39b88c1e2e1305f9813806a74fc1b2ba3"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_agent_assignment_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "a2a941c9be3919293c5db40ba99fff503604426f",
+      "local_sha256": "0e9cae1d2461356da2114adc8dc605e8ee69ef403721c7b161f53c90bda000de"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_attachment_diagnostics_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "01efd29d12ea6439455c1214dfaf24ecf8ba724d",
+      "local_sha256": "e88309b9ea2682cb8fb20a259c544f8fff9a1ed3a48b4404d86de70a0777f231"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_attachments.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "e3626008d18880377ad8221f8a894cab8ab76a94",
+      "local_sha256": "70c7ae345563ac6d8461ccbbe3e6fcd3cd8339711d66b92d4dcb6e175fa22df3"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_attachments_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "8bef2a5e3aca36c99caa54b3a3a68734f6a5460f",
+      "local_sha256": "a24a118efd3e42e6ce202a148e89923f3a9f37e54eed39c68c3f5f4e0d8621c6"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_auto_disable_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "497c8850d8fc1353ed61b06d46e254d85ecc988f",
+      "local_sha256": "429694d003c392ad75551d38bd6cf3095b2016bf11a985c10fdbf7861dade510"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_billing_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "3aa1da82cef3bf334cddc4c4a4ecc58ef2fe9021",
+      "local_sha256": "29a66bd7fbe3b899af07b842a34338d761d084a91613178bf24d32ef4cc3038a"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_cancellation.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "334cf2c0b3570f4f1c5f2d835af230aaeb04b1d6",
+      "local_sha256": "2a95a4691bd739f9a92db5d666c569680217a52afcad98482dba9301d681a31d"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_cancellation_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "148304a675d0cf7c81d78d8e1ec58c3f55c503cb",
+      "local_sha256": "6359831c83200661ae47de3953100e748405bfac15b9adb68dee63fede3f2110"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_compat.go",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "a0ce184094dd4890ce0ca903b4b5f5e18a1ee7e616353166c1ad532099172b77"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_compat_test.go",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "08e0ae18a2d8fbe2c8987d533a8192f790cc841576b04422f99a48ad4f6dec5a"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_completion_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "89c0f88edc5fa63d5b5544efe0919c97ccbad16c",
+      "local_sha256": "a318a39151db1c781b5e898daa055970d166389ecbcbae7da02b3ad0cca12991"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_encrypted.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "418806d7f8c39dd3f05d887f05dfa2513c914707",
+      "local_sha256": "8ff9ff80ff9c3c3efb6447f4a053fa148ad0a46e00304ceea6a3e96af5ed13ce"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_encrypted_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "5dd13427485d43767a375de27180d173095d3687",
+      "local_sha256": "a55fcd7c363d17c2535359266eca1c76faeddb9819d9c2966fbc0821c706e59d"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_failure_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "b6805137b683cee6c7d844402cca63c96e06ba6d",
+      "local_sha256": "943aa05a4d60f7ae67648ff52f8ec063d6516e485c508f52c28e166f73363196"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_groups_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "d9e032f4d147d01eef180a75a28009e80b2863ee",
+      "local_sha256": "931e65d16a37e017df470dcf676bff5a642f961a271e09ec3991d1758bbc15a9"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_history_messages_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "15caaecd793bb1fac25029d5b42307f2e67cea99",
+      "local_sha256": "b7e84a524ac9b2f0325f6be2d395252a34520819d4dbdbfc4c20d7049beb64fc"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_ignore_encrypted_content_e2e_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "73932eff7c5d5e600449ec6b53d3594219248d94",
+      "local_sha256": "6ba510e28297543ae437ba28769a9f73ccb4990661cfbc3dc31b603d90fa048c"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_image_admission.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "c74e063f0ef0c54f72d54b70b3ac9eb0dcd996bf",
+      "local_sha256": "4bfff24268d655e8e2d127bc60affbae4bf6264d62caa8ee88660b971aec0509",
+      "source_commit": "c59fabb39b88c1e2e1305f9813806a74fc1b2ba3"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_image_admission_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "ff3f48c3bdb9c999b12b9724aec6e78cb8b2a1db",
+      "local_sha256": "fed2256778d0d934f4e69f6876a637fc792a513b11d355b3787fec1a22f2778f",
+      "source_commit": "c59fabb39b88c1e2e1305f9813806a74fc1b2ba3"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_image_policy.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "59883a3fcb509fb1cd2a915e499f4f2efb89c857",
+      "local_sha256": "0e4786b4aa2fa9237ca0d3e5f1c0b7551a71d4d31288d7af28a0915f4ea70967"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_image_policy_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "3b042d53ab188499c1898930a14d9309029eb68d",
+      "local_sha256": "25d62657f52efb62355ee2654706f313e7abe9515c39d42e23182cccab8200b8"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_image_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "cfe3a8921de3dc68a255c28fe928bee572aa5de3",
+      "local_sha256": "f49fb4f9822ba962e6f5dbf067dc63d303946557984c011f21a7efdaed8ded26"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_images.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "fba4a3c4359bf98e212e8e2dc7d033a148cf0b86",
+      "local_sha256": "ee4fc359a9522fb5fed94218cf4a32fcbb136eacbb710061127bb7bdb900f7a9"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_images_e2e_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "abd34a19f51f2eec4c9c09815e97f89e2ea99783",
+      "local_sha256": "cf98e0768dbc5eb2c6b2209bf9e372ca4cb17a119be845b3950911583bd9299f"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_images_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "3686b0ad1aa62ec5f06017751adc8a602c8c4299",
+      "local_sha256": "f2dcf21a50e6ecba029ff950a6e73691f9c4601f22ae73e20d64754a6c78c182"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_model_access.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "6f30969d7ab46bfce75167b41ed884a5110eee33",
+      "local_sha256": "1c90b8839f58b2ef72bc732a9f2db4a0b76b9f282659391c7f975dc723bff660"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_model_access_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "acf79a9698316f945bade7518261fc4779a7eba7",
+      "local_sha256": "6668dc8cb532f451414d41fa3354b04c87d1076ed894214a3d7701924a92cbea"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_model_cooldown.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "e0d7f6c90fa40d6bfed5c1a23b289af8361494ec",
+      "local_sha256": "76d50ae3f734859a3edd79fc351b5f62c42fd83aad9bc4e42e79416149a3e8da"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_model_cooldown_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "d2f9dadad9171e882a2f8ba64f6cb6f363a1ed20",
+      "local_sha256": "8cef4f8362deffae33e4c78bdfb37b0948f8b20b123c5836ef39068917423e13"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_models_manifest.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "7147fc2f8de4aca20a41d0679fcf7fec12749b11",
+      "local_sha256": "7792b997723b0c55f9033f4648544cca5fe7ae1e7d51d8f6cd3fd0fd8971750e"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_models_manifest_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "155acf9417857e1d05d0e29bbd7363aaa0bd7dd9",
+      "local_sha256": "1dfdeb3bd0175a6f45572af4a9247ad8b1574c13a1bf2aaec4983fb976f369ed"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_models_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "876f06c4a97ed104dfb34f56ce7e8e1531ab1579",
+      "local_sha256": "1ba80589549782d1d3761500f46d89ab65ae90e9b5a7b4dd7f5d12acf323f594"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_progress.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "3be94ead9fa981df934d5b96cf121c78fcb1af2d",
+      "local_sha256": "fdd15711fd09383b45d50e75e32e6e92bc2b1322cc9201c1ad3227704f869f36"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_progress_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "c083e23ebe17f280f19b1f2081a17d2c11c9bb6c",
+      "local_sha256": "633732a787522a817bf296bd108f112c0df003fbf2c202494991946f996b1c76"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_ratelimit.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "43cc73215bd442de40fd50e27f2a92b2cc71d18b",
+      "local_sha256": "b36ad3206a1bc3eaeadd0c3fc7211f2e51bc94ab87a586b41021e708566a6161"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_ratelimit_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "5bf2f2128bfc0e6070a9099b84d5f408a4770bbd",
+      "local_sha256": "0ff7ac72b60d58d28eed8ed3e4e672d6590176ea129e362e7e727dc855dc21f3"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_recovery.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "8ffa683eca4bc8ed2e500b5666305aa0d2680629",
+      "local_sha256": "4c98c460112407e59b8b405c3c29bd02630e683f1cc3cf29f8a3889a3258508c"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_recovery_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "94a00af52c344ebfa5c839c9226606308c75380d",
+      "local_sha256": "728b21682c1d2565f858abbb1a3afb40618069f0179ad057feaf4e47a1c5813b"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_reliability_test.go",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "a12fe9e7ed1304de7b3c818f3be954b3c2259ba3f1aaec34ae1573f4e29c4507"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_repair_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "5cbf5334e55325d13945c2f2ed71a8acfa0d6ebe",
+      "local_sha256": "74e65311e3981ca5e78d9b030ef5f487dc84d775b0352f2cf4bea4d85799d057"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_scheduler_health_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "3a8352f22364a7b4a530bd6340285c3fa2d63cef",
+      "local_sha256": "cea02c3d773a46c159366655d3f8db218d0c67fce5b22c6f8d561009f0bf1a99"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_structured_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "1cffca5a373e250441f98d01d2fec0ea6511b9e7",
+      "local_sha256": "9bdd21611f9a26e3bc73b7d97cf4915c53e9cbf6e2388dade5f133934e945520"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "b9853345a77f21e23c10d668723b04d8befc498b",
+      "local_sha256": "ddd3ca523dee5cd46618f37755338f740648b65b5a3e4683a27848dca0eaf916"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_tool_images_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "f37dc684301ce65925d99b61e48c30470cd784be",
+      "local_sha256": "762e35e6742575f64bc5b3519695438cd06f51d23a95ef030cb47ec983b249fa"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_tools_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "0075936f0ad38bcc17fa82b5ba5d8493fee317e1",
+      "local_sha256": "63fba410f51b5f70ef914401612703791680a234747212e748fc5714e4e63867"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_transport.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "3bbf39deb100a67fd1336494eb4424be33e9fa43",
+      "local_sha256": "b79b8769485abe66e98b6c27699dc54af79ba3a77b2564bfa9198120acc8f3e8"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_transport_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "fa6c5384fc35993b1b344ba98e5608b8195de784",
+      "local_sha256": "dbdebed6d392d6bfbf74ba2b6ed9aa2f039c9a59a0fa27b899724cafc5d35aff"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_usage.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "62eb03b3427c6d0c956d007451d8e87cefe7e662",
+      "local_sha256": "75977072271f74e9aae5e4205c238ccb5be1c8aab6f0eb4c4c9d1d23b577560b"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_bps_usage_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "d2634aacffc914cea91f103550fecc806516ae49",
+      "local_sha256": "bc668df8826dbf02bc83cee7162429afc68fe9fa95719ce233c8e9856ec8a600"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_oauth.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "4dfa89b37af06c117a0edb473408676c5e68686f",
+      "local_sha256": "1f899a9e588049de04be2e2f988be425156c6df8ca15428fca18a97a61aed4e7"
+    },
+    {
+      "path": "backend/internal/service/openai_excel_oauth_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "9a19066ddd56ceb785bd55ded3c98f4f62d7aaf8",
+      "local_sha256": "548582d8bddc55f5d906c4f453326b11fe6cc3e96f3d8703d1cbdb5ec9be2fce"
+    },
+    {
+      "path": "backend/internal/service/openai_first_output_timeout.go",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "06f81e5e0ed48106e1a642ce9e4bfd78f79230d2a33d7a1d97ff4c2f9918fc82"
+    },
+    {
+      "path": "backend/internal/service/openai_first_output_timeout_test.go",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "a52f2db2fc42bc0e949f7ee4c8686e488b0d1d7b85f3ecd7d8794d240ea15854"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "ae5e34fdf3318bc71fb76d895fb53760fc4af7b1",
+      "local_sha256": "3e2c67166f3d11577c00e9793eba5eabf8d444d80c7d9128c8bb5af4e6a7d4ce"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "6f8d1f7b049e82c40f658b337ed99afb5d896a62",
+      "local_sha256": "7f88651a6d641127738b679f0d0584327055ad69dac1317ff9cc61b9c2715703"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "48375e17337dd0b72b82eac1ebee8cc9b31a71c9",
+      "local_sha256": "ad997a290d53e488bce51140a186c96f0741355720253e71668469bd0ee5bb40"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": null,
+      "local_sha256": "1a013f0d7e6ffcb7f1ece3f21b565bee487436b0e7ad5d8d4b341a17ea532812"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": null,
+      "local_sha256": "292ed9cac88c99e70393e24f6b2630734418b82d216eced61edba5aa254c3388"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "9471f748223b70722ec0c22c87d5b442306d78ee",
+      "local_sha256": "80800c095b57cf1c9161d70a585cafcefe854cdaa1ab86cd564d15729daa1fe2"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_service.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "70f6b8b9ba0f8111295c83e4422a48a8fc651209",
+      "local_sha256": "a5526d6fa014f419a2ba44027ac39637b0a2eebf58acd38ce2a097bb2c06109d",
+      "source_commit": "c59fabb39b88c1e2e1305f9813806a74fc1b2ba3"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_usage.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "3278bd90985045081409ac0162bd8e59cd279fcc",
+      "local_sha256": "984c050a1b3916f9c28be2ed3c84dac3cc3dcc5888fc388f82f836cdf3bc8c1d"
+    },
+    {
+      "path": "backend/internal/service/openai_images_responses.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "5b648696faf8d74970435d06325d2fbe50443ed4",
+      "local_sha256": "5170b1dcd6e68fd17fec1c5b86976f2a09a7bb8a273a490eae4b98999a4c91ef"
+    },
+    {
+      "path": "backend/internal/service/openai_models_list.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "832bd2a6f226565432c1b7ef2083fa1b638b1459",
+      "local_sha256": "bf927e9f58ce2238368905e18542eb8826e9d94cd78126434963bc08bef9dc48"
+    },
+    {
+      "path": "backend/internal/service/openai_oauth_service.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "fe9d82af0818eb38ff2d1d9c1841ee6de325436b",
+      "local_sha256": "c36b70b8ff8c95c74ccc9f43e5f134a17cbbc288838e05223e23ca740916570c"
+    },
+    {
+      "path": "backend/internal/service/openai_responses_input_compat.go",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "918bea91f0caf85cbbcb9ce887d154bc8f22f4438c5630ea8a8e2601c59dba3e"
+    },
+    {
+      "path": "backend/internal/service/openai_sse_read_pump.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "c77a6558fd2e05ebdfa0b332ce12b6cb0dd44939",
+      "local_sha256": "7c89ab9180776d71ae9fdb3eb8b2c7f5c8f0ff483f8bfb994aa5558908b66c52"
+    },
+    {
+      "path": "backend/internal/service/openai_sse_read_pump_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "5ddf4d60842c6ea652ab54f56551f1bf45f6aae0",
+      "local_sha256": "45de0999e9d7f1d46a2011b85ec67a2dbd93a8418cbe69e288b52054ac7071a8"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_bps_ingress_test.go",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "000f638084e8c17ef839b0ac7e9202be76c96ca3fff8aa35034e71208c52c901"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_excel_bps_bridge.go",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "2e0ba879f3a5fba2a08511682c9946126b134b56fef9357ae50d3312f7808b9e"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_forwarder.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "06cda5a585838468b91262dd591c42b4036fa968",
+      "local_sha256": "82bce5ce10fe9e3cf1df1abe7185ad67a608565bac04ed212d2d5452857fc2b5"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_forwarder_ingress.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "b13ca0402c8169bedb862d8b953ab0a270bcafdb",
+      "local_sha256": "766da68d0108c3302c3036472c19574a99617a1ff1e03b114de8a2add563853d"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_forwarder_ingress_test.go",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "dd06eb7f0469cefab3e35bd4f2f0c0f78c261a94d32e7e5bcd1d1b24be7fcf68"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_forwarder_payload.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": null,
+      "local_sha256": "2c56653a4baa0289f8fb4931610c60059dfb67370047ab3f565a51b831f7b969"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_forwarder_retry_payload_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": null,
+      "local_sha256": "c28adc95bf61b6f3634a2c584394538d8db9922ab1645ce10792363185e21fcd"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_http_bridge.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "01474cb72d421a6c22ac9d15ef3a4b442c5fb365",
+      "local_sha256": "e3e7540016d920e9453c17e4fc8e2dc7d187194dcb15e99dea8792d6ffab458a"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_recovery_contract_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": null,
+      "local_sha256": "df2fd0033bc4500589e097c3a6cddf526d4af4d5425eccda7fd607fa4d6856fd"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_session_preemption.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "32b49ccbbc52d63ceb057886a4854dde60c381fb",
+      "local_sha256": "bbc38e3748c95aaaedd81f3fda29b82ee86c9cd947012a201747df0c29c21194"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_session_preemption_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "f3787584788fead2d1929ca3d3e5acad04c99a35",
+      "local_sha256": "a06f6b10fe336abed81d88434ddee4dc34b9552db9f8238f2c0908c5a8da068f"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_v2_passthrough_adapter.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "671895390785dfc47ee6b45db10b81a9d23784b9",
+      "local_sha256": "a7052242c7862d4aac7c23bc4feb4f695175209524cfae9367123411b030bf1c"
+    },
+    {
+      "path": "backend/internal/service/ops_upstream_context.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "8b760ae256371f104b0018857c27d23865a21029",
+      "local_sha256": "2c0d3106769b2a18e9d7e2f28131402776c7012fca88e48a81ba1a72e63b8bf3"
+    },
+    {
+      "path": "backend/internal/service/setting_excel_bps.go",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "d97e22a8e0c0effe53dc23a4d6e93b9359bb4ef6bf9516714dd509e112312ec0"
+    },
+    {
+      "path": "backend/internal/service/setting_excel_bps_defaults.go",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "2495f7a4fbb7b1852abf03dc165721323680d5db714810938704b4ba994fa1d6"
+    },
+    {
+      "path": "backend/internal/service/setting_excel_bps_defaults_test.go",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "d8c099c7ba29ea8635a9585d8eb2ea8402e7ff9873f669ad94873a7f9f8ad1cc"
+    },
+    {
+      "path": "backend/internal/service/setting_excel_bps_image.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "db5db912cbf358c231bde6be15b4a58d1eb1a935",
+      "local_sha256": "eeed77700ef27d8707593277eda3451baeff917a225ff15cc238f0c1c16dbf6b"
+    },
+    {
+      "path": "backend/internal/service/setting_excel_bps_image_test.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "b5cd0dfb295d025f12830f78b9a9be21d2df58d8",
+      "local_sha256": "e2c163f3301c6b0f1755e2b416404d9e190ea646c2d621af44f03093720ff1c1"
+    },
+    {
+      "path": "backend/internal/service/setting_parse.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "8d9f5d93e03b4a475499f220c8abe63f1cf5cbce",
+      "local_sha256": "a58d3330143d3f383c47752d24cbd4defd6706eba58efcaf7056d225a55b5327"
+    },
+    {
+      "path": "backend/internal/service/setting_update.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "1e3faa40c613501e34edfdd3d65c0fe0ab6ced90",
+      "local_sha256": "a9fd135e9e14770f8b24130b99c12c56a5a6e473da25627f66f93faf133143a1"
+    },
+    {
+      "path": "backend/internal/service/settings_view.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "68c40c605f9044416cecd40a69a6fce50a997517",
+      "local_sha256": "a28ac1c231285ea212b9abaf26a04bc9369fd409b649aa64df899b78efe06fda"
+    },
+    {
+      "path": "backend/internal/service/wire.go",
+      "classification": "local-adaptation",
+      "source_blob_oid": "aa5c78f1c29c4b4a37a343917610d605a1fdd020",
+      "local_sha256": "de1f8caee75f0d866de17a84550d555be34a91abb37068d3374f1b8091b8be3d"
+    },
+    {
+      "path": "backend/internal/util/transportdiag/error.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "7dbeda679ea3552ae888d3f3eed30e37a75744bb",
+      "local_sha256": "41f0d2ed11b6fbc5277932917cce98f5e7fa44f77dd0e34f2d7ce629ac89d73d"
+    },
+    {
+      "path": "backend/internal/util/transportdiag/trace.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "2e75b0b769a54bf34f1a77eb2bfb2a548ce25117",
+      "local_sha256": "bb988fd35fae2fab33de737b9f566c73b5fe29d47a76782a52a6fc50023cf041"
+    },
+    {
+      "path": "backend/internal/util/transportdiag/trace_test.go",
+      "classification": "source-equivalent",
+      "source_blob_oid": "2c2e0adf6065d61dc50174f677219b6023815247",
+      "local_sha256": "82a56a2b3c966140dbe9a8945f08c2ee11ec1cd6da34b24cec98f654f56960f9"
+    },
+    {
+      "path": "backend/migrations/272_excel_bps_grants.sql",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "f96314fb295cbc246c16753554928d531b7b105e73793956a99440ed64b91c4a"
+    },
+    {
+      "path": "frontend/src/api/admin/excelBPSDefaults.ts",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "ba898e8fce41cf4b6013828561577b5aca84a9607ae4e7f70e8e587a84b049df"
+    },
+    {
+      "path": "frontend/src/api/admin/settings.ts",
+      "classification": "local-adaptation",
+      "source_blob_oid": "7b8631c3031864f4bfbf747b0d003a0d490fc57d",
+      "local_sha256": "3382534622c157cb3fccec2af4c15e2443edbb9facb1e8b11f6c09c95b7ea2c0"
+    },
+    {
+      "path": "frontend/src/components/account/AccountStatusIndicator.vue",
+      "classification": "local-adaptation",
+      "source_blob_oid": "7979b3bdade3c0e673a6c2c9ac946fdb12b380dc",
+      "local_sha256": "22dfd31bbf92a3b9f0e7fdcdadf33ebbcdf7d6c74f5991a502a2998bd04254de"
+    },
+    {
+      "path": "frontend/src/components/account/AccountTestModal.vue",
+      "classification": "local-adaptation",
+      "source_blob_oid": "250de9df2f27d8c7535bd89e73ab25bb0a635f00",
+      "local_sha256": "6a04c913f060675384f64bbc1c4ff38294a5bf9e254276a6f9f87f209a3cb898"
+    },
+    {
+      "path": "frontend/src/components/account/BulkEditAccountModal.vue",
+      "classification": "local-adaptation",
+      "source_blob_oid": "431b58e64ea73dc6b7fff079fcb9223c0c1186da",
+      "local_sha256": "871ce9997027b43dd910dc3e13fae85db323298c442a55b763273f093eb68bc1"
+    },
+    {
+      "path": "frontend/src/components/account/EditAccountModal.vue",
+      "classification": "local-adaptation",
+      "source_blob_oid": "2a211f1f45f414f48b449e649f0cab249589e48b",
+      "local_sha256": "77399572cc4c954fc01d926704c336984ede484fe68b5672f79a6abbe265e726"
+    },
+    {
+      "path": "frontend/src/components/account/ExcelBPS403Badge.vue",
+      "classification": "local-adaptation",
+      "source_blob_oid": "4c2863ea163f74790deb5fdac93e6645b9f1d2fa",
+      "local_sha256": "3a57eda22483e4e7d634866740df8efc649c9d9c77d7dcb97d62a24e7615a0ca"
+    },
+    {
+      "path": "frontend/src/components/account/ExcelBPSAuthorization.vue",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "d5ed1799f2eef6e6b7477dc026ba657145e54e362b7ee253a00bd8aa95965978"
+    },
+    {
+      "path": "frontend/src/components/account/ExcelBPSModeSwitches.vue",
+      "classification": "local-adaptation",
+      "source_blob_oid": "c22ad5a614f33fef21a44529288d9c9039fa25f0",
+      "local_sha256": "1fcb46c7f959eef020716d8dabcb421d778cfd6dcb5f2732709f657822b1a117"
+    },
+    {
+      "path": "frontend/src/components/account/__tests__/ExcelBPS403Badge.spec.ts",
+      "classification": "local-adaptation",
+      "source_blob_oid": "479957334eb7656c25c392bc556d5ba7af44b1dc",
+      "local_sha256": "d85a1a91ad5d4f289e5e86799c327333779447f252fbfac1c244b31e485bdd3e"
+    },
+    {
+      "path": "frontend/src/components/account/__tests__/ExcelBPSAuthorization.spec.ts",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "384fba115ba74ec615034d9d4d6acb91e5daf79c069c0f538d0f72b0eeb8d903"
+    },
+    {
+      "path": "frontend/src/components/admin/operations/BPSDefaultsCard.vue",
+      "classification": "local-adaptation",
+      "source_blob_oid": "595b4b327c15364b5ca2018503422a8f623fd094",
+      "local_sha256": "a9fe0d0506dc746700ce050495322aeceb5588357f7a57a24079443f5e4250a5"
+    },
+    {
+      "path": "frontend/src/components/admin/operations/BPSDefaultsPanel.vue",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "ad0791ae6c5432783f3087767c22dfbd6730d9838225bf0e99e2104c7ac02e1d"
+    },
+    {
+      "path": "frontend/src/composables/__tests__/useExcelBPSDefaults.spec.ts",
+      "classification": "local-adaptation",
+      "source_blob_oid": "3bc52eeab50ef547b330aad606bca28311a1f8d9",
+      "local_sha256": "49595e8e87e4632216aca7f4f37cbff68edf0e290ae6176039493a7de348fa40"
+    },
+    {
+      "path": "frontend/src/composables/useExcelBPSDefaults.ts",
+      "classification": "local-adaptation",
+      "source_blob_oid": "4594c87fa3561720f741ca322f185e22ba004898",
+      "local_sha256": "18919dcff72b17165f052eff7ceaa674f9b4708ee08145294a9088260aabc4ef"
+    },
+    {
+      "path": "frontend/src/constants/account.ts",
+      "classification": "local-adaptation",
+      "source_blob_oid": "45ee3b1719d7f14de5fe4b033d4ca7785f1d48b1",
+      "local_sha256": "502c7f7f70a5b8c36af441c56e903a96c1e02570418bf866952ba396c99617ed"
+    },
+    {
+      "path": "frontend/src/i18n/locales/en/admin/accounts.ts",
+      "classification": "local-adaptation",
+      "source_blob_oid": "681e6a6ea96e02778584eec4c6b82b424f79b209",
+      "local_sha256": "2225b9d019c5112c63749bf86702526a719633ad8d261b973230709db59f6463"
+    },
+    {
+      "path": "frontend/src/i18n/locales/en/admin/settings.ts",
+      "classification": "local-adaptation",
+      "source_blob_oid": "340355bc20d47960af6e841b41a9ed867e1ee06b",
+      "local_sha256": "611ecd4f6dfa3126076e417c0f0c06fcecb949b3a9ef374470ed3a830ede2e39",
+      "source_commit": "c59fabb39b88c1e2e1305f9813806a74fc1b2ba3"
+    },
+    {
+      "path": "frontend/src/i18n/locales/en/autoBPSOps.ts",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "acbdd56334063139ceff26080b4bec33ff63f8adb6f94ba9dd45a60a84551eb7"
+    },
+    {
+      "path": "frontend/src/i18n/locales/en/index.ts",
+      "classification": "local-adaptation",
+      "source_blob_oid": "524ec88d7ec7526b26d9bf37b5101e6ca2617a5b",
+      "local_sha256": "72d15fc5a4a40d95f5ee20479690a7706c388b0de8ddab6d33e7523068e915d2"
+    },
+    {
+      "path": "frontend/src/i18n/locales/ja/admin/accounts.ts",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "f56eb7d354dbc2dd881e2b85b97a317abb30675f698c50291f9b8b4bdb757cae"
+    },
+    {
+      "path": "frontend/src/i18n/locales/ja/admin/settings.ts",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "209aa81403a478e2bcb197750ae755b959e9972d9d171ce6388e7c1ffc8b13f8"
+    },
+    {
+      "path": "frontend/src/i18n/locales/ja/autoBPSOps.ts",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "fc9da7ed6de6d58a2f811a73a3c67ea8717475a78d55969a207157b65bc2d538"
+    },
+    {
+      "path": "frontend/src/i18n/locales/ja/index.ts",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "72d15fc5a4a40d95f5ee20479690a7706c388b0de8ddab6d33e7523068e915d2"
+    },
+    {
+      "path": "frontend/src/i18n/locales/zh-TW/admin/accounts.ts",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "c889d8ca16d84cb9447502b966e1854d4271791aeb0cf3e281cd33b7a1d55a30"
+    },
+    {
+      "path": "frontend/src/i18n/locales/zh-TW/admin/settings.ts",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "2b90d6ce8c605b938bc950ba8353da545e4c9072a3bfe20c1110d2b6fddb007c"
+    },
+    {
+      "path": "frontend/src/i18n/locales/zh-TW/autoBPSOps.ts",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "349b16317b1b55c37971dc85b6bdeb83280d3a43f6791bf749b7aa8e8cf7209b"
+    },
+    {
+      "path": "frontend/src/i18n/locales/zh-TW/index.ts",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "376c4fbb1cb4e985aaca7f8e46d5870cbe7e2d28821d412c21f7403962068e18"
+    },
+    {
+      "path": "frontend/src/i18n/locales/zh/admin/accounts.ts",
+      "classification": "local-adaptation",
+      "source_blob_oid": "7ca93dfe1194634b3d05d4bb30f347ed2a51f651",
+      "local_sha256": "4bf0fd007c25554e93d9641a97c32c87854f0e48d80d777c0ac38f3056f9bc52"
+    },
+    {
+      "path": "frontend/src/i18n/locales/zh/admin/settings.ts",
+      "classification": "local-adaptation",
+      "source_blob_oid": "4f67885bd24ca2f96c75241c34c3f4774694f52f",
+      "local_sha256": "852b4a4c46c7af4145388052e67da22870b6c402f7dc540fc20cfda454f15249",
+      "source_commit": "c59fabb39b88c1e2e1305f9813806a74fc1b2ba3"
+    },
+    {
+      "path": "frontend/src/i18n/locales/zh/autoBPSOps.ts",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "efe0d6273e352875739ae2ae92ced02e2b9d22238fece9addae5a034e4fe20cf"
+    },
+    {
+      "path": "frontend/src/i18n/locales/zh/index.ts",
+      "classification": "local-adaptation",
+      "source_blob_oid": "524ec88d7ec7526b26d9bf37b5101e6ca2617a5b",
+      "local_sha256": "72d15fc5a4a40d95f5ee20479690a7706c388b0de8ddab6d33e7523068e915d2"
+    },
+    {
+      "path": "frontend/src/utils/excelBPSDefaults.ts",
+      "classification": "local-adaptation",
+      "source_blob_oid": "db54915760cf7c131c1a6d13525220a28942d66e",
+      "local_sha256": "2f3161b673db78e74d27f5b4ebb68217269ba9098732ed08cdcf2882223f7dbf"
+    },
+    {
+      "path": "frontend/src/utils/excelBPSImageLimits.ts",
+      "classification": "source-equivalent",
+      "source_blob_oid": "e934e5d2ca742e1112c6b455841f65c6ee6c69ec",
+      "local_sha256": "060085f7fc6fe7d983003609f9468a3ea00399e9f8dfbcc53e60550b5ce92a0d"
+    },
+    {
+      "path": "frontend/src/utils/excelBPSRecovery.ts",
+      "classification": "local-adaptation",
+      "source_blob_oid": "5a32cab94d4367c4962d8e9c85b076bb2a769622",
+      "local_sha256": "6bf6c0dcaf4425743091aec9f7eecd70d308e0158583e4b6921760ce2ac62fc8"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "classification": "local-adaptation",
+      "source_blob_oid": "611a26dd12de5a7a79190e5dbbf51ddc39795d83",
+      "local_sha256": "1da72eeb8af44465b0c2e750b04e861e16cd6d795261eb2c782cb05f6c4b4e1f"
+    },
+    {
+      "path": "frontend/src/views/admin/SettingsView.vue",
+      "classification": "local-adaptation",
+      "source_blob_oid": "aedf7a88926fc25512a28673972795083679096d",
+      "local_sha256": "ccd41923fab18e1d44d7658fdd296145e23aa4e539b694754f9f614dfa9fc09d"
+    },
+    {
+      "path": "scripts/bps/upstream-review.py",
+      "classification": "local-only",
+      "source_blob_oid": null,
+      "local_sha256": "7628cd35830188c081bb1fc6cc421d48afe0445d680816a3e070726d061f3bfc"
+    }
+  ],
+  "review_base": "e7b94bbc301776215bf844776bab2a434e1033d9",
+  "review_notes": "docs/bps/DUAL_PATH_REVIEW.md",
+  "runtime_failure_review_base": "5a2a1c2dd187805244de4545f394312bde60750c",
+  "upstream_syncs": [
+    {
+      "date": "2026-10-12",
+      "source_commit": "a519cfeb66c253dd39d7728d20d55b7cf9f79897",
+      "compared_from": "1a74ed0e3cc6cf6923ba4747e8147decf15556b0",
+      "previous_observed_commit": "c82a856fcd4bfa4524ce93965be8e651d63227c9",
+      "local_base": "9d3420be4083e5b8b9519ec2e6e114578d3b0ed2",
+      "adopted_commits": [
+        "c59fabb39b88c1e2e1305f9813806a74fc1b2ba3"
+      ],
+      "decision_record": "docs/bps/upstream-changes.md",
+      "behavior": "Reserve image processing capacity only for selected BPS forwards, including local WS/Chat/Messages paths; preserve existing recovery, ownership and usage contracts.",
+      "excluded": "Ticket harvesting/candy observations, Mihomo static proxies, channel monitoring and unrelated account filters are outside the explicit BPS exception.",
+      "preexisting_local_drift": [
+        "backend/internal/service/openai_codex_models_service.go",
+        "backend/internal/service/openai_gateway_service.go",
+        "backend/internal/service/openai_gateway_usage.go"
+      ]
+    },
+    {
+      "date": "2026-10-14",
+      "source_commit": "216c241964274f5c543042052c71a52e47d777e6",
+      "compared_from": "a519cfeb66c253dd39d7728d20d55b7cf9f79897",
+      "local_base": "3f87d9ef2bcde59d01ea734a4fcd472676863660",
+      "adopted_commits": [
+        "a1221af4f8a4a09c716c0752dccef29ce447050a",
+        "12aa34293f1a83c12ec8c2bea60157cd15dd3235"
+      ],
+      "partial_adoptions": [
+        {
+          "source_commit": "84f7e99cc509a43a8c2dd4c67fb01fa5aa8ff318",
+          "scope": "Only use the actual forward model at the two Responses no-account diagnosis call sites; retain the local response/error contract."
+        }
+      ],
+      "decision_record": "docs/bps/upstream-changes.md",
+      "source_review": {
+        "non_merge_commits": 67,
+        "merge_commits": 14,
+        "merge_resolution_diffs": 0,
+        "official_originals_already_in_main": 51
+      },
+      "behavior": "No BPS-specific upstream changes. Update shared Redis snapshot reads, existing Grok Ops diagnostics and Responses alias diagnosis without altering BPS recovery or retired-feature boundaries.",
+      "excluded": "Regional data plane and sync, retired priority scheduling, cache test workbench, new usage cache-rate settings, candy monitoring and fork-only factory-platform restoration. Full model-capacity diagnostics were not adopted.",
+      "preexisting_local_drift": [
+        "backend/cmd/server/wire.go",
+        "backend/cmd/server/wire_gen.go",
+        "backend/go.sum",
+        "backend/internal/authz/routes.go",
+        "backend/internal/config/config.go",
+        "backend/internal/handler/openai_chat_completions.go",
+        "backend/internal/handler/openai_gateway_handler.go",
+        "backend/internal/handler/openai_images.go",
+        "backend/internal/repository/account_repo.go",
+        "backend/internal/repository/scheduler_cache.go",
+        "backend/internal/server/api_contract_test.go",
+        "backend/internal/server/routes/admin.go",
+        "backend/internal/server/routes/gateway.go",
+        "backend/internal/service/account.go",
+        "backend/internal/service/account_test_service.go",
+        "backend/internal/service/gateway_service.go",
+        "backend/internal/service/openai_account_runtime_block_fastpath.go",
+        "backend/internal/service/openai_codex_models_service.go",
+        "backend/internal/service/openai_excel_bps_compat.go",
+        "backend/internal/service/openai_gateway_chat_completions.go",
+        "backend/internal/service/openai_gateway_forward.go",
+        "backend/internal/service/openai_gateway_messages.go",
+        "backend/internal/service/openai_gateway_usage.go",
+        "backend/internal/service/ops_upstream_context.go",
+        "backend/internal/service/wire.go",
+        "frontend/src/components/account/EditAccountModal.vue",
+        "frontend/src/i18n/locales/en/admin/accounts.ts",
+        "frontend/src/i18n/locales/ja/admin/accounts.ts",
+        "frontend/src/i18n/locales/zh-TW/admin/accounts.ts",
+        "frontend/src/i18n/locales/zh-TW/admin/settings.ts",
+        "frontend/src/i18n/locales/zh/admin/accounts.ts"
+      ]
+    },
+    {
+      "date": "2026-10-21",
+      "source_commit": "16dc0e0165b696d7e418c915e8952c1c859a4dc6",
+      "compared_from": "974a47f2ed722798566727a342df1eab3140dc94",
+      "local_base": "e4108bf007bafdd4f1a61fd963e3b9ef1a666151",
+      "partial_adoptions": [
+        {
+          "source_commit": "be3823e86d3735ba69e18a375cd94441e8c3d7bc",
+          "scope": "Existing keepalive FlushError propagation and local terminal-output-flush timing; preserve existing writer, framing, usage and recovery owners."
+        },
+        {
+          "source_commit": "5b445311e485961956c0e0b6ff9e9e0617f8e6ba",
+          "scope": "Freeze bulk target IDs and reject empty filter scope in the shared resolver, including parameter editing."
+        },
+        {
+          "source_commit": "bbab353889fdcece793ab48ee83c11ffb9824e92",
+          "scope": "OAuth-only upstream plan persistence and API-key badge isolation."
+        }
+      ],
+      "decision_record": "docs/bps/upstream-changes.md",
+      "excluded": "No lossy encrypted-reasoning retry/lineage, new connection-diagnostics product, 2FA admission, latency-quantile policy, or email-alias default ban. User confirmed preserving ciphertext and saved Gemini image permission values.",
+      "review_scope": "Selected retained capability deltas; latest_observed_commit is availability, not wholesale adoption."
+    },
+    {
+      "date": "2026-10-22",
+      "compared_from": "16dc0e0165b696d7e418c915e8952c1c859a4dc6",
+      "source_commit": "8b36fe7d647c28e8189147c6bfce52a41b6e26db",
+      "partial_adoptions": [
+        {"source_commit": "e83c60a9e25a131b9644da69e4ae7688bde1d73e", "scope": "API-key relay quota isolation and configurable fallback; native OAuth/provider paths retained."},
+        {"source_commit": "9d97868de91de9a574caff39f622b1301e4f88b3", "scope": "TypeSafe endpoint normalization and existing settings validation; no new UI control."},
+        {"source_commit": "89d21645d4db811cbb385797257932002a5b143f", "scope": "Historical source attribution only: SIWC authorization-session encryption was removed with SIWC on 2026-10-23; no current implementation or authorization entry point remains. Migration 290 removes persisted private SIWC data on the next upgrade."}
+      ],
+      "decision_record": "docs/bps/upstream-changes.md",
+      "excluded": "No lossy encrypted-history repair/locator, new SIWC identity header scheme, account timers, anonymous-IP admission or separate connection-audit product.",
+      "review_scope": "Retained gateway capability deltas reviewed; source version/merge preparation excluded. No whole-fork adoption."
+    },
+    {
+      "date": "2026-10-22",
+      "compared_from": "8b36fe7d647c28e8189147c6bfce52a41b6e26db",
+      "source_commit": "1777b5c4f8953db1d6d1d1b006a7153f59dd0a96",
+      "partial_adoptions": [],
+      "decision_record": "docs/bps/upstream-changes.md",
+      "excluded": "HTTP-only attempt penalty and its three configuration fields conflict with the confirmed cross-transport health and 429 attribution contract; IP audit page changes belong to a product not adopted locally.",
+      "review_scope": "Three feature commits and two merges reviewed. Existing health isolation is not claimed to provide equivalent windowed physical-attempt statistics."
+    }
+  ]
+}

@@ -8,6 +8,37 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestChatMessagesParallelToolBlocksRemainOpenUntilComplete(t *testing.T) {
+	state := NewChatCompletionsToAnthropicStreamState("example")
+	var events []AnthropicStreamEvent
+	for _, calls := range [][]ChatToolCall{
+		{{Index: intPtr(4), ID: "call_a", Function: ChatFunctionCall{Name: "first", Arguments: `{"record":`}}, {Index: intPtr(9), ID: "call_b", Function: ChatFunctionCall{Arguments: `{"other":`}}},
+		{{Index: intPtr(9), Function: ChatFunctionCall{Name: "second", Arguments: `7}`}}, {Index: intPtr(4), Function: ChatFunctionCall{Arguments: `42}`}}},
+	} {
+		events = append(events, ChatCompletionsChunkToAnthropicEvents(&ChatCompletionsChunk{Choices: []ChatChunkChoice{{Delta: ChatDelta{ToolCalls: calls}}}}, state)...)
+	}
+	events = append(events, FinalizeChatCompletionsAnthropicStream(state)...)
+	require.NoError(t, state.Err())
+	requireAnthropicBlockLifecycle(t, events)
+	args := make(map[int]string)
+	for _, e := range events {
+		if e.Delta != nil && e.Delta.Type == "input_json_delta" {
+			args[*e.Index] += e.Delta.PartialJSON
+		}
+	}
+	require.JSONEq(t, `{"record":42}`, args[0])
+	require.JSONEq(t, `{"other":7}`, args[1])
+	require.Empty(t, FinalizeChatCompletionsAnthropicStream(state))
+	require.Empty(t, ChatCompletionsChunkToAnthropicEvents(&ChatCompletionsChunk{Choices: []ChatChunkChoice{{Delta: ChatDelta{Content: strPtr("late")}}}}, state))
+}
+
+func TestChatMessagesInvalidToolCannotFinishSuccessfully(t *testing.T) {
+	state := NewChatCompletionsToAnthropicStreamState("example")
+	ChatCompletionsChunkToAnthropicEvents(&ChatCompletionsChunk{Choices: []ChatChunkChoice{{Delta: ChatDelta{ToolCalls: []ChatToolCall{{Index: intPtr(0), ID: "call_a", Function: ChatFunctionCall{Name: "inspect", Arguments: `{"record":`}}}}}}}, state)
+	require.Empty(t, FinalizeChatCompletionsAnthropicStream(state))
+	require.Error(t, state.Err())
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -1052,6 +1083,43 @@ func TestDirectBridge_NonStreamingMatchesDoubleConversion_CacheWriteTokens(t *te
 	require.Equal(t, 9, direct.Usage.CacheCreationInputTokens)
 }
 
+func TestChatAnthropicCacheCreationInputAliasJSONAndStream(t *testing.T) {
+	for _, tt := range []struct {
+		name, details string
+		want          int
+	}{
+		{"alias_only", `{"cached_tokens":5,"cache_creation_input_tokens":7}`, 7},
+		{"duplicates", `{"cached_tokens":5,"cache_write_tokens":7,"cache_creation_tokens":7,"cache_creation_input_tokens":7}`, 7},
+		{"canonical_max", `{"cached_tokens":5,"cache_write_tokens":3,"cache_creation_tokens":11,"cache_creation_input_tokens":7}`, 11},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			usage := `{"prompt_tokens":20,"completion_tokens":2,"prompt_tokens_details":` + tt.details + `}`
+			var chat ChatCompletionsResponse
+			require.NoError(t, json.Unmarshal([]byte(`{"choices":[{"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],"usage":`+usage+`}`), &chat))
+			direct := ChatCompletionsResponseToAnthropic(&chat, "example")
+			double := ResponsesToAnthropic(ChatCompletionsResponseToResponses(&chat, "example", nil, nil, false, nil), "example")
+			require.Equal(t, double.Usage, direct.Usage)
+			require.Equal(t, tt.want, direct.Usage.CacheCreationInputTokens)
+			require.Equal(t, 20-5-tt.want, direct.Usage.InputTokens)
+			require.Equal(t, 5, direct.Usage.CacheReadInputTokens)
+			require.Equal(t, 2, direct.Usage.OutputTokens)
+
+			events := collectAnthropicStreamEvents(t, []string{
+				`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`,
+				`{"choices":[],"usage":` + usage + `}`,
+			})
+			var terminalUsage *AnthropicUsage
+			for _, event := range events {
+				if event.Type == "message_delta" {
+					terminalUsage = event.Usage
+				}
+			}
+			require.NotNil(t, terminalUsage)
+			require.Equal(t, direct.Usage, *terminalUsage)
+		})
+	}
+}
+
 func TestChatCompletionsResponseToAnthropic_GeneratesIDWhenMissing(t *testing.T) {
 	resp := &ChatCompletionsResponse{
 		Model: "deepseek-v4-pro",
@@ -1120,8 +1188,7 @@ func TestDirectBridge_NonStreamingMatchesDoubleConversion_EmptyChoices(t *testin
 }
 
 func TestChatCompletionsResponseToAnthropic_ContentFilterWithToolUse(t *testing.T) {
-	// content_filter (and unknown finish reasons) derive stop_reason from the
-	// blocks, like the double-conversion path.
+	// A filtered turn must not invite execution of the partial tool call.
 	resp := &ChatCompletionsResponse{
 		ID:    "chatcmpl-cf",
 		Model: "deepseek-v4-pro",
@@ -1140,5 +1207,5 @@ func TestChatCompletionsResponseToAnthropic_ContentFilterWithToolUse(t *testing.
 	}
 
 	out := ChatCompletionsResponseToAnthropic(resp, "claude-sonnet-4-20250514")
-	require.Equal(t, "tool_use", AnthropicStopReasonString(out.StopReason))
+	require.Equal(t, "refusal", AnthropicStopReasonString(out.StopReason))
 }

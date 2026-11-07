@@ -44,12 +44,14 @@ func TestRecordUsage_ImageReasoningPricing(t *testing.T) {
 							apiKey := &APIKey{ID: 10, GroupID: &groupID, Group: group}
 							account := &Account{ID: 30, Platform: platform, Type: AccountTypeAPIKey}
 							user := &User{ID: 20}
+							var billingRepo UsageBillingRepository
 							var forwardedEffort *string
 							if effort != "" {
 								forwardedEffort = &effort
 							}
 							if platform == PlatformAnthropic {
 								svc := newGatewayRecordUsageServiceForTest(usageRepo, userRepo, subRepo)
+								billingRepo = svc.usageBillingRepo
 								svc.resolver = resolver
 								require.NoError(t, svc.RecordUsage(context.Background(), &RecordUsageInput{
 									Result: &ForwardResult{
@@ -60,6 +62,7 @@ func TestRecordUsage_ImageReasoningPricing(t *testing.T) {
 								}))
 							} else {
 								svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, subRepo, nil)
+								billingRepo = svc.usageBillingRepo
 								svc.resolver = resolver
 								require.NoError(t, svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
 									Result: &OpenAIForwardResult{
@@ -80,7 +83,7 @@ func TestRecordUsage_ImageReasoningPricing(t *testing.T) {
 							require.NotNil(t, usageRepo.lastLog)
 							require.InDelta(t, wantTotal, usageRepo.lastLog.TotalCost, 1e-12)
 							require.InDelta(t, wantTotal*wantRate, usageRepo.lastLog.ActualCost, 1e-12)
-							require.InDelta(t, wantTotal*wantRate, userRepo.lastAmount, 1e-12)
+							require.InDelta(t, wantTotal*wantRate, recordUsageBillingCommand(t, billingRepo).BalanceCost, 1e-12)
 							require.Equal(t, forwardedEffort, usageRepo.lastLog.ReasoningEffort)
 							require.Equal(t, 2, usageRepo.lastLog.ImageCount)
 							require.Equal(t, string(mode), *usageRepo.lastLog.BillingMode)

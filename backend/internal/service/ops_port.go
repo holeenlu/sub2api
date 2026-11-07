@@ -291,7 +291,9 @@ type OpsUpsertJobHeartbeatInput struct {
 }
 
 type OpsJobHeartbeat struct {
-	JobName string `json:"job_name"`
+	JobName                 string `json:"job_name"`
+	ExpectedIntervalSeconds int64  `json:"expected_interval_seconds"`
+	HealthStatus            string `json:"health_status,omitempty"`
 
 	LastRunAt      *time.Time `json:"last_run_at"`
 	LastSuccessAt  *time.Time `json:"last_success_at"`

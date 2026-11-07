@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "run_id": null,
+  "case_id": null,
+  "case_catalog_sha256": null,
+  "status": "not_run",
+  "started_at": null,
+  "finished_at": null,
+  "executor": null,
+  "environment": {
+    "source_snapshot_sha256": null,
+    "git_commit": null,
+    "web_image_id": null,
+    "vendor_image_id": null,
+    "api_image_id": null,
+    "browser_name": null,
+    "browser_version": null,
+    "os": null,
+    "locale": null,
+    "viewport": null,
+    "origin": null,
+    "role_fixture_ref": null,
+    "fixture_manifest_sha256": null,
+    "policy_snapshot_ref": null
+  },
+  "steps": [
+    {
+      "number": 1,
+      "action": null,
+      "expected": null,
+      "actual": null,
+      "status": "not_run",
+      "evidence_refs": []
+    }
+  ],
+  "evidence": [],
+  "observed_requests": [],
+  "blocked_reason": null,
+  "not_applicable_reason": null,
+  "reviewer": null,
+  "defects": [],
+  "cleanup": {
+    "status": "not_run",
+    "removed_owned_resources": [],
+    "retained_resources": []
+  },
+  "evidence_level": null,
+  "contains_credentials": false,
+  "runner": {
+    "command": null,
+    "node_version": null,
+    "dependency_lock_sha256": null,
+    "exit_code": null,
+    "mocked_boundaries": []
+  },
+  "variant_id": null,
+  "requested_path": null,
+  "resolved_path": null,
+  "parameter_fixture_refs": []
+}

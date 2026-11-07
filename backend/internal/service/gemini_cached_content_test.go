@@ -248,7 +248,9 @@ func newGeminiCachedContentServiceForTest(t *testing.T, status int, respBody str
 		Body:       io.NopCloser(strings.NewReader(respBody)),
 	}}
 	compat := &GeminiMessagesCompatService{httpUpstream: httpStub, cfg: &config.Config{}}
-	return NewGeminiCachedContentService(newGeminiCachedContentRepoStub(), compat, &config.Config{}), httpStub
+	svc := NewGeminiCachedContentService(newGeminiCachedContentRepoStub(), compat, &config.Config{})
+	startSessionOwnerTest(t, svc)
+	return svc, httpStub
 }
 
 func TestGeminiCachedContentCreateUpstreamAIStudio(t *testing.T) {
@@ -303,6 +305,7 @@ func TestGeminiCachedContentResolve(t *testing.T) {
 	repo := newGeminiCachedContentRepoStub()
 	now := time.Date(2026, 10, 9, 8, 0, 0, 0, time.UTC)
 	svc := NewGeminiCachedContentService(repo, nil, &config.Config{})
+	startSessionOwnerTest(t, svc)
 	svc.now = func() time.Time { return now }
 	groupID := int64(5)
 	require.NoError(t, repo.Create(context.Background(), &GeminiCachedContent{
@@ -477,6 +480,7 @@ func TestGeminiExplicitCacheUpstreamTTL(t *testing.T) {
 	require.Zero(t, official.GeminiExplicitCacheUpstreamMaxTTL(), "未开启开关时上限字段不生效")
 
 	svc := NewGeminiCachedContentService(newGeminiCachedContentRepoStub(), nil, &config.Config{})
+	startSessionOwnerTest(t, svc)
 	require.Equal(t, 30*time.Minute, svc.MaxTTLForAccount(upstream))
 	require.Equal(t, 24*time.Hour, svc.MaxTTLForAccount(official))
 

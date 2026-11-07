@@ -85,3 +85,8 @@ func TestAppendMissingGrokFreeCacheNativeTools_MultipleFunctionsNoSearch(t *test
 	tools := gjson.GetBytes(result, "tools").Array()
 	require.Len(t, tools, 2, "no tools should be injected for pure client functions")
 }
+
+// Test-only adapters and reference algorithms; production uses the current entrypoints.
+func appendMissingGrokFreeCacheNativeTools(body []byte) ([]byte, error) {
+	return appendGrokFreeCacheNativeToolsWithPolicy(body, false, true)
+}

@@ -90,6 +90,33 @@ func (s *GatewayCacheSuite) TestDeleteSessionAccountID() {
 	require.True(s.T(), errors.Is(err, service.ErrStickySessionNotFound), "expected ErrStickySessionNotFound after delete")
 }
 
+func (s *GatewayCacheSuite) TestCompareAndRefreshSessionAccountID() {
+	const groupID, owner = int64(1), int64(102)
+	const sessionID = "openai:atomic-refresh"
+	key := buildSessionKey(groupID, sessionID)
+	refreshed, err := s.cache.CompareAndRefreshSessionAccountID(s.ctx, groupID, sessionID, owner, time.Minute, false)
+	require.NoError(s.T(), err)
+	require.False(s.T(), refreshed, "a refresh-only call must not create a missing binding")
+	refreshed, err = s.cache.CompareAndRefreshSessionAccountID(s.ctx, groupID, sessionID, owner, time.Minute, true)
+	require.NoError(s.T(), err)
+	require.True(s.T(), refreshed)
+	refreshed, err = s.cache.CompareAndRefreshSessionAccountID(s.ctx, groupID, sessionID, owner+1, time.Hour, true)
+	require.NoError(s.T(), err)
+	require.False(s.T(), refreshed, "a stale request must not replace a new owner")
+	actual, err := s.cache.GetSessionAccountID(s.ctx, groupID, sessionID)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), owner, actual)
+	ttl, err := s.rdb.TTL(s.ctx, key).Result()
+	require.NoError(s.T(), err)
+	s.AssertTTLWithin(ttl, time.Second, time.Minute)
+	refreshed, err = s.cache.CompareAndRefreshSessionAccountID(s.ctx, groupID, sessionID, owner, time.Hour, false)
+	require.NoError(s.T(), err)
+	require.True(s.T(), refreshed)
+	ttl, err = s.rdb.TTL(s.ctx, key).Result()
+	require.NoError(s.T(), err)
+	s.AssertTTLWithin(ttl, time.Second, time.Hour)
+}
+
 func (s *GatewayCacheSuite) TestGetSessionAccountID_CorruptedValue() {
 	sessionID := "corrupted"
 	groupID := int64(1)

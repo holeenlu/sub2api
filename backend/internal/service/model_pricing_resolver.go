@@ -5,6 +5,9 @@ import (
 	"log/slog"
 	"maps"
 	"strings"
+	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 )
 
 // PricingSource 定价来源标识
@@ -49,6 +52,10 @@ type ResolvedPricing struct {
 type ModelPricingResolver struct {
 	channelService *ChannelService
 	billingService *BillingService
+	// Nonzero pricingAt marks a pinned, read-only use of these publications.
+	pricingAt       time.Time
+	pricingSnapshot *PricingService
+	channelSnapshot *channelCache
 }
 
 // NewModelPricingResolver 创建定价解析器实例
@@ -169,7 +176,13 @@ func matchGroupModelPricing(group *Group, model string) *ChannelModelPricing {
 
 // resolveBasePricing 从 LiteLLM 或 Fallback 获取基础定价
 func (r *ModelPricingResolver) resolveBasePricing(model string) (*ModelPricing, string) {
-	pricing, err := r.billingService.GetModelPricing(model)
+	var pricing *ModelPricing
+	var err error
+	if !r.pricingAt.IsZero() {
+		pricing, err = r.billingService.getModelPricingFrom(model, r.pricingAt, r.pricingSnapshot)
+	} else {
+		pricing, err = r.billingService.GetModelPricing(model)
+	}
 	if err != nil {
 		slog.Debug("failed to get model pricing from LiteLLM, using fallback",
 			"model", model, "error", err)
@@ -182,24 +195,31 @@ func (r *ModelPricingResolver) resolveBasePricing(model string) (*ModelPricing, 
 // 未命中时用与官方兜底价一致的归一化模型名再查一次。
 //
 // 官方兜底价对 OpenAI/Codex 族会把 gpt-5.6-luna-high 这类变体名归一化到基名
-// （billing_service.go 的 normalizeKnownOpenAICodexModel 分支），而渠道定价此前
+// （billing_service.go 的 catalog.NormalizeKnownOpenAICodexModel 分支），而渠道定价此前
 // 只认字面名。两者不对称导致：管理员只配基名、请求模型带 effort 后缀时，渠道定价
 // 未命中而官方兜底命中，计费候选循环首个成功即返回，渠道定价永远轮不到（issue #5256）。
 //
 // 字面名优先，保证管理员对具体变体的显式配价不被基名覆盖；非 OpenAI 模型
-// normalizeKnownOpenAICodexModel 返回空串，此处天然 no-op。
+// catalog.NormalizeKnownOpenAICodexModel 返回空串，此处天然 no-op。
 func (r *ModelPricingResolver) lookupChannelPricingNormalized(ctx context.Context, groupID int64, model string) *ChannelModelPricing {
 	if r.channelService == nil {
 		return nil
 	}
-	if pricing := r.channelService.GetChannelModelPricing(ctx, groupID, model); pricing != nil {
+	lookup := r.channelService.GetChannelModelPricing
+	if r.channelSnapshot != nil {
+		lk := lookupGroupChannelSnapshot(ctx, r.channelSnapshot, groupID)
+		lookup = func(_ context.Context, _ int64, name string) *ChannelModelPricing {
+			return lookupChannelModelPricing(lk, name)
+		}
+	}
+	if pricing := lookup(ctx, groupID, model); pricing != nil {
 		return pricing
 	}
-	normalized := normalizeKnownOpenAICodexModel(model)
+	normalized := catalog.NormalizeKnownOpenAICodexModel(model)
 	if normalized == "" || strings.EqualFold(normalized, strings.TrimSpace(model)) {
 		return nil
 	}
-	return r.channelService.GetChannelModelPricing(ctx, groupID, normalized)
+	return lookup(ctx, groupID, normalized)
 }
 
 // applyChannelOverrides 应用渠道定价覆盖
@@ -234,6 +254,7 @@ func (r *ModelPricingResolver) applyTokenOverrides(chPricing *ChannelModelPricin
 		resolved.BasePricing = &cloned
 	}
 
+	resolved.BasePricing.managedPrice = nil
 	applyChannelTokenPriceOverrides(resolved.BasePricing, chPricing)
 	if chPricing.CacheWrite1hPrice != nil {
 		resolved.SupportsCacheBreakdown = true
@@ -349,6 +370,7 @@ func intervalToModelPricing(iv *PricingInterval, base *ModelPricing, chPricing *
 		pricing.CacheCreationPricePerTokenPriority = channelTierOverridePrice(pricing.CacheCreationPricePerToken, pricing.CacheCreationPricePerTokenPriority, *iv.CacheWritePrice)
 		pricing.CacheCreationPricePerToken = *iv.CacheWritePrice
 		pricing.CacheCreationPriceExplicit = true
+		pricing.cacheWriteFlatOverride = true
 		pricing.CacheCreation5mPrice = *iv.CacheWritePrice
 		if iv.CacheWrite1hPrice == nil {
 			pricing.CacheCreation1hPrice = *iv.CacheWritePrice

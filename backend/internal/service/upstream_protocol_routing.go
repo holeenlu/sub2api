@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+	"github.com/tidwall/gjson"
 )
 
 // resolveUpstreamProtocol 决定 OpenAI 网关本次请求发往上游的协议
@@ -117,9 +119,27 @@ func upstreamRoutingModel(account *Account, body []byte, defaultMappedModel stri
 	return resolveMappedUpstreamModel(account, body, defaultMappedModel)
 }
 
+// validateResponsesChatState checks raw JSON before narrower conversion DTOs
+// discard server-side state. Both Responses and Responses-shaped Chat input
+// must fail before a stateless upstream generates from an incomplete delta.
+func validateResponsesChatState(body []byte) *openAIResponsesInputError {
+	for _, field := range []string{"previous_response_id", "conversation", "prompt", "context_management"} {
+		value := gjson.GetBytes(body, field)
+		if !value.Exists() || value.Type == gjson.Null || (value.Type == gjson.String && strings.TrimSpace(value.String()) == "") || (value.IsArray() && len(value.Array()) == 0) {
+			continue
+		}
+		inputErr := &openAIResponsesInputError{Code: "unsupported_parameter", Param: field, Message: fmt.Sprintf("Chat Completions cannot resolve Responses %s; use a Responses-capable account or resend full input without this field.", field)}
+		return inputErr
+	}
+	return nil
+}
+
 // convertResponsesShapedChatBody 把发到 /v1/chat/completions 的 Responses 形状
 // 请求体（Cursor 兼容）转换为 Chat Completions 请求体。
 func (s *OpenAIGatewayService) convertResponsesShapedChatBody(body []byte) ([]byte, error) {
+	if err := validateResponsesChatState(body); err != nil {
+		return nil, err
+	}
 	var responsesReq apicompat.ResponsesRequest
 	if err := json.Unmarshal(body, &responsesReq); err != nil {
 		return nil, fmt.Errorf("parse responses-shaped chat completions request: %w", err)

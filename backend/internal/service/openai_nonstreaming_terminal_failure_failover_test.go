@@ -1,7 +1,9 @@
 package service
 
 import (
+	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -151,6 +153,25 @@ func TestNonStreamingSSEToJSON_NonRetryableFailedEventStillWritesProtocolError(t
 // 裸 error 帧走的是更保守的那个分类器：只有正向识别为瞬时才换号。
 // 这条用例证明两种终止事件确实被分派到了各自的判定，而不是共用一个。
 func TestNonStreamingSSEToJSON_BareErrorEventUsesConservativeClassifier(t *testing.T) {
+	t.Run("encrypted_history_does_not_fail_over", func(t *testing.T) {
+		for _, passthrough := range []bool{false, true} {
+			c, _ := newNonStreamingFailoverContext(t)
+			svc := newNonStreamingFailoverService()
+			data := `{"type":"error","code":"invalid_encrypted_content","message":"Cannot verify history; please retry"}`
+			require.False(t, openAIStreamErrorEventShouldFailover([]byte(data), "please retry"))
+			var result any
+			var err error
+			if passthrough {
+				result, err = svc.handlePassthroughSSEToJSON(newNonStreamingSSEResponse(), c, newNonStreamingFailoverAccount(), sseTerminalBody("error", data), "model", "model")
+			} else {
+				result, err = svc.handleSSEToJSON(newNonStreamingSSEResponse(), c, newNonStreamingFailoverAccount(), sseTerminalBody("error", data), "model", "model")
+			}
+			require.Nil(t, result)
+			require.Error(t, err)
+			var failover *UpstreamFailoverError
+			require.False(t, errors.As(err, &failover), "ciphertext rejection must not follow a generic retry hint")
+		}
+	})
 	t.Run("non_transient_stays_protocol_error", func(t *testing.T) {
 		c, rec := newNonStreamingFailoverContext(t)
 		svc := newNonStreamingFailoverService()
@@ -255,4 +276,41 @@ func TestNonStreamingTerminalFailureFailover_NilAccountProposesNothing(t *testin
 	require.Nil(t, svc.nonStreamingTerminalFailureFailover(
 		c, newNonStreamingSSEResponse(), nil, false, "response.failed", payload,
 		"Selected model is at capacity. Please try a different model."))
+}
+
+type openAINonStreamingFeedbackTestBody struct {
+	io.ReadCloser
+	completed bool
+}
+
+func (b *openAINonStreamingFeedbackTestBody) MarkComplete() { b.completed = true }
+
+func TestOpenAINonStreamingProtocolCompletionFeedback(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		for _, tc := range []struct {
+			body, contentType string
+			complete          bool
+		}{
+			{`{"id":"resp_json","status":"completed","usage":{"input_tokens":3,"output_tokens":2}}`, "application/json", true},
+			{`{"id":"resp_queued","status":"queued","usage":{}}`, "application/json", false},
+			{`not json`, "application/json", false},
+			{"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_sse\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":3,\"output_tokens\":2}}}\n\n", "text/event-stream", true},
+			{"data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_partial\"}}\n\n", "text/event-stream", false},
+		} {
+			c, _ := newNonStreamingFailoverContext(t)
+			body := &openAINonStreamingFeedbackTestBody{ReadCloser: io.NopCloser(strings.NewReader(tc.body))}
+			resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {tc.contentType}}, Body: body}
+			// Header/turn guards stack these wrappers in production. Completion
+			// feedback must reach the transport through every wrapper.
+			resp.Body = &openAIRequestContextReadCloser{ReadCloser: &openAIRequestContextReadCloser{ReadCloser: body, cleanup: func() {}}, cleanup: func() {}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, toolCorrector: NewCodexToolCorrector()}
+			account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+			if passthrough {
+				_, _ = svc.handleNonStreamingResponsePassthrough(context.Background(), resp, c, account, "m", "m")
+			} else {
+				_, _ = svc.handleNonStreamingResponse(context.Background(), resp, c, account, "m", "m")
+			}
+			require.Equal(t, tc.complete, body.completed, "passthrough=%v body=%s", passthrough, tc.body)
+		}
+	}
 }

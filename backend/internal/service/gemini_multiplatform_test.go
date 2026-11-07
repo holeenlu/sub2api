@@ -281,6 +281,17 @@ func (m *mockGatewayCacheForGemini) GetSessionAccountID(ctx context.Context, gro
 	return 0, errors.New("not found")
 }
 
+func (m *mockGatewayCacheForGemini) CompareAndRefreshSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration, createIfAbsent bool) (bool, error) {
+	current, exists := m.sessionBindings[sessionHash]
+	if (exists && current != accountID) || (!exists && !createIfAbsent) {
+		return false, nil
+	}
+	if err := m.SetSessionAccountID(ctx, groupID, sessionHash, accountID, ttl); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (m *mockGatewayCacheForGemini) SetSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error {
 	if m.sessionBindings == nil {
 		m.sessionBindings = make(map[string]int64)
@@ -302,6 +313,17 @@ func (m *mockGatewayCacheForGemini) DeleteSessionAccountID(ctx context.Context, 
 	}
 	m.deletedSessions[sessionHash]++
 	delete(m.sessionBindings, sessionHash)
+	return nil
+}
+
+// 长周期亲和键：该 mock 不参与历史键行为，给出中性实现以满足接口。
+func (m *mockGatewayCacheForGemini) GetSessionAccountHistory(_ context.Context, _ int64, _ string) (int64, error) {
+	return 0, ErrStickySessionNotFound
+}
+func (m *mockGatewayCacheForGemini) SetSessionAccountHistoryIfAbsentOrSame(_ context.Context, _ int64, _ string, _ int64, _ time.Duration) (bool, error) {
+	return true, nil
+}
+func (m *mockGatewayCacheForGemini) DeleteSessionAccountHistory(_ context.Context, _ int64, _ string) error {
 	return nil
 }
 
@@ -1006,4 +1028,11 @@ func TestGeminiMessagesCompatService_isModelSupportedByAccount(t *testing.T) {
 			require.Equal(t, tt.expected, got)
 		})
 	}
+}
+
+func (m *mockGatewayCacheForGemini) GetClaudeConversationState(context.Context, string, []string) (map[string]string, error) {
+	return nil, nil
+}
+func (m *mockGatewayCacheForGemini) StoreClaudeConversationState(context.Context, string, map[string]string) error {
+	return nil
 }

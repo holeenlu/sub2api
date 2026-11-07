@@ -151,7 +151,7 @@ func TestOpenAIWSv2RejectsMalformedEventAfterWritingDownstream(t *testing.T) {
 
 	result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.6-sol","stream":true,"input":"hello"}`))
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "after downstream output")
+	require.Contains(t, err.Error(), "after execution started")
 	require.Nil(t, result)
 	require.True(t, captureConn.closed)
 	require.Contains(t, recorder.Body.String(), `"delta":"ok"`)
@@ -232,13 +232,11 @@ func TestSplitOpenAIConcatenatedJSONDocumentsRejectsPayloadOverRepairLimit(t *te
 	require.Nil(t, documents)
 
 	line := "data: " + payload
-	scanner := bufio.NewScanner(strings.NewReader(line))
+	scanner := bufio.NewScanner(strings.NewReader(line + "\n\n"))
 	scanner.Buffer(make([]byte, 1024), len(line)+1)
 	documentScanner := newOpenAISSEJSONDocumentScanner(scanner)
-	require.True(t, documentScanner.Scan())
-	require.Equal(t, line, documentScanner.Text())
 	require.False(t, documentScanner.Scan())
-	require.NoError(t, documentScanner.Err())
+	require.Error(t, documentScanner.Err())
 }
 
 func TestOpenAIWSv2StreamingBreaksConnectionWhenTerminalHasTrailingDocument(t *testing.T) {
@@ -307,6 +305,7 @@ func testOpenAIStreamingRepairsConcatenatedJSONDocuments(t *testing.T, passthrou
 		"event: response.completed",
 		"data: " + completed,
 		"",
+		"",
 	}, "\n")
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
@@ -355,31 +354,26 @@ func testOpenAIStreamingRepairsConcatenatedJSONDocuments(t *testing.T, passthrou
 
 func assertOpenAISSEFrames(t *testing.T, body string, expectedTypes []string) {
 	t.Helper()
-	var parser openAICompatSSEFrameParser
+	scanner := bufio.NewScanner(strings.NewReader(body))
+	scanner.Buffer(make([]byte, 64*1024), defaultMaxLineSize)
+	frames := newOpenAISSEJSONDocumentScanner(scanner)
 	var eventTypes []string
-	for _, line := range strings.Split(body, "\n") {
-		frame, ok := parser.AddLine(strings.TrimSuffix(line, "\r"))
-		if !ok {
+	for frames.Scan() {
+		frame := frames.Frame()
+		if !frame.hasData {
 			continue
 		}
-		require.True(t, json.Valid([]byte(frame.Data)), "each downstream SSE frame must contain exactly one JSON document")
+		require.True(t, json.Valid([]byte(frame.data)), "each downstream SSE frame must contain exactly one JSON document")
 		var event struct {
 			Type string `json:"type"`
 		}
-		require.NoError(t, json.Unmarshal([]byte(frame.Data), &event))
-		if frame.EventType != "" {
-			require.Equal(t, event.Type, frame.EventType)
+		require.NoError(t, json.Unmarshal([]byte(frame.data), &event))
+		if frame.eventName != "" {
+			require.Equal(t, event.Type, frame.eventName)
 		}
 		eventTypes = append(eventTypes, event.Type)
 	}
-	if frame, ok := parser.Finish(); ok {
-		require.True(t, json.Valid([]byte(frame.Data)))
-		var event struct {
-			Type string `json:"type"`
-		}
-		require.NoError(t, json.Unmarshal([]byte(frame.Data), &event))
-		eventTypes = append(eventTypes, event.Type)
-	}
+	require.NoError(t, frames.Err())
 	require.Equal(t, expectedTypes, eventTypes)
 }
 

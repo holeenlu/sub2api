@@ -22,23 +22,23 @@ import (
 const codexImportClockSkewSeconds int64 = 120
 
 type CodexSessionImportRequest struct {
-	Content                 string         `json:"content"`
-	Contents                []string       `json:"contents"`
-	Name                    string         `json:"name"`
-	Notes                   *string        `json:"notes"`
-	GroupIDs                []int64        `json:"group_ids"`
-	ProxyID                 *int64         `json:"proxy_id"`
-	Concurrency             *int           `json:"concurrency"`
-	Priority                *int           `json:"priority"`
-	RateMultiplier          *float64       `json:"rate_multiplier"`
-	LoadFactor              *int           `json:"load_factor"`
-	ExpiresAt               *int64         `json:"expires_at"`
-	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired"`
-	CredentialExtras        map[string]any `json:"credential_extras"`
-	Extra                   map[string]any `json:"extra"`
-	UpdateExisting          *bool          `json:"update_existing"`
-	SkipDefaultGroupBind    *bool          `json:"skip_default_group_bind"`
-	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"`
+	Content                 string         `json:"content" authz:"base"`
+	Contents                []string       `json:"contents" authz:"base"`
+	Name                    string         `json:"name" authz:"base"`
+	Notes                   *string        `json:"notes" authz:"base"`
+	GroupIDs                []int64        `json:"group_ids" authz:"base"`
+	ProxyID                 *int64         `json:"proxy_id" authz:"base"`
+	Concurrency             *int           `json:"concurrency" authz:"base"`
+	Priority                *int           `json:"priority" authz:"base"`
+	RateMultiplier          *float64       `json:"rate_multiplier" authz:"billing.rates.update"`
+	LoadFactor              *int           `json:"load_factor" authz:"base"`
+	ExpiresAt               *int64         `json:"expires_at" authz:"base"`
+	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired" authz:"base"`
+	CredentialExtras        map[string]any `json:"credential_extras" authz:"base"`
+	Extra                   map[string]any `json:"extra" authz:"account_create_extra"`
+	UpdateExisting          *bool          `json:"update_existing" authz:"base"`
+	SkipDefaultGroupBind    *bool          `json:"skip_default_group_bind" authz:"base"`
+	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk" authz:"base"`
 }
 
 type CodexSessionImportResult struct {

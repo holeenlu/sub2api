@@ -25,6 +25,11 @@ func TestEffortLevelsForModel(t *testing.T) {
 		{model: "claude-opus-4-5-20251101", want: []string{"low", "medium", "high"}},
 		{model: "claude-haiku-4-5-20251001", want: nil},
 		{model: "gpt-5.6", want: nil},
+		{model: "anthropic/claude-opus-4.6", want: []string{"low", "medium", "high", "max"}},
+		{model: "claude-fable-5-1", want: []string{"low", "medium", "high", "xhigh", "max"}},
+		{model: "claude-haiku-5-5", want: []string{"low", "medium", "high", "xhigh", "max"}},
+		{model: "claude-fable-5-99", want: nil},
+		{model: "claude-opus-4-6-max", want: nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.model, func(t *testing.T) {
@@ -32,6 +37,17 @@ func TestEffortLevelsForModel(t *testing.T) {
 			require.Equal(t, tt.want, EffortLevelsForModel(tt.model))
 		})
 	}
+}
+
+func TestThinkingCapabilitiesUnknownAndNoEffortAreDifferent(t *testing.T) {
+	cap, known := ThinkingCapabilitiesForModel("claude-haiku-4-5")
+	require.True(t, known)
+	require.Empty(t, cap.EffortLevels)
+	_, known = ThinkingCapabilitiesForModel("unknown-model")
+	require.False(t, known)
+	cap, _ = ThinkingCapabilitiesForModel("claude-fable-5-1")
+	cap.EffortLevels[0] = "mutated"
+	require.Equal(t, "low", EffortLevelsForModel("claude-fable-5-1")[0])
 }
 
 func TestIsOpus55OpenRouterExactAlias(t *testing.T) {

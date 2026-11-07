@@ -2,11 +2,14 @@
 package oauth
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/sessionstore"
 	"net/url"
 	"strings"
 	"sync"
@@ -37,36 +40,28 @@ const (
 // OAuthSession stores OAuth flow state
 
 type OAuthSession struct {
-	State        string    `json:"state"`
-	CodeVerifier string    `json:"code_verifier"`
-	Scope        string    `json:"scope"`
-	ProxyURL     string    `json:"proxy_url,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
+	Authorization *authz.Lease `json:"authorization,omitempty"`
+	State         string       `json:"state"`
+	CodeVerifier  string       `json:"code_verifier"`
+	Scope         string       `json:"scope"`
+	ProxyURL      string       `json:"proxy_url,omitempty"`
+	CreatedAt     time.Time    `json:"created_at"`
 }
 
 // SessionStore manages OAuth sessions in memory
 type SessionStore struct {
+	*sessionstore.Lifecycle
 	mu       sync.RWMutex
 	sessions map[string]*OAuthSession
-	stopOnce sync.Once
-	stopCh   chan struct{}
 }
 
 // NewSessionStore creates a new session store
 func NewSessionStore() *SessionStore {
 	store := &SessionStore{
 		sessions: make(map[string]*OAuthSession),
-		stopCh:   make(chan struct{}),
 	}
-	go store.cleanup()
+	store.Lifecycle = sessionstore.NewLifecycle(5*time.Minute, func(context.Context) { store.cleanup() })
 	return store
-}
-
-// Stop stops the cleanup goroutine
-func (s *SessionStore) Stop() {
-	s.stopOnce.Do(func() {
-		close(s.stopCh)
-	})
 }
 
 // Set stores a session
@@ -99,20 +94,11 @@ func (s *SessionStore) Delete(sessionID string) {
 
 // cleanup removes expired sessions periodically
 func (s *SessionStore) cleanup() {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-s.stopCh:
-			return
-		case <-ticker.C:
-			s.mu.Lock()
-			for id, session := range s.sessions {
-				if time.Since(session.CreatedAt) > SessionTTL {
-					delete(s.sessions, id)
-				}
-			}
-			s.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, session := range s.sessions {
+		if time.Since(session.CreatedAt) > SessionTTL {
+			delete(s.sessions, id)
 		}
 	}
 }

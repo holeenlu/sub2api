@@ -29,7 +29,7 @@ func BenchmarkOpenAIResponsesOrphanPrecheck(b *testing.B) {
 							b.Fatal(err)
 						}
 						input, _ := request["input"].([]any)
-						if sanitizeOpenAIResponsesOrphanToolOutputs(request, input, previous) {
+						if changed, err := sanitizeOpenAIResponsesOrphanToolOutputs(request, input, previous); changed || err != nil {
 							b.Fatal("unexpected cleanup")
 						}
 					}

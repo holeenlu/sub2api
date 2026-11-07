@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/gateway/model"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -17,6 +18,16 @@ import (
 // openAITransportErrorTempUnschedDuration is how long an account is temporarily
 // unscheduled after a durable transport failure (matches tokenRefreshTempUnschedDuration).
 const openAITransportErrorTempUnschedDuration = 10 * time.Minute
+
+// OpenAITransportAttemptError retains the transport's actual send evidence.
+// Its zero state is unknown; absence of output never proves a request unsent.
+type OpenAITransportAttemptError struct {
+	Cause     error
+	SendState model.SendState
+}
+
+func (e *OpenAITransportAttemptError) Error() string { return e.Cause.Error() }
+func (e *OpenAITransportAttemptError) Unwrap() error { return e.Cause }
 
 // openAITransportFailoverBody is the OpenAI-format error body attached to the
 // failover error for a transport-level failure. Kept identical to the legacy
@@ -115,6 +126,31 @@ func isClientCanceledTransportError(ctx context.Context, err error) bool {
 //
 // passthrough tags the Ops error event for the OpenAI passthrough forward path.
 func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Context, c *gin.Context, account *Account, err error, passthrough bool) error {
+	if IsTurnBudgetError(err) || IsNativeDispatchDenied(err) {
+		return err
+	}
+	var attempt *OpenAITransportAttemptError
+	if errors.As(err, &attempt) && errors.Is(err, ErrTurnTargetExhausted) {
+		if attempt.SendState != model.SendNotSent && (c == nil || !c.GetBool("openai_uncertain_replay_safe")) {
+			return err
+		}
+		// Translate the original target-budget failure only after considering
+		// all redirect/TLS hops. No contradictory inner failover is retained.
+		failure := turnAttemptFailure(err)
+		var targetFailure *UpstreamFailoverError
+		if errors.As(failure, &targetFailure) {
+			targetFailure.RequestNotSent = attempt.SendState == model.SendNotSent
+		}
+		return failure
+	}
+	var recovery *UpstreamFailoverError
+	if errors.As(err, &recovery) {
+		return err
+	}
+
+	if errors.Is(err, ErrOpenAITurnAttemptBudgetExhausted) || errors.Is(err, ErrOpenAIWSFirstOutputBudgetExhausted) {
+		return err
+	}
 	if isClientCanceledTransportError(ctx, err) {
 		return err
 	}
@@ -153,10 +189,15 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 	if classifyUpstreamTransportError(err).Persistent {
 		s.tempUnscheduleOpenAITransportError(ctx, account, safeErr)
 	}
+	if errors.As(err, &attempt) && attempt.SendState != model.SendNotSent && (c == nil || !c.GetBool("openai_uncertain_replay_safe")) {
+		return err
+	}
 
 	return &UpstreamFailoverError{
-		StatusCode:   http.StatusBadGateway,
-		ResponseBody: openAITransportFailoverBody,
+		StatusCode:     http.StatusBadGateway,
+		ResponseBody:   openAITransportFailoverBody,
+		RequestNotSent: (attempt != nil && attempt.SendState == model.SendNotSent) || (pluginErr != nil && !pluginErr.RequestSent),
+		Cause:          err,
 	}
 }
 

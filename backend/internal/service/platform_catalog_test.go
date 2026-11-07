@@ -121,7 +121,7 @@ func TestBuildPlatformCatalogReturnsCopies(t *testing.T) {
 //
 //	UPDATE_PLATFORM_CATALOG=1 go test -tags unit ./internal/service/ -run TestFrontendBuiltinPlatformCatalogInSync
 func TestFrontendBuiltinPlatformCatalogInSync(t *testing.T) {
-	const path = "../../../frontend/src/constants/platformCatalog.builtin.json"
+	const path = "../../../frontend/src/features/catalog/model/platformCatalog.builtin.json"
 	want, err := json.MarshalIndent(BuildPlatformCatalog(), "", "  ")
 	require.NoError(t, err)
 	want = append(want, '\n')
@@ -136,5 +136,5 @@ func TestFrontendBuiltinPlatformCatalogInSync(t *testing.T) {
 	}
 	require.NoError(t, err)
 	require.JSONEq(t, string(want), string(got),
-		"frontend/src/constants/platformCatalog.builtin.json 与后端平台清单不一致，按测试注释重新生成")
+		"frontend/src/features/catalog/model/platformCatalog.builtin.json 与后端平台清单不一致，按测试注释重新生成")
 }

@@ -13,6 +13,13 @@ import (
 
 const requestIDHeader = "X-Request-ID"
 
+func requestLogPath(path string) string {
+	if strings.HasPrefix(path, "/api/bps-images/") {
+		return "/api/bps-images/[redacted]"
+	}
+	return path
+}
+
 // RequestLogger 在请求入口注入 request-scoped logger。
 func RequestLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -35,9 +42,16 @@ func RequestLogger() gin.HandlerFunc {
 			zap.String("component", "http"),
 			zap.String("request_id", requestID),
 			zap.String("client_request_id", strings.TrimSpace(clientRequestID)),
-			zap.String("path", c.Request.URL.Path),
+			zap.String("path", requestLogPath(c.Request.URL.Path)),
 			zap.String("method", c.Request.Method),
 		)
+
+		// Client-provided IDs may identify a session and repeat across requests.
+		// Preserve them separately for proxy correlation; never replace the
+		// internally generated, per-request ClientRequestID with this value.
+		if originalID, valid := normalizeCorrelationID(c.GetHeader(clientRequestIDHeader)); valid {
+			requestLogger = requestLogger.With(zap.String("original_client_request_id", originalID))
+		}
 
 		ctx = logger.IntoContext(ctx, requestLogger)
 		c.Request = c.Request.WithContext(ctx)

@@ -3,7 +3,6 @@ package service
 import (
 	"bytes"
 	"encoding/json"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -132,30 +131,4 @@ func restoreOpenAIResponsesInstructionsEchoInEvent(c *gin.Context, data []byte) 
 // instructions 的回显。
 func restoreOpenAIResponsesInstructionsEchoInResponse(c *gin.Context, body []byte) []byte {
 	return restoreOpenAIResponsesInstructionsAtPath(body, "instructions", openAIResponsesInstructionsEchoRestoreValue(c))
-}
-
-// restoreOpenAIResponsesInstructionsEchoInSSEBody 逐个 data 行还原整段 SSE 文本里的回显。
-func restoreOpenAIResponsesInstructionsEchoInSSEBody(c *gin.Context, body string) string {
-	restore := openAIResponsesInstructionsEchoRestoreValue(c)
-	if restore == "" || !strings.Contains(body, `"instructions"`) {
-		return body
-	}
-	lines := strings.Split(body, "\n")
-	changed := false
-	for i, line := range lines {
-		data, ok := extractOpenAISSEDataLine(line)
-		if !ok {
-			continue
-		}
-		restored := restoreOpenAIResponsesInstructionsAtPath([]byte(data), "response.instructions", restore)
-		if string(restored) == data {
-			continue
-		}
-		lines[i] = "data: " + string(restored)
-		changed = true
-	}
-	if !changed {
-		return body
-	}
-	return strings.Join(lines, "\n")
 }

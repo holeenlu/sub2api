@@ -303,7 +303,11 @@ func ollamaUsageAccount(id int64) *Account {
 func newOllamaUsageTestService(t *testing.T, repo *ollamaUsageTestRepo, upstream HTTPUpstream, settingsRepo SettingRepository, fixedKey bool) *OllamaCloudUsageService {
 	t.Helper()
 	svc := NewOllamaCloudUsageService(repo, upstream, NewSettingService(settingsRepo, nil), ollamaUsageTestEncryptor{}, fixedKey)
-	t.Cleanup(svc.Stop)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		require.NoError(t, svc.Stop(ctx))
+	})
 	return svc
 }
 
@@ -864,7 +868,11 @@ func TestOllamaCloudUsageRefreshRejectsGroupChangeBeforeUpstreamRequest(t *testi
 	repo := &ollamaRefreshPreflightIdentityChangeRepo{ollamaUsageTestRepo: base}
 	upstream := &ollamaUsageHTTPStub{body: ollamaUsageFixture(t)}
 	svc := NewOllamaCloudUsageService(repo, upstream, NewSettingService(&upstreamBillingProbeSettingRepo{}, nil), ollamaUsageTestEncryptor{}, true)
-	t.Cleanup(svc.Stop)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		require.NoError(t, svc.Stop(ctx))
+	})
 
 	_, err := svc.Refresh(context.Background(), account.ID)
 

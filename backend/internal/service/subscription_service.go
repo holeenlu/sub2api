@@ -2,11 +2,14 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"log"
 	"math/rand/v2"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -44,6 +47,23 @@ var (
 
 // SubscriptionService 订阅服务
 type SubscriptionService struct {
+	lifetimeWatchDone chan struct{}
+
+	lifecycleMu        sync.Mutex
+	lifecycleStarted   bool
+	lifecycleStartDone chan struct{}
+	lifecycleStartErr  error
+	lifecycleErr       error
+	cacheSubscription  SubscriptionCacheSubscription
+	lifecycleDraining  bool
+	lifecycleDone      chan struct{}
+	maintenancePending int
+	maintenanceIdle    chan struct{}
+	maintenanceCtx     context.Context
+	maintenanceCancel  context.CancelFunc
+	startupConfig      *config.Config
+	cacheMu            sync.RWMutex // guards cache access against final Close, never database work
+
 	groupRepo           GroupRepository
 	userSubRepo         UserSubscriptionRepository
 	billingCacheService *BillingCacheService
@@ -67,10 +87,8 @@ func NewSubscriptionService(groupRepo GroupRepository, userSubRepo UserSubscript
 		billingCacheService: billingCacheService,
 		entClient:           entClient,
 		now:                 time.Now,
+		startupConfig:       cfg,
 	}
-	svc.initSubCache(cfg)
-	svc.initMaintenanceQueue(cfg)
-	svc.StartSubCacheInvalidationSubscriber(context.Background())
 	return svc
 }
 
@@ -85,18 +103,135 @@ func (s *SubscriptionService) initMaintenanceQueue(cfg *config.Config) {
 	s.maintenanceQueue = NewSubscriptionMaintenanceQueue(mc.WorkerCount, mc.QueueSize)
 }
 
-// Stop stops the maintenance worker pool.
-func (s *SubscriptionService) Stop() {
+// Start creates the maintenance workers, L1 cache and owned invalidation
+// subscription. A failed subscription is returned to the root for rollback.
+func (s *SubscriptionService) Start(ctx context.Context) error {
 	if s == nil {
-		return
+		return nil
 	}
-	if s.maintenanceQueue != nil {
-		s.maintenanceQueue.Stop()
+	if err := ctx.Err(); err != nil {
+		return err
 	}
+	s.lifecycleMu.Lock()
+	if s.lifecycleDraining {
+		s.lifecycleMu.Unlock()
+		return fmt.Errorf("subscription workers stopped")
+	}
+	if s.lifecycleStarted {
+		done := s.lifecycleStartDone
+		s.lifecycleMu.Unlock()
+		select {
+		case <-done:
+			return s.lifecycleStartErr
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	s.maintenanceCtx, s.maintenanceCancel = context.WithCancel(ctx)
+	s.initSubCache(s.startupConfig)
+	s.initMaintenanceQueue(s.startupConfig)
+	s.lifecycleStarted = true
+	s.lifecycleStartDone = make(chan struct{})
+	s.lifetimeWatchDone = make(chan struct{})
+	watchDone := s.lifetimeWatchDone
+	subscriberCtx := s.maintenanceCtx
+	s.lifecycleMu.Unlock()
+	go func() { defer close(watchDone); <-subscriberCtx.Done(); _ = s.Drain(subscriberCtx) }()
+	subscription, err := s.startSubCacheInvalidationSubscriber(subscriberCtx)
+	s.lifecycleMu.Lock()
+	// Even a late or partially failed subscription belongs to this service.
+	// Drain waits for this handoff before closing L1.
+	s.cacheSubscription = subscription
+	s.lifecycleStartErr = err
+	close(s.lifecycleStartDone)
+	s.lifecycleMu.Unlock()
+	return err
+}
+
+// Drain closes maintenance admission before stopping its queue. One retained
+// shutdown owner joins accepted callbacks and closes L1 only after callbacks are
+// fenced. A timeout retains its completion handle for a later Stop/Drain call.
+func (s *SubscriptionService) Drain(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	s.lifecycleMu.Lock()
+	if !s.lifecycleDraining {
+		s.lifecycleDraining = true
+		s.lifecycleDone = make(chan struct{})
+		queue, idle, cancel, done := s.maintenanceQueue, s.maintenanceIdle, s.maintenanceCancel, s.lifecycleDone
+		watchDone, startDone := s.lifetimeWatchDone, s.lifecycleStartDone
+		go func() {
+			if queue != nil {
+				queue.Stop()
+			}
+			if idle != nil {
+				<-idle
+			}
+			if cancel != nil {
+				cancel()
+			}
+			if startDone != nil {
+				<-startDone
+			}
+			s.lifecycleMu.Lock()
+			subscription := s.cacheSubscription
+			s.lifecycleMu.Unlock()
+			var subscriptionErr error
+			if subscription != nil {
+				closeErr := subscription.Close()
+				// This retained shutdown owner performs the actual join. Caller
+				// timeouts never drop the handle or close the cache underneath it.
+				waitErr := subscription.Wait(context.Background())
+				subscriptionErr = errors.Join(closeErr, waitErr)
+				if subscriptionErr != nil {
+					subscriptionErr = fmt.Errorf("join subscription cache invalidation: %w", subscriptionErr)
+				}
+			}
+			if watchDone != nil {
+				<-watchDone
+			}
+			s.cacheMu.Lock()
+			if s.subCacheL1 != nil {
+				s.subCacheL1.Close()
+				s.subCacheL1 = nil
+			}
+			s.cacheMu.Unlock()
+			s.lifecycleErr = subscriptionErr
+			close(done)
+		}()
+	}
+	done := s.lifecycleDone
+	s.lifecycleMu.Unlock()
+	select {
+	case <-done:
+		return s.lifecycleErr
+	default:
+	}
+	select {
+	case <-done:
+		return s.lifecycleErr
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *SubscriptionService) Stop(ctx context.Context) error {
+	if s != nil {
+		s.lifecycleMu.Lock()
+		stop := s.maintenanceCancel
+		s.lifecycleMu.Unlock()
+		if stop != nil {
+			stop()
+		}
+	}
+	return s.Drain(ctx)
 }
 
 // initSubCache 初始化订阅 L1 缓存
 func (s *SubscriptionService) initSubCache(cfg *config.Config) {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
 	if cfg == nil {
 		return
 	}
@@ -142,6 +277,8 @@ func (s *SubscriptionService) jitteredTTL(ttl time.Duration) time.Duration {
 
 // InvalidateSubCache 失效指定用户+分组的订阅 L1 缓存
 func (s *SubscriptionService) InvalidateSubCache(userID, groupID int64) {
+	s.cacheMu.RLock()
+	defer s.cacheMu.RUnlock()
 	if s.subCacheL1 == nil {
 		return
 	}
@@ -154,6 +291,8 @@ func (s *SubscriptionService) InvalidateSubCacheSync(userID, groupID int64) {
 }
 
 func (s *SubscriptionService) invalidateSubCacheKeySync(key string) {
+	s.cacheMu.RLock()
+	defer s.cacheMu.RUnlock()
 	if s.subCacheL1 == nil {
 		return
 	}
@@ -161,16 +300,27 @@ func (s *SubscriptionService) invalidateSubCacheKeySync(key string) {
 	s.subCacheL1.Wait()
 }
 
-// StartSubCacheInvalidationSubscriber 启动跨实例订阅 L1 缓存失效订阅。
-func (s *SubscriptionService) StartSubCacheInvalidationSubscriber(ctx context.Context) {
-	if s.billingCacheService == nil || s.subCacheL1 == nil {
-		return
+// startSubCacheInvalidationSubscriber 启动跨实例订阅 L1 缓存失效订阅。
+func (s *SubscriptionService) startSubCacheInvalidationSubscriber(ctx context.Context) (SubscriptionCacheSubscription, error) {
+	s.cacheMu.RLock()
+	available := s.subCacheL1 != nil
+	s.cacheMu.RUnlock()
+	if s.billingCacheService == nil || !available {
+		return nil, nil
 	}
-	if err := s.billingCacheService.SubscribeSubscriptionCacheInvalidation(ctx, func(cacheKey string) {
+	subscription, err := s.billingCacheService.SubscribeSubscriptionCacheInvalidation(ctx, func(callbackCtx context.Context, cacheKey string) {
+		s.lifecycleMu.Lock()
+		draining := s.lifecycleDraining
+		s.lifecycleMu.Unlock()
+		if draining || callbackCtx.Err() != nil {
+			return
+		}
 		s.invalidateSubCacheKeySync(cacheKey)
-	}); err != nil {
-		log.Printf("Warning: failed to start subscription cache invalidation subscriber: %v", err)
+	})
+	if err != nil {
+		return subscription, fmt.Errorf("start subscription cache invalidation: %w", err)
 	}
+	return subscription, nil
 }
 
 func (s *SubscriptionService) invalidateSubscriptionCaches(userID, groupID int64) error {
@@ -355,7 +505,10 @@ func (s *SubscriptionService) updateExistingSubscriptionTerm(
 }
 
 func (s *SubscriptionService) withSubscriptionUpdateTx(ctx context.Context, fn func(context.Context) error) error {
-	if dbent.TxFromContext(ctx) != nil {
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		if err := authz.LockManagementWrite(ctx, tx.Client(), nil, "", "", false); err != nil {
+			return err
+		}
 		return fn(ctx)
 	}
 	if s.entClient == nil {
@@ -367,6 +520,10 @@ func (s *SubscriptionService) withSubscriptionUpdateTx(ctx context.Context, fn f
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 	txCtx := dbent.NewTxContext(ctx, tx)
+	if err := authz.LockManagementWrite(txCtx, tx.Client(), nil, "", "", false); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
 
 	if err := fn(txCtx); err != nil {
 		_ = tx.Rollback()
@@ -745,15 +902,18 @@ func (s *SubscriptionService) GetByID(ctx context.Context, id int64) (*UserSubsc
 func (s *SubscriptionService) GetActiveSubscription(ctx context.Context, userID, groupID int64) (*UserSubscription, error) {
 	key := subCacheKey(userID, groupID)
 
-	// L1 缓存命中：返回浅拷贝
+	// L1 access is fenced against final cache release; return a copied value.
+	s.cacheMu.RLock()
 	if s.subCacheL1 != nil {
 		if v, ok := s.subCacheL1.Get(key); ok {
 			if sub, ok := v.(*UserSubscription); ok {
 				cp := *sub
+				s.cacheMu.RUnlock()
 				return &cp, nil
 			}
 		}
 	}
+	s.cacheMu.RUnlock()
 
 	// singleflight 防止并发击穿
 	value, err, _ := s.subCacheGroup.Do(key, func() (any, error) {
@@ -762,9 +922,11 @@ func (s *SubscriptionService) GetActiveSubscription(ctx context.Context, userID,
 			return nil, err // 直接透传 repo 已翻译的错误（NotFound → ErrSubscriptionNotFound，其他错误原样返回）
 		}
 		// 写入 L1 缓存
+		s.cacheMu.RLock()
 		if s.subCacheL1 != nil {
 			_ = s.subCacheL1.SetWithTTL(key, sub, 1, s.jitteredTTL(s.subCacheTTL))
 		}
+		s.cacheMu.RUnlock()
 		return sub, nil
 	})
 	if err != nil {
@@ -1053,24 +1215,51 @@ func (s *SubscriptionService) ValidateAndCheckLimits(sub *UserSubscription, grou
 // 而 IsExpired()=true 的订阅在 ValidateAndCheckLimits 中已被拦截返回错误，
 // 因此进入此方法的订阅一定未过期，无需处理过期状态同步。
 func (s *SubscriptionService) DoWindowMaintenance(sub *UserSubscription) {
-	if s == nil {
+	if s == nil || sub == nil {
 		return
 	}
+	s.lifecycleMu.Lock()
+	if s.lifecycleDraining || (s.maintenanceCtx != nil && s.maintenanceCtx.Err() != nil) {
+		s.lifecycleMu.Unlock()
+		log.Print("Subscription maintenance rejected after stop")
+		return
+	}
+	if s.maintenancePending == 0 {
+		s.maintenanceIdle = make(chan struct{})
+	}
+	s.maintenancePending++
+	parent := s.maintenanceCtx
+	if parent == nil {
+		parent = context.Background()
+	}
+	finish := func() {
+		s.lifecycleMu.Lock()
+		defer s.lifecycleMu.Unlock()
+		s.maintenancePending--
+		if s.maintenancePending == 0 {
+			close(s.maintenanceIdle)
+		}
+	}
+	task := func() { defer finish(); s.doWindowMaintenance(sub, parent) }
 	if s.maintenanceQueue != nil {
-		err := s.maintenanceQueue.TryEnqueue(func() {
-			s.doWindowMaintenance(sub)
-		})
+		err := s.maintenanceQueue.TryEnqueue(task)
+		s.lifecycleMu.Unlock()
 		if err != nil {
+			finish()
 			log.Printf("Subscription maintenance enqueue failed: %v", err)
 		}
 		return
 	}
-
-	s.doWindowMaintenance(sub)
+	s.lifecycleMu.Unlock()
+	task()
 }
 
-func (s *SubscriptionService) doWindowMaintenance(sub *UserSubscription) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (s *SubscriptionService) doWindowMaintenance(sub *UserSubscription, contexts ...context.Context) {
+	parent := context.Background()
+	if len(contexts) > 0 {
+		parent = contexts[0]
+	}
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 
 	// 激活窗口（首次使用时）

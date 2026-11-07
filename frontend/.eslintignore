@@ -7,6 +7,8 @@ node_modules/
 
 # 忽略构建输出
 dist/
+dist-vendor/
+dist-review/
 ../backend/internal/web/dist/
 
 # 忽略缓存

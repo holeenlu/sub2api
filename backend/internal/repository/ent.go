@@ -114,20 +114,11 @@ func InitEnt(cfg *config.Config) (*ent.Client, *sql.DB, error) {
 
 	// 使用 Ent 的 SQL 驱动打开 PostgreSQL 连接。
 	// dialect.Postgres 指定使用 PostgreSQL 方言进行 SQL 生成。
-	var drv *entsql.Driver
-	if cfg.Server.EnableServerTiming {
-		connector, err := pq.NewConnector(dsn)
-		if err != nil {
-			return nil, nil, err
-		}
-		drv = entsql.OpenDB(dialect.Postgres, sql.OpenDB(newServerTimingConnector(connector)))
-	} else {
-		var err error
-		drv, err = entsql.Open(dialect.Postgres, dsn)
-		if err != nil {
-			return nil, nil, err
-		}
+	connector, err := pq.NewConnector(dsn)
+	if err != nil {
+		return nil, nil, err
 	}
+	drv := entsql.OpenDB(dialect.Postgres, sql.OpenDB(newServerTimingConnector(connector)))
 	applyDBPoolSettings(drv.DB(), cfg)
 
 	// 确保数据库 schema 已准备就绪。
@@ -136,7 +127,10 @@ func InitEnt(cfg *config.Config) (*ent.Client, *sql.DB, error) {
 	migrationCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	if err := initializeDatabaseWithRetry(migrationCtx, func(ctx context.Context) error {
-		return applyMigrationsFS(ctx, drv.DB(), migrations.FS)
+		if err := applyMigrationsFS(ctx, drv.DB(), migrations.FS); err != nil {
+			return err
+		}
+		return migrateSchedulerBusinessPreferences(ctx, drv.DB(), cfg.SchedulerMigrationWeights())
 	}); err != nil {
 		_ = drv.Close() // 迁移失败时关闭驱动，避免资源泄露
 		return nil, nil, err

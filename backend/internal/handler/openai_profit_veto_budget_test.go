@@ -3,6 +3,7 @@ package handler
 import (
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/gateway/execution"
 	"github.com/stretchr/testify/require"
 )
 
@@ -16,16 +17,16 @@ func TestRecordOpenAIProfitVetoBounded(t *testing.T) {
 	failed := make(map[int64]struct{})
 	count := 0
 
-	for i := int64(1); i < int64(maxProfitVetoAttempts); i++ {
+	for i := int64(1); i < int64(execution.MaxProfitVetoAttempts); i++ {
 		require.True(t, recordOpenAIProfitVeto(failed, i, &count), "第 %d 次否决应允许继续重选", i)
 		require.Contains(t, failed, i, "否决的账号必须进入本请求排除集")
 	}
 
 	require.False(t,
-		recordOpenAIProfitVeto(failed, int64(maxProfitVetoAttempts), &count),
-		"第 %d 次否决应耗尽预算并要求终止", maxProfitVetoAttempts)
-	require.Equal(t, maxProfitVetoAttempts, count)
-	require.Len(t, failed, maxProfitVetoAttempts)
+		recordOpenAIProfitVeto(failed, int64(execution.MaxProfitVetoAttempts), &count),
+		"第 %d 次否决应耗尽预算并要求终止", execution.MaxProfitVetoAttempts)
+	require.Equal(t, execution.MaxProfitVetoAttempts, count)
+	require.Len(t, failed, execution.MaxProfitVetoAttempts)
 }
 
 // TestOpenAIProfitVetoLoopTerminates 模拟「选号 → 抢槽 → 利润终检否决 → 重选」
@@ -49,7 +50,7 @@ func TestOpenAIProfitVetoLoopTerminates(t *testing.T) {
 	}
 
 	require.True(t, terminated, "整池越线时循环必须由否决预算终止")
-	require.Equal(t, maxProfitVetoAttempts, iterations)
+	require.Equal(t, execution.MaxProfitVetoAttempts, iterations)
 }
 
 // TestProfitVetoBudgetSharedWithFailoverState 钉死两条路径（FailoverState 与
@@ -60,8 +61,8 @@ func TestProfitVetoBudgetSharedWithFailoverState(t *testing.T) {
 	count := 0
 
 	var fsStoppedAt, openAIStoppedAt int
-	for i := int64(1); i <= int64(maxProfitVetoAttempts)+5; i++ {
-		if fsStoppedAt == 0 && fs.RecordProfitVeto(i) == FailoverExhausted {
+	for i := int64(1); i <= int64(execution.MaxProfitVetoAttempts)+5; i++ {
+		if fsStoppedAt == 0 && fs.RecordProfitVeto(i) == execution.RecoveryExhausted {
 			fsStoppedAt = fs.ProfitVetoCount()
 		}
 		if openAIStoppedAt == 0 && !recordOpenAIProfitVeto(failed, i, &count) {
@@ -69,6 +70,6 @@ func TestProfitVetoBudgetSharedWithFailoverState(t *testing.T) {
 		}
 	}
 
-	require.Equal(t, maxProfitVetoAttempts, fsStoppedAt)
+	require.Equal(t, execution.MaxProfitVetoAttempts, fsStoppedAt)
 	require.Equal(t, fsStoppedAt, openAIStoppedAt, "两条路径的利润否决上限必须一致")
 }

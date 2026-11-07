@@ -267,81 +267,6 @@ func TestGetBasePaymentType(t *testing.T) {
 	}
 }
 
-func TestApplyVisibleMethodRoutingToEnabledTypes(t *testing.T) {
-	t.Parallel()
-
-	base := []string{"alipay", "wxpay", "stripe"}
-	vals := map[string]string{
-		SettingPaymentVisibleMethodAlipayEnabled: "true",
-		SettingPaymentVisibleMethodAlipaySource:  VisibleMethodSourceOfficialAlipay,
-		SettingPaymentVisibleMethodWxpayEnabled:  "true",
-		SettingPaymentVisibleMethodWxpaySource:   VisibleMethodSourceOfficialWechat,
-	}
-	available := map[string]bool{
-		VisibleMethodSourceOfficialAlipay: true,
-		VisibleMethodSourceOfficialWechat: false,
-	}
-
-	got := applyVisibleMethodRoutingToEnabledTypes(base, vals, available)
-	want := []string{"alipay", "stripe"}
-	if len(got) != len(want) {
-		t.Fatalf("applyVisibleMethodRoutingToEnabledTypes len = %d, want %d (%v)", len(got), len(want), got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("applyVisibleMethodRoutingToEnabledTypes[%d] = %q, want %q (full=%v)", i, got[i], want[i], got)
-		}
-	}
-}
-
-func TestApplyVisibleMethodRoutingAddsConfiguredVisibleMethod(t *testing.T) {
-	t.Parallel()
-
-	base := []string{"stripe"}
-	vals := map[string]string{
-		SettingPaymentVisibleMethodAlipayEnabled: "true",
-		SettingPaymentVisibleMethodAlipaySource:  VisibleMethodSourceEasyPayAlipay,
-	}
-	available := map[string]bool{
-		VisibleMethodSourceEasyPayAlipay: true,
-	}
-
-	got := applyVisibleMethodRoutingToEnabledTypes(base, vals, available)
-	want := []string{"stripe", "alipay"}
-	if len(got) != len(want) {
-		t.Fatalf("applyVisibleMethodRoutingToEnabledTypes len = %d, want %d (%v)", len(got), len(want), got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("applyVisibleMethodRoutingToEnabledTypes[%d] = %q, want %q (full=%v)", i, got[i], want[i], got)
-		}
-	}
-}
-
-func TestBuildVisibleMethodSourceAvailability(t *testing.T) {
-	t.Parallel()
-
-	instances := []*dbent.PaymentProviderInstance{
-		{ProviderKey: payment.TypeAlipay, SupportedTypes: "alipay"},
-		{ProviderKey: payment.TypeEasyPay, SupportedTypes: "wxpay_direct, alipay"},
-		{ProviderKey: payment.TypeWxpay, SupportedTypes: "wxpay_direct"},
-	}
-
-	got := buildVisibleMethodSourceAvailability(instances)
-	if !got[VisibleMethodSourceOfficialAlipay] {
-		t.Fatalf("expected %q to be available", VisibleMethodSourceOfficialAlipay)
-	}
-	if !got[VisibleMethodSourceEasyPayAlipay] {
-		t.Fatalf("expected %q to be available", VisibleMethodSourceEasyPayAlipay)
-	}
-	if !got[VisibleMethodSourceOfficialWechat] {
-		t.Fatalf("expected %q to be available", VisibleMethodSourceOfficialWechat)
-	}
-	if !got[VisibleMethodSourceEasyPayWechat] {
-		t.Fatalf("expected %q to be available", VisibleMethodSourceEasyPayWechat)
-	}
-}
-
 func TestGetPaymentConfigKeepsStoredEnabledTypes(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)
@@ -440,7 +365,7 @@ func (s *paymentConfigSettingRepoStub) GetAll(context.Context) (map[string]strin
 }
 func (s *paymentConfigSettingRepoStub) Delete(context.Context, string) error { return nil }
 
-func TestUpdatePaymentConfig_PersistsVisibleMethodRouting(t *testing.T) {
+func TestPaymentConfigPreparedValues_PersistsVisibleMethodRouting(t *testing.T) {
 	repo := &paymentConfigSettingRepoStub{values: map[string]string{
 		SettingPaymentVisibleMethodAlipayEnabled: "false",
 		SettingPaymentVisibleMethodAlipaySource:  VisibleMethodSourceOfficialAlipay,
@@ -451,7 +376,7 @@ func TestUpdatePaymentConfig_PersistsVisibleMethodRouting(t *testing.T) {
 
 	alipayEnabled := true
 	wxpayEnabled := false
-	err := svc.UpdatePaymentConfig(context.Background(), UpdatePaymentConfigRequest{
+	err := storePreparedPaymentForTest(svc, context.Background(), UpdatePaymentConfigRequest{
 		VisibleMethodAlipayEnabled: &alipayEnabled,
 		VisibleMethodAlipaySource:  paymentConfigStrPtr(VisibleMethodSourceEasyPayAlipay),
 		VisibleMethodWxpayEnabled:  &wxpayEnabled,
@@ -475,7 +400,7 @@ func TestUpdatePaymentConfig_PersistsVisibleMethodRouting(t *testing.T) {
 	}
 }
 
-func TestUpdatePaymentConfig_OmittedVisibleMethodRoutingIsPreserved(t *testing.T) {
+func TestPaymentConfigPreparedValues_OmittedVisibleMethodRoutingIsPreserved(t *testing.T) {
 	wantVisibleMethods := map[string]string{
 		SettingPaymentVisibleMethodAlipayEnabled: "true",
 		SettingPaymentVisibleMethodAlipaySource:  VisibleMethodSourceEasyPayAlipay,
@@ -490,7 +415,7 @@ func TestUpdatePaymentConfig_OmittedVisibleMethodRoutingIsPreserved(t *testing.T
 	svc := &PaymentConfigService{settingRepo: repo}
 
 	enabled := true
-	err := svc.UpdatePaymentConfig(context.Background(), UpdatePaymentConfigRequest{Enabled: &enabled})
+	err := storePreparedPaymentForTest(svc, context.Background(), UpdatePaymentConfigRequest{Enabled: &enabled})
 	if err != nil {
 		t.Fatalf("UpdatePaymentConfig returned error: %v", err)
 	}
@@ -514,7 +439,7 @@ func TestUpdatePaymentConfig_OmittedVisibleMethodRoutingIsPreserved(t *testing.T
 	}
 }
 
-func TestUpdatePaymentConfig_PersistsExplicitEmptyAndFalseValues(t *testing.T) {
+func TestPaymentConfigPreparedValues_PersistsExplicitEmptyAndFalseValues(t *testing.T) {
 	repo := &paymentConfigSettingRepoStub{values: map[string]string{
 		SettingEnabledPaymentTypes: "alipay,wxpay",
 		SettingBalancePayDisabled:  "true",
@@ -524,7 +449,7 @@ func TestUpdatePaymentConfig_PersistsExplicitEmptyAndFalseValues(t *testing.T) {
 
 	falseValue := false
 	emptyString := ""
-	err := svc.UpdatePaymentConfig(context.Background(), UpdatePaymentConfigRequest{
+	err := storePreparedPaymentForTest(svc, context.Background(), UpdatePaymentConfigRequest{
 		EnabledTypes:      []string{},
 		BalanceDisabled:   &falseValue,
 		ProductNamePrefix: &emptyString,
@@ -553,4 +478,13 @@ func TestUpdatePaymentConfig_PersistsExplicitEmptyAndFalseValues(t *testing.T) {
 
 func paymentConfigStrPtr(value string) *string {
 	return &value
+}
+
+// 将准备好的值放入测试仓储，以验证同一编码结果的读取；实际原子写入由设置处理器测试覆盖。
+func storePreparedPaymentForTest(svc *PaymentConfigService, ctx context.Context, request UpdatePaymentConfigRequest) error {
+	values, err := svc.BuildPaymentConfigUpdates(ctx, request)
+	if err != nil {
+		return err
+	}
+	return svc.settingRepo.SetMultiple(ctx, values)
 }

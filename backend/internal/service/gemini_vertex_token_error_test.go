@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -199,9 +198,10 @@ func TestGeminiForwardNative_OtherVertexTokenErrorKeepsAccountState(t *testing.T
 	require.Nil(t, result)
 	require.Error(t, err)
 	var failoverErr *UpstreamFailoverError
-	require.False(t, errors.As(err, &failoverErr), "未识别的换 token 失败不换号")
+	require.True(t, errors.As(err, &failoverErr), "credential preparation is recoverable before sending inference")
+	require.True(t, failoverErr.RequestNotSent)
 	require.Zero(t, repo.setErrCalls, "未识别的换 token 失败不改账号状态")
 	require.Zero(t, httpStub.calls)
-	require.Equal(t, http.StatusBadGateway, rec.Code)
-	require.True(t, strings.Contains(rec.Body.String(), "Invalid JWT Signature."))
+	require.False(t, c.Writer.Written())
+	require.Empty(t, rec.Body.String())
 }

@@ -1,0 +1,609 @@
+{
+  "version": 0,
+  "source": "seed",
+  "defaults": {
+    "enabled": true,
+    "max_tokens": 16384,
+    "thinking_fallback_budget": 4096,
+    "strip_context_1m": true,
+    "context_1m_whitelist": [
+      "claude-sonnet-5",
+      "claude-sonnet-5-*"
+    ],
+    "normalize_thinking": true
+  },
+  "models": {
+    "claude-haiku-4-5-20251001": {
+      "enabled": true,
+      "display_name": "Haiku 4.5",
+      "family": "haiku",
+      "sort": 10,
+      "capabilities": {
+        "context_window": 200000,
+        "supports_1m": false,
+        "thinking_mode": "enabled_only",
+        "supports_adaptive": false,
+        "requires_adaptive": false,
+        "supports_interleaved": false,
+        "supports_effort": false,
+        "supports_context_management": false
+      },
+      "betas": {
+        "required": [
+          "oauth-2025-04-20",
+          "interleaved-thinking-2025-05-14"
+        ],
+        "drop": [
+          "context-1m-2025-08-07",
+          "effort-2025-11-24",
+          "context-management-2025-06-27"
+        ],
+        "allow_client": true,
+        "pass_context_1m": false
+      },
+      "params": {
+        "max_tokens_default": 8192,
+        "max_tokens_cap": 64000,
+        "thinking_fallback_budget": 4096,
+        "on_adaptive": "convert_to_enabled",
+        "on_enabled": "passthrough"
+      },
+      "aliases": [
+        "claude-haiku-4-5",
+        "claude-3-5-haiku",
+        "claude-3-5-haiku-latest"
+      ],
+      "id": "claude-haiku-4-5-20251001",
+      "kind": "chat"
+    },
+    "claude-haiku-4-5": {
+      "enabled": true,
+      "display_name": "Haiku 4.5 (alias id)",
+      "family": "haiku",
+      "sort": 11,
+      "capabilities": {
+        "context_window": 200000,
+        "supports_1m": false,
+        "thinking_mode": "enabled_only",
+        "supports_adaptive": false,
+        "requires_adaptive": false,
+        "supports_interleaved": false,
+        "supports_effort": false,
+        "supports_context_management": false
+      },
+      "betas": {
+        "required": [
+          "oauth-2025-04-20",
+          "interleaved-thinking-2025-05-14"
+        ],
+        "drop": [
+          "context-1m-2025-08-07",
+          "effort-2025-11-24",
+          "context-management-2025-06-27"
+        ],
+        "allow_client": true,
+        "pass_context_1m": false
+      },
+      "params": {
+        "max_tokens_default": 8192,
+        "max_tokens_cap": 64000,
+        "thinking_fallback_budget": 4096,
+        "on_adaptive": "convert_to_enabled",
+        "on_enabled": "passthrough"
+      },
+      "aliases": [],
+      "id": "claude-haiku-4-5",
+      "kind": "chat"
+    },
+    "claude-haiku-5-5": {
+      "enabled": true,
+      "display_name": "Haiku 5.5",
+      "family": "haiku",
+      "sort": 4,
+      "capabilities": {
+        "context_window": 1000000,
+        "supports_1m": true,
+        "thinking_mode": "adaptive_only",
+        "supports_adaptive": true,
+        "requires_adaptive": true,
+        "supports_interleaved": true,
+        "supports_effort": true,
+        "supports_context_management": true
+      },
+      "betas": {
+        "required": [
+          "claude-code-20250219",
+          "oauth-2025-04-20",
+          "interleaved-thinking-2025-05-14"
+        ],
+        "drop": [
+          "context-1m-2025-08-07"
+        ],
+        "allow_client": true,
+        "pass_context_1m": false
+      },
+      "params": {
+        "max_tokens_default": 128000,
+        "max_tokens_cap": 128000,
+        "thinking_fallback_budget": 4096,
+        "on_adaptive": "passthrough",
+        "on_enabled": "passthrough",
+        "default_effort": "medium"
+      },
+      "aliases": [],
+      "id": "claude-haiku-5-5",
+      "kind": "chat"
+    },
+    "claude-sonnet-4-5-20250929": {
+      "enabled": true,
+      "display_name": "Sonnet 4.5",
+      "family": "sonnet",
+      "sort": 15,
+      "capabilities": {
+        "context_window": 200000,
+        "supports_1m": false,
+        "thinking_mode": "enabled_only",
+        "supports_adaptive": false,
+        "requires_adaptive": false,
+        "supports_interleaved": true,
+        "supports_effort": false,
+        "supports_context_management": true
+      },
+      "betas": {
+        "required": [
+          "oauth-2025-04-20",
+          "interleaved-thinking-2025-05-14"
+        ],
+        "drop": [
+          "context-1m-2025-08-07"
+        ],
+        "allow_client": true,
+        "pass_context_1m": false
+      },
+      "params": {
+        "max_tokens_default": 16384,
+        "max_tokens_cap": 64000,
+        "thinking_fallback_budget": 4096,
+        "on_adaptive": "convert_to_enabled",
+        "on_enabled": "passthrough"
+      },
+      "aliases": [
+        "claude-sonnet-4-5"
+      ],
+      "id": "claude-sonnet-4-5-20250929",
+      "kind": "chat"
+    },
+    "claude-sonnet-4-6": {
+      "enabled": true,
+      "display_name": "Sonnet 4.6",
+      "family": "sonnet",
+      "sort": 20,
+      "capabilities": {
+        "context_window": 1000000,
+        "supports_1m": true,
+        "thinking_mode": "adaptive_or_enabled",
+        "supports_adaptive": true,
+        "requires_adaptive": false,
+        "supports_interleaved": true,
+        "supports_effort": true,
+        "supports_context_management": true
+      },
+      "betas": {
+        "required": [
+          "claude-code-20250219",
+          "oauth-2025-04-20",
+          "interleaved-thinking-2025-05-14"
+        ],
+        "drop": [
+          "context-1m-2025-08-07"
+        ],
+        "allow_client": true,
+        "pass_context_1m": false
+      },
+      "params": {
+        "max_tokens_default": 16384,
+        "max_tokens_cap": 64000,
+        "thinking_fallback_budget": 4096,
+        "on_adaptive": "passthrough",
+        "on_enabled": "passthrough"
+      },
+      "aliases": [],
+      "id": "claude-sonnet-4-6",
+      "kind": "chat"
+    },
+    "claude-opus-4-6": {
+      "enabled": true,
+      "display_name": "Opus 4.6",
+      "family": "opus",
+      "sort": 25,
+      "capabilities": {
+        "context_window": 1000000,
+        "supports_1m": true,
+        "thinking_mode": "adaptive_or_enabled",
+        "supports_adaptive": true,
+        "requires_adaptive": false,
+        "supports_interleaved": true,
+        "supports_effort": true,
+        "supports_context_management": true
+      },
+      "betas": {
+        "required": [
+          "claude-code-20250219",
+          "oauth-2025-04-20",
+          "interleaved-thinking-2025-05-14"
+        ],
+        "drop": [
+          "context-1m-2025-08-07"
+        ],
+        "allow_client": true,
+        "pass_context_1m": false
+      },
+      "params": {
+        "max_tokens_default": 32000,
+        "max_tokens_cap": 128000,
+        "thinking_fallback_budget": 4096,
+        "on_adaptive": "passthrough",
+        "on_enabled": "passthrough"
+      },
+      "aliases": [],
+      "id": "claude-opus-4-6",
+      "kind": "chat"
+    },
+    "claude-opus-4-7": {
+      "enabled": true,
+      "display_name": "Opus 4.7",
+      "family": "opus",
+      "sort": 28,
+      "capabilities": {
+        "context_window": 1000000,
+        "supports_1m": true,
+        "thinking_mode": "adaptive_only",
+        "supports_adaptive": true,
+        "requires_adaptive": true,
+        "supports_interleaved": true,
+        "supports_effort": true,
+        "supports_context_management": true
+      },
+      "betas": {
+        "required": [
+          "oauth-2025-04-20",
+          "interleaved-thinking-2025-05-14"
+        ],
+        "drop": [
+          "context-1m-2025-08-07"
+        ],
+        "allow_client": true,
+        "pass_context_1m": false
+      },
+      "params": {
+        "max_tokens_default": 32000,
+        "max_tokens_cap": 128000,
+        "thinking_fallback_budget": 4096,
+        "on_adaptive": "passthrough",
+        "on_enabled": "passthrough"
+      },
+      "aliases": [],
+      "id": "claude-opus-4-7",
+      "kind": "chat"
+    },
+    "claude-opus-4-8": {
+      "enabled": true,
+      "display_name": "Opus 4.8",
+      "family": "opus",
+      "sort": 29,
+      "capabilities": {
+        "context_window": 1000000,
+        "supports_1m": true,
+        "thinking_mode": "adaptive_only",
+        "supports_adaptive": true,
+        "requires_adaptive": true,
+        "supports_interleaved": true,
+        "supports_effort": true,
+        "supports_context_management": true
+      },
+      "betas": {
+        "required": [
+          "oauth-2025-04-20",
+          "interleaved-thinking-2025-05-14"
+        ],
+        "drop": [
+          "context-1m-2025-08-07"
+        ],
+        "allow_client": true,
+        "pass_context_1m": false
+      },
+      "params": {
+        "max_tokens_default": 32000,
+        "max_tokens_cap": 128000,
+        "thinking_fallback_budget": 4096,
+        "on_adaptive": "passthrough",
+        "on_enabled": "passthrough"
+      },
+      "aliases": [],
+      "id": "claude-opus-4-8",
+      "kind": "chat"
+    },
+    "claude-sonnet-5": {
+      "enabled": true,
+      "display_name": "Sonnet 5",
+      "family": "sonnet",
+      "sort": 30,
+      "capabilities": {
+        "context_window": 1000000,
+        "supports_1m": true,
+        "thinking_mode": "adaptive_only",
+        "supports_adaptive": true,
+        "requires_adaptive": true,
+        "supports_interleaved": true,
+        "supports_effort": true,
+        "supports_context_management": true
+      },
+      "betas": {
+        "required": [
+          "oauth-2025-04-20",
+          "interleaved-thinking-2025-05-14"
+        ],
+        "drop": [
+          "context-1m-2025-08-07"
+        ],
+        "allow_client": true,
+        "pass_context_1m": true
+      },
+      "params": {
+        "max_tokens_default": 64000,
+        "max_tokens_cap": 128000,
+        "thinking_fallback_budget": 4096,
+        "on_adaptive": "passthrough",
+        "on_enabled": "passthrough"
+      },
+      "aliases": [],
+      "id": "claude-sonnet-5",
+      "kind": "chat"
+    },
+    "claude-sonnet-5-5": {
+      "enabled": true,
+      "display_name": "Sonnet 5.5",
+      "family": "sonnet",
+      "sort": 3,
+      "capabilities": {
+        "context_window": 1000000,
+        "supports_1m": true,
+        "thinking_mode": "adaptive_only",
+        "supports_adaptive": true,
+        "requires_adaptive": true,
+        "supports_interleaved": true,
+        "supports_effort": true,
+        "supports_context_management": true
+      },
+      "betas": {
+        "required": [
+          "oauth-2025-04-20",
+          "interleaved-thinking-2025-05-14"
+        ],
+        "drop": [
+          "context-1m-2025-08-07"
+        ],
+        "allow_client": true,
+        "pass_context_1m": true
+      },
+      "params": {
+        "max_tokens_default": 128000,
+        "max_tokens_cap": 128000,
+        "thinking_fallback_budget": 4096,
+        "on_adaptive": "passthrough",
+        "on_enabled": "convert_to_adaptive",
+        "default_effort": "medium"
+      },
+      "aliases": [
+        "sonnet"
+      ],
+      "id": "claude-sonnet-5-5",
+      "kind": "chat"
+    },
+    "claude-opus-5": {
+      "enabled": true,
+      "display_name": "Opus 5",
+      "family": "opus",
+      "sort": 35,
+      "capabilities": {
+        "context_window": 1000000,
+        "supports_1m": true,
+        "thinking_mode": "adaptive_only",
+        "supports_adaptive": true,
+        "requires_adaptive": true,
+        "supports_interleaved": true,
+        "supports_effort": true,
+        "supports_context_management": true
+      },
+      "betas": {
+        "required": [
+          "oauth-2025-04-20",
+          "interleaved-thinking-2025-05-14"
+        ],
+        "drop": [
+          "context-1m-2025-08-07"
+        ],
+        "allow_client": true,
+        "pass_context_1m": false
+      },
+      "params": {
+        "max_tokens_default": 32000,
+        "max_tokens_cap": 128000,
+        "thinking_fallback_budget": 4096,
+        "on_adaptive": "passthrough",
+        "on_enabled": "passthrough"
+      },
+      "aliases": [],
+      "id": "claude-opus-5",
+      "kind": "chat"
+    },
+    "claude-opus-5-5": {
+      "enabled": true,
+      "display_name": "Opus 5.5",
+      "family": "opus",
+      "sort": 2,
+      "capabilities": {
+        "context_window": 1000000,
+        "supports_1m": true,
+        "thinking_mode": "adaptive_only",
+        "supports_adaptive": true,
+        "requires_adaptive": true,
+        "supports_interleaved": true,
+        "supports_effort": true,
+        "supports_context_management": true
+      },
+      "betas": {
+        "required": [
+          "oauth-2025-04-20",
+          "interleaved-thinking-2025-05-14"
+        ],
+        "drop": [
+          "context-1m-2025-08-07"
+        ],
+        "allow_client": true,
+        "pass_context_1m": true
+      },
+      "params": {
+        "max_tokens_default": 128000,
+        "max_tokens_cap": 128000,
+        "thinking_fallback_budget": 4096,
+        "on_adaptive": "passthrough",
+        "on_enabled": "convert_to_adaptive",
+        "default_effort": "medium"
+      },
+      "aliases": [
+        "opus",
+        "claude-opus-5.5"
+      ],
+      "id": "claude-opus-5-5",
+      "kind": "chat"
+    },
+    "claude-fable-5": {
+      "enabled": true,
+      "display_name": "Fable 5",
+      "family": "fable",
+      "sort": 40,
+      "capabilities": {
+        "context_window": 1000000,
+        "supports_1m": true,
+        "thinking_mode": "adaptive_only",
+        "supports_adaptive": true,
+        "requires_adaptive": true,
+        "supports_interleaved": true,
+        "supports_effort": true,
+        "supports_context_management": true
+      },
+      "betas": {
+        "required": [
+          "oauth-2025-04-20",
+          "interleaved-thinking-2025-05-14"
+        ],
+        "drop": [
+          "context-1m-2025-08-07"
+        ],
+        "allow_client": true,
+        "pass_context_1m": false
+      },
+      "params": {
+        "max_tokens_default": 32000,
+        "max_tokens_cap": 128000,
+        "thinking_fallback_budget": 4096,
+        "on_adaptive": "passthrough",
+        "on_enabled": "passthrough"
+      },
+      "aliases": [],
+      "id": "claude-fable-5",
+      "kind": "chat"
+    },
+    "claude-fable-5-1": {
+      "enabled": true,
+      "display_name": "Fable 5.1",
+      "family": "fable",
+      "sort": 1,
+      "capabilities": {
+        "context_window": 1000000,
+        "supports_1m": true,
+        "thinking_mode": "adaptive_only",
+        "supports_adaptive": true,
+        "requires_adaptive": true,
+        "supports_interleaved": true,
+        "supports_effort": true,
+        "supports_context_management": true
+      },
+      "betas": {
+        "required": [
+          "oauth-2025-04-20",
+          "interleaved-thinking-2025-05-14"
+        ],
+        "drop": [
+          "context-1m-2025-08-07"
+        ],
+        "allow_client": true,
+        "pass_context_1m": false
+      },
+      "params": {
+        "max_tokens_default": 32000,
+        "max_tokens_cap": 128000,
+        "thinking_fallback_budget": 4096,
+        "on_adaptive": "passthrough",
+        "on_enabled": "passthrough"
+      },
+      "aliases": [
+        "fable",
+        "claude-fable-5.1"
+      ],
+      "id": "claude-fable-5-1",
+      "kind": "chat"
+    },
+    "auto": {
+      "enabled": true,
+      "display_name": "Auto",
+      "family": "auto",
+      "sort": 1,
+      "capabilities": {
+        "context_window": 1000000,
+        "supports_1m": true,
+        "thinking_mode": "adaptive_only",
+        "supports_adaptive": true,
+        "requires_adaptive": true,
+        "supports_interleaved": true,
+        "supports_effort": true,
+        "supports_context_management": true
+      },
+      "betas": {
+        "required": [
+          "oauth-2025-04-20",
+          "interleaved-thinking-2025-05-14"
+        ],
+        "drop": [
+          "context-1m-2025-08-07"
+        ],
+        "allow_client": true,
+        "pass_context_1m": false
+      },
+      "params": {
+        "max_tokens_default": 128000,
+        "max_tokens_cap": 128000,
+        "thinking_fallback_budget": 4096,
+        "on_adaptive": "passthrough",
+        "on_enabled": "passthrough"
+      },
+      "aliases": [],
+      "id": "auto",
+      "kind": "chat"
+    }
+  },
+  "aliases": {
+    "sonnet": "claude-sonnet-5-5",
+    "opus": "claude-opus-5-5",
+    "haiku": "claude-haiku-5-5",
+    "claude-haiku-4-5": "claude-haiku-4-5-20251001",
+    "claude-3-5-haiku": "claude-haiku-4-5-20251001",
+    "claude-3-5-haiku-latest": "claude-haiku-4-5-20251001",
+    "fable": "claude-fable-5-1",
+    "claude-fable-5.1": "claude-fable-5-1",
+    "claude-opus-5.5": "claude-opus-5-5"
+  },
+  "catalog_mode": "policy_only",
+  "platform": "anthropic"
+}

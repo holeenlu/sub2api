@@ -4,6 +4,8 @@ package repository
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"testing"
 	"time"
 
@@ -12,6 +14,38 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestSchedulerCacheAnthropicThresholdPreservesUsageIdentity(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	until := now.Add(time.Hour)
+	for _, matching := range []bool{false, true} {
+		t.Run(fmt.Sprint(matching), func(t *testing.T) {
+			identity := fmt.Sprintf("%x", sha256.Sum256([]byte("previous-token")))
+			if matching {
+				identity = fmt.Sprintf("%x", sha256.Sum256([]byte("current-token")))
+			}
+			account := service.Account{ID: 3, Platform: service.PlatformAnthropic, Type: service.AccountTypeOAuth,
+				Status: service.StatusActive, Schedulable: true,
+				Credentials: map[string]any{"access_token": "current-token"},
+				Extra:       map[string]any{"passive_usage_7d_utilization": .9, "passive_usage_7d_reset": until.Unix()}}
+			for field, value := range map[string]any{"utilization": 90, "resets_at": until.Format(time.RFC3339)} {
+				account.Extra["anthropic_observation_seven_day."+field] = map[string]any{"value": value, "source": "upstream_headers", "sampled_at": now, "identity": identity}
+			}
+			cache := newSchedulerCacheUnit(t)
+			bucket := service.SchedulerBucket{GroupID: 8, Platform: service.PlatformAnthropic, Mode: service.SchedulerModeSingle}
+			token, err := cache.CaptureBucketWriteToken(t.Context(), bucket)
+			require.NoError(t, err)
+			require.NoError(t, cache.SetSnapshot(t.Context(), bucket, token, []service.Account{account}))
+			candidates, hit, err := cache.GetSnapshot(t.Context(), bucket)
+			require.NoError(t, err)
+			require.True(t, hit)
+			require.Len(t, candidates, 1)
+			require.NotContains(t, candidates[0].Credentials, "access_token")
+			decision := service.EvaluateAccountSchedulingThreshold(candidates[0], map[string]int{service.PlatformAnthropic: 80}, now)
+			require.Equal(t, matching, decision.ShouldPause)
+		})
+	}
+}
+
 // Only persistence is stubbed: the candidate is serialized through the real
 // Redis snapshot projection before the production threshold service sees it.
 type snapshotThresholdRepo struct {
@@ -19,6 +53,10 @@ type snapshotThresholdRepo struct {
 	accountPauses int
 	modelPauses   int
 	until         time.Time
+}
+
+func (r *snapshotThresholdRepo) SetModelRateLimitIfNotActive(ctx context.Context, id int64, scope string, resetAt time.Time, reason string) (bool, error) {
+	return true, r.SetModelRateLimit(ctx, id, scope, resetAt, reason)
 }
 
 func (r *snapshotThresholdRepo) SetTempUnschedulable(_ context.Context, _ int64, until time.Time, _ string) error {

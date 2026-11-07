@@ -97,7 +97,7 @@ func ServerTimingHeaderValue(c *gin.Context) string {
 	if !ok || role == "" {
 		return ""
 	}
-	if role != "admin" && !isUserTimingPath(c.Request.URL.Path) {
+	if role != "admin" && role != "super_admin" && !isUserTimingPath(c.Request.URL.Path) {
 		return ""
 	}
 	return servertiming.HeaderValue(c.Request.Context(), time.Now(), responseCacheStatus(c.Writer.Header()))
@@ -172,8 +172,6 @@ func isUserTimingPath(path string) bool {
 	case rest == "/usage", strings.HasPrefix(rest, "/usage/"):
 		return true
 	case rest == "/announcements", strings.HasPrefix(rest, "/announcements/"):
-		return true
-	case rest == "/redeem", strings.HasPrefix(rest, "/redeem/"):
 		return true
 	case rest == "/subscriptions", strings.HasPrefix(rest, "/subscriptions/"):
 		return true

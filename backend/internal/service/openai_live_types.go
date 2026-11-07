@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/Wei-Shaw/sub2api/internal/gateway/routing"
 	"time"
 )
 
@@ -40,16 +41,22 @@ type LiveCallRequest struct {
 }
 
 type LiveCallIdentity struct {
-	APIKeyID        int64
-	UserID          int64
-	GroupID         *int64
-	SubscriptionID  *int64
-	UserAgent       string
-	IPAddress       string
-	InboundEndpoint string
+	GroupNameSnapshot *string
+	APIKeyID          int64
+	UserID            int64
+	GroupID           *int64
+	SubscriptionID    *int64
+	UserAgent         string
+	IPAddress         string
+	InboundEndpoint   string
 }
 
 type LiveCallRecord struct {
+	GroupNameSnapshot   *string
+	VendorIDSnapshot    *int64
+	AccountNameSnapshot *string
+	PlatformSnapshot    *string
+
 	CallID          string
 	CallHash        string
 	AccountID       int64
@@ -87,17 +94,13 @@ type LiveCallStore interface {
 	MarkLiveCallClosed(ctx context.Context, callHash string, ttl time.Duration) (bool, error)
 }
 
-type LiveConcurrencyCache interface {
-	AcquireLiveLease(
-		ctx context.Context,
-		accountID int64,
-		accountMax int,
-		userID int64,
-		userMax int,
-		apiKeyID int64,
-		leaseID string,
-		replacingRegularSlots bool,
-	) (bool, error)
-	RefreshLiveLease(ctx context.Context, accountID, userID, apiKeyID int64, leaseID string) (bool, error)
-	ReleaseLiveLease(ctx context.Context, accountID, userID, apiKeyID int64, leaseID string) error
+// LiveConcurrencyCache shares the single routing capacity authority. The alias
+// preserves existing repository/Live callers while no lease state lives here.
+type LiveConcurrencyCache = routing.LiveLeaseStore
+
+// LiveUsageSnapshotStore persists selected-account attribution alongside native
+// live-call state; the finalizer must never look up a current account owner.
+type LiveUsageSnapshotStore interface {
+	SaveLiveUsageSnapshot(context.Context, *LiveCallRecord, time.Duration) error
+	LoadLiveUsageSnapshot(context.Context, *LiveCallRecord) error
 }

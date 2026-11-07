@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/gateway/routing"
 	"strconv"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -56,9 +58,43 @@ const (
 	activeIndexPipelineChunkSize = 500
 
 	// 一次性迁移 marker：活跃索引机制上线前遗留的等待计数键无法被索引发现，
-	// 且有流量时 TTL 会被不断刷新，必须清扫一次。marker 存在即代表已完成。
+	// 为缺少期限的旧计数补有界 TTL；不删除其他实例的有效等待计数。marker 表示已处理。
 	legacyWaitSweepMarkerKey = "concurrency:startup:legacy_wait_sweep:v1"
 )
+
+// This deployment uses redis.Client and multi-key scripts; not a Cluster contract.
+// KEYS: regular slot, live slot, FIFO order, deadlines, lifecycle, sequence.
+const capacityWaitLua = `
+local queue, deadlines, states, sequence = KEYS[3], KEYS[4], KEYS[5], KEYS[6]
+-- Infrastructure ceilings, not a priority or an inferred business policy.
+local MAX_TRACKED, REAP_BATCH = 4096, 128
+local function reapWait(now)
+ local expired = redis.call('ZRANGEBYSCORE', deadlines, '-inf', now, 'LIMIT', 0, REAP_BATCH)
+ for _,token in ipairs(expired) do
+  redis.call('ZREM', queue, token)
+  redis.call('ZREM', deadlines, token)
+  redis.call('HDEL', states, token)
+ end
+ -- Terminal-marker backlog must not prevent clearing expired queue heads.
+ local heads = redis.call('ZRANGE', queue, 0, REAP_BATCH-1)
+ for _,token in ipairs(heads) do
+  local deadline = redis.call('ZSCORE', deadlines, token)
+  if deadline ~= false and tonumber(deadline) > now then break end
+  redis.call('ZREM', queue, token)
+  redis.call('ZREM', deadlines, token)
+  redis.call('HDEL', states, token)
+ end
+end
+local function expireWaitKeys(now)
+ local last = redis.call('ZREVRANGE', deadlines, 0, 0, 'WITHSCORES')
+ if #last == 0 then
+  redis.call('DEL', queue, deadlines, states, sequence)
+ else
+  local ttl = math.max(1, tonumber(last[2])-now)
+  for _,key in ipairs({queue,deadlines,states,sequence}) do redis.call('PEXPIRE',key,ttl) end
+ end
+end
+`
 
 var (
 	// acquireScript 使用有序集合计数并在未达上限时添加槽位
@@ -68,7 +104,7 @@ var (
 	// ARGV[2] = TTL（秒）
 	// ARGV[3] = requestID
 	// 返回 {是否成功, Redis 当前秒}，Go 侧复用同一时间源写活跃索引，省去额外 TIME 往返。
-	acquireScript = redis.NewScript(`
+	acquireScript = redis.NewScript(capacityWaitLua + `
 		-- Redis 3.2-4.x compat: opt into effects replication so redis.call('TIME')
 		-- replicates correctly. No-op on Redis 5.0+ (effects replication is default).
 		redis.replicate_commands()
@@ -81,11 +117,13 @@ var (
 		-- 使用 Redis 服务器时间，确保多实例时钟一致
 		local timeResult = redis.call('TIME')
 		local now = tonumber(timeResult[1])
+		local nowms = now*1000+math.floor(tonumber(timeResult[2])/1000)
 		local expireBefore = now - ttl
 
 		-- 清理过期槽位
 		redis.call('ZREMRANGEBYSCORE', key, '-inf', expireBefore)
 		redis.call('ZREMRANGEBYSCORE', liveKey, '-inf', now - 60)
+		reapWait(nowms)
 
 		-- 检查是否已存在（支持重试场景刷新时间戳）
 		local exists = redis.call('ZSCORE', key, requestID)
@@ -95,15 +133,99 @@ var (
 			return {1, now}
 		end
 
+		local queued = ARGV[4] == '1'
+		if queued then
+			local waitDeadline = redis.call('ZSCORE', deadlines, requestID)
+			if waitDeadline == false or tonumber(waitDeadline) <= nowms or redis.call('HGET', states, requestID) ~= 'waiting' or redis.call('ZSCORE', queue, requestID) == false then return {-1, now} end
+			local head = redis.call('ZRANGE', queue, 0, 0)
+			if head[1] ~= requestID then return {0, now} end
+		elseif redis.call('ZCARD', queue) > 0 then
+			-- Fast-path callers cannot bypass an existing FIFO position.
+			return {0, now}
+		end
+
 		-- 检查是否达到并发上限
 		local count = redis.call('ZCARD', key) + redis.call('ZCARD', liveKey)
 		if count < maxConcurrency then
 			redis.call('ZADD', key, now, requestID)
 			redis.call('EXPIRE', key, ttl)
+			if queued then
+				redis.call('ZREM', queue, requestID)
+				redis.call('HSET', states, requestID, 'admitted')
+			end
 			return {1, now}
 		end
 
 		return {0, now}
+	`)
+
+	enqueueCapacityWaitScript = redis.NewScript(capacityWaitLua + `
+		redis.replicate_commands()
+		local token, remaining, limit = ARGV[1], tonumber(ARGV[2]), tonumber(ARGV[3])
+		local t = redis.call('TIME')
+		local now = tonumber(t[1])*1000+math.floor(tonumber(t[2])/1000)
+		reapWait(now)
+		if remaining <= 0 then return -1 end
+		local state = redis.call('HGET', states, token)
+		if state == 'waiting' then
+			local deadline = redis.call('ZSCORE', deadlines, token)
+			if deadline == false or tonumber(deadline) <= now then return -1 end
+			return 1
+		end
+		if state ~= false then return -1 end
+		if redis.call('ZCARD', queue) >= limit or redis.call('HLEN', states) >= MAX_TRACKED then return 0 end
+		local order = redis.call('INCR', sequence)
+		redis.call('ZADD', queue, order, token)
+		redis.call('ZADD', deadlines, now+remaining, token)
+		redis.call('HSET', states, token, 'waiting')
+		expireWaitKeys(now)
+		return 1
+	`)
+
+	endCapacityWaitScript = redis.NewScript(capacityWaitLua + `
+		redis.replicate_commands()
+		local token, rollback, uncertainTTL = ARGV[1], ARGV[2], tonumber(ARGV[3])
+		local t = redis.call('TIME')
+		local now = tonumber(t[1])*1000+math.floor(tonumber(t[2])/1000)
+		local originalDeadline = redis.call('ZSCORE', deadlines, token)
+		reapWait(now)
+		redis.call('ZREM', queue, token)
+		if rollback == '1' then redis.call('ZREM', KEYS[1], token) end
+		-- Lost enqueue responses can leave late retransmissions. A terminal
+		-- marker retains the first deadline; repeat cleanup never extends it.
+		if redis.call('ZSCORE', deadlines, token) == false then
+			-- An unknown-result cleanup cannot evict someone else's marker or
+			-- allocate without bound. Return an observable cleanup dependency
+			-- failure if the bounded lifecycle index has no available slot.
+			if redis.call('HLEN', states) >= MAX_TRACKED then return 0 end
+			if originalDeadline ~= false then uncertainTTL = math.min(uncertainTTL, 5000) end
+			redis.call('ZADD', deadlines, now+uncertainTTL, token)
+		end
+		redis.call('HSET', states, token, 'closed')
+		expireWaitKeys(now)
+		return 1
+	`)
+
+	// Confirm and optionally renew the existing member, using the same seconds
+	// score/TTL as acquireScript. Never resurrect expired or replaced owners.
+	capacityLeaseScript = redis.NewScript(`
+		redis.replicate_commands()
+		local key, token, ttl, renew = KEYS[1], ARGV[1], tonumber(ARGV[2]), ARGV[3]
+		local t = redis.call('TIME')
+		local now = tonumber(t[1])
+		local nowms = now * 1000 + math.floor(tonumber(t[2]) / 1000)
+		local score = redis.call('ZSCORE', key, token)
+		if score == false then return {0, now} end
+		if tonumber(score) <= now-ttl then
+			redis.call('ZREM', key, token)
+			return {0, now}
+		end
+		if renew == '1' then
+			score = now
+			redis.call('ZADD', key, 'XX', now, token)
+			redis.call('EXPIRE', key, ttl)
+		end
+		return {math.max(0,(tonumber(score)+ttl)*1000-nowms),now}
 	`)
 
 	// getCountScript 统计有序集合中的槽位数量并清理过期条目
@@ -163,21 +285,32 @@ var (
 		return 1
 	`)
 
-	refreshLiveLeaseScript = redis.NewScript(`
+	// Verify all three existing Live members before changing any score. Check
+	// and renewal share exactly the same expiration/ownership interpretation.
+	liveLeaseProofScript = redis.NewScript(`
 		redis.replicate_commands()
-		local ttl = tonumber(ARGV[1])
-		local leaseID = ARGV[2]
-		local now = tonumber(redis.call('TIME')[1])
-		local expireBefore = now - ttl
-		for _, key in ipairs(KEYS) do
-			redis.call('ZREMRANGEBYSCORE', key, '-inf', expireBefore)
-			if redis.call('ZSCORE', key, leaseID) == false then return 0 end
+		local ttl, token, renew = tonumber(ARGV[1]), ARGV[2], ARGV[3]
+		local t = redis.call('TIME')
+		local now = tonumber(t[1])
+		local nowms = now*1000+math.floor(tonumber(t[2])/1000)
+		local remaining = ttl*1000
+		for _,key in ipairs(KEYS) do
+			local score = redis.call('ZSCORE',key,token)
+			if score == false then return 0 end
+			if tonumber(score) <= now-ttl then
+				redis.call('ZREM',key,token)
+				return 0
+			end
+			remaining = math.min(remaining,(tonumber(score)+ttl)*1000-nowms)
 		end
-		for _, key in ipairs(KEYS) do
-			redis.call('ZADD', key, now, leaseID)
-			redis.call('EXPIRE', key, ttl)
+		if renew == '1' then
+			for _,key in ipairs(KEYS) do
+				redis.call('ZADD',key,'XX',now,token)
+				redis.call('EXPIRE',key,ttl)
+			end
+			remaining=(now+ttl)*1000-nowms
 		end
-		return 1
+		return math.max(0,remaining)
 	`)
 
 	// trackSlotScript 记录 stats-only 槽位，不做并发上限判断。
@@ -330,27 +463,14 @@ var (
 		return 1
 	`)
 
-	// startupCleanupSlotScript 清理单个槽位 key 中非当前进程前缀的成员，避免 Redis Cluster CROSSSLOT。
-	// KEYS[1] 是有序集合键，ARGV[1] 是当前进程前缀，ARGV[2] 是槽位 TTL。
-	// 返回 {清除数量, 剩余成员数}，Go 侧据剩余数决定索引 member 去留，无需再回读槽位。
-	startupCleanupSlotScript = redis.NewScript(`
-		local key = KEYS[1]
-		local activePrefix = ARGV[1]
-		local slotTTL = tonumber(ARGV[2])
-		local removed = 0
-		local members = redis.call('ZRANGE', key, 0, -1)
-		for _, member in ipairs(members) do
-			if string.sub(member, 1, string.len(activePrefix)) ~= activePrefix then
-				removed = removed + redis.call('ZREM', key, member)
-			end
+	// Legacy unindexed counters may lack TTL, but a different process prefix
+	// never proves a live waiter or slot is dead. Preserve values and existing
+	// deadlines; only give immortal legacy counters the configured queue TTL.
+	legacyWaitTTLScript = redis.NewScript(`
+		if redis.call('TTL',KEYS[1]) == -1 then
+			return redis.call('EXPIRE',KEYS[1],ARGV[1])
 		end
-		local remaining = redis.call('ZCARD', key)
-		if remaining == 0 then
-			redis.call('DEL', key)
-		else
-			redis.call('EXPIRE', key, slotTTL)
-		end
-		return {removed, remaining}
+		return 0
 	`)
 )
 
@@ -626,20 +746,40 @@ func runScriptInt64Pair(ctx context.Context, rdb *redis.Client, script *redis.Sc
 	return first, second, nil
 }
 
+var _ routing.CapacityLeaseStore = (*concurrencyCache)(nil)
+
+func (c *concurrencyCache) CheckCapacityLease(ctx context.Context, request routing.CapacityRequest) (time.Duration, error) {
+	return c.confirmCapacityLease(ctx, request, false)
+}
+func (c *concurrencyCache) RefreshCapacityLease(ctx context.Context, request routing.CapacityRequest) (time.Duration, error) {
+	return c.confirmCapacityLease(ctx, request, true)
+}
+func (c *concurrencyCache) confirmCapacityLease(ctx context.Context, request routing.CapacityRequest, refresh bool) (time.Duration, error) {
+	if c == nil || c.rdb == nil || request.ID <= 0 || request.Token == "" {
+		return 0, routing.ErrCapacityDependencyUnavailable
+	}
+	key, index := accountSlotKey(request.ID), accountActiveIndexKey
+	if request.User {
+		key, index = userSlotKey(request.ID), userActiveIndexKey
+	}
+	renew := "0"
+	if refresh {
+		renew = "1"
+	}
+	remaining, now, err := runScriptInt64Pair(ctx, c.rdb, capacityLeaseScript, []string{key}, request.Token, c.slotTTLSeconds, renew)
+	if err != nil {
+		return 0, err
+	}
+	if refresh && remaining > 0 {
+		c.touchActiveIndexAt(ctx, index, request.ID, now+int64(c.slotTTLSeconds))
+	}
+	return time.Duration(remaining) * time.Millisecond, nil
+}
+
 // Account slot operations
 
 func (c *concurrencyCache) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
-	key := accountSlotKey(accountID)
-	// 时间戳在 Lua 脚本内使用 Redis TIME 命令获取，确保多实例时钟一致
-	result, now, err := runScriptInt64Pair(ctx, c.rdb, acquireScript, []string{key, liveAccountSlotKey(accountID)}, maxConcurrency, c.slotTTLSeconds, requestID)
-	if err != nil {
-		return false, err
-	}
-	if result == 1 {
-		// 成功占槽后标记活跃账号，后台清理即可从索引定位候选账号。
-		c.touchActiveIndexAt(ctx, accountActiveIndexKey, accountID, now+int64(c.slotTTLSeconds))
-	}
-	return result == 1, nil
+	return c.acquireCapacity(ctx, routing.CapacityRequest{ID: accountID, Limit: maxConcurrency, Token: requestID})
 }
 
 func (c *concurrencyCache) ReleaseAccountSlot(ctx context.Context, accountID int64, requestID string) error {
@@ -706,17 +846,95 @@ func (c *concurrencyCache) GetAccountConcurrencyBatch(ctx context.Context, accou
 // User slot operations
 
 func (c *concurrencyCache) AcquireUserSlot(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error) {
-	key := userSlotKey(userID)
-	// 时间戳在 Lua 脚本内使用 Redis TIME 命令获取，确保多实例时钟一致
-	result, now, err := runScriptInt64Pair(ctx, c.rdb, acquireScript, []string{key, liveUserSlotKey(userID)}, maxConcurrency, c.slotTTLSeconds, requestID)
+	return c.acquireCapacity(ctx, routing.CapacityRequest{ID: userID, Limit: maxConcurrency, Token: requestID, User: true})
+}
+
+func capacityWaitKeys(request routing.CapacityRequest) []string {
+	scope, regular, live := "account", accountSlotKey(request.ID), liveAccountSlotKey(request.ID)
+	if request.User {
+		scope, regular, live = "user", userSlotKey(request.ID), liveUserSlotKey(request.ID)
+	}
+	base := fmt.Sprintf("concurrency:wait_ticket:%s:%d:", scope, request.ID)
+	return []string{regular, live, base + "order", base + "deadlines", base + "state", base + "sequence"}
+}
+
+func (c *concurrencyCache) acquireCapacity(ctx context.Context, request routing.CapacityRequest) (bool, error) {
+	wait := "0"
+	if request.Wait {
+		wait = "1"
+	}
+	result, now, err := runScriptInt64Pair(ctx, c.rdb, acquireScript, capacityWaitKeys(request), request.Limit, c.slotTTLSeconds, request.Token, wait)
 	if err != nil {
 		return false, err
 	}
+	if result < 0 {
+		return false, routing.ErrCapacityWaitExpired
+	}
 	if result == 1 {
-		// 成功占槽后标记活跃用户，避免启动清理依赖全量 SCAN。
-		c.touchActiveIndexAt(ctx, userActiveIndexKey, userID, now+int64(c.slotTTLSeconds))
+		index := accountActiveIndexKey
+		if request.User {
+			index = userActiveIndexKey
+		}
+		c.touchActiveIndexAt(ctx, index, request.ID, now+int64(c.slotTTLSeconds))
 	}
 	return result == 1, nil
+}
+
+func (c *concurrencyCache) AcquireQueuedCapacity(ctx context.Context, request routing.CapacityRequest) (bool, error) {
+	request.Wait = true
+	return c.acquireCapacity(ctx, request)
+}
+
+func (c *concurrencyCache) EnqueueCapacityWait(ctx context.Context, request routing.CapacityRequest, maxWaiting int, remaining time.Duration) error {
+	if request.ID <= 0 || request.Token == "" || maxWaiting < 0 {
+		return routing.ErrCapacityDependencyUnavailable
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining = min(remaining, time.Until(deadline))
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if remaining.Milliseconds() <= 0 {
+		return routing.ErrCapacityWaitExpired
+	}
+	result, err := enqueueCapacityWaitScript.Run(ctx, c.rdb, capacityWaitKeys(request), request.Token, remaining.Milliseconds(), maxWaiting).Int()
+	if err != nil {
+		return err
+	}
+	switch result {
+	case 1:
+		return nil
+	case 0:
+		return routing.ErrCapacityWaitFull
+	default:
+		return routing.ErrCapacityWaitExpired
+	}
+}
+
+func (c *concurrencyCache) EndCapacityWait(ctx context.Context, request routing.CapacityRequest, releaseSlot bool) error {
+	if request.ID <= 0 || request.Token == "" {
+		return routing.ErrCapacityDependencyUnavailable
+	}
+	rollback := "0"
+	if releaseSlot {
+		rollback = "1"
+	}
+	result, err := endCapacityWaitScript.Run(ctx, c.rdb, capacityWaitKeys(request), request.Token, rollback, c.waitQueueTTLSeconds*1000).Int()
+	if err != nil {
+		return err
+	}
+	if result != 1 {
+		return fmt.Errorf("%w: wait lifecycle index is full during uncertain cleanup", routing.ErrCapacityDependencyUnavailable)
+	}
+	if releaseSlot {
+		if request.User {
+			c.refreshUserActiveIndex(ctx, request.ID)
+		} else {
+			c.refreshAccountActiveIndex(ctx, request.ID)
+		}
+	}
+	return nil
 }
 
 func (c *concurrencyCache) ReleaseUserSlot(ctx context.Context, userID int64, requestID string) error {
@@ -819,16 +1037,26 @@ func (c *concurrencyCache) AcquireLiveLease(
 	return result == 1, err
 }
 
-func (c *concurrencyCache) RefreshLiveLease(ctx context.Context, accountID, userID, apiKeyID int64, leaseID string) (bool, error) {
-	if c == nil || c.rdb == nil || leaseID == "" {
-		return false, nil
+func (c *concurrencyCache) RefreshLiveLease(ctx context.Context, accountID, userID, apiKeyID int64, token string) (bool, error) {
+	remaining, err := c.RefreshLiveLeaseProof(ctx, accountID, userID, apiKeyID, token)
+	return remaining > 0, err
+}
+func (c *concurrencyCache) CheckLiveLease(ctx context.Context, accountID, userID, apiKeyID int64, token string) (time.Duration, error) {
+	return c.confirmLiveLease(ctx, accountID, userID, apiKeyID, token, false)
+}
+func (c *concurrencyCache) RefreshLiveLeaseProof(ctx context.Context, accountID, userID, apiKeyID int64, token string) (time.Duration, error) {
+	return c.confirmLiveLease(ctx, accountID, userID, apiKeyID, token, true)
+}
+func (c *concurrencyCache) confirmLiveLease(ctx context.Context, accountID, userID, apiKeyID int64, token string, refresh bool) (time.Duration, error) {
+	if c == nil || c.rdb == nil || accountID <= 0 || userID <= 0 || apiKeyID <= 0 || token == "" {
+		return 0, routing.ErrCapacityDependencyUnavailable
 	}
-	result, err := refreshLiveLeaseScript.Run(ctx, c.rdb, []string{
-		liveAccountSlotKey(accountID),
-		liveUserSlotKey(userID),
-		liveAPIKeySlotKey(apiKeyID),
-	}, liveLeaseTTLSeconds, leaseID).Int()
-	return result == 1, err
+	renew := "0"
+	if refresh {
+		renew = "1"
+	}
+	remaining, err := liveLeaseProofScript.Run(ctx, c.rdb, []string{liveAccountSlotKey(accountID), liveUserSlotKey(userID), liveAPIKeySlotKey(apiKeyID)}, liveLeaseTTLSeconds, token, renew).Int64()
+	return time.Duration(remaining) * time.Millisecond, err
 }
 
 func (c *concurrencyCache) ReleaseLiveLease(ctx context.Context, accountID, userID, apiKeyID int64, leaseID string) error {
@@ -952,7 +1180,7 @@ func (c *concurrencyCache) GetAccountsLoadBatch(ctx context.Context, accounts []
 	}
 
 	// 使用 Pipeline 替代 Lua 脚本，兼容 Redis Cluster（Lua 内动态拼 key 会 CROSSSLOT）。
-	// 每个账号执行 3 个命令：ZREMRANGEBYSCORE（清理过期）、ZCARD（并发数）、GET（等待数）。
+	// 每账号清理并读取普通/实时槽位，再读取等待数，共 5 个命令。
 	now, err := c.rdb.Time(ctx).Result()
 	if err != nil {
 		return nil, fmt.Errorf("redis TIME: %w", err)
@@ -969,7 +1197,10 @@ func (c *concurrencyCache) GetAccountsLoadBatch(ctx context.Context, accounts []
 		getCmd         *redis.StringCmd
 	}
 	cmds := make([]accountCmds, 0, len(accounts))
-	for _, acc := range accounts {
+	for i, acc := range accounts {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		slotKey := accountSlotKeyPrefix + strconv.FormatInt(acc.ID, 10)
 		liveKey := liveAccountSlotKeyPrefix + strconv.FormatInt(acc.ID, 10)
 		waitKey := accountWaitKeyPrefix + strconv.FormatInt(acc.ID, 10)
@@ -983,6 +1214,12 @@ func (c *concurrencyCache) GetAccountsLoadBatch(ctx context.Context, accounts []
 			getCmd:         pipe.Get(ctx, waitKey),
 		}
 		cmds = append(cmds, ac)
+		// Five Redis commands per account; cap each pipeline at 1280 commands.
+		if (i+1)%256 == 0 {
+			if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+				return nil, fmt.Errorf("pipeline exec: %w", err)
+			}
+		}
 	}
 
 	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
@@ -1113,6 +1350,11 @@ func (c *concurrencyCache) reconcileExpiredIndexCandidates(ctx context.Context, 
 		return fmt.Errorf("read expired index %s: %w", spec.indexKey, err)
 	}
 
+	return c.reconcileIndexMembers(ctx, spec, members, now)
+}
+
+// reconcileIndexMembers uses actual Redis load/TTL, never process-prefix identity.
+func (c *concurrencyCache) reconcileIndexMembers(ctx context.Context, spec slotIndexSpec, members []string, now int64) error {
 	loads, staleMembers, err := c.readIndexLoads(ctx, spec, members, now)
 	if err != nil {
 		return err
@@ -1138,7 +1380,8 @@ func (c *concurrencyCache) reconcileExpiredIndexCandidates(ctx context.Context, 
 	return nil
 }
 
-// CleanupStaleProcessSlots 启动时清理非当前进程前缀的槽位。
+// CleanupStaleProcessSlots reaps only TTL-expired slots at startup. A process
+// prefix identifies the caller, not the ownership/liveness of other instances.
 // 清理范围来自活跃索引（含 score 已过期的成员——它们往往正是崩溃进程留下的残留），
 // 避免在 Redis 上 SCAN 全部 concurrency:* 键；另有一次性迁移清扫兜底索引机制上线前的遗留等待计数。
 // API Key 槽位（concurrency:api_key:*）是 stats-only 数据：每次 Track/读取都会按分数
@@ -1147,7 +1390,7 @@ func (c *concurrencyCache) CleanupStaleProcessSlots(ctx context.Context, activeR
 	if activeRequestPrefix == "" {
 		return nil
 	}
-	if err := c.sweepLegacyWaitKeysOnce(ctx); err != nil {
+	if err := c.expireLegacyWaitKeysOnce(ctx); err != nil {
 		return err
 	}
 	now, err := c.redisUnixSeconds(ctx)
@@ -1159,7 +1402,7 @@ func (c *concurrencyCache) CleanupStaleProcessSlots(ctx context.Context, activeR
 	if err != nil {
 		return err
 	}
-	if err := c.cleanupStaleProcessSlotsForIndex(ctx, accountSlotIndex, accountMembers, activeRequestPrefix, now); err != nil {
+	if err := c.reconcileIndexMembers(ctx, accountSlotIndex, accountMembers, now); err != nil {
 		return err
 	}
 
@@ -1167,14 +1410,13 @@ func (c *concurrencyCache) CleanupStaleProcessSlots(ctx context.Context, activeR
 	if err != nil {
 		return err
 	}
-	return c.cleanupStaleProcessSlotsForIndex(ctx, userSlotIndex, userMembers, activeRequestPrefix, now)
+	return c.reconcileIndexMembers(ctx, userSlotIndex, userMembers, now)
 }
 
-// sweepLegacyWaitKeysOnce 一次性清扫活跃索引机制上线前遗留的等待计数键。
-// 等待计数在有流量时会不断刷新 TTL、无法自然过期，而索引不认识旧键，
-// 因此这里例外地做一次 SCAN，用 marker 键保证整个 Redis 数据生命周期内只执行一次。
-// 先清扫后写 marker：清扫失败时下次启动会重试；并发实例重复清扫是幂等的。
-func (c *concurrencyCache) sweepLegacyWaitKeysOnce(ctx context.Context) error {
+// expireLegacyWaitKeysOnce preserves the existing marker and queue values. It
+// only adds the already-configured TTL to legacy counters with no expiry. Active
+// counters from another instance are not evidence of abandoned requests.
+func (c *concurrencyCache) expireLegacyWaitKeysOnce(ctx context.Context) error {
 	exists, err := c.rdb.Exists(ctx, legacyWaitSweepMarkerKey).Result()
 	if err != nil {
 		return fmt.Errorf("check legacy wait sweep marker: %w", err)
@@ -1189,9 +1431,9 @@ func (c *concurrencyCache) sweepLegacyWaitKeysOnce(ctx context.Context) error {
 			if err != nil {
 				return fmt.Errorf("scan legacy wait keys %s: %w", pattern, err)
 			}
-			if len(keys) > 0 {
-				if err := c.rdb.Del(ctx, keys...).Err(); err != nil {
-					return fmt.Errorf("delete legacy wait keys: %w", err)
+			for _, key := range keys {
+				if err := legacyWaitTTLScript.Run(ctx, c.rdb, []string{key}, c.waitQueueTTLSeconds).Err(); err != nil {
+					return fmt.Errorf("bound legacy wait TTL: %w", err)
 				}
 			}
 			cursor = next
@@ -1214,49 +1456,4 @@ func (c *concurrencyCache) allIndexMembers(ctx context.Context, indexKey string)
 		return nil, fmt.Errorf("read active index %s: %w", indexKey, err)
 	}
 	return members, nil
-}
-
-// cleanupStaleProcessSlotsForIndex 逐个处理索引中的账号/用户。
-// Lua 脚本一次只碰一个槽位 key，兼容 Redis Cluster，随后删除重启后已失效的等待计数；
-// 索引 member 的去留由脚本返回的剩余槽位数决定，最后批量写回。
-func (c *concurrencyCache) cleanupStaleProcessSlotsForIndex(
-	ctx context.Context,
-	spec slotIndexSpec,
-	members []string,
-	activeRequestPrefix string,
-	now int64,
-) error {
-	staleMembers := make([]string, 0)
-	refreshed := make([]redis.Z, 0)
-	for _, member := range members {
-		id, err := strconv.ParseInt(member, 10, 64)
-		if err != nil || id <= 0 {
-			staleMembers = append(staleMembers, member)
-			continue
-		}
-
-		_, remaining, err := runScriptInt64Pair(ctx, c.rdb, startupCleanupSlotScript, []string{spec.slotKey(id)}, activeRequestPrefix, c.slotTTLSeconds)
-		if err != nil {
-			return fmt.Errorf("cleanup stale process slots %s: %w", spec.slotKey(id), err)
-		}
-		// 等待计数属于已死进程，直接删除；剩余槽位（当前进程前缀）决定索引 member 去留。
-		if err := c.rdb.Del(ctx, spec.waitKey(id)).Err(); err != nil {
-			return fmt.Errorf("delete stale wait key %s: %w", spec.waitKey(id), err)
-		}
-		if remaining > 0 {
-			refreshed = append(refreshed, redis.Z{
-				Score:  float64(now + int64(c.slotTTLSeconds)),
-				Member: member,
-			})
-		} else {
-			staleMembers = append(staleMembers, member)
-		}
-	}
-	if len(refreshed) > 0 {
-		if err := c.rdb.ZAdd(ctx, spec.indexKey, refreshed...).Err(); err != nil {
-			logger.LegacyPrintf("repository.concurrency", "Warning: refresh %d active index members in %s failed: %v", len(refreshed), spec.indexKey, err)
-		}
-	}
-	c.removeActiveIndexMembers(ctx, spec.indexKey, staleMembers)
-	return nil
 }

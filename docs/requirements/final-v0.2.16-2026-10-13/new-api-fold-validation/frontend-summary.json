@@ -1,0 +1,42 @@
+[
+  {
+    "name": "frontend-tests",
+    "command": [
+      "/Users/luhonglin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+      "node_modules/vitest/vitest.mjs",
+      "run",
+      "src/utils/__tests__/usageServiceTier.spec.ts",
+      "src/api/__tests__/usageExport.spec.ts",
+      "src/components/admin/usage/__tests__/UsageTable.spec.ts",
+      "src/i18n/__tests__/usageServiceTierLocales.spec.ts",
+      "src/views/user/__tests__/UsageView.spec.ts",
+      "src/__tests__/integration/usage-reasoning-effort.spec.ts",
+      "src/views/admin/__tests__/UsageView.spec.ts",
+      "src/i18n/__tests__/localeKeyCompleteness.spec.ts"
+    ],
+    "exit": 0,
+    "seconds": 7.95
+  },
+  {
+    "name": "frontend-typecheck",
+    "command": [
+      "/Users/luhonglin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+      "node_modules/vue-tsc/bin/vue-tsc.js",
+      "--noEmit"
+    ],
+    "exit": 0,
+    "seconds": 21.0
+  },
+  {
+    "name": "frontend-eslint",
+    "command": [
+      "/Users/luhonglin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+      "node_modules/eslint/bin/eslint.js",
+      "src/api/usageExport.ts",
+      "src/views/user/UsageView.vue",
+      "src/views/admin/UsageView.vue"
+    ],
+    "exit": 0,
+    "seconds": 1.05
+  }
+]

@@ -60,7 +60,7 @@ func newJWTTestEnv(users map[int64]*service.User) (*gin.Engine, *service.AuthSer
 	cfg.JWT.AccessTokenExpireMinutes = 60
 
 	userRepo := &stubJWTUserRepo{users: users}
-	authSvc := service.NewAuthService(nil, userRepo, nil, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil)
+	authSvc := service.NewAuthService(nil, userRepo, nil, cfg, nil, nil, nil, nil, nil, nil)
 	userSvc := service.NewUserService(userRepo, nil, nil, nil)
 	mw := NewJWTAuthMiddleware(authSvc, userSvc, nil, nil)
 
@@ -143,7 +143,7 @@ func TestJWTAuth_ValidToken_TouchesLastActive(t *testing.T) {
 	cfg.JWT.AccessTokenExpireMinutes = 60
 
 	userRepo := &stubJWTUserRepo{users: map[int64]*service.User{1: user}}
-	authSvc := service.NewAuthService(nil, userRepo, nil, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil)
+	authSvc := service.NewAuthService(nil, userRepo, nil, cfg, nil, nil, nil, nil, nil, nil)
 	userSvc := service.NewUserService(userRepo, nil, nil, nil)
 	toucher := &recordingActivityToucher{}
 
@@ -235,8 +235,8 @@ func TestJWTAuth_TamperedToken(t *testing.T) {
 func TestJWTAuth_UserLookupErrors(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{JWT: config.JWTConfig{Secret: "test-secret", ExpireHour: 1}}
-	authSvc := service.NewAuthService(nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil)
-	token, err := authSvc.GenerateToken(context.Background(), &service.User{ID: 1, Role: service.RoleAdmin})
+	authSvc := service.NewAuthService(nil, nil, nil, cfg, nil, nil, nil, nil, nil, nil)
+	token, err := authSvc.GenerateToken(context.Background(), &service.User{ID: 1, Role: service.RoleSuperAdmin})
 	require.NoError(t, err)
 
 	for _, tc := range []struct {
@@ -373,4 +373,38 @@ func TestJWTAuth_TokenVersionMismatch(t *testing.T) {
 	var body ErrorResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	require.Equal(t, "TOKEN_REVOKED", body.Code)
+}
+
+type supplierJWTRepo struct{ stubJWTUserRepo }
+
+func (*supplierJWTRepo) ValidateVendorIdentity(context.Context, int64, string) error { return nil }
+
+func TestJWTAuthSupplierRoleRestrictionDoesNotDependOnOrigin(t *testing.T) {
+	for _, role := range []string{service.RoleVendorLevel1, service.RoleVendorLevel2} {
+		user := &service.User{ID: 17, Email: "supplier@example.invalid", Role: role, Status: service.StatusActive}
+		repo := &supplierJWTRepo{stubJWTUserRepo{users: map[int64]*service.User{17: user}}}
+		cfg := &config.Config{}
+		cfg.JWT.Secret = "isolated-vendor-test-signing-secret"
+		cfg.JWT.AccessTokenExpireMinutes = 60
+		auth := service.NewAuthService(nil, repo, nil, cfg, nil, nil, nil, nil, nil, nil)
+		token, err := auth.GenerateToken(context.Background(), user)
+		require.NoError(t, err)
+		r := gin.New()
+		// Deliberately omit the origin boundary: JWT role enforcement is independent.
+		r.Use(gin.HandlerFunc(NewJWTAuthMiddleware(auth, service.NewUserService(repo, nil, nil, nil), nil, nil)))
+		for _, path := range []string{"/api/v1/keys", "/api/v1/usage", "/api/v1/admin/vendors", "/api/v1/admin/compliance"} {
+			r.GET(path, func(c *gin.Context) { t.Error("supplier reached a forbidden endpoint"); c.Status(204) })
+			for _, origin := range []string{"", "https://main.example.invalid", "https://supplier.example.invalid"} {
+				req := httptest.NewRequest("GET", "https://api.example.invalid"+path, nil)
+				req.Header.Set("Authorization", "Bearer "+token)
+				if origin != "" {
+					req.Header.Set("Origin", origin)
+				}
+				out := httptest.NewRecorder()
+				r.ServeHTTP(out, req)
+				require.Equal(t, 403, out.Code)
+				require.Contains(t, out.Body.String(), "VENDOR_CONSUMER_FORBIDDEN")
+			}
+		}
+	}
 }

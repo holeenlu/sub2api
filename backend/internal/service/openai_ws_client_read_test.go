@@ -3,14 +3,19 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	coderws "github.com/coder/websocket"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestReadOpenAIWSClientMessage_ControlCloseFrames(t *testing.T) {
@@ -139,5 +144,262 @@ func TestReadOpenAIWSClientMessage_ParentCancellationStillJoinsRead(t *testing.T
 	case <-serverResult:
 	case <-time.After(time.Second):
 		t.Fatal("server read goroutine leaked after parent cancellation")
+	}
+}
+
+// Deliberately ignores close until CloseNow: exercises the bounded close path.
+type queuedWSDownstreamTestConn struct {
+	writes      chan []byte
+	onWrite     func([]byte)
+	input       chan []byte
+	closed      chan struct{}
+	closeOnce   sync.Once
+	closeStatus chan coderws.StatusCode
+}
+
+func (c *queuedWSDownstreamTestConn) Read(ctx context.Context) (coderws.MessageType, []byte, error) {
+	select {
+	case b := <-c.input:
+		return coderws.MessageText, b, nil
+	case <-ctx.Done():
+		return 0, nil, ctx.Err()
+	case <-c.closed:
+		return 0, nil, io.EOF
+	}
+}
+func (c *queuedWSDownstreamTestConn) Write(_ context.Context, _ coderws.MessageType, payload []byte) error {
+	if c.onWrite != nil {
+		c.onWrite(payload)
+	}
+	if c.writes != nil {
+		c.writes <- append([]byte(nil), payload...)
+	}
+	return nil
+}
+func (c *queuedWSDownstreamTestConn) Close(status coderws.StatusCode, _ string) error {
+	c.closeStatus <- status
+	<-c.closed
+	return nil
+}
+func (c *queuedWSDownstreamTestConn) CloseNow() error {
+	c.closeOnce.Do(func() { close(c.closed) })
+	return nil
+}
+func newQueuedWSDownstreamTestConn() *queuedWSDownstreamTestConn {
+	return &queuedWSDownstreamTestConn{input: make(chan []byte, 16), closed: make(chan struct{}), closeStatus: make(chan coderws.StatusCode, 1)}
+}
+
+func TestOpenAIWSDownstreamTurnTimingIncludesQueuedCreate(t *testing.T) {
+	conn := newQueuedWSDownstreamTestConn()
+	ds := NewOpenAIWSDownstream(conn, 4096, openAIWSTestAdmissionContext(context.Background()))
+	defer ds.CloseNow()
+	ds.modeSelected.Store(true)
+	ds.controlsEnabled.Store(false) // passthrough also returns control frames to its owner
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	conn.input <- []byte(`{"type":"response.create","model":"gpt-5","generate":false}`)
+	require.Eventually(t, func() bool { return len(ds.frames) == 1 }, time.Second, time.Millisecond)
+	_, _, err := ds.Read(ctx)
+	require.NoError(t, err)
+	firstReceived := ds.TurnReceivedAt()
+	require.False(t, firstReceived.IsZero())
+
+	// The physical reader accepts a new create while the previous turn still owns
+	// the gateway. Its clock must survive that queue instead of starting at Read.
+	conn.input <- []byte(`{"type":"response.create","model":"gpt-5","input":"next"}`)
+	require.Eventually(t, func() bool { return len(ds.frames) == 1 }, time.Second, time.Millisecond)
+	queuedAt := time.Now()
+	require.Equal(t, firstReceived, ds.TurnReceivedAt(), "read-ahead must not replace the active turn clock")
+	conn.input <- []byte(`{"type":"response.cancel","response_id":"old"}`)
+	require.Eventually(t, func() bool { return len(ds.frames) == 2 }, time.Second, time.Millisecond)
+	time.Sleep(25 * time.Millisecond)
+	_, payload, err := ds.Read(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "response.create", gjson.GetBytes(payload, "type").String())
+	secondReceived := ds.TurnReceivedAt()
+	require.False(t, secondReceived.After(queuedAt))
+	_, _, err = ds.Read(ctx)
+	require.NoError(t, err)
+	require.Equal(t, secondReceived, ds.TurnReceivedAt(), "control frames must not reset generation timing")
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	BeginOpenAIRequestTiming(c, firstReceived)
+	BeginOpsStreamTurn(c, 2, secondReceived)
+	timing := newOpenAITransportTiming(c, &Account{ID: 1}, "websocket", 1)
+	timing.ObserveEvent([]byte(`{"type":"response.output_text.delta","delta":"text"}`))
+	metrics := timing.UsageLatencyMetrics()
+	require.NotNil(t, metrics.FirstTextMs)
+	require.GreaterOrEqual(t, *metrics.FirstTextMs, 25)
+	require.Equal(t, secondReceived, timing.root.started)
+	frozen := *metrics.FirstTextMs
+
+	// Idle before another create belongs to neither that turn nor the preceding
+	// prewarm. Starting the next root cannot mutate an already frozen snapshot.
+	idleStarted := time.Now()
+	time.Sleep(25 * time.Millisecond)
+	conn.input <- []byte(`{"type":"response.create","model":"gpt-5","input":"later"}`)
+	_, _, err = ds.Read(ctx)
+	require.NoError(t, err)
+	require.True(t, ds.TurnReceivedAt().After(idleStarted))
+	BeginOpsStreamTurn(c, 3, ds.TurnReceivedAt())
+	require.Equal(t, ds.TurnReceivedAt(), openAIRequestTimingFromContext(c.Request.Context()).started)
+	require.Equal(t, frozen, *metrics.FirstTextMs)
+}
+
+func TestOpenAIWSDownstreamBackpressureAndBoundedClose(t *testing.T) {
+	conn := newQueuedWSDownstreamTestConn()
+	ds := NewOpenAIWSDownstream(conn, 4096, openAIWSTestAdmissionContext(context.Background()))
+	defer ds.CloseNow()
+	for i := 0; i < 12; i++ {
+		conn.input <- []byte(fmt.Sprintf(`{"type":"response.create","model":"m","input":"%d"}`, i))
+	}
+	require.Eventually(t, func() bool { return len(ds.frames) == openAIWSClientQueueLimit }, time.Second, time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	for i := 0; i < 12; i++ {
+		_, b, err := ds.Read(ctx)
+		require.NoError(t, err)
+		require.Contains(t, string(b), fmt.Sprintf(`"input":"%d"`, i))
+	}
+	require.False(t, ds.ClientClosed(), "queue pressure applies backpressure instead of disconnecting")
+	start := time.Now()
+	require.NoError(t, ds.Close(coderws.StatusGoingAway, "preempted"))
+	require.Less(t, time.Since(start), time.Second)
+	require.Equal(t, coderws.StatusGoingAway, <-conn.closeStatus)
+}
+
+func TestOpenAIWSDownstreamEarlyCancelPassesThrough(t *testing.T) {
+	conn := newQueuedWSDownstreamTestConn()
+	ds := NewOpenAIWSDownstream(conn, 4096, openAIWSTestAdmissionContext(context.Background()))
+	defer ds.CloseNow()
+	conn.input <- []byte(`{"type":"response.create"}`)
+	conn.input <- []byte(`{"type":"response.cancel","event_id":"early"}`)
+	require.Eventually(t, func() bool { return len(ds.controls) == 1 }, time.Second, time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, _, err := ds.Read(ctx)
+	require.NoError(t, err)
+	ds.controlsEnabled.Store(false)
+	ds.modeSelected.Store(true)
+	_, b, err := ds.Read(ctx)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"type":"response.cancel","event_id":"early"}`, string(b))
+}
+
+func TestOpenAIWSDownstreamRetryStopsRefusalAndCommittedTurn(t *testing.T) {
+	conn := newQueuedWSDownstreamTestConn()
+	ds := NewOpenAIWSDownstream(conn, 4096, openAIWSTestAdmissionContext(context.Background()))
+	defer ds.CloseNow()
+	ctx := ds.TurnBudgetContext(t.Context(), nil, []byte(`{"type":"response.create","model":"gpt-5.1","input":"hello"}`))
+	allowed, reason := ds.CanRetry(1, []byte(`{"type":"response.failed","response":{"error":{"code":"content_filter"}}}`))
+	require.False(t, allowed)
+	require.Equal(t, OpenAIRetryStopContentRefusal, reason)
+	MarkTurnOutputCommitted(ctx)
+	allowed, reason = ds.CanRetry(1, nil)
+	require.False(t, allowed)
+	require.Equal(t, OpenAIRetryStopDownstreamCommitted, reason)
+	conn.input <- []byte(`{"type":"response.create","input":"next turn"}`)
+	next, err := ds.FinishTurnAndReadNext(ctx, nil, "upstream_error", "failed turn")
+	require.NoError(t, err)
+	ds.TurnBudgetContext(ctx, nil, next)
+	allowed, reason = ds.CanRetry(1, nil)
+	require.True(t, allowed)
+	require.Empty(t, reason)
+}
+
+func TestOpenAIWSDownstreamUsageDrainDeadline(t *testing.T) {
+	conn := newQueuedWSDownstreamTestConn()
+	ds := NewOpenAIWSDownstream(conn, 4096, openAIWSTestAdmissionContext(context.Background()))
+	defer ds.CloseNow()
+	ctx, finish := ds.turnContext(context.Background())
+	defer finish()
+	require.NoError(t, conn.CloseNow())
+	select {
+	case <-ctx.Done():
+		require.ErrorIs(t, context.Cause(ctx), errOpenAIWSUsageDrainExpired)
+	case <-time.After(2 * time.Second):
+		t.Fatal("drain is not bounded")
+	}
+}
+
+func TestOpenAIWSDownstreamDoesNotConsumeQueuedCreateAfterDisconnect(t *testing.T) {
+	conn := newQueuedWSDownstreamTestConn()
+	ds := NewOpenAIWSDownstream(conn, 4096, openAIWSTestAdmissionContext(context.Background()))
+	defer ds.CloseNow()
+	conn.input <- []byte(`{"type":"response.create","input":"queued"}`)
+	require.Eventually(t, func() bool { return len(ds.frames) == 1 }, time.Second, time.Millisecond)
+	require.NoError(t, conn.CloseNow())
+	<-ds.done
+	_, payload, err := ds.Read(context.Background())
+	require.Error(t, err)
+	require.Empty(t, payload)
+}
+
+func TestOpenAIWSInterruptPreservesPayloadAndTurnIsolation(t *testing.T) {
+	for _, scenario := range []string{"active", "idle", "foreign response", "foreign lane", "stale response", "passthrough", "invalid", "missing response"} {
+		t.Run(scenario, func(t *testing.T) {
+			conn := newQueuedWSDownstreamTestConn()
+			conn.writes = make(chan []byte, 16)
+			ds := NewOpenAIWSDownstream(conn, 4096, openAIWSTestAdmissionContext(context.Background()))
+			defer ds.CloseNow()
+			ds.turn.Store(7)
+			ds.active.Store(scenario != "idle")
+			ds.modeSelected.Store(true)
+			current, lane := "resp_active", "lane_a"
+			ds.currentResponseID.Store(&current)
+			ds.streamID.Store(&lane)
+			if scenario == "passthrough" {
+				ds.controlsEnabled.Store(false)
+			}
+			payload := `{"type":"response.interrupt","response_id":"resp_active","mode":"discard_partial_items","event_id":"stop-1","stream_id":"lane_a"}`
+			switch scenario {
+			case "foreign response":
+				payload = strings.ReplaceAll(payload, "resp_active", "resp_other")
+			case "foreign lane":
+				payload = strings.ReplaceAll(payload, "lane_a", "lane_b")
+			case "stale response":
+				ds.lastTerminalID.Store(&current)
+			case "invalid":
+				payload = `{"type":"response.interrupt","response_id":true}`
+			case "missing response":
+				payload = `{"type":"response.interrupt","previous_response_id":"resp_active"}`
+			}
+			conn.input <- []byte(payload)
+			// FIFO barrier proves the preceding control has been processed.
+			conn.input <- []byte(`{"type":"barrier"}`)
+			select {
+			case <-ds.frames:
+			case <-time.After(time.Second):
+				t.Fatal("reader stalled")
+			}
+			if scenario == "active" || scenario == "passthrough" {
+				require.Empty(t, conn.writes, "only the upstream may acknowledge an interrupt")
+				require.Len(t, ds.controls, 1)
+				if scenario == "passthrough" {
+					ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+					defer cancel()
+					_, wire, err := ds.Read(ctx)
+					require.NoError(t, err)
+					require.Equal(t, payload, string(wire))
+				} else {
+					control := <-ds.controls
+					require.True(t, control.interrupt)
+					require.Equal(t, uint64(7), control.turn)
+					require.Equal(t, payload, string(control.payload))
+				}
+			} else {
+				require.Empty(t, ds.controls, "an obsolete interrupt must not cancel another turn")
+				require.Len(t, conn.writes, 1)
+				failure := <-conn.writes
+				require.Equal(t, "response.interrupt.failed", gjson.GetBytes(failure, "type").String())
+				require.Equal(t, "response_not_active", gjson.GetBytes(failure, "error.code").String())
+			}
+			require.Equal(t, uint64(0), ds.terminalTurn.Load(), "control failure must not end a generation")
+		})
+	}
+	for _, raw := range []string{`{"type":"response.interrupt","type":"response.create"}`, `{"type":"response.interrupt","event_id":"a","event_id":"b"}`} {
+		_, err := validateOpenAIWSInterrupt([]byte(raw))
+		require.Error(t, err)
 	}
 }

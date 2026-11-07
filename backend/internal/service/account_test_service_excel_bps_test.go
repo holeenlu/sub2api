@@ -1,0 +1,89 @@
+package service
+
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
+)
+
+func TestBuildOpenAIGrantAccountTestBodyUsesResponsesContract(t *testing.T) {
+	raw, err := buildOpenAIGrantAccountTestBody("gpt-6-astra", "糖果题")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["model"] != "gpt-6-astra" || body["stream"] != true || body["store"] != false {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+	input, _ := body["input"].([]any)
+	item, _ := input[0].(map[string]any)
+	contentItems, _ := item["content"].([]any)
+	content, _ := contentItems[0].(map[string]any)
+	if content["text"] != "糖果题" {
+		t.Fatalf("prompt was not preserved: %#v", content)
+	}
+	reasoning, ok := body["reasoning"].(map[string]any)
+	if !ok || reasoning["effort"] != "medium" {
+		t.Fatalf("missing reasoning effort: %#v", body["reasoning"])
+	}
+}
+
+func TestExcelBPSAccountOnlyUsesOAuth(t *testing.T) {
+	oauth := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{"openai_excel_bps": true}}
+	apiKey := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: map[string]any{"openai_excel_bps": true}}
+	if !oauth.IsExcelBPSEnabled() || apiKey.IsExcelBPSEnabled() {
+		t.Fatal("Excel BPS gate must be OAuth-only")
+	}
+}
+
+func TestExcelBPSManualTestKeepsInboundRequestUnchanged(t *testing.T) {
+	upstream := &httpUpstreamRecorder{resp: bpsCompletionResponse(200, bpsCompletedStream("resp_probe", "OK"))}
+	gateway := excelBPSGatewayTestService(upstream)
+	svc := &AccountTestService{openaiGatewayService: gateway}
+	account := excelAccount()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/api/v1/admin/accounts/300/test", nil)
+	err := svc.testOpenAIGrantAccountConnection(c, account, "gpt-6-astra", "Reply OK")
+	require.NoError(t, err)
+	require.NotNil(t, upstream.lastReq)
+	require.Empty(t, c.Request.Header.Get("Session-Id"), "test must not mutate the inbound request")
+}
+
+func TestExcelBPSBackgroundTestHandlesNilHeader(t *testing.T) {
+	upstream := &httpUpstreamRecorder{resp: bpsCompletionResponse(200, bpsCompletedStream("resp_probe", "OK"))}
+	svc := &AccountTestService{openaiGatewayService: excelBPSGatewayTestService(upstream)}
+	account := excelAccount()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = &http.Request{}
+	require.NotPanics(t, func() {
+		err := svc.testOpenAIGrantAccountConnection(c, account, "gpt-6-astra", "Reply OK")
+		require.NoError(t, err)
+	})
+	require.Nil(t, c.Request.Header, "the inbound request must remain unchanged")
+	require.NotNil(t, upstream.lastReq)
+}
+
+func TestExcelBPSManualTestReportsRateLimit(t *testing.T) {
+	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{"Retry-After": {"30"}},
+		Body: io.NopCloser(strings.NewReader(`{"error":{"message":"PRIVATE_UPSTREAM"}}`))}}
+	svc := &AccountTestService{openaiGatewayService: excelBPSGatewayTestService(upstream)}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest("POST", "/api/v1/admin/accounts/300/test", nil)
+
+	err := svc.testOpenAIGrantAccountConnection(c, excelAccount(), "gpt-6-astra", "Reply OK")
+
+	// A single-account test shows the rate limit instead of a failover signal.
+	require.EqualError(t, err, excelBPSRateLimitedClientMessage)
+	require.NotContains(t, rec.Body.String(), "PRIVATE_UPSTREAM")
+	require.Len(t, upstream.requests, 1)
+}

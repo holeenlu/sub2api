@@ -416,6 +416,15 @@ func (s *DashboardService) GetUserBreakdownStats(ctx context.Context, startTime,
 	return stats, nil
 }
 
+// GetAPIKeyBreakdownStats 与 GetUserBreakdownStats 同构，聚合维度换成 api_key_id。
+func (s *DashboardService) GetAPIKeyBreakdownStats(ctx context.Context, startTime, endTime time.Time, dim usagestats.UserBreakdownDimension, limit int) ([]usagestats.APIKeyBreakdownItem, error) {
+	stats, err := s.usageRepo.GetAPIKeyBreakdownStats(ctx, startTime, endTime, dim, limit)
+	if err != nil {
+		return nil, fmt.Errorf("get api key breakdown stats: %w", err)
+	}
+	return stats, nil
+}
+
 func (s *DashboardService) GetBatchUserUsageStats(ctx context.Context, userIDs []int64, startTime, endTime time.Time) (map[int64]*usagestats.BatchUserUsageStats, error) {
 	stats, err := s.usageRepo.GetBatchUserUsageStats(ctx, userIDs, startTime, endTime)
 	if err != nil {

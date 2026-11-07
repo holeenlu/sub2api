@@ -125,3 +125,8 @@ func BenchmarkReplaceOpenAIWSMessageModel_DualReplace(b *testing.B) {
 		benchmarkOpenAIWSBytesSink = replaceOpenAIWSMessageModel(event, "gpt-5.1", "custom-model")
 	}
 }
+
+// Test-only adapters and reference algorithms; production uses the current entrypoints.
+func payloadAsJSON(payload map[string]any) string {
+	return string(payloadAsJSONBytes(payload))
+}

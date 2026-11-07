@@ -232,7 +232,11 @@ func openCodeGoUsageAccount(id int64) *Account {
 func newOpenCodeGoUsageTestService(t *testing.T, repo *openCodeGoUsageTestRepo, upstream HTTPUpstream, settingsRepo SettingRepository) *OpenCodeGoUsageService {
 	t.Helper()
 	svc := NewOpenCodeGoUsageService(repo, upstream, NewSettingService(settingsRepo, nil))
-	t.Cleanup(svc.Stop)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		require.NoError(t, svc.Stop(ctx))
+	})
 	return svc
 }
 
@@ -688,7 +692,11 @@ func TestOpenCodeGoUsageRefreshRejectsGroupChangeBeforeUpstreamRequest(t *testin
 	repo := &openCodeGoRefreshPreflightIdentityChangeRepo{openCodeGoUsageTestRepo: base}
 	upstream := &openCodeGoUsageHTTPStub{body: []byte(openCodeGoUsageFixture)}
 	svc := NewOpenCodeGoUsageService(repo, upstream, NewSettingService(&upstreamBillingProbeSettingRepo{}, nil))
-	t.Cleanup(svc.Stop)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		require.NoError(t, svc.Stop(ctx))
+	})
 
 	_, err := svc.Refresh(context.Background(), account.ID)
 

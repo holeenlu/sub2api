@@ -48,8 +48,10 @@ type OpsDashboardOverview struct {
 	// It is derived from the monitored metrics in this overview, plus best-effort system metrics/job heartbeats.
 	HealthScore int `json:"health_score"`
 
-	// Latest system-level snapshot (window=1m, global).
-	SystemMetrics *OpsSystemMetricsSnapshot `json:"system_metrics"`
+	// Fresh-node health summary (worst CPU/memory pressure, summed pools).
+	SystemMetrics            *OpsSystemMetricsSnapshot `json:"system_metrics"`
+	SystemMetricsNodes       []*OpsNodeMetricsSnapshot `json:"system_metrics_nodes"`
+	SystemMetricsUnavailable bool                      `json:"system_metrics_unavailable"`
 
 	// Background jobs health (heartbeats).
 	JobHeartbeats []*OpsJobHeartbeat `json:"job_heartbeats"`

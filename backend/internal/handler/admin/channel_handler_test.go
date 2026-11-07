@@ -615,7 +615,8 @@ func TestGetModelDefaultPricing_ReturnsFable51CacheTTLs(t *testing.T) {
 
 func TestGetModelDefaultPricing_OmitsUnsupportedCache1hPrice(t *testing.T) {
 	router := setupModelDefaultPricingRouter()
-	req := httptest.NewRequest(http.MethodGet, "/channels/model-pricing?model=claude-sonnet-4", nil)
+	// Claude fallbacks now support 1h writes; OpenAI has no Anthropic TTL tier.
+	req := httptest.NewRequest(http.MethodGet, "/channels/model-pricing?model=gpt-5.4", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 

@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"errors"
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"go.uber.org/zap"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -515,4 +517,89 @@ func TestSetClaudeCodeClientContext_ParsedRequestProbeWithoutSystemPrompt(t *tes
 	c2.Request.Header.Set("User-Agent", "claude-cli/2.1.260 (external, cli)")
 	SetClaudeCodeClientContext(c2, nil, &service.ParsedRequest{Model: "claude-sonnet-4-5", MaxTokens: 64})
 	require.False(t, service.IsClaudeCodeClient(c2.Request.Context()))
+}
+
+type helperFlushFailureWriter struct {
+	*httptest.ResponseRecorder
+	err error
+}
+
+func (w *helperFlushFailureWriter) FlushError() error { return w.err }
+
+type heartbeatQueueCache struct{ service.UserMsgQueueCache }
+
+func (*heartbeatQueueCache) AcquireLock(context.Context, int64, string, int) (bool, error) {
+	return false, nil
+}
+
+func TestQueueHeartbeatFlushFailureStopsWaiting(t *testing.T) {
+	for _, path := range []string{"concurrency", "serial_queue", "throttle", "mock"} {
+		t.Run(path, func(t *testing.T) {
+			writeErr := errors.New("downstream flush failed")
+			rec := &helperFlushFailureWriter{ResponseRecorder: httptest.NewRecorder(), err: writeErr}
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+			finishGuard := service.GuardSSEWrites(c)
+			original := c.Writer
+			capture := acquireOpsCaptureWriter(original)
+			c.Writer = capture
+			defer func() {
+				c.Writer = original
+				releaseOpsCaptureWriter(capture)
+				finishGuard()
+			}()
+			started := false
+			start := time.Now()
+			var err error
+			switch path {
+			case "concurrency":
+				cache := &helperConcurrencyCacheStub{}
+				helper := NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatComment, time.Millisecond)
+				_, err = helper.waitForSlotWithPingTimeout(c, "account", 1, 1, time.Second, true, &started, false)
+				require.Zero(t, cache.accountAcquireCalls, "failed heartbeat must not continue acquiring slots")
+			case "serial_queue":
+				queue := service.NewUserMessageQueueService(&heartbeatQueueCache{}, nil, &config.UserMessageQueueConfig{})
+				helper := NewUserMsgQueueHelper(queue, SSEPingFormatComment, time.Millisecond)
+				_, err = helper.waitForLockWithPing(c, c.Request.Context(), 1, 0, true, &started, zap.NewNop())
+			case "throttle":
+				queue := service.NewUserMessageQueueService(nil, nil, &config.UserMessageQueueConfig{MinDelayMs: 1000, MaxDelayMs: 1000})
+				helper := NewUserMsgQueueHelper(queue, SSEPingFormatComment, time.Millisecond)
+				err = helper.ThrottleWithPing(c, 1, 0, true, &started, time.Second, zap.NewNop())
+			case "mock":
+				sendMockInterceptStream(c, "claude", InterceptTypeWarmup)
+				require.NotContains(t, rec.Body.String(), "event: message_stop")
+			}
+			if path != "mock" {
+				require.ErrorIs(t, err, writeErr)
+			}
+			require.Less(t, time.Since(start), 100*time.Millisecond)
+			require.NoError(t, c.Request.Context().Err())
+		})
+	}
+}
+
+// Retry staging and Ops must preserve the failure from the guarded writer,
+// including when committing buffered lifecycle events performs the first flush.
+func TestStreamWriterWrapperFlushFailures(t *testing.T) {
+	writeErr := errors.New("flush failed")
+	rec := &helperFlushFailureWriter{ResponseRecorder: httptest.NewRecorder(), err: writeErr}
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+	finishGuard := service.GuardSSEWrites(c)
+	defer finishGuard()
+	guarded := c.Writer
+	capture := acquireOpsCaptureWriter(guarded)
+	defer releaseOpsCaptureWriter(capture)
+	c.Writer = capture
+	finishStage := beginRetryOutputStage(c)
+	c.Header("Content-Type", "text/event-stream")
+	_, err := c.Writer.WriteString("data: {\"type\":\"response.created\"}\n\n")
+	require.NoError(t, err)
+	require.NoError(t, http.NewResponseController(c.Writer).Flush(), "metadata must stay staged")
+	_, err = c.Writer.WriteString("data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n")
+	require.ErrorIs(t, err, writeErr)
+	require.ErrorIs(t, http.NewResponseController(c.Writer).Flush(), writeErr)
+	require.ErrorIs(t, finishStage(nil), writeErr)
+	c.Writer = guarded
+	require.NoError(t, c.Request.Context().Err())
 }

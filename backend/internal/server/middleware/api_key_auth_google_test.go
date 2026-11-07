@@ -908,3 +908,88 @@ func TestApiKeyAuthWithSubscriptionGoogle_SubscriptionLimitExceededReturns429(t 
 	require.Equal(t, "RESOURCE_EXHAUSTED", resp.Error.Status)
 	require.Contains(t, resp.Error.Message, "daily usage limit exceeded")
 }
+
+func TestGoogleKeyPolicyPrecedesSubscriptionAndPreservesErrors(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name                              string
+		change                            func(*service.APIKey)
+		simple                            bool
+		wantStatus                        int
+		wantGoogleStatus, wantMessage     string
+		subscriptionReads, lastUsedWrites int32
+	}{
+		{name: "stored quota precedes expiry", change: func(key *service.APIKey) {
+			key.Status = service.StatusAPIKeyQuotaExhausted
+			past := time.Now().Add(-time.Hour)
+			key.ExpiresAt = &past
+		}, wantStatus: 429, wantGoogleStatus: "RESOURCE_EXHAUSTED", wantMessage: "API key 额度已用完"},
+		{name: "stored expiry precedes quota", change: func(key *service.APIKey) { key.Status = service.StatusAPIKeyExpired; key.Quota = 1; key.QuotaUsed = 1 }, wantStatus: 403, wantGoogleStatus: "PERMISSION_DENIED", wantMessage: "API key 已过期"},
+		{name: "runtime expiry precedes quota", change: func(key *service.APIKey) {
+			past := time.Now().Add(-time.Hour)
+			key.ExpiresAt = &past
+			key.Quota = 1
+			key.QuotaUsed = 1
+		}, wantStatus: 403, wantGoogleStatus: "PERMISSION_DENIED", wantMessage: "API key 已过期"},
+		{name: "runtime quota precedes subscription", change: func(key *service.APIKey) { key.Quota = 1; key.QuotaUsed = 1 }, wantStatus: 429, wantGoogleStatus: "RESOURCE_EXHAUSTED", wantMessage: "API key 额度已用完"},
+		{name: "disabled key precedes IP and user", change: func(key *service.APIKey) {
+			key.Status = service.StatusDisabled
+			key.IPBlacklist = []string{"192.0.2.8"}
+			key.User.Status = service.StatusDisabled
+		}, wantStatus: 401, wantGoogleStatus: "UNAUTHENTICATED", wantMessage: "API key is disabled"},
+		{name: "IP precedes user and quota", change: func(key *service.APIKey) {
+			key.IPBlacklist = []string{"192.0.2.8"}
+			key.User.Status = service.StatusDisabled
+			key.Status = service.StatusAPIKeyQuotaExhausted
+		}, wantStatus: 403, wantGoogleStatus: "PERMISSION_DENIED", wantMessage: "Access denied. Your IP is 192.0.2.8"},
+		{name: "user precedes quota", change: func(key *service.APIKey) {
+			key.User.Status = service.StatusDisabled
+			key.Status = service.StatusAPIKeyQuotaExhausted
+		}, wantStatus: 401, wantGoogleStatus: "UNAUTHENTICATED", wantMessage: "User account is not active"},
+		{name: "missing user is rejected by lookup before group", change: func(key *service.APIKey) { key.User = nil; key.Group = nil }, wantStatus: 401, wantGoogleStatus: "UNAUTHENTICATED", wantMessage: "Invalid API key"},
+		{name: "group precedes quota", change: func(key *service.APIKey) {
+			key.Group.Status = service.StatusDisabled
+			key.Status = service.StatusAPIKeyQuotaExhausted
+		}, wantStatus: 403, wantGoogleStatus: "PERMISSION_DENIED", wantMessage: "API Key 所属分组已停用"},
+		{name: "vendor rejection stays in identity lookup", change: func(key *service.APIKey) { key.User.Role = service.RoleVendorLevel1 }, wantStatus: 500, wantGoogleStatus: "INTERNAL", wantMessage: "Failed to validate API key"},
+		{name: "simple skips quota and subscription once", simple: true, change: func(key *service.APIKey) { key.Status = service.StatusAPIKeyExpired; key.Quota = 1; key.QuotaUsed = 1 }, wantStatus: 200, lastUsedWrites: 1},
+		{name: "simple retains key guard", simple: true, change: func(key *service.APIKey) { key.Status = service.StatusDisabled }, wantStatus: 401, wantGoogleStatus: "UNAUTHENTICATED", wantMessage: "API key is disabled"},
+		{name: "eligible key reads subscription once", wantStatus: 403, wantGoogleStatus: "PERMISSION_DENIED", wantMessage: "No active subscription found for this group", subscriptionReads: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.Config{RunMode: config.RunModeStandard}
+			if tc.simple {
+				cfg.RunMode = config.RunModeSimple
+			}
+			group := &service.Group{ID: 9, Status: service.StatusActive, Platform: service.PlatformGemini, Hydrated: true, SubscriptionType: service.SubscriptionTypeSubscription}
+			key := &service.APIKey{ID: 2, UserID: 3, Key: "google-policy-fixture", Status: service.StatusActive, GroupID: &group.ID, Group: group, User: &service.User{ID: 3, Role: service.RoleUser, Status: service.StatusActive, Balance: 10}}
+			if tc.change != nil {
+				tc.change(key)
+			}
+			var subscriptionReads, lastUsedWrites atomic.Int32
+			keys := service.NewAPIKeyService(fakeAPIKeyRepo{
+				getByKey:       func(context.Context, string) (*service.APIKey, error) { return key, nil },
+				updateLastUsed: func(context.Context, int64, time.Time) error { lastUsedWrites.Add(1); return nil },
+			}, nil, nil, nil, nil, nil, cfg)
+			subscriptions := service.NewSubscriptionService(nil, fakeGoogleSubscriptionRepo{getActive: func(context.Context, int64, int64) (*service.UserSubscription, error) {
+				subscriptionReads.Add(1)
+				return nil, service.ErrSubscriptionNotFound
+			}}, nil, nil, cfg)
+			router := gin.New()
+			router.Use(APIKeyAuthWithSubscriptionGoogle(keys, subscriptions, cfg))
+			router.GET("/v1beta/models", func(c *gin.Context) { c.Status(200) })
+			request := httptest.NewRequest(http.MethodGet, "/v1beta/models", nil)
+			request.RemoteAddr = "192.0.2.8:12345"
+			request.Header.Set("x-goog-api-key", key.Key)
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+			require.Equal(t, tc.wantStatus, recorder.Code)
+			if tc.wantMessage != "" {
+				expected, _ := json.Marshal(map[string]any{"error": map[string]any{"code": tc.wantStatus, "status": tc.wantGoogleStatus, "message": tc.wantMessage}})
+				require.JSONEq(t, string(expected), recorder.Body.String())
+			}
+			require.Equal(t, tc.subscriptionReads, subscriptionReads.Load())
+			require.Equal(t, tc.lastUsedWrites, lastUsedWrites.Load())
+		})
+	}
+}

@@ -380,6 +380,8 @@ type OllamaCloudUsageService struct {
 	encryptor               SecretEncryptor
 	encryptionKeyConfigured bool
 
+	drainCh      chan struct{}
+	done         chan struct{}
 	parentCtx    context.Context
 	parentCancel context.CancelFunc
 	wg           sync.WaitGroup
@@ -412,15 +414,13 @@ func NewOllamaCloudUsageService(
 	encryptor SecretEncryptor,
 	encryptionKeyConfigured bool,
 ) *OllamaCloudUsageService {
-	ctx, cancel := context.WithCancel(context.Background())
 	return &OllamaCloudUsageService{
 		accountRepo:             accountRepo,
 		httpUpstream:            httpUpstream,
 		settingService:          settingService,
 		encryptor:               encryptor,
 		encryptionKeyConfigured: encryptionKeyConfigured,
-		parentCtx:               ctx,
-		parentCancel:            cancel,
+		drainCh:                 make(chan struct{}),
 		refreshSlots:            make(chan struct{}, ollamaCloudUsageConcurrency),
 		now:                     time.Now,
 		instanceID:              uuid.NewString(),
@@ -442,48 +442,80 @@ func ProvideOllamaCloudUsageService(
 	svc := NewOllamaCloudUsageService(accountRepo, httpUpstream, settingService, encryptor, keyConfigured)
 	svc.lockCache = lockCache
 	svc.db = db
-	svc.Start()
 	return svc
 }
 
-func (s *OllamaCloudUsageService) Start() {
+func (s *OllamaCloudUsageService) Start(ctx context.Context) error {
 	if s == nil {
-		return
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	s.mu.Lock()
-	if s.started || s.stopped {
-		s.mu.Unlock()
-		return
+	defer s.mu.Unlock()
+	if s.stopped {
+		return ErrOllamaCloudUsageUnavailable
 	}
+	if s.started {
+		return s.parentCtx.Err()
+	}
+	s.parentCtx, s.parentCancel = context.WithCancel(ctx)
 	s.started = true
 	s.wg.Add(2)
-	s.mu.Unlock()
 	go s.runLoop()
 	go s.probeLoop()
+	return nil
 }
 
-func (s *OllamaCloudUsageService) Stop() {
+// Drain stops periodic/queued admission and joins accepted background work.
+// The same completion handle survives a caller deadline; no early owner reset.
+func (s *OllamaCloudUsageService) Drain(ctx context.Context) error { return s.stopRunner(ctx, false) }
+func (s *OllamaCloudUsageService) Stop(ctx context.Context) error  { return s.stopRunner(ctx, true) }
+func (s *OllamaCloudUsageService) stopRunner(ctx context.Context, force bool) error {
 	if s == nil {
-		return
+		return nil
 	}
 	s.mu.Lock()
-	if s.stopped {
-		s.mu.Unlock()
-		return
+	if !s.stopped {
+		s.stopped = true
+		close(s.drainCh)
+		s.done = make(chan struct{})
+		done := s.done
+		go func() { s.wg.Wait(); close(done) }()
 	}
-	s.stopped = true
-	s.parentCancel()
+	done, cancel := s.done, s.parentCancel
 	s.mu.Unlock()
-	s.wg.Wait()
+	if force && cancel != nil {
+		cancel()
+	}
+	select {
+	case <-done:
+		return nil
+	default:
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (s *OllamaCloudUsageService) runLoop() {
 	defer s.wg.Done()
+	select {
+	case <-s.drainCh:
+		return
+	default:
+	}
 	_ = s.RunDue(s.parentCtx)
 	ticker := time.NewTicker(ollamaCloudUsageCycleInterval)
 	defer ticker.Stop()
 	for {
 		select {
+		case <-s.drainCh:
+			return
 		case <-s.parentCtx.Done():
 			return
 		case <-ticker.C:
@@ -717,6 +749,14 @@ func (s *OllamaCloudUsageService) Refresh(ctx context.Context, accountID int64) 
 }
 
 func (s *OllamaCloudUsageService) RunDue(ctx context.Context) error {
+	if s != nil {
+		s.mu.Lock()
+		stopped := s.stopped
+		s.mu.Unlock()
+		if stopped {
+			return ErrOllamaCloudUsageUnavailable
+		}
+	}
 	if s == nil || s.accountRepo == nil {
 		return nil
 	}

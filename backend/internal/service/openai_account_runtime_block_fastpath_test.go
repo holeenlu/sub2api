@@ -361,18 +361,26 @@ func TestOpenAIHTTP429StillUsesQuotaResetHeaders(t *testing.T) {
 	require.Greater(t, time.Until(blockedUntil), 6*24*time.Hour, "real HTTP 429 must retain the upstream quota reset")
 }
 
-func TestOpenAI429RetryDelayHonorsBoundedRetryAfter(t *testing.T) {
-	deadline := time.Now().Add(openAIOAuth429RetryWindow)
-	require.Equal(t, openAIOAuth429RetryDelay, openAIOAuth429SameAccountRetryDelay(nil, deadline))
-	require.Equal(t, openAIOAuth429MaxRetryDelay, openAIOAuth429SameAccountRetryDelay(http.Header{"Retry-After": []string{"90"}}, deadline))
+func TestOpenAI429RetryDelayHonorsRetryAfter(t *testing.T) {
+	require.Equal(t, openAIOAuth429RetryDelay, openAIOAuth429SameAccountRetryDelay(nil))
+	require.Equal(t, 90*time.Second, openAIOAuth429SameAccountRetryDelay(http.Header{"Retry-After": []string{"90"}}))
+	require.Equal(t, time.Duration(1<<63-1), openAIOAuth429SameAccountRetryDelay(http.Header{"Retry-After": []string{"99999999999999999999"}}))
+	require.Equal(t, openAIOAuth429RetryDelay, openAIOAuth429SameAccountRetryDelay(http.Header{"Retry-After": []string{"Inf"}}))
+	retryAt := time.Now().Add(time.Minute).UTC().Truncate(time.Second)
+	before := time.Now()
+	delay := openAIOAuth429SameAccountRetryDelay(http.Header{"Retry-After": []string{retryAt.Format(http.TimeFormat)}})
+	require.GreaterOrEqual(t, delay, time.Until(retryAt))
+	require.LessOrEqual(t, delay, retryAt.Sub(before))
 }
 
 func TestOpenAI429FastPath_OpenCodeGoUsageLimitUsesMessageResetDuration(t *testing.T) {
 	repo := &rateLimit429AccountRepoStub{}
 	rateLimitService := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
 	svc := &OpenAIGatewayService{rateLimitService: rateLimitService}
-	rateLimitService.SetAccountRuntimeBlocker(svc)
-	account := &Account{ID: 44, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	blocker := &runtimeBlockRecorder{}
+	rateLimitService.SetAccountRuntimeBlocker(blocker)
+	// Only an identified provider owns this quota; generic relayed OpenAI keys use fallback.
+	account := &Account{ID: 44, Platform: PlatformOpenCodeGo, Type: AccountTypeAPIKey}
 	body := []byte(`{"type":"error","error":{"type":"GoUsageLimitError","message":"5-hour usage limit reached. Resets in 4hr 59min. To continue using this model now, enable usage from your available balance: https://opencode.ai/workspace/wrk_test/go"},"metadata":{"workspace":"wrk_test","limitName":"5 hour"}}`)
 
 	before := time.Now()
@@ -391,7 +399,8 @@ func TestOpenAI429FastPath_OpenCodeGoUsageLimitUsesMessageResetDuration(t *testi
 	expectedResetAfter := 4*time.Hour + 59*time.Minute
 	require.False(t, repo.lastRateLimitReset.Before(before.Add(expectedResetAfter-time.Second)))
 	require.False(t, repo.lastRateLimitReset.After(after.Add(expectedResetAfter)))
-	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+	require.Equal(t, []*Account{account}, blocker.accounts)
+	require.Equal(t, []time.Time{repo.lastRateLimitReset}, blocker.until)
 }
 
 // TestOpenAI429FastPath_SkipsSparkShadow 外审第8轮 P1:spark 影子被选中后若 /responses 返回 429,
@@ -803,6 +812,67 @@ func TestRuntimeBlockKeepsActivePersistedCooldown(t *testing.T) {
 	svc.BlockAccountScheduling(account, until, "grok payment required")
 	require.True(t, svc.isOpenAIAccountRequestRuntimeBlocked(account, "grok-3"))
 	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+}
+
+func TestOpenAIRuntimeBlockBPSCooldownRespectsEndpointCapability(t *testing.T) {
+	for _, source := range []string{"local", "snapshot"} {
+		for _, kind := range []string{"rate_limit", "model_permission"} {
+			t.Run(source+"/"+kind, func(t *testing.T) {
+				svc := excelBPSGatewayTestService(nil)
+				account := excelBPSDualGrantTestAccount(t, svc)
+				account.Credentials["model_mapping"] = map[string]any{"alias": "gpt-6-astra"}
+				until := time.Now().Add(time.Hour)
+				scope := excelBPSAccountCooldownScope
+				if kind == "model_permission" {
+					scope = excelBPSModelPermissionScope("gpt-6-astra")
+				}
+				if source == "snapshot" {
+					setAccountModelRateLimitSnapshot(account, scope, until, kind, time.Now())
+				} else if kind == "model_permission" {
+					svc.extendExcelBPSModelLocalCooldown(account.ID, "gpt-6-astra", until)
+				} else {
+					svc.extendExcelBPSLocalCooldown(account.ID, scope, until)
+				}
+				for _, capability := range []OpenAIEndpointCapability{
+					OpenAIEndpointCapabilityResponses, OpenAIEndpointCapabilityResponsesCompatible,
+					OpenAIEndpointCapabilityChatCompletions,
+				} {
+					require.True(t, svc.isOpenAIAccountRequestRuntimeBlocked(account, "alias", capability), "%s retains BPS cooldown", capability)
+				}
+				require.False(t, svc.isOpenAIAccountRequestRuntimeBlocked(account, "alias", OpenAIEndpointCapabilityAlphaSearch))
+				require.False(t, svc.isOpenAIAccountRequestRuntimeBlocked(account, "alias", OpenAIEndpointCapabilityLive))
+				require.True(t, svc.isOpenAIAccountRequestRuntimeBlocked(account, "alias"), "legacy Responses callers remain conservative")
+				require.True(t, account.IsExcelBPSEnabled(), "bypassing an unrelated scope cannot turn BPS off")
+				account.Extra["openai_excel_bps"] = false
+				require.False(t, svc.isOpenAIAccountRequestRuntimeBlocked(account, "alias", OpenAIEndpointCapabilityResponses), "an independent request after shutdown no longer selects BPS")
+			})
+		}
+	}
+}
+
+func TestOpenAIRuntimeBlockNativeCapabilityKeepsSharedHealthGuards(t *testing.T) {
+	svc := excelBPSGatewayTestService(nil)
+	account := excelBPSDualGrantTestAccount(t, svc)
+	until := time.Now().Add(time.Hour)
+	svc.extendExcelBPSLocalCooldown(account.ID, excelBPSAccountCooldownScope, until)
+	account.RateLimitResetAt = &until
+	svc.BlockAccountScheduling(account, until, "native_quota")
+	require.True(t, svc.isOpenAIAccountRequestRuntimeBlocked(account, "gpt-6-astra", OpenAIEndpointCapabilityAlphaSearch))
+
+	account.RateLimitResetAt = nil
+	require.False(t, svc.isOpenAIAccountRequestRuntimeBlocked(account, "gpt-6-astra", OpenAIEndpointCapabilityAlphaSearch))
+	require.False(t, svc.isOpenAIAccountRuntimeBlocked(account), "stale shared block still clears by generation/deadline CAS")
+	for range 2 {
+		svc.recordOpenAIAccountModelTransientFailure(account, "gpt-6-astra", time.Now())
+	}
+	require.True(t, svc.isOpenAIAccountRequestRuntimeBlocked(account, "gpt-6-astra", OpenAIEndpointCapabilityAlphaSearch))
+	require.False(t, svc.isOpenAIAccountRequestRuntimeBlocked(account, "gpt-5.6-sol", OpenAIEndpointCapabilityAlphaSearch))
+}
+
+func TestOpenAIRuntimeBlockNilInputs(t *testing.T) {
+	var svc *OpenAIGatewayService
+	require.False(t, svc.isOpenAIAccountRequestRuntimeBlocked(excelAccount(), "gpt-6-astra"))
+	require.False(t, (&OpenAIGatewayService{}).isOpenAIAccountRequestRuntimeBlocked(nil, "gpt-6-astra"))
 }
 
 func TestShouldStopOpenAIOAuth429Failover_AfterBoundedFullWindows(t *testing.T) {

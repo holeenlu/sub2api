@@ -1,0 +1,923 @@
+[
+  {
+    "name": "23-steps",
+    "samples": [
+      {
+        "input_tokens": 254598,
+        "output_tokens": 268,
+        "cached_input_tokens": 2816,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 254866,
+        "reasoning_output_tokens": 59
+      },
+      {
+        "input_tokens": 72546,
+        "output_tokens": 197,
+        "cached_input_tokens": 72448,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 72743,
+        "reasoning_output_tokens": 104
+      },
+      {
+        "input_tokens": 72925,
+        "output_tokens": 153,
+        "cached_input_tokens": 72448,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 73078,
+        "reasoning_output_tokens": 35
+      },
+      {
+        "input_tokens": 74404,
+        "output_tokens": 119,
+        "cached_input_tokens": 72832,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 74523,
+        "reasoning_output_tokens": 20
+      },
+      {
+        "input_tokens": 75906,
+        "output_tokens": 149,
+        "cached_input_tokens": 74368,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 76055,
+        "reasoning_output_tokens": 15
+      },
+      {
+        "input_tokens": 77897,
+        "output_tokens": 310,
+        "cached_input_tokens": 77824,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 78207,
+        "reasoning_output_tokens": 42
+      },
+      {
+        "input_tokens": 78318,
+        "output_tokens": 371,
+        "cached_input_tokens": 77824,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 78689,
+        "reasoning_output_tokens": 27
+      },
+      {
+        "input_tokens": 83812,
+        "output_tokens": 308,
+        "cached_input_tokens": 78208,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 84120,
+        "reasoning_output_tokens": 47
+      },
+      {
+        "input_tokens": 85591,
+        "output_tokens": 258,
+        "cached_input_tokens": 83712,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 85849,
+        "reasoning_output_tokens": 86
+      },
+      {
+        "input_tokens": 99349,
+        "output_tokens": 367,
+        "cached_input_tokens": 85504,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 99716,
+        "reasoning_output_tokens": 93
+      },
+      {
+        "input_tokens": 99762,
+        "output_tokens": 223,
+        "cached_input_tokens": 99328,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 99985,
+        "reasoning_output_tokens": 38
+      },
+      {
+        "input_tokens": 100051,
+        "output_tokens": 216,
+        "cached_input_tokens": 99968,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 100267,
+        "reasoning_output_tokens": 93
+      },
+      {
+        "input_tokens": 104708,
+        "output_tokens": 168,
+        "cached_input_tokens": 99968,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 104876,
+        "reasoning_output_tokens": 15
+      },
+      {
+        "input_tokens": 109735,
+        "output_tokens": 175,
+        "cached_input_tokens": 104576,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 109910,
+        "reasoning_output_tokens": 16
+      },
+      {
+        "input_tokens": 117162,
+        "output_tokens": 199,
+        "cached_input_tokens": 117120,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 117361,
+        "reasoning_output_tokens": 72
+      },
+      {
+        "input_tokens": 123004,
+        "output_tokens": 142,
+        "cached_input_tokens": 117120,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 123146,
+        "reasoning_output_tokens": 68
+      },
+      {
+        "input_tokens": 131018,
+        "output_tokens": 515,
+        "cached_input_tokens": 122880,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 131533,
+        "reasoning_output_tokens": 337
+      },
+      {
+        "input_tokens": 131582,
+        "output_tokens": 236,
+        "cached_input_tokens": 130944,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 131818,
+        "reasoning_output_tokens": 89
+      },
+      {
+        "input_tokens": 131946,
+        "output_tokens": 148,
+        "cached_input_tokens": 131456,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 132094,
+        "reasoning_output_tokens": 42
+      },
+      {
+        "input_tokens": 132141,
+        "output_tokens": 112,
+        "cached_input_tokens": 131840,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 132253,
+        "reasoning_output_tokens": 9
+      },
+      {
+        "input_tokens": 139949,
+        "output_tokens": 326,
+        "cached_input_tokens": 132096,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 140275,
+        "reasoning_output_tokens": 71
+      },
+      {
+        "input_tokens": 141177,
+        "output_tokens": 429,
+        "cached_input_tokens": 139904,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 141606,
+        "reasoning_output_tokens": 166
+      },
+      {
+        "input_tokens": 152205,
+        "output_tokens": 569,
+        "cached_input_tokens": 141056,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 152774,
+        "reasoning_output_tokens": 223
+      }
+    ],
+    "usage": {
+      "input_tokens": 2589786,
+      "output_tokens": 5958,
+      "cached_input_tokens": 2266240,
+      "cache_write_input_tokens": 0,
+      "total_tokens": 2595744,
+      "reasoning_output_tokens": 1767
+    },
+    "expected_cost": 5.7996
+  },
+  {
+    "name": "42-steps",
+    "samples": [
+      {
+        "input_tokens": 135512,
+        "output_tokens": 269,
+        "cached_input_tokens": 2816,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 135781,
+        "reasoning_output_tokens": 117
+      },
+      {
+        "input_tokens": 135828,
+        "output_tokens": 158,
+        "cached_input_tokens": 135424,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 135986,
+        "reasoning_output_tokens": 63
+      },
+      {
+        "input_tokens": 137115,
+        "output_tokens": 181,
+        "cached_input_tokens": 135680,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 137296,
+        "reasoning_output_tokens": 16
+      },
+      {
+        "input_tokens": 137397,
+        "output_tokens": 169,
+        "cached_input_tokens": 136960,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 137566,
+        "reasoning_output_tokens": 7
+      },
+      {
+        "input_tokens": 139097,
+        "output_tokens": 223,
+        "cached_input_tokens": 137216,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 139320,
+        "reasoning_output_tokens": 22
+      },
+      {
+        "input_tokens": 139644,
+        "output_tokens": 219,
+        "cached_input_tokens": 139008,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 139863,
+        "reasoning_output_tokens": 15
+      },
+      {
+        "input_tokens": 139931,
+        "output_tokens": 212,
+        "cached_input_tokens": 139520,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 140143,
+        "reasoning_output_tokens": 12
+      },
+      {
+        "input_tokens": 146669,
+        "output_tokens": 462,
+        "cached_input_tokens": 139776,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 147131,
+        "reasoning_output_tokens": 60
+      },
+      {
+        "input_tokens": 147169,
+        "output_tokens": 381,
+        "cached_input_tokens": 146560,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 147550,
+        "reasoning_output_tokens": 18
+      },
+      {
+        "input_tokens": 147588,
+        "output_tokens": 419,
+        "cached_input_tokens": 147072,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 148007,
+        "reasoning_output_tokens": 20
+      },
+      {
+        "input_tokens": 148947,
+        "output_tokens": 202,
+        "cached_input_tokens": 147456,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 149149,
+        "reasoning_output_tokens": 37
+      },
+      {
+        "input_tokens": 162746,
+        "output_tokens": 170,
+        "cached_input_tokens": 148736,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 162916,
+        "reasoning_output_tokens": 26
+      },
+      {
+        "input_tokens": 164049,
+        "output_tokens": 190,
+        "cached_input_tokens": 162560,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 164239,
+        "reasoning_output_tokens": 74
+      },
+      {
+        "input_tokens": 164806,
+        "output_tokens": 389,
+        "cached_input_tokens": 163840,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 165195,
+        "reasoning_output_tokens": 13
+      },
+      {
+        "input_tokens": 165233,
+        "output_tokens": 347,
+        "cached_input_tokens": 164608,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 165580,
+        "reasoning_output_tokens": 8
+      },
+      {
+        "input_tokens": 165618,
+        "output_tokens": 434,
+        "cached_input_tokens": 165120,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 166052,
+        "reasoning_output_tokens": 127
+      },
+      {
+        "input_tokens": 169594,
+        "output_tokens": 282,
+        "cached_input_tokens": 165504,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 169876,
+        "reasoning_output_tokens": 135
+      },
+      {
+        "input_tokens": 170388,
+        "output_tokens": 148,
+        "cached_input_tokens": 169472,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 170536,
+        "reasoning_output_tokens": 23
+      },
+      {
+        "input_tokens": 170652,
+        "output_tokens": 146,
+        "cached_input_tokens": 170240,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 170798,
+        "reasoning_output_tokens": 18
+      },
+      {
+        "input_tokens": 170953,
+        "output_tokens": 116,
+        "cached_input_tokens": 170496,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 171069,
+        "reasoning_output_tokens": 16
+      },
+      {
+        "input_tokens": 171611,
+        "output_tokens": 489,
+        "cached_input_tokens": 170752,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 172100,
+        "reasoning_output_tokens": 240
+      },
+      {
+        "input_tokens": 172332,
+        "output_tokens": 434,
+        "cached_input_tokens": 171520,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 172766,
+        "reasoning_output_tokens": 188
+      },
+      {
+        "input_tokens": 173072,
+        "output_tokens": 298,
+        "cached_input_tokens": 172160,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 173370,
+        "reasoning_output_tokens": 47
+      },
+      {
+        "input_tokens": 173429,
+        "output_tokens": 281,
+        "cached_input_tokens": 172928,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 173710,
+        "reasoning_output_tokens": 31
+      },
+      {
+        "input_tokens": 174328,
+        "output_tokens": 349,
+        "cached_input_tokens": 173312,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 174677,
+        "reasoning_output_tokens": 83
+      },
+      {
+        "input_tokens": 174825,
+        "output_tokens": 261,
+        "cached_input_tokens": 174208,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 175086,
+        "reasoning_output_tokens": 33
+      },
+      {
+        "input_tokens": 175226,
+        "output_tokens": 286,
+        "cached_input_tokens": 174720,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 175512,
+        "reasoning_output_tokens": 40
+      },
+      {
+        "input_tokens": 175573,
+        "output_tokens": 417,
+        "cached_input_tokens": 175104,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 175990,
+        "reasoning_output_tokens": 50
+      },
+      {
+        "input_tokens": 176168,
+        "output_tokens": 377,
+        "cached_input_tokens": 175488,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 176545,
+        "reasoning_output_tokens": 50
+      },
+      {
+        "input_tokens": 176738,
+        "output_tokens": 338,
+        "cached_input_tokens": 176000,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 177076,
+        "reasoning_output_tokens": 139
+      },
+      {
+        "input_tokens": 180902,
+        "output_tokens": 1245,
+        "cached_input_tokens": 176640,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 182147,
+        "reasoning_output_tokens": 787
+      },
+      {
+        "input_tokens": 182184,
+        "output_tokens": 513,
+        "cached_input_tokens": 180736,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 182697,
+        "reasoning_output_tokens": 46
+      },
+      {
+        "input_tokens": 183626,
+        "output_tokens": 443,
+        "cached_input_tokens": 182016,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 184069,
+        "reasoning_output_tokens": 134
+      },
+      {
+        "input_tokens": 184242,
+        "output_tokens": 164,
+        "cached_input_tokens": 183424,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 184406,
+        "reasoning_output_tokens": 10
+      },
+      {
+        "input_tokens": 184519,
+        "output_tokens": 313,
+        "cached_input_tokens": 184064,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 184832
+      },
+      {
+        "input_tokens": 186010,
+        "output_tokens": 285,
+        "cached_input_tokens": 184320,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 186295,
+        "reasoning_output_tokens": 28
+      },
+      {
+        "input_tokens": 204645,
+        "output_tokens": 194,
+        "cached_input_tokens": 185856,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 204839,
+        "reasoning_output_tokens": 94
+      },
+      {
+        "input_tokens": 204876,
+        "output_tokens": 111,
+        "cached_input_tokens": 204544,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 204987,
+        "reasoning_output_tokens": 8
+      },
+      {
+        "input_tokens": 206392,
+        "output_tokens": 217,
+        "cached_input_tokens": 204672,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 206609,
+        "reasoning_output_tokens": 56
+      },
+      {
+        "input_tokens": 218996,
+        "output_tokens": 215,
+        "cached_input_tokens": 206208,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 219211,
+        "reasoning_output_tokens": 60
+      },
+      {
+        "input_tokens": 219571,
+        "output_tokens": 128,
+        "cached_input_tokens": 218880,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 219699,
+        "reasoning_output_tokens": 10
+      },
+      {
+        "input_tokens": 211967,
+        "output_tokens": 3954,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 215921,
+        "reasoning_output_tokens": 1709
+      }
+    ],
+    "usage": {
+      "input_tokens": 7170168,
+      "output_tokens": 16429,
+      "cached_input_tokens": 6735616,
+      "cache_write_input_tokens": 0,
+      "total_tokens": 7186597,
+      "reasoning_output_tokens": 4670
+    },
+    "expected_cost": 11.902586
+  },
+  {
+    "name": "45-steps",
+    "samples": [
+      {
+        "input_tokens": 64619,
+        "output_tokens": 440,
+        "cached_input_tokens": 2816,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 65059,
+        "reasoning_output_tokens": 144
+      },
+      {
+        "input_tokens": 65106,
+        "output_tokens": 142,
+        "cached_input_tokens": 64512,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 65248,
+        "reasoning_output_tokens": 60
+      },
+      {
+        "input_tokens": 72484,
+        "output_tokens": 217,
+        "cached_input_tokens": 59008,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 72701,
+        "reasoning_output_tokens": 76
+      },
+      {
+        "input_tokens": 73486,
+        "output_tokens": 188,
+        "cached_input_tokens": 59008,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 73674,
+        "reasoning_output_tokens": 54
+      },
+      {
+        "input_tokens": 77087,
+        "output_tokens": 274,
+        "cached_input_tokens": 72320,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 77361,
+        "reasoning_output_tokens": 78
+      },
+      {
+        "input_tokens": 89486,
+        "output_tokens": 422,
+        "cached_input_tokens": 73344,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 89908,
+        "reasoning_output_tokens": 179
+      },
+      {
+        "input_tokens": 93270,
+        "output_tokens": 398,
+        "cached_input_tokens": 76928,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 93668,
+        "reasoning_output_tokens": 144
+      },
+      {
+        "input_tokens": 104834,
+        "output_tokens": 355,
+        "cached_input_tokens": 93184,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 105189,
+        "reasoning_output_tokens": 77
+      },
+      {
+        "input_tokens": 106876,
+        "output_tokens": 301,
+        "cached_input_tokens": 104704,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 107177,
+        "reasoning_output_tokens": 73
+      },
+      {
+        "input_tokens": 109520,
+        "output_tokens": 222,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 109742,
+        "reasoning_output_tokens": 145
+      },
+      {
+        "input_tokens": 109842,
+        "output_tokens": 86,
+        "cached_input_tokens": 109312,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 109928,
+        "reasoning_output_tokens": 60
+      },
+      {
+        "input_tokens": 109967,
+        "output_tokens": 67,
+        "cached_input_tokens": 109696,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 110034,
+        "reasoning_output_tokens": 14
+      },
+      {
+        "input_tokens": 110085,
+        "output_tokens": 276,
+        "cached_input_tokens": 109824,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 110361,
+        "reasoning_output_tokens": 125
+      },
+      {
+        "input_tokens": 110491,
+        "output_tokens": 510,
+        "cached_input_tokens": 109952,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 111001,
+        "reasoning_output_tokens": 106
+      },
+      {
+        "input_tokens": 121917,
+        "output_tokens": 406,
+        "cached_input_tokens": 110336,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 122323,
+        "reasoning_output_tokens": 83
+      },
+      {
+        "input_tokens": 129096,
+        "output_tokens": 481,
+        "cached_input_tokens": 121728,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 129577,
+        "reasoning_output_tokens": 224
+      },
+      {
+        "input_tokens": 132819,
+        "output_tokens": 205,
+        "cached_input_tokens": 128896,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 133024,
+        "reasoning_output_tokens": 15
+      },
+      {
+        "input_tokens": 133459,
+        "output_tokens": 440,
+        "cached_input_tokens": 132608,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 133899,
+        "reasoning_output_tokens": 212
+      },
+      {
+        "input_tokens": 146591,
+        "output_tokens": 360,
+        "cached_input_tokens": 133248,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 146951,
+        "reasoning_output_tokens": 195
+      },
+      {
+        "input_tokens": 153932,
+        "output_tokens": 960,
+        "cached_input_tokens": 146432,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 154892,
+        "reasoning_output_tokens": 861
+      },
+      {
+        "input_tokens": 156603,
+        "output_tokens": 1222,
+        "cached_input_tokens": 153728,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 157825,
+        "reasoning_output_tokens": 822
+      },
+      {
+        "input_tokens": 157916,
+        "output_tokens": 2770,
+        "cached_input_tokens": 156416,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 160686,
+        "reasoning_output_tokens": 48
+      },
+      {
+        "input_tokens": 160766,
+        "output_tokens": 95,
+        "cached_input_tokens": 157824,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 160861,
+        "reasoning_output_tokens": 10
+      },
+      {
+        "input_tokens": 160965,
+        "output_tokens": 2963,
+        "cached_input_tokens": 160640,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 163928,
+        "reasoning_output_tokens": 214
+      },
+      {
+        "input_tokens": 163977,
+        "output_tokens": 174,
+        "cached_input_tokens": 160768,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 164151,
+        "reasoning_output_tokens": 63
+      },
+      {
+        "input_tokens": 164418,
+        "output_tokens": 2916,
+        "cached_input_tokens": 163840,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 167334,
+        "reasoning_output_tokens": 136
+      },
+      {
+        "input_tokens": 167377,
+        "output_tokens": 1053,
+        "cached_input_tokens": 164224,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 168430,
+        "reasoning_output_tokens": 287
+      },
+      {
+        "input_tokens": 168541,
+        "output_tokens": 785,
+        "cached_input_tokens": 167168,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 169326,
+        "reasoning_output_tokens": 48
+      },
+      {
+        "input_tokens": 169376,
+        "output_tokens": 1539,
+        "cached_input_tokens": 168448,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 170915,
+        "reasoning_output_tokens": 68
+      },
+      {
+        "input_tokens": 171025,
+        "output_tokens": 1519,
+        "cached_input_tokens": 169216,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 172544,
+        "reasoning_output_tokens": 50
+      },
+      {
+        "input_tokens": 172736,
+        "output_tokens": 1444,
+        "cached_input_tokens": 170880,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 174180,
+        "reasoning_output_tokens": 76
+      },
+      {
+        "input_tokens": 174231,
+        "output_tokens": 242,
+        "cached_input_tokens": 172544,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 174473,
+        "reasoning_output_tokens": 11
+      },
+      {
+        "input_tokens": 177736,
+        "output_tokens": 1560,
+        "cached_input_tokens": 174080,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 179296,
+        "reasoning_output_tokens": 499
+      },
+      {
+        "input_tokens": 179346,
+        "output_tokens": 299,
+        "cached_input_tokens": 177536,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 179645,
+        "reasoning_output_tokens": 19
+      },
+      {
+        "input_tokens": 180921,
+        "output_tokens": 556,
+        "cached_input_tokens": 179200,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 181477,
+        "reasoning_output_tokens": 463
+      },
+      {
+        "input_tokens": 183574,
+        "output_tokens": 344,
+        "cached_input_tokens": 180736,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 183918,
+        "reasoning_output_tokens": 102
+      },
+      {
+        "input_tokens": 183978,
+        "output_tokens": 591,
+        "cached_input_tokens": 183424,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 184569,
+        "reasoning_output_tokens": 72
+      },
+      {
+        "input_tokens": 186514,
+        "output_tokens": 554,
+        "cached_input_tokens": 183808,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 187068,
+        "reasoning_output_tokens": 65
+      },
+      {
+        "input_tokens": 187177,
+        "output_tokens": 177,
+        "cached_input_tokens": 186368,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 187354,
+        "reasoning_output_tokens": 65
+      },
+      {
+        "input_tokens": 188150,
+        "output_tokens": 1153,
+        "cached_input_tokens": 187008,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 189303,
+        "reasoning_output_tokens": 680
+      },
+      {
+        "input_tokens": 189496,
+        "output_tokens": 509,
+        "cached_input_tokens": 188032,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 190005,
+        "reasoning_output_tokens": 34
+      },
+      {
+        "input_tokens": 190197,
+        "output_tokens": 693,
+        "cached_input_tokens": 189312,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 190890,
+        "reasoning_output_tokens": 442
+      },
+      {
+        "input_tokens": 191117,
+        "output_tokens": 607,
+        "cached_input_tokens": 190080,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 191724,
+        "reasoning_output_tokens": 117
+      },
+      {
+        "input_tokens": 191836,
+        "output_tokens": 134,
+        "cached_input_tokens": 190976,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 191970,
+        "reasoning_output_tokens": 20
+      },
+      {
+        "input_tokens": 195469,
+        "output_tokens": 186,
+        "cached_input_tokens": 191744,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 195655,
+        "reasoning_output_tokens": 45
+      }
+    ],
+    "usage": {
+      "input_tokens": 6528409,
+      "output_tokens": 30835,
+      "cached_input_tokens": 6185856,
+      "cache_write_input_tokens": 0,
+      "total_tokens": 6559244,
+      "reasoning_output_tokens": 7381
+    },
+    "expected_cost": 11.153136
+  }
+]

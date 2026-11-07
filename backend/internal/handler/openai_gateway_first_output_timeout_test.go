@@ -21,10 +21,10 @@ func TestOpenAIForwardMayFailoverOnlyAfterNonSemanticWrite(t *testing.T) {
 	require.NoError(t, err)
 	c.Writer.Flush()
 
-	require.True(t, openAIForwardMayFailover(c, before, &service.UpstreamFailoverError{
+	require.Empty(t, openAIForwardRetryStopReason(c, before, &service.UpstreamFailoverError{
 		SafeToFailoverAfterWrite: true,
 	}))
-	require.False(t, openAIForwardMayFailover(c, before, &service.UpstreamFailoverError{}))
+	require.Equal(t, service.OpenAIRetryStopDownstreamCommitted, openAIForwardRetryStopReason(c, before, &service.UpstreamFailoverError{}))
 }
 
 func TestOpenAIFirstOutputFailoverStopsAfterOneAccountSwitch(t *testing.T) {
@@ -35,6 +35,22 @@ func TestOpenAIFirstOutputFailoverStopsAfterOneAccountSwitch(t *testing.T) {
 	require.Equal(t, 1, count)
 	require.True(t, openAIFirstOutputFailoverExhausted(failoverErr, &count))
 	require.Equal(t, 1, count)
+}
+
+func TestOpenAICredentialFailoverDoesNotSpendFirstOutputSwitches(t *testing.T) {
+	count := 0
+	for _, reason := range []service.GatewayFailureReason{"basispoints_credentials_unavailable", "basispoints_credentials_rejected", "credential_preparation_failed"} {
+		failure := &service.UpstreamFailoverError{Stage: service.GatewayFailureStageAccountAuth, Reason: reason, SafeToFailoverAfterWrite: true}
+		for range 3 {
+			require.False(t, openAIFirstOutputFailoverExhausted(failure, &count))
+			require.Zero(t, count, "credential preparation is not a first-output timeout")
+		}
+	}
+	actualTimeout := &service.UpstreamFailoverError{SafeToFailoverAfterWrite: true}
+	require.False(t, openAIFirstOutputFailoverExhausted(actualTimeout, &count))
+	require.True(t, openAIFirstOutputFailoverExhausted(actualTimeout, &count))
+	require.False(t, openAIFirstOutputFailoverExhausted(&service.UpstreamFailoverError{Stage: service.GatewayFailureStageAccountAuth, SafeToFailoverAfterWrite: true}, &count))
+	require.Equal(t, 1, count, "the normal timeout allowance remains exhausted")
 }
 
 func TestOpenAIRequestAllowsFailoverReplayStopsCanceledClient(t *testing.T) {

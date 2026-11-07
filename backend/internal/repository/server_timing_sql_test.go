@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"database/sql/driver"
+	"errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/selectionbudget"
 	"io"
 	"regexp"
 	"strconv"
@@ -254,5 +256,23 @@ func TestNamedValuesRejectNamedParameters(t *testing.T) {
 	}
 	if len(values) != 1 || values[0] != "value" {
 		t.Fatalf("namedValues() = %#v", values)
+	}
+}
+
+func TestSQLExecutionsShareSelectionBudgetWithoutTiming(t *testing.T) {
+	ctx, b, cancel := selectionbudget.Start(context.Background())
+	defer cancel()
+	conn := &serverTimingConn{Conn: newTimingFakeConn()}
+	for range 64 {
+		_, err := conn.ExecContext(ctx, "UPDATE fake SET v=1", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := conn.QueryContext(ctx, "SELECT v FROM fake", nil); !errors.Is(err, selectionbudget.ErrExhausted) {
+		t.Fatal(err)
+	}
+	if b.Snapshot().SQL != 64 {
+		t.Fatal(b.Snapshot())
 	}
 }

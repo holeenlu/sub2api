@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+
+	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 const statusClientClosedRequest = 499
@@ -15,6 +17,9 @@ const (
 )
 
 func concurrencyErrorResponse(err error, slotType string) (int, string, string, string) {
+	if errors.Is(err, service.ErrOpenAIWSFirstOutputBudgetExhausted) {
+		return http.StatusServiceUnavailable, "api_error", "retry_budget_exhausted", "Request budget exhausted before upstream output"
+	}
 	var waitQueueFullErr *WaitQueueFullError
 	if errors.As(err, &waitQueueFullErr) {
 		return http.StatusTooManyRequests, "rate_limit_error", gatewayQueueFullCode,

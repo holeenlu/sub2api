@@ -1,6 +1,11 @@
 package service
 
-import "github.com/Wei-Shaw/sub2api/internal/config"
+import (
+	"strings"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/tidwall/gjson"
+)
 
 // OpenAIUpstreamTransport 表示 OpenAI 上游传输协议。
 type OpenAIUpstreamTransport string
@@ -121,5 +126,31 @@ func openAIWSHTTPDecision(reason string) OpenAIWSProtocolDecision {
 	return OpenAIWSProtocolDecision{
 		Transport: OpenAIUpstreamTransportHTTPSSE,
 		Reason:    reason,
+	}
+}
+
+// HTTP is an optional alternative only when it preserves the request's state
+// contract. In particular, an explicit connection-local continuation and WS
+// warmup cannot become a fresh HTTP generation. A gateway-selected delta is
+// assessed using its retained complete request, never by removing its parent.
+func openAIWSRequestAllowsHTTP(account *Account, body []byte) bool {
+	if account == nil || account.GetPoolModeRetryCount() <= 0 || !account.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityResponses) {
+		return false
+	}
+	request := gjson.ParseBytes(body)
+	if request.Get("generate").Type == gjson.False || request.Get("agent_task_id").Exists() || request.Get("conversation").Exists() {
+		return false
+	}
+	return strings.TrimSpace(request.Get("previous_response_id").String()) == "" ||
+		(account.Type == AccountTypeAPIKey && request.Get("store").Type != gjson.False)
+}
+
+func openAIWSFailureBeforeSend(reason string) bool {
+	switch reason {
+	case "upgrade_required", "ws_unsupported", "dial_failed", "acquire_timeout", "conn_queue_full",
+		openAIWSPayloadPrefersHTTP, openAIWSOptionalPreparationTimedOut:
+		return true
+	default:
+		return false
 	}
 }

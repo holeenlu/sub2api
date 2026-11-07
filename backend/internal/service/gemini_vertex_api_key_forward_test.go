@@ -144,7 +144,7 @@ func TestGeminiForwardNative_VertexSharedCapacity429RetriesSameAccountWithoutCoo
 			repo := &geminiBoundCacheRateLimitRepo{}
 			svc := &GeminiMessagesCompatService{
 				httpUpstream:     upstream,
-				cfg:              &config.Config{Gateway: config.GatewayConfig{MaxSameAccountRetriesGemini: 1}},
+				cfg:              &config.Config{},
 				accountRepo:      repo,
 				rateLimitService: NewRateLimitService(repo, nil, &config.Config{}, nil, nil),
 			}

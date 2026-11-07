@@ -1,0 +1,10 @@
+{
+  "command": [
+    "/tmp/gobin/golangci-lint",
+    "run",
+    "--new-from-rev=c65e3de3551f853f43303688766e704e8557a2e9",
+    "--timeout=5m"
+  ],
+  "exit": 0,
+  "seconds": 19.1
+}

@@ -227,7 +227,7 @@ func finishAnthropicCompatStreamFailure(c *gin.Context, writerSizeBeforeStream i
 		return nil, failure.err
 	}
 	writeFailure()
-	if !result.Usage.hasObservedTokens() {
+	if !result.Usage.HasObservedTokens() {
 		return nil, failure.err
 	}
 	return result, failure.err

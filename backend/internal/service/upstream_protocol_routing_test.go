@@ -163,3 +163,12 @@ func TestResponsesToNativeAnthropicTrimsBillingModel(t *testing.T) {
 		})
 	}
 }
+
+func TestConvertResponsesShapedChatBodyAllowsStatelessInput(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	for _, state := range []string{``, `,"previous_response_id":null`, `,"conversation":""`, `,"prompt":null`, `,"context_management":[]`} {
+		body, err := svc.convertResponsesShapedChatBody([]byte(`{"model":"glm-5.3","input":"hello"` + state + `}`))
+		require.NoError(t, err)
+		require.Equal(t, "hello", gjson.GetBytes(body, "messages.0.content").String())
+	}
+}

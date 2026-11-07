@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	mathrand "math/rand/v2"
 	"net/http"
 	"os"
 	"runtime"
@@ -15,16 +16,255 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/gateway/execution"
+	"github.com/Wei-Shaw/sub2api/internal/gateway/model"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/selectionbudget"
 	"github.com/gin-gonic/gin"
 )
 
+type openAITurnBudgetKey struct{}
+
+// OpenAITurnBudget is shared through context across account switches and
+// transport-local retries. It does not contain request data or credentials.
+type OpenAITurnBudget struct {
+	mu                 sync.Mutex
+	attemptBudget      *execution.AttemptBudget
+	firstOutput        *execution.FirstOutput
+	control            context.Context
+	controlCancel      context.CancelCauseFunc
+	protectionAccounts map[int64]bool
+	bpsSelected        bool
+	refreshedGrants    map[model.AttemptTarget]bool
+	pinnedAccount      *Account
+	excludedModes      map[model.ResourceOwner]map[string]bool
+	failedDomains      map[model.ResourceOwner]turnRecoveryDomain
+	healthMode         string
+	healthCohort       string
+	healthAccountID    int64
+	recovery           *schedulingRecovery
+	model              string
+	selection          selectionbudget.Aggregate
+}
+
+var ErrOpenAITurnAttemptBudgetExhausted = execution.ErrAttemptBudgetExhausted
+
+func NewOpenAITurnBudget(cfg *config.Config) *OpenAITurnBudget {
+	limit := 8
+	if cfg != nil && cfg.Gateway.OpenAITurnMaxAttempts > 0 {
+		limit = min(limit, cfg.Gateway.OpenAITurnMaxAttempts)
+	}
+	return &OpenAITurnBudget{firstOutput: execution.NewFirstOutput(time.Now()), attemptBudget: newOpenAITurnAttemptBudget(limit)}
+}
+
+func newOpenAITurnAttemptBudget(limit int) *execution.AttemptBudget {
+	return execution.NewAttemptBudget(execution.AttemptLimits{
+		Total: limit, PerOwner: 3, Preparation: 2, RetryWait: 10 * time.Second,
+	})
+}
+
+func WithOpenAITurnBudget(ctx context.Context, budget *OpenAITurnBudget) context.Context {
+	if budget != nil {
+		budget.mu.Lock()
+		if budget.firstOutput == nil {
+			budget.firstOutput = execution.NewFirstOutput(time.Now())
+		}
+		if budget.control == nil {
+			ctx, budget.controlCancel = context.WithCancelCause(ctx)
+			budget.control = ctx
+		} else if ctx != budget.control {
+			var cancel context.CancelCauseFunc
+			ctx, cancel = context.WithCancelCause(ctx)
+			control := budget.control
+			stop := context.AfterFunc(control, func() { cancel(context.Cause(control)) })
+			context.AfterFunc(ctx, func() { stop() })
+		}
+		budget.mu.Unlock()
+	}
+	if budget != nil {
+		ctx = selectionbudget.WithAggregate(ctx, &budget.selection)
+	}
+	return context.WithValue(ctx, openAITurnBudgetKey{}, budget)
+}
+
+func EnsureOpenAITurnBudget(ctx context.Context, cfg *config.Config, reasoningEffort ...string) context.Context {
+	b, _ := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
+	if b == nil {
+		b = NewOpenAITurnBudget(cfg)
+		ctx = WithOpenAITurnBudget(ctx, b)
+	}
+	effort := ""
+	if len(reasoningEffort) > 0 {
+		effort = reasoningEffort[0]
+	}
+	b.mu.Lock()
+	b.firstOutput.Configure(openAIFirstOutputTimeoutForConfig(cfg, effort), len(reasoningEffort) > 0, b.attemptBudget.Snapshot().Attempts > 0)
+
+	b.mu.Unlock()
+
+	return ctx
+}
+
+// Bound admission and backoff without putting a pre-output cancellation on the
+// entire response stream. Each waiter releases its child context before relay;
+// the absolute deadline remains owned by the logical turn.
+func OpenAITurnWaitContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	b, _ := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
+	if b != nil {
+		b.mu.Lock()
+		deadline := b.firstOutput.Snapshot().Deadline
+		b.mu.Unlock()
+		if !deadline.IsZero() {
+			return context.WithDeadlineCause(ctx, deadline, ErrOpenAIWSFirstOutputBudgetExhausted)
+		}
+	}
+	return ctx, func() {}
+}
+
+func WaitOpenAITurnRetry(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return ctx.Err()
+	}
+	if b, _ := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget); b != nil {
+		// Positive jitter never retries before Retry-After; the execution owner
+		// clips it to the shared wait allowance.
+		jitter := time.Duration(mathrand.Int64N(int64(delay/10) + 1))
+		var err error
+		delay, err = b.attemptBudget.ReserveWait(delay, jitter)
+		if err != nil {
+			return err
+		}
+	}
+	waitCtx, cancel := OpenAITurnWaitContext(ctx)
+	defer cancel()
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-waitCtx.Done():
+		return context.Cause(waitCtx)
+	case <-timer.C:
+		return nil
+	}
+}
+
+func TakeOpenAITurnAttempt(ctx context.Context) error {
+	// Preparation retries have their own small allowance; only generation sends
+	// consume this counter, across all accounts and transports.
+	b, _ := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
+	if b == nil {
+		return ctx.Err()
+	}
+	b.mu.Lock()
+	recovery := b.recovery
+	b.mu.Unlock()
+	if recovery != nil {
+		if account, _ := ctx.Value(schedulingRecoveryAccountKey{}).(*Account); account != nil {
+			if err := recovery.beforeSend(ctx, account); err != nil {
+				return err
+			}
+		}
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if b.control != nil && b.control.Err() != nil {
+		return b.control.Err()
+	}
+	if deadline := b.firstOutput.Snapshot().Deadline; !deadline.IsZero() && !time.Now().Before(deadline) {
+		return ErrOpenAIWSFirstOutputBudgetExhausted
+	}
+	target, hasTarget := ctx.Value(turnRecoveryTargetKey{}).(model.AttemptTarget)
+	var identity *model.AttemptTarget
+	if hasTarget {
+		identity = &target
+	}
+	if err := b.attemptBudget.Take(identity); err != nil {
+		return err
+	}
+	if hasTarget {
+		b.healthMode = schedulingHealthMode(target.Mode)
+		b.healthCohort = schedulingHealthCohort(ctx, b.healthMode)
+		b.healthAccountID = target.Owner.AccountID
+	}
+	return nil
+}
+
+func openAITurnFirstOutputDeadline(ctx context.Context, timeout time.Duration, fallback time.Time) time.Time {
+	b, _ := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
+	if b == nil {
+		return fallback.Add(timeout)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.firstOutput.Limit(timeout, fallback)
+}
+
+// pauseOpenAITurnFirstOutput excludes a separately bounded pre-generation phase
+// from the logical turn's first-output budget. While paused, the turn deadline
+// is pushed out by maxPause so waits inside the phase are not cut short; resume
+// keeps only the time actually spent (at most maxPause). Without a budget, or
+// after output is committed, it does nothing.
+func pauseOpenAITurnFirstOutput(ctx context.Context, maxPause time.Duration) (resume func()) {
+	b, _ := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
+	if b == nil || maxPause <= 0 {
+		return func() {}
+	}
+	b.mu.Lock()
+	resumeOutput := b.firstOutput.Pause(maxPause)
+	b.mu.Unlock()
+	return func() {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		resumeOutput()
+	}
+}
+
+// Correlated protection failures on independent credentials are not repaired
+// by exhausting every account. Stop this turn after two distinct accounts;
+// future requests remain free to probe recovery without a global outage flag.
+func OpenAITurnRetryAllowed(ctx context.Context, accountID int64, response []byte) bool {
+	if IsUpstreamContentRefusal(response) {
+		return false
+	}
+	if ctx == nil {
+		return true
+	}
+	b, _ := ctx.Value(openAITurnBudgetKey{}).(*OpenAITurnBudget)
+	if b == nil {
+		return true
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.firstOutput.Snapshot().Committed {
+		return false
+	}
+	if b.control != nil && b.control.Err() != nil {
+		return false
+	}
+	snapshot := b.attemptBudget.Snapshot()
+	if snapshot.Attempts >= snapshot.Limit {
+		return false
+	}
+	if deadline := b.firstOutput.Snapshot().Deadline; !deadline.IsZero() && !time.Now().Before(deadline) {
+		return false
+	}
+	if !isOpenAIResponseProtectionUnavailable("", response) {
+		return true
+	}
+	if b.protectionAccounts == nil {
+		b.protectionAccounts = make(map[int64]bool)
+	}
+	b.protectionAccounts[accountID] = true
+	return len(b.protectionAccounts) < 2
+}
+
 const (
 	openAIFirstOutputStageMemoryLimit        = 64 * 1024
-	openAIFirstOutputStageMaxBytes           = 8 * 1024 * 1024
+	openAIFirstOutputStageMaxBytes           = 32 * 1024 * 1024
 	openAIFirstOutputScannerFramingAllowance = 64
-	openAIFirstOutputGuardQueueSize          = 1
-	openAIDefaultStreamQueueSize             = 16
 )
 
 var (
@@ -61,16 +301,10 @@ func newDefaultOpenAIFirstOutputStage() *openAIFirstOutputStage {
 	return newOpenAIFirstOutputStage(openAIFirstOutputStageMaxBytes)
 }
 
-func openAIFirstOutputEventQueueSize(guardFirstOutput bool) int {
-	if guardFirstOutput {
-		return openAIFirstOutputGuardQueueSize
-	}
-	return openAIDefaultStreamQueueSize
-}
-
 func openAIFirstOutputDynamicScanLines(guardActive *atomic.Bool) bufio.SplitFunc {
+	split := newSSEScanLines()
 	return func(data []byte, atEOF bool) (advance int, token []byte, err error) {
-		advance, token, err = bufio.ScanLines(data, atEOF)
+		advance, token, err = split(data, atEOF)
 		if err != nil || guardActive == nil || !guardActive.Load() {
 			return advance, token, err
 		}
@@ -230,14 +464,23 @@ func (s *openAIFirstOutputStage) Close() error {
 }
 
 func (s *OpenAIGatewayService) openAIFirstOutputTimeout(reasoningEffort string) time.Duration {
-	if s == nil || s.cfg == nil || s.cfg.Gateway.OpenAIFirstOutputTimeoutSeconds <= 0 {
+	if s == nil {
 		return 0
 	}
-	seconds := s.cfg.Gateway.OpenAIFirstOutputTimeoutSeconds
+	return openAIFirstOutputTimeoutForConfig(s.cfg, reasoningEffort)
+}
+
+func openAIFirstOutputTimeoutForConfig(cfg *config.Config, reasoningEffort string) time.Duration {
+	seconds := 300
+	if cfg != nil && cfg.Gateway.OpenAIFirstOutputTimeoutSeconds > 0 {
+		seconds = cfg.Gateway.OpenAIFirstOutputTimeoutSeconds
+	}
 	switch strings.ToLower(strings.TrimSpace(reasoningEffort)) {
-	case "high", "xhigh", "max":
-		if override := s.cfg.Gateway.OpenAIHighEffortFirstOutputTimeoutSeconds; override > 0 {
-			seconds = override
+	case "high", "xhigh", "x-high", "extra-high", "extra_high", "max", "ultra":
+		if cfg != nil && cfg.Gateway.OpenAIHighEffortFirstOutputTimeoutSeconds > 0 {
+			seconds = cfg.Gateway.OpenAIHighEffortFirstOutputTimeoutSeconds
+		} else if cfg == nil || cfg.Gateway.OpenAIFirstOutputTimeoutSeconds <= 0 {
+			seconds = 600
 		}
 	}
 	return time.Duration(seconds) * time.Second
@@ -286,58 +529,166 @@ func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 }
 
 type openAIFirstOutputHeaderGuard struct {
-	cancel  context.CancelFunc
-	release context.CancelFunc
-	timer   *time.Timer
-	fired   chan struct{}
-	once    sync.Once
+	cancel           context.CancelCauseFunc
+	release          context.CancelFunc
+	timer            *time.Timer
+	fired            chan struct{}
+	once             sync.Once
+	stopOnce         sync.Once
+	timedOut         bool
+	stopCancellation []func() bool
+
+	// mu orders pause/resume against stopHeaderWait. A paused timer is stopped
+	// without firing, so stopHeaderWait must not wait for fired in that state.
+	mu       sync.Mutex
+	deadline time.Time
+	paused   bool
+	stopped  bool
+	pausedAt time.Time
+	maxPause time.Duration
 }
 
 func newOpenAIFirstOutputHeaderGuard(
 	ctx context.Context,
 	release context.CancelFunc,
 	deadline time.Time,
+	cancellations ...context.Context,
 ) (context.Context, *openAIFirstOutputHeaderGuard) {
-	guardedCtx, cancel := context.WithCancel(ctx)
-	guard := &openAIFirstOutputHeaderGuard{cancel: cancel, release: release, fired: make(chan struct{})}
+	guardedCtx, cancel := context.WithCancelCause(ctx)
+	guard := &openAIFirstOutputHeaderGuard{cancel: cancel, release: release, fired: make(chan struct{}), deadline: deadline}
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
 		remaining = time.Nanosecond
 	}
 	guard.timer = time.AfterFunc(remaining, func() {
 		close(guard.fired)
-		cancel()
+		cancel(ErrOpenAIWSFirstOutputBudgetExhausted)
 	})
+	for _, observed := range cancellations {
+		if observed != nil {
+			// Client cancellation retains the existing usage-drain allowance;
+			// a nearly expired first-output budget must not cut it short.
+			guard.stopCancellation = append(guard.stopCancellation,
+				context.AfterFunc(observed, func() { guard.stopHeaderWait() }))
+		}
+	}
 	return guardedCtx, guard
 }
 
 func (g *openAIFirstOutputHeaderGuard) stopHeaderWait() bool {
-	if g.timer.Stop() {
+	g.stopOnce.Do(func() {
+		g.mu.Lock()
+		g.stopped = true
+		if g.paused {
+			// The paused timer was stopped before it fired; there is no timeout.
+			g.mu.Unlock()
+			return
+		}
+		stoppedBeforeFire := g.timer.Stop()
+		g.mu.Unlock()
+		if !stoppedBeforeFire {
+			<-g.fired
+			g.timedOut = true
+		}
+	})
+	return g.timedOut
+}
+
+// pause stops the first-output timer for a separately bounded phase. It fails
+// when the timer has already fired, the wait has stopped, or it is paused.
+func (g *openAIFirstOutputHeaderGuard) pause(maxPause time.Duration) bool {
+	if g == nil || maxPause <= 0 {
 		return false
 	}
-	<-g.fired
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.paused || g.stopped || !g.timer.Stop() {
+		return false
+	}
+	g.paused, g.pausedAt, g.maxPause = true, time.Now(), maxPause
 	return true
+}
+
+// resume restarts the timer with the paused time (at most maxPause) added to
+// the deadline. A guard stopped while paused stays stopped.
+func (g *openAIFirstOutputHeaderGuard) resume() {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.paused {
+		return
+	}
+	g.paused = false
+	g.deadline = g.deadline.Add(min(time.Since(g.pausedAt), g.maxPause))
+	if g.stopped {
+		return
+	}
+	remaining := time.Until(g.deadline)
+	if remaining <= 0 {
+		remaining = time.Nanosecond
+	}
+	g.timer.Reset(remaining)
+}
+
+func (g *openAIFirstOutputHeaderGuard) expired() bool {
+	if g == nil {
+		return false
+	}
+	select {
+	case <-g.fired:
+		return true
+	default:
+		return false
+	}
 }
 
 func (g *openAIFirstOutputHeaderGuard) close() {
 	g.once.Do(func() {
-		g.timer.Stop()
-		g.cancel()
+		for _, stop := range g.stopCancellation {
+			stop()
+		}
+		g.stopHeaderWait()
+		g.cancel(context.Canceled)
 		g.release()
 	})
 }
 
 type openAIRequestContextReadCloser struct {
 	io.ReadCloser
-	cleanup func()
-	once    sync.Once
-	err     error
+	ctx      context.Context
+	cleanup  func()
+	once     sync.Once
+	bodyOnce sync.Once
+	err      error
+}
+
+func (r *openAIRequestContextReadCloser) MarkComplete() {
+	if complete, ok := r.ReadCloser.(interface{ MarkComplete() }); ok {
+		complete.MarkComplete()
+	}
+}
+
+func (r *openAIRequestContextReadCloser) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	if err != nil && r.ctx != nil && IsTurnBudgetError(context.Cause(r.ctx)) {
+		return n, context.Cause(r.ctx)
+	}
+	return n, err
 }
 
 func (r *openAIRequestContextReadCloser) Close() error {
 	r.once.Do(func() {
 		r.cleanup()
-		r.err = r.ReadCloser.Close()
+		_ = r.closeBody()
 	})
+	return r.err
+}
+
+// closeBody can interrupt a blocked Read without racing cleanup initialization.
+// Cancellation and the consumer may both close; the underlying body closes once.
+func (r *openAIRequestContextReadCloser) closeBody() error {
+	r.bodyOnce.Do(func() { r.err = r.ReadCloser.Close() })
 	return r.err
 }

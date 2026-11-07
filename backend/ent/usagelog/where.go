@@ -55,6 +55,11 @@ func IDLTE(id int64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldLTE(FieldID, id))
 }
 
+// BillingStatus applies equality check predicate on the "billing_status" field. It's identical to BillingStatusEQ.
+func BillingStatus(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldBillingStatus, v))
+}
+
 // UserID applies equality check predicate on the "user_id" field. It's identical to UserIDEQ.
 func UserID(v int64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldUserID, v))
@@ -68,6 +73,36 @@ func APIKeyID(v int64) predicate.UsageLog {
 // AccountID applies equality check predicate on the "account_id" field. It's identical to AccountIDEQ.
 func AccountID(v int64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldAccountID, v))
+}
+
+// VendorIDSnapshot applies equality check predicate on the "vendor_id_snapshot" field. It's identical to VendorIDSnapshotEQ.
+func VendorIDSnapshot(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldVendorIDSnapshot, v))
+}
+
+// VendorRootIDSnapshot applies equality check predicate on the "vendor_root_id_snapshot" field. It's identical to VendorRootIDSnapshotEQ.
+func VendorRootIDSnapshot(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldVendorRootIDSnapshot, v))
+}
+
+// VendorParentIDSnapshot applies equality check predicate on the "vendor_parent_id_snapshot" field. It's identical to VendorParentIDSnapshotEQ.
+func VendorParentIDSnapshot(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldVendorParentIDSnapshot, v))
+}
+
+// AccountNameSnapshot applies equality check predicate on the "account_name_snapshot" field. It's identical to AccountNameSnapshotEQ.
+func AccountNameSnapshot(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldAccountNameSnapshot, v))
+}
+
+// GroupNameSnapshot applies equality check predicate on the "group_name_snapshot" field. It's identical to GroupNameSnapshotEQ.
+func GroupNameSnapshot(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldGroupNameSnapshot, v))
+}
+
+// PlatformSnapshot applies equality check predicate on the "platform_snapshot" field. It's identical to PlatformSnapshotEQ.
+func PlatformSnapshot(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldPlatformSnapshot, v))
 }
 
 // RequestID applies equality check predicate on the "request_id" field. It's identical to RequestIDEQ.
@@ -285,6 +320,86 @@ func CreatedAt(v time.Time) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldCreatedAt, v))
 }
 
+// AuthorizationMode applies equality check predicate on the "authorization_mode" field. It's identical to AuthorizationModeEQ.
+func AuthorizationMode(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldAuthorizationMode, v))
+}
+
+// CacheCreation30mTokens applies equality check predicate on the "cache_creation_30m_tokens" field. It's identical to CacheCreation30mTokensEQ.
+func CacheCreation30mTokens(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldCacheCreation30mTokens, v))
+}
+
+// CacheCreation12hTokens applies equality check predicate on the "cache_creation_12h_tokens" field. It's identical to CacheCreation12hTokensEQ.
+func CacheCreation12hTokens(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldCacheCreation12hTokens, v))
+}
+
+// BillingStatusEQ applies the EQ predicate on the "billing_status" field.
+func BillingStatusEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldBillingStatus, v))
+}
+
+// BillingStatusNEQ applies the NEQ predicate on the "billing_status" field.
+func BillingStatusNEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldBillingStatus, v))
+}
+
+// BillingStatusIn applies the In predicate on the "billing_status" field.
+func BillingStatusIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldBillingStatus, vs...))
+}
+
+// BillingStatusNotIn applies the NotIn predicate on the "billing_status" field.
+func BillingStatusNotIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldBillingStatus, vs...))
+}
+
+// BillingStatusGT applies the GT predicate on the "billing_status" field.
+func BillingStatusGT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldBillingStatus, v))
+}
+
+// BillingStatusGTE applies the GTE predicate on the "billing_status" field.
+func BillingStatusGTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldBillingStatus, v))
+}
+
+// BillingStatusLT applies the LT predicate on the "billing_status" field.
+func BillingStatusLT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldBillingStatus, v))
+}
+
+// BillingStatusLTE applies the LTE predicate on the "billing_status" field.
+func BillingStatusLTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldBillingStatus, v))
+}
+
+// BillingStatusContains applies the Contains predicate on the "billing_status" field.
+func BillingStatusContains(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContains(FieldBillingStatus, v))
+}
+
+// BillingStatusHasPrefix applies the HasPrefix predicate on the "billing_status" field.
+func BillingStatusHasPrefix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasPrefix(FieldBillingStatus, v))
+}
+
+// BillingStatusHasSuffix applies the HasSuffix predicate on the "billing_status" field.
+func BillingStatusHasSuffix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasSuffix(FieldBillingStatus, v))
+}
+
+// BillingStatusEqualFold applies the EqualFold predicate on the "billing_status" field.
+func BillingStatusEqualFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEqualFold(FieldBillingStatus, v))
+}
+
+// BillingStatusContainsFold applies the ContainsFold predicate on the "billing_status" field.
+func BillingStatusContainsFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContainsFold(FieldBillingStatus, v))
+}
+
 // UserIDEQ applies the EQ predicate on the "user_id" field.
 func UserIDEQ(v int64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldUserID, v))
@@ -343,6 +458,381 @@ func AccountIDIn(vs ...int64) predicate.UsageLog {
 // AccountIDNotIn applies the NotIn predicate on the "account_id" field.
 func AccountIDNotIn(vs ...int64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNotIn(FieldAccountID, vs...))
+}
+
+// VendorIDSnapshotEQ applies the EQ predicate on the "vendor_id_snapshot" field.
+func VendorIDSnapshotEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldVendorIDSnapshot, v))
+}
+
+// VendorIDSnapshotNEQ applies the NEQ predicate on the "vendor_id_snapshot" field.
+func VendorIDSnapshotNEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldVendorIDSnapshot, v))
+}
+
+// VendorIDSnapshotIn applies the In predicate on the "vendor_id_snapshot" field.
+func VendorIDSnapshotIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldVendorIDSnapshot, vs...))
+}
+
+// VendorIDSnapshotNotIn applies the NotIn predicate on the "vendor_id_snapshot" field.
+func VendorIDSnapshotNotIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldVendorIDSnapshot, vs...))
+}
+
+// VendorIDSnapshotGT applies the GT predicate on the "vendor_id_snapshot" field.
+func VendorIDSnapshotGT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldVendorIDSnapshot, v))
+}
+
+// VendorIDSnapshotGTE applies the GTE predicate on the "vendor_id_snapshot" field.
+func VendorIDSnapshotGTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldVendorIDSnapshot, v))
+}
+
+// VendorIDSnapshotLT applies the LT predicate on the "vendor_id_snapshot" field.
+func VendorIDSnapshotLT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldVendorIDSnapshot, v))
+}
+
+// VendorIDSnapshotLTE applies the LTE predicate on the "vendor_id_snapshot" field.
+func VendorIDSnapshotLTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldVendorIDSnapshot, v))
+}
+
+// VendorIDSnapshotIsNil applies the IsNil predicate on the "vendor_id_snapshot" field.
+func VendorIDSnapshotIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldVendorIDSnapshot))
+}
+
+// VendorIDSnapshotNotNil applies the NotNil predicate on the "vendor_id_snapshot" field.
+func VendorIDSnapshotNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldVendorIDSnapshot))
+}
+
+// VendorRootIDSnapshotEQ applies the EQ predicate on the "vendor_root_id_snapshot" field.
+func VendorRootIDSnapshotEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldVendorRootIDSnapshot, v))
+}
+
+// VendorRootIDSnapshotNEQ applies the NEQ predicate on the "vendor_root_id_snapshot" field.
+func VendorRootIDSnapshotNEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldVendorRootIDSnapshot, v))
+}
+
+// VendorRootIDSnapshotIn applies the In predicate on the "vendor_root_id_snapshot" field.
+func VendorRootIDSnapshotIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldVendorRootIDSnapshot, vs...))
+}
+
+// VendorRootIDSnapshotNotIn applies the NotIn predicate on the "vendor_root_id_snapshot" field.
+func VendorRootIDSnapshotNotIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldVendorRootIDSnapshot, vs...))
+}
+
+// VendorRootIDSnapshotGT applies the GT predicate on the "vendor_root_id_snapshot" field.
+func VendorRootIDSnapshotGT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldVendorRootIDSnapshot, v))
+}
+
+// VendorRootIDSnapshotGTE applies the GTE predicate on the "vendor_root_id_snapshot" field.
+func VendorRootIDSnapshotGTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldVendorRootIDSnapshot, v))
+}
+
+// VendorRootIDSnapshotLT applies the LT predicate on the "vendor_root_id_snapshot" field.
+func VendorRootIDSnapshotLT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldVendorRootIDSnapshot, v))
+}
+
+// VendorRootIDSnapshotLTE applies the LTE predicate on the "vendor_root_id_snapshot" field.
+func VendorRootIDSnapshotLTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldVendorRootIDSnapshot, v))
+}
+
+// VendorRootIDSnapshotIsNil applies the IsNil predicate on the "vendor_root_id_snapshot" field.
+func VendorRootIDSnapshotIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldVendorRootIDSnapshot))
+}
+
+// VendorRootIDSnapshotNotNil applies the NotNil predicate on the "vendor_root_id_snapshot" field.
+func VendorRootIDSnapshotNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldVendorRootIDSnapshot))
+}
+
+// VendorParentIDSnapshotEQ applies the EQ predicate on the "vendor_parent_id_snapshot" field.
+func VendorParentIDSnapshotEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldVendorParentIDSnapshot, v))
+}
+
+// VendorParentIDSnapshotNEQ applies the NEQ predicate on the "vendor_parent_id_snapshot" field.
+func VendorParentIDSnapshotNEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldVendorParentIDSnapshot, v))
+}
+
+// VendorParentIDSnapshotIn applies the In predicate on the "vendor_parent_id_snapshot" field.
+func VendorParentIDSnapshotIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldVendorParentIDSnapshot, vs...))
+}
+
+// VendorParentIDSnapshotNotIn applies the NotIn predicate on the "vendor_parent_id_snapshot" field.
+func VendorParentIDSnapshotNotIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldVendorParentIDSnapshot, vs...))
+}
+
+// VendorParentIDSnapshotGT applies the GT predicate on the "vendor_parent_id_snapshot" field.
+func VendorParentIDSnapshotGT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldVendorParentIDSnapshot, v))
+}
+
+// VendorParentIDSnapshotGTE applies the GTE predicate on the "vendor_parent_id_snapshot" field.
+func VendorParentIDSnapshotGTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldVendorParentIDSnapshot, v))
+}
+
+// VendorParentIDSnapshotLT applies the LT predicate on the "vendor_parent_id_snapshot" field.
+func VendorParentIDSnapshotLT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldVendorParentIDSnapshot, v))
+}
+
+// VendorParentIDSnapshotLTE applies the LTE predicate on the "vendor_parent_id_snapshot" field.
+func VendorParentIDSnapshotLTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldVendorParentIDSnapshot, v))
+}
+
+// VendorParentIDSnapshotIsNil applies the IsNil predicate on the "vendor_parent_id_snapshot" field.
+func VendorParentIDSnapshotIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldVendorParentIDSnapshot))
+}
+
+// VendorParentIDSnapshotNotNil applies the NotNil predicate on the "vendor_parent_id_snapshot" field.
+func VendorParentIDSnapshotNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldVendorParentIDSnapshot))
+}
+
+// AccountNameSnapshotEQ applies the EQ predicate on the "account_name_snapshot" field.
+func AccountNameSnapshotEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldAccountNameSnapshot, v))
+}
+
+// AccountNameSnapshotNEQ applies the NEQ predicate on the "account_name_snapshot" field.
+func AccountNameSnapshotNEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldAccountNameSnapshot, v))
+}
+
+// AccountNameSnapshotIn applies the In predicate on the "account_name_snapshot" field.
+func AccountNameSnapshotIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldAccountNameSnapshot, vs...))
+}
+
+// AccountNameSnapshotNotIn applies the NotIn predicate on the "account_name_snapshot" field.
+func AccountNameSnapshotNotIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldAccountNameSnapshot, vs...))
+}
+
+// AccountNameSnapshotGT applies the GT predicate on the "account_name_snapshot" field.
+func AccountNameSnapshotGT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldAccountNameSnapshot, v))
+}
+
+// AccountNameSnapshotGTE applies the GTE predicate on the "account_name_snapshot" field.
+func AccountNameSnapshotGTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldAccountNameSnapshot, v))
+}
+
+// AccountNameSnapshotLT applies the LT predicate on the "account_name_snapshot" field.
+func AccountNameSnapshotLT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldAccountNameSnapshot, v))
+}
+
+// AccountNameSnapshotLTE applies the LTE predicate on the "account_name_snapshot" field.
+func AccountNameSnapshotLTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldAccountNameSnapshot, v))
+}
+
+// AccountNameSnapshotContains applies the Contains predicate on the "account_name_snapshot" field.
+func AccountNameSnapshotContains(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContains(FieldAccountNameSnapshot, v))
+}
+
+// AccountNameSnapshotHasPrefix applies the HasPrefix predicate on the "account_name_snapshot" field.
+func AccountNameSnapshotHasPrefix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasPrefix(FieldAccountNameSnapshot, v))
+}
+
+// AccountNameSnapshotHasSuffix applies the HasSuffix predicate on the "account_name_snapshot" field.
+func AccountNameSnapshotHasSuffix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasSuffix(FieldAccountNameSnapshot, v))
+}
+
+// AccountNameSnapshotIsNil applies the IsNil predicate on the "account_name_snapshot" field.
+func AccountNameSnapshotIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldAccountNameSnapshot))
+}
+
+// AccountNameSnapshotNotNil applies the NotNil predicate on the "account_name_snapshot" field.
+func AccountNameSnapshotNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldAccountNameSnapshot))
+}
+
+// AccountNameSnapshotEqualFold applies the EqualFold predicate on the "account_name_snapshot" field.
+func AccountNameSnapshotEqualFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEqualFold(FieldAccountNameSnapshot, v))
+}
+
+// AccountNameSnapshotContainsFold applies the ContainsFold predicate on the "account_name_snapshot" field.
+func AccountNameSnapshotContainsFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContainsFold(FieldAccountNameSnapshot, v))
+}
+
+// GroupNameSnapshotEQ applies the EQ predicate on the "group_name_snapshot" field.
+func GroupNameSnapshotEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldGroupNameSnapshot, v))
+}
+
+// GroupNameSnapshotNEQ applies the NEQ predicate on the "group_name_snapshot" field.
+func GroupNameSnapshotNEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldGroupNameSnapshot, v))
+}
+
+// GroupNameSnapshotIn applies the In predicate on the "group_name_snapshot" field.
+func GroupNameSnapshotIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldGroupNameSnapshot, vs...))
+}
+
+// GroupNameSnapshotNotIn applies the NotIn predicate on the "group_name_snapshot" field.
+func GroupNameSnapshotNotIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldGroupNameSnapshot, vs...))
+}
+
+// GroupNameSnapshotGT applies the GT predicate on the "group_name_snapshot" field.
+func GroupNameSnapshotGT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldGroupNameSnapshot, v))
+}
+
+// GroupNameSnapshotGTE applies the GTE predicate on the "group_name_snapshot" field.
+func GroupNameSnapshotGTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldGroupNameSnapshot, v))
+}
+
+// GroupNameSnapshotLT applies the LT predicate on the "group_name_snapshot" field.
+func GroupNameSnapshotLT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldGroupNameSnapshot, v))
+}
+
+// GroupNameSnapshotLTE applies the LTE predicate on the "group_name_snapshot" field.
+func GroupNameSnapshotLTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldGroupNameSnapshot, v))
+}
+
+// GroupNameSnapshotContains applies the Contains predicate on the "group_name_snapshot" field.
+func GroupNameSnapshotContains(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContains(FieldGroupNameSnapshot, v))
+}
+
+// GroupNameSnapshotHasPrefix applies the HasPrefix predicate on the "group_name_snapshot" field.
+func GroupNameSnapshotHasPrefix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasPrefix(FieldGroupNameSnapshot, v))
+}
+
+// GroupNameSnapshotHasSuffix applies the HasSuffix predicate on the "group_name_snapshot" field.
+func GroupNameSnapshotHasSuffix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasSuffix(FieldGroupNameSnapshot, v))
+}
+
+// GroupNameSnapshotIsNil applies the IsNil predicate on the "group_name_snapshot" field.
+func GroupNameSnapshotIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldGroupNameSnapshot))
+}
+
+// GroupNameSnapshotNotNil applies the NotNil predicate on the "group_name_snapshot" field.
+func GroupNameSnapshotNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldGroupNameSnapshot))
+}
+
+// GroupNameSnapshotEqualFold applies the EqualFold predicate on the "group_name_snapshot" field.
+func GroupNameSnapshotEqualFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEqualFold(FieldGroupNameSnapshot, v))
+}
+
+// GroupNameSnapshotContainsFold applies the ContainsFold predicate on the "group_name_snapshot" field.
+func GroupNameSnapshotContainsFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContainsFold(FieldGroupNameSnapshot, v))
+}
+
+// PlatformSnapshotEQ applies the EQ predicate on the "platform_snapshot" field.
+func PlatformSnapshotEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldPlatformSnapshot, v))
+}
+
+// PlatformSnapshotNEQ applies the NEQ predicate on the "platform_snapshot" field.
+func PlatformSnapshotNEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldPlatformSnapshot, v))
+}
+
+// PlatformSnapshotIn applies the In predicate on the "platform_snapshot" field.
+func PlatformSnapshotIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldPlatformSnapshot, vs...))
+}
+
+// PlatformSnapshotNotIn applies the NotIn predicate on the "platform_snapshot" field.
+func PlatformSnapshotNotIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldPlatformSnapshot, vs...))
+}
+
+// PlatformSnapshotGT applies the GT predicate on the "platform_snapshot" field.
+func PlatformSnapshotGT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldPlatformSnapshot, v))
+}
+
+// PlatformSnapshotGTE applies the GTE predicate on the "platform_snapshot" field.
+func PlatformSnapshotGTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldPlatformSnapshot, v))
+}
+
+// PlatformSnapshotLT applies the LT predicate on the "platform_snapshot" field.
+func PlatformSnapshotLT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldPlatformSnapshot, v))
+}
+
+// PlatformSnapshotLTE applies the LTE predicate on the "platform_snapshot" field.
+func PlatformSnapshotLTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldPlatformSnapshot, v))
+}
+
+// PlatformSnapshotContains applies the Contains predicate on the "platform_snapshot" field.
+func PlatformSnapshotContains(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContains(FieldPlatformSnapshot, v))
+}
+
+// PlatformSnapshotHasPrefix applies the HasPrefix predicate on the "platform_snapshot" field.
+func PlatformSnapshotHasPrefix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasPrefix(FieldPlatformSnapshot, v))
+}
+
+// PlatformSnapshotHasSuffix applies the HasSuffix predicate on the "platform_snapshot" field.
+func PlatformSnapshotHasSuffix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasSuffix(FieldPlatformSnapshot, v))
+}
+
+// PlatformSnapshotIsNil applies the IsNil predicate on the "platform_snapshot" field.
+func PlatformSnapshotIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldPlatformSnapshot))
+}
+
+// PlatformSnapshotNotNil applies the NotNil predicate on the "platform_snapshot" field.
+func PlatformSnapshotNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldPlatformSnapshot))
+}
+
+// PlatformSnapshotEqualFold applies the EqualFold predicate on the "platform_snapshot" field.
+func PlatformSnapshotEqualFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEqualFold(FieldPlatformSnapshot, v))
+}
+
+// PlatformSnapshotContainsFold applies the ContainsFold predicate on the "platform_snapshot" field.
+func PlatformSnapshotContainsFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContainsFold(FieldPlatformSnapshot, v))
 }
 
 // RequestIDEQ applies the EQ predicate on the "request_id" field.
@@ -1785,6 +2275,26 @@ func FirstTokenMsNotNil() predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNotNull(FieldFirstTokenMs))
 }
 
+// SamplingDetailsIsNil applies the IsNil predicate on the "sampling_details" field.
+func SamplingDetailsIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldSamplingDetails))
+}
+
+// SamplingDetailsNotNil applies the NotNil predicate on the "sampling_details" field.
+func SamplingDetailsNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldSamplingDetails))
+}
+
+// LatencyMetricsIsNil applies the IsNil predicate on the "latency_metrics" field.
+func LatencyMetricsIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldLatencyMetrics))
+}
+
+// LatencyMetricsNotNil applies the NotNil predicate on the "latency_metrics" field.
+func LatencyMetricsNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldLatencyMetrics))
+}
+
 // UserAgentEQ applies the EQ predicate on the "user_agent" field.
 func UserAgentEQ(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldUserAgent, v))
@@ -2498,6 +3008,161 @@ func CreatedAtLT(v time.Time) predicate.UsageLog {
 // CreatedAtLTE applies the LTE predicate on the "created_at" field.
 func CreatedAtLTE(v time.Time) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldLTE(FieldCreatedAt, v))
+}
+
+// AuthorizationModeEQ applies the EQ predicate on the "authorization_mode" field.
+func AuthorizationModeEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldAuthorizationMode, v))
+}
+
+// AuthorizationModeNEQ applies the NEQ predicate on the "authorization_mode" field.
+func AuthorizationModeNEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldAuthorizationMode, v))
+}
+
+// AuthorizationModeIn applies the In predicate on the "authorization_mode" field.
+func AuthorizationModeIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldAuthorizationMode, vs...))
+}
+
+// AuthorizationModeNotIn applies the NotIn predicate on the "authorization_mode" field.
+func AuthorizationModeNotIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldAuthorizationMode, vs...))
+}
+
+// AuthorizationModeGT applies the GT predicate on the "authorization_mode" field.
+func AuthorizationModeGT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldAuthorizationMode, v))
+}
+
+// AuthorizationModeGTE applies the GTE predicate on the "authorization_mode" field.
+func AuthorizationModeGTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldAuthorizationMode, v))
+}
+
+// AuthorizationModeLT applies the LT predicate on the "authorization_mode" field.
+func AuthorizationModeLT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldAuthorizationMode, v))
+}
+
+// AuthorizationModeLTE applies the LTE predicate on the "authorization_mode" field.
+func AuthorizationModeLTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldAuthorizationMode, v))
+}
+
+// AuthorizationModeContains applies the Contains predicate on the "authorization_mode" field.
+func AuthorizationModeContains(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContains(FieldAuthorizationMode, v))
+}
+
+// AuthorizationModeHasPrefix applies the HasPrefix predicate on the "authorization_mode" field.
+func AuthorizationModeHasPrefix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasPrefix(FieldAuthorizationMode, v))
+}
+
+// AuthorizationModeHasSuffix applies the HasSuffix predicate on the "authorization_mode" field.
+func AuthorizationModeHasSuffix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasSuffix(FieldAuthorizationMode, v))
+}
+
+// AuthorizationModeIsNil applies the IsNil predicate on the "authorization_mode" field.
+func AuthorizationModeIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldAuthorizationMode))
+}
+
+// AuthorizationModeNotNil applies the NotNil predicate on the "authorization_mode" field.
+func AuthorizationModeNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldAuthorizationMode))
+}
+
+// AuthorizationModeEqualFold applies the EqualFold predicate on the "authorization_mode" field.
+func AuthorizationModeEqualFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEqualFold(FieldAuthorizationMode, v))
+}
+
+// AuthorizationModeContainsFold applies the ContainsFold predicate on the "authorization_mode" field.
+func AuthorizationModeContainsFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContainsFold(FieldAuthorizationMode, v))
+}
+
+// CacheCreation30mTokensEQ applies the EQ predicate on the "cache_creation_30m_tokens" field.
+func CacheCreation30mTokensEQ(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldCacheCreation30mTokens, v))
+}
+
+// CacheCreation30mTokensNEQ applies the NEQ predicate on the "cache_creation_30m_tokens" field.
+func CacheCreation30mTokensNEQ(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldCacheCreation30mTokens, v))
+}
+
+// CacheCreation30mTokensIn applies the In predicate on the "cache_creation_30m_tokens" field.
+func CacheCreation30mTokensIn(vs ...int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldCacheCreation30mTokens, vs...))
+}
+
+// CacheCreation30mTokensNotIn applies the NotIn predicate on the "cache_creation_30m_tokens" field.
+func CacheCreation30mTokensNotIn(vs ...int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldCacheCreation30mTokens, vs...))
+}
+
+// CacheCreation30mTokensGT applies the GT predicate on the "cache_creation_30m_tokens" field.
+func CacheCreation30mTokensGT(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldCacheCreation30mTokens, v))
+}
+
+// CacheCreation30mTokensGTE applies the GTE predicate on the "cache_creation_30m_tokens" field.
+func CacheCreation30mTokensGTE(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldCacheCreation30mTokens, v))
+}
+
+// CacheCreation30mTokensLT applies the LT predicate on the "cache_creation_30m_tokens" field.
+func CacheCreation30mTokensLT(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldCacheCreation30mTokens, v))
+}
+
+// CacheCreation30mTokensLTE applies the LTE predicate on the "cache_creation_30m_tokens" field.
+func CacheCreation30mTokensLTE(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldCacheCreation30mTokens, v))
+}
+
+// CacheCreation12hTokensEQ applies the EQ predicate on the "cache_creation_12h_tokens" field.
+func CacheCreation12hTokensEQ(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldCacheCreation12hTokens, v))
+}
+
+// CacheCreation12hTokensNEQ applies the NEQ predicate on the "cache_creation_12h_tokens" field.
+func CacheCreation12hTokensNEQ(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldCacheCreation12hTokens, v))
+}
+
+// CacheCreation12hTokensIn applies the In predicate on the "cache_creation_12h_tokens" field.
+func CacheCreation12hTokensIn(vs ...int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldCacheCreation12hTokens, vs...))
+}
+
+// CacheCreation12hTokensNotIn applies the NotIn predicate on the "cache_creation_12h_tokens" field.
+func CacheCreation12hTokensNotIn(vs ...int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldCacheCreation12hTokens, vs...))
+}
+
+// CacheCreation12hTokensGT applies the GT predicate on the "cache_creation_12h_tokens" field.
+func CacheCreation12hTokensGT(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldCacheCreation12hTokens, v))
+}
+
+// CacheCreation12hTokensGTE applies the GTE predicate on the "cache_creation_12h_tokens" field.
+func CacheCreation12hTokensGTE(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldCacheCreation12hTokens, v))
+}
+
+// CacheCreation12hTokensLT applies the LT predicate on the "cache_creation_12h_tokens" field.
+func CacheCreation12hTokensLT(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldCacheCreation12hTokens, v))
+}
+
+// CacheCreation12hTokensLTE applies the LTE predicate on the "cache_creation_12h_tokens" field.
+func CacheCreation12hTokensLTE(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldCacheCreation12hTokens, v))
 }
 
 // HasUser applies the HasEdge predicate on the "user" edge.

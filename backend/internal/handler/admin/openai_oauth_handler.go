@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/adminaccess"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -66,8 +65,7 @@ type openAIQuotaRefreshResponse struct {
 
 // openAIQuotaResetPostProcessContext detaches the post-reset bookkeeping from the
 // client connection. The credit is already spent at that point, so account-state
-// recovery must complete even if the operator closes the tab (mirrors
-// systemUpdateContext, added for the same reason in #4504).
+// recovery must complete even if the operator closes the tab.
 func openAIQuotaResetPostProcessContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	base := context.Background()
 	if ctx != nil {
@@ -106,8 +104,9 @@ func NewOpenAIOAuthHandler(
 
 // OpenAIGenerateAuthURLRequest represents the request for generating OpenAI auth URL
 type OpenAIGenerateAuthURLRequest struct {
-	ProxyID     *int64 `json:"proxy_id"`
-	RedirectURI string `json:"redirect_uri"`
+	OAuthProfile string `json:"oauth_profile"`
+	ProxyID      *int64 `json:"proxy_id"`
+	RedirectURI  string `json:"redirect_uri"`
 }
 
 // GenerateAuthURL generates OpenAI OAuth authorization URL
@@ -124,6 +123,7 @@ func (h *OpenAIOAuthHandler) GenerateAuthURL(c *gin.Context) {
 		req.ProxyID,
 		req.RedirectURI,
 		oauthPlatformFromPath(c),
+		req.OAuthProfile,
 	)
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -175,31 +175,26 @@ type OpenAIRefreshTokenRequest struct {
 }
 
 type OpenAICodexPATCreateRequest struct {
-	AccessToken             string         `json:"access_token" binding:"required"`
-	Name                    string         `json:"name"`
-	Notes                   *string        `json:"notes"`
-	GroupIDs                []int64        `json:"group_ids"`
-	ProxyID                 *int64         `json:"proxy_id"`
-	Concurrency             *int           `json:"concurrency"`
-	Priority                *int           `json:"priority"`
-	RateMultiplier          *float64       `json:"rate_multiplier"`
-	LoadFactor              *int           `json:"load_factor"`
-	ExpiresAt               *int64         `json:"expires_at"`
-	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired"`
-	CredentialExtras        map[string]any `json:"credential_extras"`
-	Extra                   map[string]any `json:"extra"`
-	SkipDefaultGroupBind    *bool          `json:"skip_default_group_bind"`
-	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"`
+	AccessToken             string         `json:"access_token" binding:"required" authz:"base"`
+	Name                    string         `json:"name" authz:"base"`
+	Notes                   *string        `json:"notes" authz:"base"`
+	GroupIDs                []int64        `json:"group_ids" authz:"base"`
+	ProxyID                 *int64         `json:"proxy_id" authz:"base"`
+	Concurrency             *int           `json:"concurrency" authz:"base"`
+	Priority                *int           `json:"priority" authz:"base"`
+	RateMultiplier          *float64       `json:"rate_multiplier" authz:"billing.rates.update"`
+	LoadFactor              *int           `json:"load_factor" authz:"base"`
+	ExpiresAt               *int64         `json:"expires_at" authz:"base"`
+	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired" authz:"base"`
+	CredentialExtras        map[string]any `json:"credential_extras" authz:"base"`
+	Extra                   map[string]any `json:"extra" authz:"account_create_extra"`
+	SkipDefaultGroupBind    *bool          `json:"skip_default_group_bind" authz:"base"`
+	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk" authz:"base"`
 }
 
 // RefreshToken refreshes an OpenAI OAuth token
 // POST /api/v1/admin/openai/refresh-token
 func (h *OpenAIOAuthHandler) RefreshToken(c *gin.Context) {
-	scoped := adminaccess.RestrictedFromContext(c.Request.Context()) != nil
-	if scoped && !adminaccess.RouteAllowed(adminaccess.RestrictedFromContext(c.Request.Context()).Policy, c.Request.Method, c.FullPath()) {
-		response.Error(c, 403, "调用方令牌刷新未授权")
-		return
-	}
 	var req OpenAIRefreshTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -217,10 +212,6 @@ func (h *OpenAIOAuthHandler) RefreshToken(c *gin.Context) {
 	var proxyURL string
 	if req.ProxyID != nil {
 		proxy, err := h.adminService.GetProxy(c.Request.Context(), *req.ProxyID)
-		if scoped && (err != nil || proxy == nil || !proxy.IsActive() || proxy.IsExpired(time.Now())) {
-			response.BadRequest(c, "代理不可用")
-			return
-		}
 		if err == nil && proxy != nil {
 			proxyURL = proxy.URL()
 		}
@@ -235,10 +226,6 @@ func (h *OpenAIOAuthHandler) RefreshToken(c *gin.Context) {
 
 	tokenInfo, err := h.openaiOAuthService.RefreshTokenWithClientID(c.Request.Context(), refreshToken, proxyURL, clientID)
 	if err != nil {
-		if scoped {
-			response.Error(c, 502, "调用方令牌刷新失败")
-			return
-		}
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -491,10 +478,6 @@ func buildOpenAICodexPATAccountName(name string, tokenInfo *service.OpenAITokenI
 // QueryQuota queries the rate-limit / quota usage for an OpenAI account.
 // GET /api/v1/admin/openai/accounts/:id/quota
 func (h *OpenAIOAuthHandler) QueryQuota(c *gin.Context) {
-	if adminaccess.RestrictedFromContext(c.Request.Context()) != nil {
-		h.scopedOpenAIQuota(c, false)
-		return
-	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
@@ -522,10 +505,6 @@ func (h *OpenAIOAuthHandler) QueryQuota(c *gin.Context) {
 // state: the audit middleware only records mutating verbs, so a persisting GET
 // would mutate the database without an audit trail.
 func (h *OpenAIOAuthHandler) RefreshQuota(c *gin.Context) {
-	if adminaccess.RestrictedFromContext(c.Request.Context()) != nil {
-		h.scopedOpenAIQuota(c, true)
-		return
-	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
@@ -610,19 +589,13 @@ func (h *OpenAIOAuthHandler) ResetQuota(c *gin.Context) {
 		response.BadRequest(c, "Invalid account ID")
 		return
 	}
-	if !h.scopedOpenAIAllowed(c, accountID, "openai.quota.reset", false) {
-		return
-	}
 	if h.quotaService == nil {
 		response.BadRequest(c, "openai quota service is not enabled")
 		return
 	}
-	if adminaccess.RestrictedFromContext(c.Request.Context()) != nil {
-		c.Request = c.Request.WithContext(service.WithScopedAdminAccountOperation(c.Request.Context(), "openai.quota.reset"))
-	}
 	result, err := h.quotaService.ResetCredit(c.Request.Context(), accountID)
 	if err != nil {
-		scopedOpenAIError(c, err)
+		response.ErrorFrom(c, err)
 		return
 	}
 	if result == nil {
@@ -647,14 +620,6 @@ func (h *OpenAIOAuthHandler) ResetQuota(c *gin.Context) {
 	resetResponse.WarningCode = postResult.WarningCode
 	if postResult.Account != nil {
 		resetResponse.Account = dto.AccountFromService(postResult.Account)
-	}
-	if adminaccess.RestrictedFromContext(c.Request.Context()) != nil {
-		if h.scopedOpenAIHasPermission(c, accountID, "openai.quota.read", true) {
-			resetResponse.Quota = h.scopedQuotaDTO(c, accountID, resetResponse.Quota)
-		} else {
-			resetResponse.Quota = nil
-		}
-		resetResponse.Account = nil
 	}
 	response.Success(c, resetResponse)
 }

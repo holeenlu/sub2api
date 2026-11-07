@@ -133,6 +133,10 @@ func (s *stickyGatewayCacheHotpathStub) GetSessionAccountID(ctx context.Context,
 	return 0, errors.New("not found")
 }
 
+func (s *stickyGatewayCacheHotpathStub) CompareAndRefreshSessionAccountID(_ context.Context, _ int64, _ string, accountID int64, _ time.Duration, createIfAbsent bool) (bool, error) {
+	return s.stickyID == accountID || (s.stickyID <= 0 && createIfAbsent), nil
+}
+
 func (s *stickyGatewayCacheHotpathStub) SetSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error {
 	return nil
 }
@@ -952,4 +956,11 @@ func TestSelectAccountWithLoadAwareness_StickyReadReuse(t *testing.T) {
 		require.Equal(t, account.ID, result.Account.ID)
 		require.Equal(t, int64(1), cache.getCalls.Load())
 	})
+}
+
+func (s *stickyGatewayCacheHotpathStub) GetClaudeConversationState(context.Context, string, []string) (map[string]string, error) {
+	return nil, nil
+}
+func (s *stickyGatewayCacheHotpathStub) StoreClaudeConversationState(context.Context, string, map[string]string) error {
+	return nil
 }

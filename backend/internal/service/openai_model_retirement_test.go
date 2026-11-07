@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -140,7 +141,7 @@ func TestGPT55RetirementProjectionUsesPublicNames(t *testing.T) {
 				if tc.api {
 					account.Type = AccountTypeAPIKey
 				}
-				group := &Group{Platform: PlatformOpenAI, ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"legacy", "gpt-5.5", "gpt-6.1-sol"}}}
+				group := &Group{Platform: PlatformOpenAI, ModelAllowlist: catalog.ModelAllowlist{Enabled: true, Models: []string{"legacy", "gpt-5.5", "gpt-6.1-sol"}}}
 				body, err := json.Marshal(map[string]any{field: []map[string]any{
 					{idField: "gpt-5.5", "source": "retired"}, {idField: "gpt-6.1-sol", "source": "live"},
 				}, "unknown_top": true})

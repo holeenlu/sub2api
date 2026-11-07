@@ -64,7 +64,7 @@ func TestCNProviderBalanceCheckRunOnceProbesCodingPlanQuota(t *testing.T) {
 		cfg:          &config.Config{},
 	}
 
-	svc.runOnce()
+	svc.runOnce(t.Context())
 
 	require.ElementsMatch(t, []int64{1, 2, 4, 5}, prober.probed)
 }
@@ -76,7 +76,7 @@ func TestCNProviderBalanceCheckRunOnceWithoutQuotaService(t *testing.T) {
 			Credentials: map[string]any{"account_mode": "coding"}}},
 	}}
 	svc := &CNProviderBalanceCheckService{accountRepo: repo, cfg: &config.Config{}}
-	require.NotPanics(t, func() { svc.runOnce() })
+	require.NotPanics(t, func() { svc.runOnce(t.Context()) })
 }
 
 // recordingCNBalanceLoadRepo 记录余额探测服务的 GetByID 调用：payg 账号进入
@@ -119,7 +119,7 @@ func TestCNProviderBalanceCheckRunOnceSkipsOllamaCloudUsageAccounts(t *testing.T
 		cfg:            &config.Config{},
 	}
 
-	svc.runOnce()
+	svc.runOnce(t.Context())
 
 	require.Equal(t, []int64{1}, prober.probed)
 	require.Empty(t, loadRepo.getByIDIDs, "ollama 账号不得进入 payg 检查队列")

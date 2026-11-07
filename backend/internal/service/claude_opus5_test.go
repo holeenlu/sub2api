@@ -95,26 +95,24 @@ func TestClaudeOpus5_BedrockCapabilityGates(t *testing.T) {
 		modelID       string
 		claude45Newer bool
 		toolSearch    bool
-		opus47Newer   bool
 	}{
-		{"claude-opus-5", true, true, true},
-		{"us.anthropic.claude-opus-5-v1", true, true, true},
-		{"eu.anthropic.claude-opus-5-v1", true, true, true},
-		{"claude-sonnet-5", true, true, false},
-		{"us.anthropic.claude-sonnet-5-v1", true, true, false},
+		{"claude-opus-5", true, true},
+		{"us.anthropic.claude-opus-5-v1", true, true},
+		{"eu.anthropic.claude-opus-5-v1", true, true},
+		{"claude-sonnet-5", true, true},
+		{"us.anthropic.claude-sonnet-5-v1", true, true},
 		// 回归保护：旧模型不能因为 minor 可选而被误判为新版本
-		{"anthropic.claude-opus-4-1-v1", false, false, false},
-		{"anthropic.claude-sonnet-4-0-v1", false, false, false},
-		{"anthropic.claude-3-opus-20240229-v1:0", false, false, false},
-		{"us.anthropic.claude-opus-4-8-v1", true, true, true},
+		{"anthropic.claude-opus-4-1-v1", false, false},
+		{"anthropic.claude-sonnet-4-0-v1", false, false},
+		{"anthropic.claude-3-opus-20240229-v1:0", false, false},
+		{"us.anthropic.claude-opus-4-8-v1", true, true},
 		// Haiku 不支持 tool search
-		{"us.anthropic.claude-haiku-4-5-20251001-v1:0", true, false, false},
+		{"us.anthropic.claude-haiku-4-5-20251001-v1:0", true, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.modelID, func(t *testing.T) {
 			assert.Equal(t, tt.claude45Newer, isBedrockClaude45OrNewer(tt.modelID), "isBedrockClaude45OrNewer")
 			assert.Equal(t, tt.toolSearch, bedrockModelSupportsToolSearch(tt.modelID), "bedrockModelSupportsToolSearch")
-			assert.Equal(t, tt.opus47Newer, isBedrockOpus47OrNewer(tt.modelID), "isBedrockOpus47OrNewer")
 		})
 	}
 }
@@ -126,7 +124,7 @@ func TestClaudeOpus5_BedrockThinkingConvertedToAdaptive(t *testing.T) {
 	body := []byte(`{"thinking":{"type":"enabled","budget_tokens":10000}}`)
 	got := sanitizeBedrockThinking(body, "us.anthropic.claude-opus-5-v1")
 
-	assert.JSONEq(t, `{"thinking":{"type":"adaptive"}}`, string(got))
+	assert.JSONEq(t, `{"thinking":{"type":"adaptive"},"output_config":{"effort":"high"}}`, string(got))
 }
 
 // TestClaudeOpus5_CatalogAndBedrockMapping 锁定模型清单与 Bedrock 默认映射。

@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 func (r *opsRepository) UpsertHourlyMetrics(ctx context.Context, startTime, endTime time.Time) error {
@@ -76,7 +78,7 @@ error_base AS (
     -- value so platform-level GROUPING SETS don't collide with the overall (platform=NULL) row.
     COALESCE(platform, 'unknown') AS platform,
     group_id AS group_id,
-    is_business_limited AS is_business_limited,
+    ` + service.OpsSLABusinessLimitedSQL("") + ` AS is_business_limited,
     error_owner AS error_owner,
     status_code AS client_status_code,
     COALESCE(upstream_status_code, status_code, 0) AS effective_status_code
@@ -224,7 +226,7 @@ ON CONFLICT (bucket_start, COALESCE(platform, ''), COALESCE(group_id, 0)) DO UPD
   computed_at = NOW()
 `
 
-	_, err := r.db.ExecContext(ctx, q, start, end)
+	_, err := r.execOpsQuery(ctx, q, start, end)
 	return err
 }
 
@@ -337,7 +339,7 @@ ON CONFLICT (bucket_date, COALESCE(platform, ''), COALESCE(group_id, 0)) DO UPDA
   computed_at = NOW()
 `
 
-	_, err := r.db.ExecContext(ctx, q, start, end)
+	_, err := r.execOpsQuery(ctx, q, start, end)
 	return err
 }
 
@@ -347,7 +349,7 @@ func (r *opsRepository) GetLatestHourlyBucketStart(ctx context.Context) (time.Ti
 	}
 
 	var value sql.NullTime
-	if err := r.db.QueryRowContext(ctx, `SELECT MAX(bucket_start) FROM ops_metrics_hourly`).Scan(&value); err != nil {
+	if err := r.queryOpsRow(ctx, `SELECT MAX(bucket_start) FROM ops_metrics_hourly`).Scan(&value); err != nil {
 		return time.Time{}, false, err
 	}
 	if !value.Valid {
@@ -362,7 +364,7 @@ func (r *opsRepository) GetLatestDailyBucketDate(ctx context.Context) (time.Time
 	}
 
 	var value sql.NullTime
-	if err := r.db.QueryRowContext(ctx, `SELECT MAX(bucket_date) FROM ops_metrics_daily`).Scan(&value); err != nil {
+	if err := r.queryOpsRow(ctx, `SELECT MAX(bucket_date) FROM ops_metrics_daily`).Scan(&value); err != nil {
 		return time.Time{}, false, err
 	}
 	if !value.Valid {

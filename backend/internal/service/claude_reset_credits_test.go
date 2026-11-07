@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/stretchr/testify/require"
 	"io"
 	"net/http"
@@ -13,7 +14,79 @@ import (
 
 type resetAccountStub struct{ account *Account }
 
-func (s resetAccountStub) GetByID(context.Context, int64) (*Account, error) { return s.account, nil }
+func (s resetAccountStub) GetByID(context.Context, int64) (*Account, error)         { return s.account, nil }
+func (s resetAccountStub) UpdateExtra(context.Context, int64, map[string]any) error { return nil }
+
+type resetSnapshotAccounts struct {
+	resetAccountStub
+	writes []map[string]any
+	fail   error
+}
+
+func (s *resetSnapshotAccounts) UpdateExtra(_ context.Context, _ int64, values map[string]any) error {
+	data, err := json.Marshal(values)
+	if err != nil {
+		return err
+	}
+	var stored map[string]any
+	if err := json.Unmarshal(data, &stored); err != nil {
+		return err
+	}
+	s.writes = append(s.writes, stored)
+	if s.fail != nil {
+		return s.fail
+	}
+	if s.account.Extra == nil {
+		s.account.Extra = map[string]any{}
+	}
+	for k, v := range stored {
+		s.account.Extra[k] = v
+	}
+	return nil
+}
+
+func TestClaudeResetQueryPersistsPublicSnapshotAndKeepsItOnFetchFailure(t *testing.T) {
+	now := time.Now().UTC()
+	accounts := &resetSnapshotAccounts{resetAccountStub: resetAccountStub{&Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Credentials: map[string]any{"scope": "user:profile"}}}}
+	upstream := `{"cedar_ember":{"eligible":true,"next_grant_id":"private_grant_id","grants":[{"id":"private_grant_id","label":"Reset","resets_left":2,"usable_now":true,"use_requires_limit":false,"clears":["five_hour","seven_day"],"ends_at":"` + now.Add(time.Hour).Format(time.RFC3339) + `"}]}}`
+	s := &ClaudeResetCreditService{accounts: accounts, tokens: resetTokenStub{}, now: func() time.Time { return now }, do: func(*http.Request, string) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(upstream))}, nil
+	}}
+	status, err := s.Query(context.Background(), 1)
+	require.NoError(t, err)
+	require.True(t, status.CachePersisted)
+	require.Equal(t, 2, status.AvailableCount)
+	require.Len(t, accounts.writes, 1)
+	stored, err := json.Marshal(accounts.account.Extra[claudeResetCreditSnapshotKey])
+	require.NoError(t, err)
+	require.NotContains(t, string(stored), "private_grant_id")
+	require.NotContains(t, string(stored), "synthetic-token")
+	var reloaded ClaudeResetCredits
+	require.NoError(t, json.Unmarshal(stored, &reloaded))
+	require.Equal(t, status, &reloaded)
+	upstream = `{broken`
+	_, err = s.Query(context.Background(), 1)
+	require.Error(t, err)
+	require.Len(t, accounts.writes, 1, "failed reads must not erase the saved snapshot")
+	upstream = `{}`
+	status, err = s.Query(context.Background(), 1)
+	require.NoError(t, err)
+	require.Zero(t, status.AvailableCount)
+	require.Empty(t, status.Credits)
+	require.Len(t, accounts.writes, 2, "a successful empty observation must replace the old count")
+}
+
+func TestClaudeResetSnapshotWriteFailureKeepsLiveCount(t *testing.T) {
+	accounts := &resetSnapshotAccounts{resetAccountStub: resetAccountStub{&Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Credentials: map[string]any{"scope": "user:profile"}}}, fail: errors.New("write failed")}
+	s := &ClaudeResetCreditService{accounts: accounts, tokens: resetTokenStub{}, now: time.Now, do: func(*http.Request, string) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"cedar_ember":{"eligible":true,"next_grant_id":"launch","grants":[{"id":"launch","resets_left":1,"clears":["five_hour"],"usable_now":true,"use_requires_limit":false}]}}`))}, nil
+	}}
+	status, err := s.Query(context.Background(), 1)
+	require.NoError(t, err)
+	require.False(t, status.CachePersisted)
+	require.Equal(t, 1, status.AvailableCount)
+	require.Nil(t, accounts.account.Extra)
+}
 
 type resetTokenStub struct{}
 

@@ -31,20 +31,16 @@ func newEmailOAuthAutoAuthService(
 	settingService := NewSettingService(&settingRepoStub{values: settings}, cfg)
 
 	return NewAuthService(
-		nil, // entClient — nil, updateUserSignupSource early return
-		userRepo,
-		nil, // redeemRepo — invitationCode="" 时不触发
+		nil,      // entClient — nil, updateUserSignupSource early return
+		userRepo, // redeemRepo — invitationCode="" 时不触发
 		&refreshTokenCacheStub{},
 		cfg,
 		settingService,
 		nil, // emailService
 		nil, // turnstileService
 		nil, // emailQueueService
-		nil, // promoService
-		nil, // defaultSubAssigner — nil, assignSubscriptions early return
 		nil, // affiliateService — nil, bindOAuthAffiliate early return
-		quotaRepo,
-	)
+		quotaRepo)
 }
 
 func TestEmailOAuthAuto_SnapshotsPlatformQuotaDefaults(t *testing.T) {
@@ -64,9 +60,7 @@ func TestEmailOAuthAuto_SnapshotsPlatformQuotaDefaults(t *testing.T) {
 		context.Background(),
 		"newoauth@example.com",
 		"newoauth",
-		"github",
-		"", // invitationCode
-		"", // affiliateCode
+		"github", // affiliateCode
 	)
 	require.NoError(t, err)
 	require.NotNil(t, user)

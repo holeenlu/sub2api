@@ -357,3 +357,74 @@ func TestWriteOpenAIUpstreamClientError_PayloadShape(t *testing.T) {
 		})
 	}
 }
+
+// 流式客户端的上下文超限：Codex 只从 response.failed 识别 context_length_exceeded
+// 并在下一轮先压缩，HTTP 400 只当普通错误显示。JSON 客户端保持 400。
+const openAIContextWindow400Body = `{"error":{"message":"Your input exceeds the context window of this model. Please adjust your input and try again.","type":"invalid_request_error","param":"input","code":"context_length_exceeded"}}`
+
+func requireOpenAIContextWindowResponseFailed(t *testing.T, c *gin.Context, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	require.True(t, IsResponseCommitted(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "text/event-stream", rec.Header().Get("Content-Type"))
+	out := rec.Body.String()
+	require.True(t, strings.HasPrefix(out, "event: response.failed\ndata: "), out)
+	payload := strings.TrimSuffix(strings.TrimPrefix(out, "event: response.failed\ndata: "), "\n\n")
+	require.Equal(t, "response.failed", gjson.Get(payload, "type").String())
+	require.Equal(t, "failed", gjson.Get(payload, "response.status").String())
+	require.True(t, gjson.Get(payload, "response.created_at").Exists())
+	require.Equal(t, "context_length_exceeded", gjson.Get(payload, "response.error.code").String())
+	require.Equal(t, "invalid_request_error", gjson.Get(payload, "response.error.type").String())
+	require.Equal(t, "input", gjson.Get(payload, "response.error.param").String())
+	require.Contains(t, gjson.Get(payload, "response.error.message").String(), "context window")
+	streamErr, recorded := GetOpsStreamError(c)
+	require.True(t, recorded, "ops keeps the semantic 400 for a failure delivered on a 200 stream")
+	require.Equal(t, http.StatusBadRequest, streamErr.IntendedStatus)
+	require.Equal(t, "context_length_exceeded", streamErr.ErrType)
+}
+
+func TestHandleErrorResponse_ContextWindow400StreamingClientGetsResponseFailed(t *testing.T) {
+	for _, stream := range []bool{true, false} {
+		t.Run(map[bool]string{true: "stream", false: "json"}[stream], func(t *testing.T) {
+			c, rec := newOpenAIUpstreamErrorTestContext(t)
+			markOpenAIResponsesClientStream(c, stream)
+			svc := &OpenAIGatewayService{cfg: &config.Config{}}
+			_, err := svc.handleErrorResponse(context.Background(),
+				newOpenAIUpstreamErrorResponse(http.StatusBadRequest, openAIContextWindow400Body),
+				c, newOpenAIUpstreamErrorTestAccount(), nil)
+			require.Error(t, err)
+			var failoverErr *UpstreamFailoverError
+			require.False(t, errors.As(err, &failoverErr), "a full context window never fails over")
+			if !stream {
+				require.Equal(t, http.StatusBadRequest, rec.Code)
+				require.Equal(t, "context_length_exceeded", gjson.Get(rec.Body.String(), "error.code").String())
+				require.NotContains(t, rec.Body.String(), "response.failed")
+				return
+			}
+			requireOpenAIContextWindowResponseFailed(t, c, rec)
+		})
+	}
+}
+
+func TestHandleErrorResponsePassthrough_ContextWindow400StreamingClientGetsResponseFailed(t *testing.T) {
+	for _, stream := range []bool{true, false} {
+		t.Run(map[bool]string{true: "stream", false: "json"}[stream], func(t *testing.T) {
+			c, rec := newOpenAIUpstreamErrorTestContext(t)
+			markOpenAIResponsesClientStream(c, stream)
+			svc := &OpenAIGatewayService{cfg: &config.Config{}}
+			resp := newOpenAIUpstreamErrorResponse(http.StatusBadRequest, openAIContextWindow400Body)
+			err := svc.handleErrorResponsePassthrough(context.Background(), resp, c, newOpenAIUpstreamErrorTestAccount(),
+				[]byte(`{"model":"gpt-5.6-sol","stream":true,"input":"hello"}`), []byte(openAIContextWindow400Body))
+			require.Error(t, err)
+			if !stream {
+				// The sanitized passthrough envelope keeps the actionable message only.
+				require.Equal(t, http.StatusBadRequest, rec.Code)
+				require.Equal(t, "upstream_error", gjson.Get(rec.Body.String(), "error.type").String())
+				require.Contains(t, gjson.Get(rec.Body.String(), "error.message").String(), "context window")
+				require.NotContains(t, rec.Body.String(), "response.failed")
+				return
+			}
+			requireOpenAIContextWindowResponseFailed(t, c, rec)
+		})
+	}
+}

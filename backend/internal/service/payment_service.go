@@ -39,7 +39,6 @@ const (
 const (
 	// defaultMaxPendingOrders and defaultOrderTimeoutMin are defined in
 	// payment_config_service.go alongside other payment configuration defaults.
-	paymentGraceMinutes = 5
 
 	defaultPageSize    = 20
 	maxPageSize        = 100
@@ -123,6 +122,7 @@ type OrderListParams struct {
 }
 
 type RefundPlan struct {
+	ReservationID   string
 	OrderID         int64
 	Order           *dbent.PaymentOrder
 	RefundAmount    float64
@@ -134,8 +134,6 @@ type RefundPlan struct {
 	BalanceToDeduct float64
 	SubDaysToDeduct int
 	SubscriptionID  int64
-	// deductionHeld 表示扣减已在进入 REFUND_PENDING 前执行并保留，终态收敛时不再重复扣减。
-	deductionHeld bool
 }
 
 type RefundResult struct {
@@ -199,12 +197,12 @@ type PaymentService struct {
 	userRepo                 UserRepository
 	groupRepo                GroupRepository
 	resumeService            *PaymentResumeService
-	affiliateService         *AffiliateService
 	notificationEmailService *NotificationEmailService
+	notificationTasks        maintenanceTaskOwner
 }
 
-func NewPaymentService(entClient *dbent.Client, registry *payment.Registry, loadBalancer payment.LoadBalancer, redeemService *RedeemService, subscriptionSvc *SubscriptionService, configService *PaymentConfigService, userRepo UserRepository, groupRepo GroupRepository, affiliateService *AffiliateService) *PaymentService {
-	svc := &PaymentService{entClient: entClient, registry: registry, loadBalancer: newVisibleMethodLoadBalancer(loadBalancer, configService), redeemService: redeemService, subscriptionSvc: subscriptionSvc, configService: configService, userRepo: userRepo, groupRepo: groupRepo, affiliateService: affiliateService}
+func NewPaymentService(entClient *dbent.Client, registry *payment.Registry, loadBalancer payment.LoadBalancer, redeemService *RedeemService, subscriptionSvc *SubscriptionService, configService *PaymentConfigService, userRepo UserRepository, groupRepo GroupRepository) *PaymentService {
+	svc := &PaymentService{entClient: entClient, registry: registry, loadBalancer: newVisibleMethodLoadBalancer(loadBalancer, configService), redeemService: redeemService, subscriptionSvc: subscriptionSvc, configService: configService, userRepo: userRepo, groupRepo: groupRepo}
 	svc.resumeService = psNewPaymentResumeService(configService)
 	return svc
 }

@@ -1,0 +1,224 @@
+{
+  "date": "2026-10-17",
+  "official_release": "https://github.com/Wei-Shaw/sub2api/releases/tag/v0.2.17",
+  "official_base": "060d0160417782cd962a0c7f460f6cd4565d4916",
+  "official_tag_object": "6d6c4e701a463dcf83c261e8428e93423d6c0b3e",
+  "original_final_sources": {
+    "main": {
+      "sha": "e6b3b332dc1fba704db6e07157c4b4674bed2437",
+      "tree": "1589b40aa70756ec5d8506ec67643fd7a686a8cb"
+    },
+    "TapModels": {
+      "sha": "bf2c1d8580f5a00b3369f43e5edd0f2a5cde2ad4",
+      "tree": "6bfbb53cc548a635e4f75225a6437c4143fd5011"
+    },
+    "tokensavy": {
+      "sha": "9cbb381ccb6d5871cf56540711791776fa1c2dc9",
+      "tree": "403194e70e64132f67b9f09e55e3f3e359692672"
+    }
+  },
+  "expected_trees_without_this_archive": {
+    "main": "a2cc76f63d420c88b4decc820eda19eba36c6db4",
+    "TapModels": "44dbac733a30ad27e65e1e24676bcc40da6e9e00",
+    "tokensavy": "410d8d6b1c5f3795a1e97662bfe2aff6f1edd187"
+  },
+  "allowed_existing_file_changes": [
+    {
+      "path": "backend/internal/repository/account_repo_excel_bps_test.go",
+      "before_blob": "503c678ded97f732e6d348ccb554a61ae7725e64",
+      "after_blob": "93d7c0c80ac25d377ea1e52809a6dbef50b64c39",
+      "added_lines": 1,
+      "deleted_lines": 1,
+      "reason": "Update SQL assertions to retain the existing archived-vendor account write exclusion."
+    },
+    {
+      "path": "backend/internal/repository/account_repo_upstream_billing_probe_update_test.go",
+      "before_blob": "a1b858e51ae8bd3a83544d6337a1099b62cdf25c",
+      "after_blob": "4d6992e2d599c5c7feb14e4b32364c03c32a0ad9",
+      "added_lines": 1,
+      "deleted_lines": 1,
+      "reason": "Update SQL assertions to retain the existing archived-vendor account write exclusion."
+    }
+  ],
+  "uncommitted_drafts": [
+    {
+      "worktree": "/Users/luhonglin/.codex/worktrees/bps-ranxi-sync-20261013/sub2api",
+      "head": "d47bb2d177a8add61eab92246ae47f907d10e3f6",
+      "files": {
+        "docs/bps/REQUIREMENTS.md": {
+          "mode": 33188,
+          "sha256": "2bd634d216dd8cfb75dd807af7048638e23400ac945d15fdf8e60ca5899e303f"
+        },
+        "docs/bps/VALIDATION.md": {
+          "mode": 33188,
+          "sha256": "4c72e76abbb0e9fbbdfefbbfcbdbe58f3d4a5fd3eea2d9470ce9e1f90987133c"
+        },
+        "docs/bps/integration-state.json": {
+          "mode": 33188,
+          "sha256": "b251026a12298ddcef175da0bf09136832301d45045a31d8a51e595d24d1ce11"
+        },
+        "docs/bps/upstream-changes.md": {
+          "mode": 33188,
+          "sha256": "9cdfe5eceed277b13797e66762379fe77ea982224223871897014e64792d359d"
+        }
+      },
+      "handling": "Preserve exact bytes and modes outside published commits."
+    }
+  ],
+  "groups": {
+    "01": [
+      "migration",
+      "数据库升级、实体结构与历史数据保护",
+      "chore(schema): preserve final migrations and entity contracts"
+    ],
+    "02": [
+      "identity",
+      "角色、会话、管理授权与敏感操作",
+      "feat(auth): preserve roles sessions and management authorization"
+    ],
+    "03": [
+      "security",
+      "网关安全、隔离、准入与敏感信息保护",
+      "fix(gateway): preserve tenant isolation and request safety"
+    ],
+    "04": [
+      "accounts",
+      "账号授权、调度、粘性会话与 Fable 阈值",
+      "feat(accounts): preserve authorization scheduling and Fable controls"
+    ],
+    "05": [
+      "models",
+      "模型权限、分组候选与目录顺序",
+      "fix(models): preserve restrictions catalogs and group selection"
+    ],
+    "06": [
+      "recovery",
+      "Responses 恢复、流终止、计费与 WS 所有权",
+      "fix(gateway): preserve recovery streaming and response ownership"
+    ],
+    "07": [
+      "bps",
+      "BPS、Excel 独立授权、工具、图片与原生回退",
+      "feat(bps): preserve final tools images recovery and native fallback"
+    ],
+    "08": [
+      "protocols",
+      "模型能力、推理参数与多协议兼容",
+      "feat(gateway): preserve model capabilities and protocol semantics"
+    ],
+    "09": [
+      "billing",
+      "支付、退款、余额与返利完整性",
+      "fix(billing): preserve payment refund and balance invariants"
+    ],
+    "10": [
+      "usage",
+      "用量分析、统计快照与有界导出",
+      "feat(usage): preserve analytics snapshots and bounded exports"
+    ],
+    "11": [
+      "diagnostics",
+      "降智检测、计费探测与定时诊断",
+      "feat(diagnostics): preserve metered probes and scheduled checks"
+    ],
+    "12": [
+      "vendor",
+      "供应商门户、资源运营、归档与结算",
+      "feat(vendor): preserve supplier portal operations and settlement"
+    ],
+    "13": [
+      "ops",
+      "运维健康、SLA 分类、监控与运行指标",
+      "fix(ops): preserve health scoring SLA and monitoring corrections"
+    ],
+    "14": [
+      "claude",
+      "Claude Linux 指纹、CCH 与请求身份一致性",
+      "fix(claude): preserve verified Linux fingerprint and CCH wire format"
+    ],
+    "15": [
+      "clients",
+      "客户端配置、下载包与恢复工具",
+      "feat(clients): preserve setup downloads and recovery tools"
+    ],
+    "16": [
+      "site",
+      "KDAN 品牌、文档站与公共界面",
+      "feat(site): preserve final KDAN branding and presentation"
+    ],
+    "17": [
+      "localization",
+      "多语言与繁体生成",
+      "feat(i18n): preserve translations and generated traditional Chinese"
+    ],
+    "18": [
+      "delivery",
+      "手动发布、渠道、构建、安装与在线更新",
+      "chore(delivery): preserve manual workflows and release channels"
+    ],
+    "19": [
+      "integration",
+      "共享配置、路由、类型、依赖与装配",
+      "refactor(core): preserve shared routes configuration and wiring"
+    ],
+    "20": [
+      "records",
+      "需求、方案、来源与逐文件核验归档",
+      "docs(requirements): document final v0.2.17 requirements and provenance"
+    ]
+  },
+  "path_item_counts": {
+    "main": 1874,
+    "TapModels": 263,
+    "tokensavy": 290
+  },
+  "counting_rule": "No rename detection: deletions and additions are separate path items.",
+  "attribution_rule": "Source commits touched the path; not a claim of line ownership. Final blobs are authoritative.",
+  "backup_directory": "/Users/luhonglin/Git/sub2api-rebuild-v0217-20261017-113657",
+  "validation": {
+    "backend-unit": {
+      "exit_code": 0,
+      "seconds": 14.08
+    },
+    "backend-build": {
+      "exit_code": 0,
+      "seconds": 11.71
+    },
+    "frontend-typecheck": {
+      "exit_code": 0,
+      "seconds": 14.5
+    },
+    "frontend-unit": {
+      "exit_code": 0,
+      "seconds": 43.22
+    },
+    "frontend-locales": {
+      "exit_code": 0,
+      "seconds": 0.27
+    },
+    "frontend-build": {
+      "exit_code": 0,
+      "seconds": 16.85
+    },
+    "vendor-build": {
+      "exit_code": 0,
+      "seconds": 17.14
+    },
+    "manual-workflows": {
+      "exit_code": 0,
+      "seconds": 4.64
+    },
+    "release-matrix": {
+      "exit_code": 0,
+      "seconds": 0.48
+    },
+    "generated-downloads": {
+      "exit_code": 0,
+      "seconds": 0.07
+    },
+    "vendor-prototype": {
+      "exit_code": 0,
+      "seconds": 0.08
+    }
+  }
+}

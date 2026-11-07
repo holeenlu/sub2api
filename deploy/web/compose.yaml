@@ -1,0 +1,17 @@
+# Combine after deploy/api/compose.yaml; both roles use the project default network.
+services:
+  web:
+    image: ${WEB_IMAGE:-sub2api-web:local}
+    pull_policy: never
+    restart: unless-stopped
+    ports:
+      - "${WEB_BIND_HOST:-127.0.0.1}:${WEB_PORT:-8082}:8080"
+    environment:
+      WEB_PUBLIC_ORIGIN: ${WEB_PUBLIC_ORIGIN:?Set the public main site origin}
+      BACKEND_ORIGIN: ${BACKEND_ORIGIN:-http://api:8080}
+      WEB_TRUSTED_PROXY_CIDRS: ${WEB_TRUSTED_PROXY_CIDRS:-}
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]

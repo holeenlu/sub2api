@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"net/http"
 	"strings"
 	"time"
@@ -34,14 +35,11 @@ func NewGrokOAuthService(proxyRepo ProxyRepository, oauthClient GrokOAuthClient,
 	return service
 }
 
-// WithSessionStore replaces the in-memory OAuth session store (e.g. Redis-backed
+// WithSessionStore is a construction-only option applied before Start. It replaces the OAuth session store (e.g. Redis-backed
 // for cross-instance single-use callbacks). Redis wiring stays in Wire providers
 // so this service package does not import go-redis (depguard).
 func (s *GrokOAuthService) WithSessionStore(store *xai.SessionStore) *GrokOAuthService {
 	if s != nil && store != nil {
-		if s.sessionStore != nil {
-			s.sessionStore.Stop()
-		}
 		s.sessionStore = store
 	}
 	return s
@@ -66,6 +64,11 @@ type GrokAuthURLResult struct {
 }
 
 func (s *GrokOAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64, redirectURI string) (*GrokAuthURLResult, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	state, err := xai.GenerateState()
 	if err != nil {
 		return nil, infraerrors.Newf(http.StatusInternalServerError, "GROK_OAUTH_STATE_FAILED", "failed to generate state: %v", err)
@@ -95,7 +98,8 @@ func (s *GrokOAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64, 
 		return nil, infraerrors.Newf(http.StatusBadRequest, "GROK_OAUTH_INVALID_AUTHORIZE_URL", "%v", err)
 	}
 
-	s.sessionStore.Set(sessionID, &xai.OAuthSession{
+	s.sessionStore.Set(ctx, sessionID, &xai.OAuthSession{
+		Authorization: authz.CaptureLease(ctx),
 		State:         state,
 		CodeVerifier:  codeVerifier,
 		CodeChallenge: codeChallenge,
@@ -145,12 +149,20 @@ type GrokPasswordLoginResult struct {
 }
 
 func (s *GrokOAuthService) ExchangeCode(ctx context.Context, input *GrokExchangeCodeInput) (*GrokTokenInfo, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	if input == nil {
 		return nil, infraerrors.New(http.StatusBadRequest, "GROK_OAUTH_INVALID_INPUT", "input is required")
 	}
-	session, ok := s.sessionStore.Get(input.SessionID)
+	session, ok := s.sessionStore.Get(ctx, input.SessionID)
 	if !ok {
 		return nil, infraerrors.New(http.StatusBadRequest, "GROK_OAUTH_SESSION_NOT_FOUND", "session not found or expired")
+	}
+	if err := authz.CheckLease(ctx, session.Authorization, "accounts.authorize"); err != nil {
+		return nil, err
 	}
 
 	parsed := xai.ParseAuthorizationInput(input.Code)
@@ -184,10 +196,10 @@ func (s *GrokOAuthService) ExchangeCode(ctx context.Context, input *GrokExchange
 	if err := s.requireOAuthClient(); err != nil {
 		return nil, err
 	}
-	if !s.sessionStore.TryConsumeSession(input.SessionID) {
+	if !s.sessionStore.TryConsumeSession(ctx, input.SessionID) {
 		return nil, infraerrors.New(http.StatusBadRequest, "GROK_OAUTH_SESSION_ALREADY_USED", "oauth session has already been used")
 	}
-	defer s.sessionStore.Delete(input.SessionID)
+	defer s.sessionStore.Delete(ctx, input.SessionID)
 	tokenResp, err := s.oauthClient.ExchangeCode(ctx, code, session.CodeVerifier, session.RedirectURI, proxyURL, session.ClientID)
 	if err != nil {
 		return nil, err
@@ -206,6 +218,11 @@ func (s *GrokOAuthService) requireOAuthClient() error {
 }
 
 func (s *GrokOAuthService) RefreshToken(ctx context.Context, refreshToken, proxyURL, clientID string) (*GrokTokenInfo, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	refreshToken = strings.TrimSpace(refreshToken)
 	if refreshToken == "" {
 		return nil, infraerrors.New(http.StatusBadRequest, "GROK_OAUTH_NO_REFRESH_TOKEN", "refresh_token is required")
@@ -228,6 +245,11 @@ func (s *GrokOAuthService) RefreshToken(ctx context.Context, refreshToken, proxy
 }
 
 func (s *GrokOAuthService) ValidateRefreshToken(ctx context.Context, refreshToken string, proxyID *int64) (*GrokTokenInfo, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	proxyURL, err := s.proxyURL(ctx, proxyID)
 	if err != nil {
 		return nil, err
@@ -238,6 +260,11 @@ func (s *GrokOAuthService) ValidateRefreshToken(ctx context.Context, refreshToke
 // ValidateSSOToken converts a Web SSO cookie into Build OAuth tokens.
 // The raw sso_token is never stored on GrokTokenInfo or account credentials.
 func (s *GrokOAuthService) ValidateSSOToken(ctx context.Context, ssoToken string, proxyID *int64) (*GrokTokenInfo, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	ssoToken = strings.TrimSpace(ssoToken)
 	if ssoToken == "" {
 		return nil, infraerrors.New(http.StatusBadRequest, "GROK_OAUTH_NO_SSO_TOKEN", "sso_token is required")
@@ -261,12 +288,22 @@ func (s *GrokOAuthService) ValidateSSOToken(ctx context.Context, ssoToken string
 
 // ConvertFromSSO is the batch-import entry point; same semantics as ValidateSSOToken.
 func (s *GrokOAuthService) ConvertFromSSO(ctx context.Context, ssoToken string, proxyID *int64) (*GrokTokenInfo, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	return s.ValidateSSOToken(ctx, ssoToken, proxyID)
 }
 
 // AuthorizePassword logs in with email/password, converts the resulting SSO cookie
 // to Build OAuth, and returns OAuth tokens only. Password and raw SSO are never persisted.
 func (s *GrokOAuthService) AuthorizePassword(ctx context.Context, email, password string, proxyID *int64) (*GrokTokenInfo, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	if !s.passwordAuthEnabled() {
 		return nil, infraerrors.New(http.StatusForbidden, "GROK_OAUTH_PASSWORD_AUTH_DISABLED", "Grok password authorization is disabled")
 	}
@@ -309,6 +346,11 @@ func validateGrokTokenResponse(tokenResp *xai.TokenResponse) error {
 }
 
 func (s *GrokOAuthService) RefreshAccountToken(ctx context.Context, account *Account) (*GrokTokenInfo, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	if account == nil || account.Platform != PlatformGrok {
 		return nil, infraerrors.New(http.StatusBadRequest, "GROK_OAUTH_INVALID_ACCOUNT", "account is not a Grok account")
 	}
@@ -384,8 +426,19 @@ func (s *GrokOAuthService) BuildAccountCredentials(tokenInfo *GrokTokenInfo) map
 	return creds
 }
 
-func (s *GrokOAuthService) Stop() {
-	s.sessionStore.Stop()
+// Start explicitly starts the session owner; constructors do not start workers.
+func (s *GrokOAuthService) Start(ctx context.Context) error {
+	return s.sessionStore.Start(ctx)
+}
+
+// Drain rejects new OAuth work and waits for admitted operations and the janitor.
+func (s *GrokOAuthService) Drain(ctx context.Context) error {
+	return s.sessionStore.Drain(ctx)
+}
+
+// Stop cancels and joins the same owner, retaining join state after a timeout.
+func (s *GrokOAuthService) Stop(ctx context.Context) error {
+	return s.sessionStore.Stop(ctx)
 }
 
 func (s *GrokOAuthService) tokenInfoFromResponse(tokenResp *xai.TokenResponse, clientID string, existing map[string]any) *GrokTokenInfo {

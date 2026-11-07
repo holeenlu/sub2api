@@ -2,10 +2,6 @@ package admin
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/adminaccess"
 	"strconv"
 	"time"
 
@@ -72,11 +68,6 @@ func executeAdminIdempotentWithTimeout(
 }
 
 func adminActorScope(c *gin.Context) string {
-	if principal := adminaccess.FromContext(c.Request.Context()); principal != nil {
-		policy, _ := json.Marshal(principal.Policy)
-		digest := sha256.Sum256(policy)
-		return "admin-key:" + principal.KeyID + ":" + hex.EncodeToString(digest[:])
-	}
 	actorScope := "admin:0"
 	if subject, ok := middleware2.GetAuthSubjectFromContext(c); ok {
 		actorScope = "admin:" + strconv.FormatInt(subject.UserID, 10)
@@ -103,16 +94,6 @@ func executeAdminIdempotentJSONWithTimeout(
 	execute func(context.Context) (any, error),
 ) {
 	executeAdminIdempotentJSONWithMode(c, scope, payload, ttl, executionTimeout, idempotencyStoreUnavailableFailClose, execute)
-}
-
-func executeAdminIdempotentJSONFailOpenOnStoreUnavailable(
-	c *gin.Context,
-	scope string,
-	payload any,
-	ttl time.Duration,
-	execute func(context.Context) (any, error),
-) {
-	executeAdminIdempotentJSONWithMode(c, scope, payload, ttl, 0, idempotencyStoreUnavailableFailOpen, execute)
 }
 
 func executeAdminIdempotentJSONWithMode(

@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import en from '../locales/en/admin/accounts'
-import zh from '../locales/zh/admin/accounts'
+import { loadApplicationLocale } from '@/app/i18n'
+const assembledEnMessages = await loadApplicationLocale('en')
+const assembledZhMessages = await loadApplicationLocale('zh')
+const en = assembledEnMessages.admin
+const zh = assembledZhMessages.admin
+
 
 describe('OpenAI WS mode locale descriptions', () => {
   it('documents the global v2 router requirement for account WS modes', () => {

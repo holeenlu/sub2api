@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -166,6 +167,7 @@ func shouldMarkCreditsExhausted(resp *http.Response, respBody []byte, reqErr err
 type creditsOveragesRetryResult struct {
 	handled bool
 	resp    *http.Response
+	err     error
 }
 
 // attemptCreditsOveragesRetry 在确认免费配额耗尽后，尝试注入 AI Credits 继续请求。
@@ -192,7 +194,10 @@ func (s *AntigravityGatewayService) attemptCreditsOveragesRetry(
 		return &creditsOveragesRetryResult{handled: true}
 	}
 
-	creditsResp, err := p.httpUpstream.Do(creditsReq, p.proxyURL, p.account.ID, p.account.Concurrency)
+	creditsResp, err := qualifiedAccountUpstream(p.accountRepo, p.httpUpstream, p.account, vendorDispatchGroup(p.c), p.settingService).Do(creditsReq, p.proxyURL, p.account.ID, p.account.Concurrency)
+	if IsTurnBudgetError(err) || errors.Is(err, ErrTurnTargetExhausted) {
+		return &creditsOveragesRetryResult{handled: true, err: err}
+	}
 	if err == nil && creditsResp != nil && creditsResp.StatusCode < 400 {
 		s.clearCreditsExhausted(p.ctx, p.account)
 		logger.LegacyPrintf("service.antigravity_gateway", "%s status=%d credit_overages_success model=%s account=%d",

@@ -1,0 +1,344 @@
+{
+  "date": "2026-10-13",
+  "official_base": {
+    "tag": "v0.2.16",
+    "tag_object": "c3cb8588ce6a5aef4dc29fa4f71ac91f3c0bdf3d",
+    "commit": "01842576b3d5c1e2545b5a99ad555d36e28ed306",
+    "url": "https://github.com/Wei-Shaw/sub2api/releases/tag/v0.2.16"
+  },
+  "sources": {
+    "main": {
+      "sha": "49b29ef158e6319cfd6b1227781307de5f8f870e",
+      "backup": "refs/backup/20261013-v0216-210726/main"
+    },
+    "TapModels": {
+      "sha": "87fb1f2613667cb250525af8a4c7c0c12f03c2f6",
+      "backup": "refs/backup/20261013-v0216-210726/TapModels"
+    },
+    "tokensavy": {
+      "sha": "f58b507f2c774bb6e6f7f9b8915a84b60a1d3f7e",
+      "backup": "refs/backup/20261013-v0216-210726/tokensavy"
+    },
+    "origin/main": {
+      "sha": "49b29ef158e6319cfd6b1227781307de5f8f870e",
+      "backup": "refs/backup/20261013-v0216-210726/origin/main"
+    },
+    "origin/TapModels": {
+      "sha": "87fb1f2613667cb250525af8a4c7c0c12f03c2f6",
+      "backup": "refs/backup/20261013-v0216-210726/origin/TapModels"
+    },
+    "origin/tokensavy": {
+      "sha": "f58b507f2c774bb6e6f7f9b8915a84b60a1d3f7e",
+      "backup": "refs/backup/20261013-v0216-210726/origin/tokensavy"
+    }
+  },
+  "working_checkpoint": {
+    "sha": "acf71dbc6c3f1ffe8ab0200ed8b7499c1b7d0286",
+    "tree": "8051a119022d45b8604442404ffbd88f8ca65b08",
+    "backup": "refs/backup/20261013-v0216-210726/main-worktree"
+  },
+  "new_branch_names": {
+    "main": "codex/rebuild-v0.2.16-main-20261013",
+    "TapModels": "codex/rebuild-v0.2.16-TapModels-20261013",
+    "tokensavy": "codex/rebuild-v0.2.16-tokensavy-20261013"
+  },
+  "separate_unfinished_task": {
+    "path": "/Users/luhonglin/.codex/worktrees/bps-ranxi-sync-20261013/sub2api",
+    "head": "35e7a0687c17352d8a7d170aaebdf2f61eb49ffc",
+    "checkpoint": "d0a30cf0028d722ac0831281eeab4dd2784b350d",
+    "backup": "refs/backup/20261013-v0216-210726/separate-bps-worktree",
+    "status": " M docs/bps/REQUIREMENTS.md\n M docs/bps/VALIDATION.md\n M docs/bps/integration-state.json\n M docs/bps/upstream-changes.md\n",
+    "included": false,
+    "reason": "Separate older task worktree, with uncommitted BPS documentation; committed latest delivery trees remain authoritative."
+  },
+  "grouping": "Each changed path is assigned one primary feature, with cross-feature ownership recorded; final blobs are restored directly, not replayed from historical patches.",
+  "known_shared_working_edits": [
+    "AGENTS.md",
+    "docs/CHANGE_DELIVERY.md"
+  ],
+  "business_changes_during_reconstruction": 0,
+  "test_changes_during_reconstruction": 0,
+  "new_http_endpoints": 0,
+  "new_runtime_configuration": 0,
+  "new_execution_paths": 0,
+  "migration_execution": false,
+  "remote_history_rewritten": false,
+  "backup_bundle": "/Users/luhonglin/Git/sub2api-history-20261013-v0216-210726/source-history.bundle",
+  "groups": {
+    "00": {
+      "slug": "upstream-version",
+      "title": "官方发布后的版本标记",
+      "subject": "chore(upstream): retain v0.2.16 version marker"
+    },
+    "01": {
+      "slug": "migration",
+      "title": "数据库升级与历史数据保护",
+      "subject": "chore(schema): preserve final migrations and entity schemas"
+    },
+    "02": {
+      "slug": "identity",
+      "title": "三级角色、会话与管理授权",
+      "subject": "feat(auth): preserve roles sessions and usage export authorization"
+    },
+    "03": {
+      "slug": "gateway-security",
+      "title": "原生网关安全与入站失败",
+      "subject": "fix(gateway): preserve tenant safety and inbound body failures"
+    },
+    "04": {
+      "slug": "accounts",
+      "title": "账号、Anthropic 授权、亲和历史与 Fable",
+      "subject": "feat(accounts): preserve setup tokens sticky history and Fable thresholds"
+    },
+    "05": {
+      "slug": "models",
+      "title": "账号模型权限、分组候选与目录顺序",
+      "subject": "fix(models): preserve final restrictions catalogs and discovery order"
+    },
+    "06": {
+      "slug": "recovery",
+      "title": "网关恢复、流终止、失败用量与传输诊断",
+      "subject": "fix(gateway): preserve recovery and harden stream failure accounting"
+    },
+    "07": {
+      "slug": "bps",
+      "title": "BPS、独立 Excel 授权、工具图片与 WS 桥接",
+      "subject": "feat(bps): preserve Excel credentials and reliable HTTP WebSocket bridge"
+    },
+    "08": {
+      "slug": "thinking",
+      "title": "最终模型能力、推理参数与协议语义",
+      "subject": "feat(gateway): normalize model capabilities and preserve protocol semantics"
+    },
+    "09": {
+      "slug": "billing",
+      "title": "支付、退款与返利完整性",
+      "subject": "fix(billing): preserve final payment and refund invariants"
+    },
+    "10": {
+      "slug": "usage",
+      "title": "用量分析、页面加载与有界快照导出",
+      "subject": "feat(usage): preserve analytics and add bounded snapshot exports"
+    },
+    "11": {
+      "slug": "diagnostics",
+      "title": "Codex 降智检测与定时诊断",
+      "subject": "feat(diagnostics): preserve metered probes and scheduled diagnostics"
+    },
+    "12": {
+      "slug": "clients",
+      "title": "客户端配置、模型目录下载与修复工具",
+      "subject": "feat(clients): preserve setup catalogs and recovery downloads"
+    },
+    "13": {
+      "slug": "site",
+      "title": "KDAN 品牌、文档站与用户界面",
+      "subject": "feat(site): preserve final KDAN branding docs and presentation"
+    },
+    "14": {
+      "slug": "localization",
+      "title": "多语言与繁体生成",
+      "subject": "feat(i18n): preserve translations and generated traditional Chinese"
+    },
+    "15": {
+      "slug": "delivery",
+      "title": "构建、手动发布、安装与在线更新",
+      "subject": "chore(delivery): preserve manual releases and update tooling"
+    },
+    "16": {
+      "slug": "integration",
+      "title": "跨功能配置、路由、类型与依赖装配",
+      "subject": "refactor(core): preserve final shared wiring and configuration"
+    },
+    "17": {
+      "slug": "records",
+      "title": "需求、方案、来源与工程规范",
+      "subject": "docs(requirements): consolidate final requirements and New API evidence"
+    }
+  },
+  "path_count": 1435,
+  "brand_path_counts": {
+    "TapModels": 258,
+    "tokensavy": 285
+  },
+  "new_api_integration": {
+    "date": "2026-10-14",
+    "source_head": "49b29ef158e6319cfd6b1227781307de5f8f870e",
+    "source_manifest_sha256": "fa60b9e4f64d261141a87fafa29e6764db186d3d77728397cb2d3c8aae4a86fe",
+    "before": {
+      "main": "c65e3de3551f853f43303688766e704e8557a2e9",
+      "TapModels": "bee70a5577bc29e1b0fbd157217887a1c0c274fa",
+      "tokensavy": "eab9e7b8e3e6cfb370320e7352d94f4da2e137a1"
+    },
+    "bundle": "/Users/luhonglin/Git/sub2api-history-20261014-new-api-fold/before.bundle",
+    "working_archive": "/Users/luhonglin/Git/sub2api-history-20261014-new-api-fold/working-files.tar.gz",
+    "file_manifest": "new-api-files.tsv",
+    "groups": [
+      {
+        "group": "00",
+        "old": "6a0fce2a5b461772b8f155fc433861ce9c0c9fe1",
+        "sha": "6a0fce2a5b461772b8f155fc433861ce9c0c9fe1",
+        "subject": "chore(upstream): retain v0.2.16 version marker",
+        "paths": "1",
+        "document": "docs/requirements/final-v0.2.16-2026-10-13/00-upstream-version.md"
+      },
+      {
+        "group": "01",
+        "old": "32c844bb1227f1f689594263645ec5ced5a252be",
+        "sha": "32c844bb1227f1f689594263645ec5ced5a252be",
+        "subject": "chore(schema): preserve final migrations and entity schemas",
+        "paths": "65",
+        "document": "docs/requirements/final-v0.2.16-2026-10-13/01-migration.md"
+      },
+      {
+        "group": "02",
+        "old": "299caf2b2d58e33f6387125a9afb1bdaa8a4fe63",
+        "sha": "1d768c0227fbffdab8f00571b6831c7904ceee93",
+        "subject": "feat(auth): preserve roles sessions and usage export authorization",
+        "paths": "151",
+        "document": "docs/requirements/final-v0.2.16-2026-10-13/02-identity.md"
+      },
+      {
+        "group": "03",
+        "old": "8d0e499c5b63ad8e8aa39b1ae6fa7de91ed00c86",
+        "sha": "50a767d4cae40071f38c68482e72974d2cce3039",
+        "subject": "fix(gateway): preserve tenant safety and inbound body failures",
+        "paths": "42",
+        "document": "docs/requirements/final-v0.2.16-2026-10-13/03-gateway-security.md"
+      },
+      {
+        "group": "04",
+        "old": "8720d382cbe92ea555097894c76c69efd87b81ac",
+        "sha": "ec41f4a692e43dd478afc6d76ede94662229c391",
+        "subject": "feat(accounts): preserve setup tokens sticky history and Fable thresholds",
+        "paths": "60",
+        "document": "docs/requirements/final-v0.2.16-2026-10-13/04-accounts.md"
+      },
+      {
+        "group": "05",
+        "old": "419c16d524e1f9cd46caefdbc1bef94026f1ba2c",
+        "sha": "89ea2f0943dd8e5b058f6588eb1662ef375ca753",
+        "subject": "fix(models): preserve final restrictions catalogs and discovery order",
+        "paths": "11",
+        "document": "docs/requirements/final-v0.2.16-2026-10-13/05-models.md"
+      },
+      {
+        "group": "06",
+        "old": "becc74714973c2d8ff9957b9dd2f6b1ef672bb1d",
+        "sha": "3475509f991f60e5024baef6a403262f96882621",
+        "subject": "fix(gateway): preserve recovery and harden stream failure accounting",
+        "paths": "89",
+        "document": "docs/requirements/final-v0.2.16-2026-10-13/06-recovery.md"
+      },
+      {
+        "group": "07",
+        "old": "9766dc89d581e6c268777aaa45eb8499a2a6bff8",
+        "sha": "b43cb9b55317ac9b3b96d2725c5fbe45f143f8f2",
+        "subject": "feat(bps): preserve Excel credentials and reliable HTTP WebSocket bridge",
+        "paths": "234",
+        "document": "docs/requirements/final-v0.2.16-2026-10-13/07-bps.md"
+      },
+      {
+        "group": "08",
+        "old": "de17a9980fd22e5380685847fc77b63167a256ad",
+        "sha": "281e593a72f9517a34ccfe9d0d61ea1173e38737",
+        "subject": "feat(gateway): normalize model capabilities and preserve protocol semantics",
+        "paths": "48",
+        "document": "docs/requirements/final-v0.2.16-2026-10-13/08-thinking.md"
+      },
+      {
+        "group": "09",
+        "old": "fbc8cb433dd3f8f5d77172798067665ffa1a6022",
+        "sha": "1e56464a1b21efa6df9b25f0bc2a779e6ecebe42",
+        "subject": "fix(billing): preserve final payment and refund invariants",
+        "paths": "37",
+        "document": "docs/requirements/final-v0.2.16-2026-10-13/09-billing.md"
+      },
+      {
+        "group": "10",
+        "old": "d0527449d7c61a2215cc7e34b0d692fb5b4ae355",
+        "sha": "1202233ec0f9d81bb7497ab77ed97f498cf393e8",
+        "subject": "feat(usage): preserve analytics and add bounded snapshot exports",
+        "paths": "46",
+        "document": "docs/requirements/final-v0.2.16-2026-10-13/10-usage.md"
+      },
+      {
+        "group": "11",
+        "old": "b8a69b469682c0cb7e6352aba21b9cb2e97d056f",
+        "sha": "70d9066cf366dadf1138fff97275f3698f3c23a1",
+        "subject": "feat(diagnostics): preserve metered probes and scheduled diagnostics",
+        "paths": "32",
+        "document": "docs/requirements/final-v0.2.16-2026-10-13/11-diagnostics.md"
+      },
+      {
+        "group": "12",
+        "old": "cfd0fdb1a6cef427b2c0257668ec490154488415",
+        "sha": "510d1b7aaececcdab59716ad14ec4535c320f67b",
+        "subject": "feat(clients): preserve setup catalogs and recovery downloads",
+        "paths": "47",
+        "document": "docs/requirements/final-v0.2.16-2026-10-13/12-clients.md"
+      },
+      {
+        "group": "13",
+        "old": "46888778f85585c77dca315b0ea014aa979e7b13",
+        "sha": "620075ed9ed9f99397a3168b165a5453e06d2135",
+        "subject": "feat(site): preserve final KDAN branding docs and presentation",
+        "paths": "225",
+        "document": "docs/requirements/final-v0.2.16-2026-10-13/13-site.md"
+      },
+      {
+        "group": "14",
+        "old": "bb1ffdbc322f3669193fb1cb7636101983738a3f",
+        "sha": "a5cca508b19432792018e9a09b1c460721b5dfd6",
+        "subject": "feat(i18n): preserve translations and generated traditional Chinese",
+        "paths": "95",
+        "document": "docs/requirements/final-v0.2.16-2026-10-13/14-localization.md"
+      },
+      {
+        "group": "15",
+        "old": "6a1c7f187e188587a61ea83a6b323857b59e18bc",
+        "sha": "db4fe49a590e20a98b47d2e3914fb6c9a84eb183",
+        "subject": "chore(delivery): preserve manual releases and update tooling",
+        "paths": "84",
+        "document": "docs/requirements/final-v0.2.16-2026-10-13/15-delivery.md"
+      },
+      {
+        "group": "16",
+        "old": "06df2e2d8c2ae173ae68d84e2cd374bf7ee1a058",
+        "sha": "5fecd49f304cd0c64257c38eeaf5bbdabcefd78a",
+        "subject": "refactor(core): preserve final shared wiring and configuration",
+        "paths": "93",
+        "document": "docs/requirements/final-v0.2.16-2026-10-13/16-integration.md"
+      },
+      {
+        "group": "17",
+        "old": "3995d81947768ab1db32dfac421c1e9892a6baf7",
+        "sha": "e9d376836282226aecb40d0c9311ac20f3f93ed1",
+        "subject": "docs(requirements): consolidate final requirements and New API evidence",
+        "paths": "75",
+        "document": "docs/requirements/final-v0.2.16-2026-10-13/17-records.md"
+      }
+    ],
+    "business_files": 61,
+    "test_files": 18,
+    "config_generated_files": 2,
+    "new_http_endpoints": 2,
+    "new_runtime_configuration": 3,
+    "new_execution_paths": 1,
+    "further_business_source_changes": 0,
+    "further_test_source_changes": 0,
+    "published": false,
+    "validation": {
+      "状态": "2026-10-14 本轮归并检查全部通过",
+      "源码一致性": "81/81 文件与原验收 SHA-256 相同；每文件仅一个功能提交；1435 项对象清单核对通过",
+      "主线后端": "全量 unit：60 个含测试包；go build ./...、go vet -tags=unit ./... 通过",
+      "前端": "8 文件 95 测试、typecheck、改动生产文件 ESLint 通过",
+      "品牌后端": "TapModels 和 tokensavy：config/server 单测与全后端 build 均通过",
+      "增量 lint": "相对旧重建 c65e3de3551f 的实际改动，0 新增问题",
+      "品牌与旧需求": "两品牌原覆盖差异保持；00/01/04/05/09/11/12/13/14 的功能差异保持",
+      "提交结构": "主线 19 个；各品牌在主线上追加 5 个覆盖提交",
+      "验证范围": "本次未重复定向 race、数据库 integration、Vite build 或 96 格基准；保留同一源码此前的通过证据",
+      "发布边界": "仅本地重建分支归并；未推送、未替换正式分支、未发版部署或生产迁移"
+    }
+  }
+}

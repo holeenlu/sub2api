@@ -1,0 +1,4 @@
+# Opt-in for one API replica only; omit this file for automatic names/scaling.
+services:
+  api:
+    container_name: ${APP_CONTAINER_NAME:?Set APP_CONTAINER_NAME only for a single API replica}

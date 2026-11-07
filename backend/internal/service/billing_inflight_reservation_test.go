@@ -6,12 +6,15 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
+	"os/exec"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/billing/reservation"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
@@ -51,7 +54,7 @@ func TestReserveInflightBalance_NoReservationCacheFailsOpen(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Billing.InflightReservation.Enabled = true
 	svc := NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
-	t.Cleanup(svc.Stop)
+	startBillingCacheForTest(t, svc)
 	release, err := svc.ReserveInflightBalance(context.Background(), &User{ID: 1}, nil, nil, 100)
 	require.NoError(t, err)
 	release()
@@ -61,7 +64,7 @@ func TestReserveInflightBalance_SimpleModeDisabled(t *testing.T) {
 	cfg := &config.Config{RunMode: config.RunModeSimple}
 	cfg.Billing.InflightReservation.Enabled = true
 	svc := NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
-	t.Cleanup(svc.Stop)
+	startBillingCacheForTest(t, svc)
 	require.False(t, svc.InflightReservationEnabled())
 }
 
@@ -173,7 +176,6 @@ type memInflightCache struct {
 	res       map[string]float64
 	exp       map[string]time.Time
 	renews    atomic.Int32
-	deducts   atomic.Int32
 	releaseCt atomic.Int32
 }
 
@@ -185,14 +187,6 @@ func (m *memInflightCache) GetUserBalance(context.Context, int64) (float64, erro
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.balance, nil
-}
-
-func (m *memInflightCache) DeductUserBalance(_ context.Context, _ int64, amount float64) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.balance -= amount
-	m.deducts.Add(1)
-	return nil
 }
 
 func (m *memInflightCache) gc() {
@@ -253,7 +247,7 @@ func newInflightSvc(t *testing.T, cache BillingCache, ttlSeconds int) *BillingCa
 	cfg := &config.Config{}
 	cfg.Billing.InflightReservation = config.InflightReservationConfig{Enabled: true, TTLSeconds: ttlSeconds}
 	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, cfg, nil)
-	t.Cleanup(svc.Stop)
+	startBillingCacheForTest(t, svc)
 	return svc
 }
 
@@ -287,10 +281,31 @@ func TestInflightReservation_HeldUntilBillingTaskDone(t *testing.T) {
 	require.Equal(t, int32(2), cache.releaseCt.Load())
 
 	// Nil handle is safe.
-	var nilRes *InflightReservation
+	var nilRes *reservation.Handle
 	nilRes.Acquire()()
 	nilRes.HandlerDone()
 	nilRes.Release()
+}
+
+func TestInflightReservation_CanceledRequestKeepsPendingBillingHold(t *testing.T) {
+	cache := newMemInflightCache(1)
+	svc := newInflightSvc(t, cache, 60)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	res, err := svc.ReserveInflight(ctx, &User{ID: 1}, nil, nil, 0.9)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	t.Cleanup(res.Release)
+	require.Same(t, res, InflightReservationFromContext(WithInflightReservation(ctx, res)))
+	done := res.Acquire()
+	cancel()
+	res.HandlerDone()
+	require.Equal(t, 1, cache.count(), "request cancellation must not release pending billing")
+	require.Zero(t, cache.releaseCt.Load())
+	done()
+	done()
+	require.Zero(t, cache.count())
+	require.Equal(t, int32(1), cache.releaseCt.Load())
 }
 
 func TestInflightReservation_RenewedWhileHandlerActive(t *testing.T) {
@@ -313,16 +328,6 @@ func TestInflightReservation_RenewedWhileHandlerActive(t *testing.T) {
 	require.Equal(t, renewsAtStop, cache.renews.Load(), "no renewal after handler end")
 	require.Equal(t, 0, cache.count(), "post-handler hold is bounded by TTL")
 	done()
-}
-
-func TestSyncBalanceCacheAfterDeduction_SynchronousWhenInflightEnabled(t *testing.T) {
-	cache := newMemInflightCache(1)
-	svc := newInflightSvc(t, cache, 60)
-	p := &postUsageBillingParams{Cost: &CostBreakdown{ActualCost: 0.25}, User: &User{ID: 3}}
-	syncBalanceCacheAfterDeduction(context.Background(), p, &billingDeps{billingCacheService: svc}, nil)
-	require.Equal(t, int32(1), cache.deducts.Load(), "cache deduction must land before the billing task returns")
-	bal, _ := cache.GetUserBalance(context.Background(), 3)
-	require.InDelta(t, 0.75, bal, 1e-12)
 }
 
 // 计费侧：requested 来源下别名本身无价 → billableModelWithFallback 回退到映射模型。
@@ -434,6 +439,16 @@ func attachInflightSnapshot(svc *GatewayService, snap *inflightSnapshotCacheStub
 
 // 已定价模型永不查账号映射；随机未定价模型名不直接查库、不产生按模型名的缓存（内存有界）。
 func TestInflightEstimate_AccountMappingNoDBAndBoundedMemory(t *testing.T) {
+	// HeapAlloc is process-wide; isolate other tests' background allocations.
+	const subprocess = "SUB2API_INFLIGHT_MEMORY_SUBPROCESS"
+	if os.Getenv(subprocess) != "1" {
+		cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^"+t.Name()+"$", "-test.timeout=30s")
+		cmd.Env = append(os.Environ(), subprocess+"=1")
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "%s", output)
+		return
+	}
+
 	groupID := int64(40)
 	svc := newInflightEstimateGateway(t, nil)
 	snap := &inflightSnapshotCacheStub{byBucket: map[string][]Account{inflightBucketKey(groupID, PlatformAnthropic): {

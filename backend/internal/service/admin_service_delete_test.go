@@ -5,8 +5,11 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/stretchr/testify/require"
@@ -116,8 +119,8 @@ func (s *userRepoStub) GetByEmail(ctx context.Context, email string) (*User, err
 	return nil, ErrUserNotFound
 }
 
-func (s *userRepoStub) GetFirstAdmin(ctx context.Context) (*User, error) {
-	panic("unexpected GetFirstAdmin call")
+func (s *userRepoStub) GetFirstSuperAdmin(ctx context.Context) (*User, error) {
+	panic("unexpected GetFirstSuperAdmin call")
 }
 
 func (s *userRepoStub) Update(ctx context.Context, user *User, fields UserUpdateFields) error {
@@ -415,7 +418,6 @@ type redeemRepoStub struct {
 	deletedIDs    []int64
 
 	batchUpdateIDs    []int64
-	batchUpdateFields RedeemCodeBatchUpdateFields
 	batchUpdateResult int64
 	batchUpdateErr    error
 	batchUpdateCalled bool
@@ -439,19 +441,6 @@ func (s *redeemRepoStub) GetByCode(ctx context.Context, code string) (*RedeemCod
 
 func (s *redeemRepoStub) Update(ctx context.Context, code *RedeemCode) error {
 	panic("unexpected Update call")
-}
-
-func (s *redeemRepoStub) BatchUpdate(ctx context.Context, ids []int64, fields RedeemCodeBatchUpdateFields) (int64, error) {
-	s.batchUpdateCalled = true
-	s.batchUpdateIDs = append([]int64(nil), ids...)
-	s.batchUpdateFields = fields
-	if s.batchUpdateErr != nil {
-		return 0, s.batchUpdateErr
-	}
-	if s.batchUpdateResult != 0 {
-		return s.batchUpdateResult, nil
-	}
-	return int64(len(ids)), nil
 }
 
 func (s *redeemRepoStub) Delete(ctx context.Context, id int64) error {
@@ -509,10 +498,6 @@ func (s *billingCacheStub) SetUserBalance(ctx context.Context, userID int64, bal
 	panic("unexpected SetUserBalance call")
 }
 
-func (s *billingCacheStub) DeductUserBalance(ctx context.Context, userID int64, amount float64) error {
-	panic("unexpected DeductUserBalance call")
-}
-
 func (s *billingCacheStub) InvalidateUserBalance(ctx context.Context, userID int64) error {
 	panic("unexpected InvalidateUserBalance call")
 }
@@ -525,10 +510,6 @@ func (s *billingCacheStub) SetSubscriptionCache(ctx context.Context, userID, gro
 	panic("unexpected SetSubscriptionCache call")
 }
 
-func (s *billingCacheStub) UpdateSubscriptionUsage(ctx context.Context, userID, groupID int64, cost float64) error {
-	panic("unexpected UpdateSubscriptionUsage call")
-}
-
 func (s *billingCacheStub) InvalidateSubscriptionCache(ctx context.Context, userID, groupID int64) error {
 	s.invalidations <- subscriptionInvalidateCall{userID: userID, groupID: groupID}
 	return nil
@@ -539,9 +520,6 @@ func (s *billingCacheStub) GetAPIKeyRateLimit(ctx context.Context, keyID int64) 
 }
 func (s *billingCacheStub) SetAPIKeyRateLimit(ctx context.Context, keyID int64, data *APIKeyRateLimitCacheData) error {
 	panic("unexpected SetAPIKeyRateLimit call")
-}
-func (s *billingCacheStub) UpdateAPIKeyRateLimitUsage(ctx context.Context, keyID int64, cost float64) error {
-	panic("unexpected UpdateAPIKeyRateLimitUsage call")
 }
 func (s *billingCacheStub) InvalidateAPIKeyRateLimit(ctx context.Context, keyID int64) error {
 	panic("unexpected InvalidateAPIKeyRateLimit call")
@@ -557,22 +535,6 @@ func (s *billingCacheStub) SetUserPlatformQuotaCache(ctx context.Context, userID
 
 func (s *billingCacheStub) DeleteUserPlatformQuotaCache(ctx context.Context, userID int64, platform string) error {
 	panic("unexpected DeleteUserPlatformQuotaCache call")
-}
-
-func (s *billingCacheStub) IncrUserPlatformQuotaUsageCache(ctx context.Context, userID int64, platform string, cost float64, ttl time.Duration, markDirty bool) error {
-	panic("unexpected IncrUserPlatformQuotaUsageCache call")
-}
-
-func (s *billingCacheStub) PopDirtyUserPlatformQuotaKeys(ctx context.Context, n int) ([]UserPlatformQuotaKey, error) {
-	panic("unexpected PopDirtyUserPlatformQuotaKeys call")
-}
-
-func (s *billingCacheStub) ReaddDirtyUserPlatformQuotaKeys(ctx context.Context, keys []UserPlatformQuotaKey) error {
-	panic("unexpected ReaddDirtyUserPlatformQuotaKeys call")
-}
-
-func (s *billingCacheStub) BatchGetUserPlatformQuotaCache(ctx context.Context, keys []UserPlatformQuotaKey) ([]*UserPlatformQuotaCacheEntry, error) {
-	panic("unexpected BatchGetUserPlatformQuotaCache call")
 }
 
 func waitForInvalidations(t *testing.T, ch <-chan subscriptionInvalidateCall, expected int) []subscriptionInvalidateCall {
@@ -633,14 +595,28 @@ func TestAdminService_DeleteUser_NotFound(t *testing.T) {
 	require.Empty(t, repo.deletedIDs)
 }
 
-func TestAdminService_DeleteUser_AdminGuard(t *testing.T) {
-	repo := &userRepoStub{user: &User{ID: 1, Role: RoleAdmin}}
-	svc := &adminServiceImpl{userRepo: repo}
-
-	err := svc.DeleteUser(context.Background(), 1)
-	require.Error(t, err)
-	require.ErrorContains(t, err, "cannot delete admin user")
-	require.Empty(t, repo.deletedIDs)
+func TestAdminService_DeleteUser_ManagementScope(t *testing.T) {
+	for _, tc := range []struct {
+		role    string
+		id      int64
+		allowed bool
+	}{
+		{RoleAdmin, 2, false}, {RoleUser, 2, true}, {RoleSuperAdmin, 2, false}, {RoleAdmin, 1, false},
+	} {
+		t.Run(tc.role+fmt.Sprint(tc.id), func(t *testing.T) {
+			repo := &userRepoStub{user: &User{ID: tc.id, Role: tc.role, CreatedBy: func() *int64 { v := int64(1); return &v }()}}
+			svc := &adminServiceImpl{userRepo: repo}
+			ctx := authz.WithSubject(context.Background(), authz.Subject{UserID: 1, Role: RoleAdmin, PolicyVersion: 1, Permissions: []string{"users.read", "users.delete", "staff.manage"}})
+			err := svc.DeleteUser(ctx, tc.id)
+			if tc.allowed {
+				require.NoError(t, err)
+				require.Equal(t, []int64{tc.id}, repo.deletedIDs)
+			} else {
+				require.Error(t, err)
+				require.Empty(t, repo.deletedIDs)
+			}
+		})
+	}
 }
 
 func TestAdminService_DeleteUser_DeleteError(t *testing.T) {
@@ -759,56 +735,4 @@ func TestAdminService_DeleteProxy_Error(t *testing.T) {
 
 	err := svc.DeleteProxy(context.Background(), 33)
 	require.ErrorIs(t, err, deleteErr)
-}
-
-func TestAdminService_DeleteRedeemCode_Success(t *testing.T) {
-	repo := &redeemRepoStub{}
-	svc := &adminServiceImpl{redeemCodeRepo: repo}
-
-	err := svc.DeleteRedeemCode(context.Background(), 10)
-	require.NoError(t, err)
-	require.Equal(t, []int64{10}, repo.deletedIDs)
-}
-
-func TestAdminService_DeleteRedeemCode_Idempotent(t *testing.T) {
-	repo := &redeemRepoStub{}
-	svc := &adminServiceImpl{redeemCodeRepo: repo}
-
-	err := svc.DeleteRedeemCode(context.Background(), 999)
-	require.NoError(t, err)
-	require.Equal(t, []int64{999}, repo.deletedIDs)
-}
-
-func TestAdminService_DeleteRedeemCode_Error(t *testing.T) {
-	deleteErr := errors.New("delete failed")
-	repo := &redeemRepoStub{deleteErrByID: map[int64]error{1: deleteErr}}
-	svc := &adminServiceImpl{redeemCodeRepo: repo}
-
-	err := svc.DeleteRedeemCode(context.Background(), 1)
-	require.ErrorIs(t, err, deleteErr)
-	require.Equal(t, []int64{1}, repo.deletedIDs)
-}
-
-func TestAdminService_BatchDeleteRedeemCodes_Success(t *testing.T) {
-	repo := &redeemRepoStub{}
-	svc := &adminServiceImpl{redeemCodeRepo: repo}
-
-	deleted, err := svc.BatchDeleteRedeemCodes(context.Background(), []int64{1, 2, 3})
-	require.NoError(t, err)
-	require.Equal(t, int64(3), deleted)
-	require.Equal(t, []int64{1, 2, 3}, repo.deletedIDs)
-}
-
-func TestAdminService_BatchDeleteRedeemCodes_PartialFailures(t *testing.T) {
-	repo := &redeemRepoStub{
-		deleteErrByID: map[int64]error{
-			2: errors.New("db error"),
-		},
-	}
-	svc := &adminServiceImpl{redeemCodeRepo: repo}
-
-	deleted, err := svc.BatchDeleteRedeemCodes(context.Background(), []int64{1, 2, 3})
-	require.NoError(t, err)
-	require.Equal(t, int64(2), deleted)
-	require.Equal(t, []int64{1, 2, 3}, repo.deletedIDs)
 }

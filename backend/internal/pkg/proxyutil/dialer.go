@@ -61,10 +61,13 @@ func ConfigureTransportProxy(transport *http.Transport, proxyURL *url.URL) error
 	switch scheme {
 	case "http", "https":
 		transport.Proxy = http.ProxyURL(proxyURL)
+		if IsVendorProxy(proxyURL) {
+			transport.DialContext = GuardProxyDial(proxyURL, transport.DialContext)
+		}
 		return nil
 
 	case "socks5", "socks5h":
-		dialer, err := proxy.FromURL(proxyURL, socks5ForwardDialer)
+		dialer, err := proxy.FromURL(proxyURL, ContextForwardDialer{DialFunc: GuardProxyDial(proxyURL, socks5ForwardDialer.DialContext)})
 		if err != nil {
 			return fmt.Errorf("create socks5 dialer: %w", err)
 		}

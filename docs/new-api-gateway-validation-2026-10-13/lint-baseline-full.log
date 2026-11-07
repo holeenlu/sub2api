@@ -1,0 +1,164 @@
+internal/service/email_service.go:24:2: import 'github.com/redis/go-redis/v9' is not allowed from list 'service-no-repository': service must not import redis (depguard)
+	"github.com/redis/go-redis/v9"
+	^
+cmd/server/main.go:107:17: Error return value of `(*database/sql.DB).Close` is not checked (errcheck)
+		defer db.Close()
+		              ^
+internal/authz/policy_test.go:40:12: Error return value is not checked (errcheck)
+	result := FilterResponse(data, "/api/v1/admin/usage", actor, false).(map[string]any)
+	          ^
+internal/authz/policy_test.go:42:35: Error return value is not checked (errcheck)
+	require.Equal(t, "customer key", result["api_key"].(map[string]any)["name"])
+	                                 ^
+internal/authz/policy_test.go:53:12: Error return value is not checked (errcheck)
+	result := FilterResponse(stats, "/api/v1/admin/usage/stats", actor, false).(map[string]any)
+	          ^
+internal/repository/account_repo.go:4202:18: Error return value of `(*database/sql.Rows).Close` is not checked (errcheck)
+	defer rows.Close()
+	                ^
+internal/repository/account_repo_excel_credentials.go:20:18: Error return value of `(*database/sql.Rows).Close` is not checked (errcheck)
+	defer rows.Close()
+	                ^
+internal/repository/account_repo_excel_credentials_test.go:28:18: Error return value of `(*database/sql.DB).Close` is not checked (errcheck)
+			defer db.Close()
+			              ^
+internal/repository/account_repo_excel_credentials_test.go:30:22: Error return value of `(*github.com/Wei-Shaw/sub2api/ent.Client).Close` is not checked (errcheck)
+			defer client.Close()
+			                  ^
+internal/repository/model_policy_preflight.go:19:19: Error return value of `(*database/sql.Tx).Rollback` is not checked (errcheck)
+	defer tx.Rollback()
+	                 ^
+internal/repository/ops_repo_recovery_test.go:22:19: Error return value of `(*database/sql.DB).Close` is not checked (errcheck)
+				defer db.Close()
+				              ^
+internal/repository/scheduled_test_diagnostic_repo.go:113:19: Error return value of `(*database/sql.Tx).Rollback` is not checked (errcheck)
+	defer tx.Rollback()
+	                 ^
+internal/repository/scheduled_test_diagnostic_repo.go:143:19: Error return value of `(*database/sql.Tx).Rollback` is not checked (errcheck)
+	defer tx.Rollback()
+	                 ^
+internal/service/account_test_service.go:1065:26: Error return value of `(*strings.Builder).WriteString` is not checked (errcheck)
+							answer.WriteString(text)
+							                  ^
+internal/service/admin_user.go:92:18: Error return value of `(*database/sql.Rows).Close` is not checked (errcheck)
+	defer rows.Close()
+	                ^
+internal/service/basispoints/upstream_failure_test.go:27:21: Error return value of `(io.Closer).Close` is not checked (errcheck)
+				defer body.Close()
+				                ^
+internal/service/openai_excel_bps.go:970:23: Error return value of `(*strings.Builder).WriteString` is not checked (errcheck)
+				staged.WriteString(line + "\n")
+				                  ^
+internal/service/openai_excel_bps_agent_assignment_test.go:59:18: Error return value of `(*strings.Builder).Write` is not checked (errcheck)
+					output.Write(event)
+					            ^
+internal/service/openai_excel_bps_attachment_diagnostics_test.go:113:25: Error return value of `(io.Closer).Close` is not checked (errcheck)
+			defer resp.Body.Close()
+			                     ^
+internal/service/openai_excel_bps_attachments_test.go:303:21: Error return value of `(*strings.Builder).Write` is not checked (errcheck)
+								events.Write(event)
+								            ^
+internal/service/openai_excel_bps_failure_test.go:452:20: Error return value of `(*strings.Builder).Write` is not checked (errcheck)
+							output.Write(event)
+							            ^
+internal/service/openai_excel_bps_reliability_test.go:23:20: Error return value of `(*io.PipeWriter).Close` is not checked (errcheck)
+	defer writer.Close()
+	                  ^
+internal/service/openai_excel_bps_reliability_test.go:33:23: Error return value of `(*github.com/coder/websocket.Conn).CloseNow` is not checked (errcheck)
+	defer client.CloseNow()
+	                     ^
+internal/service/openai_excel_bps_reliability_test.go:70:23: Error return value of `(*io.PipeWriter).Close` is not checked (errcheck)
+				defer writer.Close()
+				                  ^
+internal/service/openai_excel_bps_reliability_test.go:98:27: Error return value of `(*github.com/coder/websocket.Conn).CloseNow` is not checked (errcheck)
+					defer client.CloseNow()
+					                     ^
+internal/service/openai_excel_bps_reliability_test.go:148:20: Error return value of `(*io.PipeWriter).Close` is not checked (errcheck)
+	defer writer.Close()
+	                  ^
+internal/service/openai_excel_bps_reliability_test.go:204:23: Error return value of `(*github.com/coder/websocket.Conn).CloseNow` is not checked (errcheck)
+	defer client.CloseNow()
+	                     ^
+internal/service/openai_ws_client_read_test.go:185:19: Error return value of `(*github.com/Wei-Shaw/sub2api/internal/service.OpenAIWSDownstream).CloseNow` is not checked (errcheck)
+	defer ds.CloseNow()
+	                 ^
+internal/service/openai_ws_client_read_test.go:207:19: Error return value of `(*github.com/Wei-Shaw/sub2api/internal/service.OpenAIWSDownstream).CloseNow` is not checked (errcheck)
+	defer ds.CloseNow()
+	                 ^
+internal/service/openai_ws_client_read_test.go:225:19: Error return value of `(*github.com/Wei-Shaw/sub2api/internal/service.OpenAIWSDownstream).CloseNow` is not checked (errcheck)
+	defer ds.CloseNow()
+	                 ^
+internal/service/openai_ws_http_bridge_test.go:1382:21: Error return value of `(*io.PipeReader).Close` is not checked (errcheck)
+		defer reader.Close()
+		                  ^
+internal/service/openai_ws_http_bridge_test.go:1447:22: Error return value of `(*io.PipeReader).Close` is not checked (errcheck)
+			defer reader.Close()
+			                  ^
+internal/service/openai_ws_v2_passthrough_lifecycle_test.go:114:21: Error return value of `(*github.com/Wei-Shaw/sub2api/internal/service.stagedPassthroughConn).Close` is not checked (errcheck)
+			defer inner.Close()
+			                 ^
+internal/authz/request_fields.go:34:17: ST1005: error strings should not be capitalized (staticcheck)
+		return false, fmt.Errorf("Request field policy is unavailable: %s", name)
+		              ^
+internal/authz/request_fields.go:76:19: ST1005: error strings should not be capitalized (staticcheck)
+				return false, fmt.Errorf("Field %s%s requires super administrator", prefix, key)
+				              ^
+internal/authz/request_fields.go:101:20: ST1005: error strings should not be capitalized (staticcheck)
+					return false, fmt.Errorf("Field %s%s requires super administrator", prefix, key)
+					              ^
+internal/handler/admin/user_handler.go:287:2: QF1003: could use tagged switch on req.Role (staticcheck)
+	if req.Role == service.RoleSuperAdmin {
+	^
+internal/handler/openai_excel_bps_error_test.go:80:4: QF1003: could use tagged switch on tt.name (staticcheck)
+			if tt.name == "incomplete_stream" {
+			^
+internal/handler/ops_error_logger.go:1254:30: QF1001: could apply De Morgan's law (staticcheck)
+		if parsed.StreamFailure && !(c.GetBool(opsGatewayResponsesFailedKey) &&
+		                           ^
+internal/server/middleware/admin_response.go:65:17: QF1001: could apply De Morgan's law (staticcheck)
+		w.eventOpen = !(bytes.HasSuffix(tail, []byte("\n\n")) || bytes.HasSuffix(tail, []byte("\r\n\r\n")))
+		              ^
+internal/service/basispoints/unknown_tool_repair.go:49:6: QF1001: could apply De Morgan's law (staticcheck)
+		if !(char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' || char == '_' || char == '.' || char == '-' || char == ':') {
+		   ^
+internal/service/openai_excel_bps_attachments_test.go:247:6: QF1003: could use tagged switch on source (staticcheck)
+					if source == "client file" {
+					^
+internal/service/openai_excel_bps_image_admission_test.go:323:5: QF1003: could use tagged switch on outcome (staticcheck)
+				if outcome == "validation" {
+				^
+internal/service/openai_ws_forwarder_ingress_session_test.go:5131:72: ST1008: error should be returned as the last argument (staticcheck)
+	run := func(t *testing.T, upstreamError string, visibleFailure bool) (error, []byte) {
+	                                                                      ^
+internal/service/openai_ws_v2_passthrough_adapter.go:1351:5: QF1003: could use tagged switch on eventType (staticcheck)
+				if eventType == "error" || eventType == "response.failed" {
+				^
+internal/handler/openai_gateway_ws_group_pricing_test.go:92:40: func (*wsGroupPricingAPIKeyRepoStub).lookupCount is unused (unused)
+func (s *wsGroupPricingAPIKeyRepoStub) lookupCount() int {
+                                       ^
+internal/pkg/httputil/body.go:180:6: func decompressRequestBody is unused (unused)
+func decompressRequestBody(encoding string, raw []byte) ([]byte, error) {
+     ^
+internal/server/middleware/admin_authorization.go:537:6: func hasPermissionField is unused (unused)
+func hasPermissionField(body map[string]any, key string) bool {
+     ^
+internal/service/openai_excel_bps_transport.go:104:33: func (*excelBPSWriteEvidence).unsent is unused (unused)
+func (e *excelBPSWriteEvidence) unsent() bool { return e.DefinitelyUnsent() }
+                                ^
+internal/service/openai_ws_bps_ingress_test.go:360:6: type ctxBlockingBody is unused (unused)
+type ctxBlockingBody struct{ ctx context.Context }
+     ^
+internal/service/openai_ws_forwarder.go:24:2: const openAIWSFallbackReasonInvalidEncryptedContent is unused (unused)
+	openAIWSFallbackReasonInvalidEncryptedContent = "invalid_encrypted_content"
+	^
+internal/service/openai_ws_forwarder_ingress_test.go:1263:6: type nativeWSTestTurn is unused (unused)
+type nativeWSTestTurn struct {
+     ^
+internal/service/openai_ws_forwarder_payload.go:655:6: func openAIWSRawItemsHaveToolCallContextForOutputs is unused (unused)
+func openAIWSRawItemsHaveToolCallContextForOutputs(items []json.RawMessage) bool {
+     ^
+53 issues:
+* depguard: 1
+* errcheck: 32
+* staticcheck: 12
+* unused: 8

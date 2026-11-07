@@ -191,6 +191,8 @@ func (s *stubAdminService) UpdateUser(ctx context.Context, id int64, input *serv
 	return &user, nil
 }
 
+func (s *stubAdminService) DeleteUsers(ctx context.Context, ids []int64) error { return nil }
+
 func (s *stubAdminService) DeleteUser(ctx context.Context, id int64) error {
 	return nil
 }
@@ -205,14 +207,6 @@ func (s *stubAdminService) BatchUpdateConcurrency(ctx context.Context, userIDs [
 }
 
 func (s *stubAdminService) BatchUpdateLimits(ctx context.Context, userIDs []int64, concurrency, rpmLimit *int) (int, error) {
-	return len(userIDs), nil
-}
-
-func (s *stubAdminService) FindActiveUsersByBlacklistedEmails(ctx context.Context, emails []string) ([]service.User, error) {
-	return []service.User{}, nil
-}
-
-func (s *stubAdminService) BatchDisableUsers(ctx context.Context, userIDs []int64) (int, error) {
 	return len(userIDs), nil
 }
 
@@ -554,11 +548,6 @@ func (s *stubAdminService) DeleteAccount(ctx context.Context, id int64) error {
 	return nil
 }
 
-func (s *stubAdminService) RefreshAccountCredentials(ctx context.Context, id int64) (*service.Account, error) {
-	account := service.Account{ID: id, Name: "account", Status: service.StatusActive}
-	return &account, nil
-}
-
 func (s *stubAdminService) ClearAccountError(ctx context.Context, id int64) (*service.Account, error) {
 	account := service.Account{ID: id, Name: "account", Status: service.StatusActive}
 	return &account, nil
@@ -715,38 +704,6 @@ func (s *stubAdminService) CheckProxyQuality(ctx context.Context, id int64) (*se
 			{Target: "gemini", Status: "pass", HTTPStatus: 200},
 		},
 	}, nil
-}
-
-func (s *stubAdminService) ListRedeemCodes(ctx context.Context, page, pageSize int, codeType, status, search string, sortBy, sortOrder string) ([]service.RedeemCode, int64, error) {
-	s.lastListRedeemCodes.codeType = codeType
-	s.lastListRedeemCodes.status = status
-	s.lastListRedeemCodes.search = search
-	s.lastListRedeemCodes.sortBy = sortBy
-	s.lastListRedeemCodes.sortOrder = sortOrder
-	s.lastListRedeemCodes.calls++
-	return s.redeems, int64(len(s.redeems)), nil
-}
-
-func (s *stubAdminService) GetRedeemCode(ctx context.Context, id int64) (*service.RedeemCode, error) {
-	code := service.RedeemCode{ID: id, Code: "R-TEST", Status: service.StatusUnused}
-	return &code, nil
-}
-
-func (s *stubAdminService) GenerateRedeemCodes(ctx context.Context, input *service.GenerateRedeemCodesInput) ([]service.RedeemCode, error) {
-	return s.redeems, nil
-}
-
-func (s *stubAdminService) DeleteRedeemCode(ctx context.Context, id int64) error {
-	return nil
-}
-
-func (s *stubAdminService) BatchDeleteRedeemCodes(ctx context.Context, ids []int64) (int64, error) {
-	return int64(len(ids)), nil
-}
-
-func (s *stubAdminService) ExpireRedeemCode(ctx context.Context, id int64) (*service.RedeemCode, error) {
-	code := service.RedeemCode{ID: id, Code: "R-TEST", Status: service.StatusUsed}
-	return &code, nil
 }
 
 func (s *stubAdminService) GetUserBalanceHistory(ctx context.Context, userID int64, page, pageSize int, codeType string) ([]service.RedeemCode, int64, float64, error) {

@@ -18,20 +18,20 @@ func TestMappedResponseModelPreservesOtherData(t *testing.T) {
 	body := `{"model":"alias","text":"mapped alias","tool":{"model":"mapped","arguments":"{\"model\":\"alias\"}"}}`
 	want := `{"model":"public","text":"mapped alias","tool":{"model":"mapped","arguments":"{\"model\":\"alias\"}"}}`
 	require.Equal(t, want, string(svc.replaceModelInResponseBody([]byte(body), "mapped", "public")))
-	require.Equal(t, "data: "+want, svc.replaceModelInSSELine("data: "+body, "mapped", "public"))
+	require.Equal(t, want, replaceOpenAISSEModelData(body, "mapped", "public"))
 	for _, body := range []string{
 		`{"model":"alias",`, `{"model":"alias"} trailing`, `{"model":null}`, `{"model":42}`, `{"model":{}}`, `{"model":[]}`, `{"model":true}`,
 		`{"text":"alias","tool":{"model":"alias"}}`,
 	} {
 		require.Equal(t, body, string(svc.replaceModelInResponseBody([]byte(body), "mapped", "public")))
-		require.Equal(t, "data: "+body, svc.replaceModelInSSELine("data: "+body, "mapped", "public"))
+		require.Equal(t, body, replaceOpenAISSEModelData(body, "mapped", "public"))
 	}
 	for _, models := range [][2]string{{"same", "same"}, {"", "public"}, {"mapped", ""}} {
 		body := `{"model":"alias","response":{"model":"alias"}}`
 		require.Equal(t, body, string(svc.replaceModelInResponseBody([]byte(body), models[0], models[1])))
-		require.Equal(t, "data: "+body, svc.replaceModelInSSELine("data: "+body, models[0], models[1]))
+		require.Equal(t, body, replaceOpenAISSEModelData(body, models[0], models[1]))
 	}
-	require.Equal(t, `data: {"response":{"model":42}}`, svc.replaceModelInSSELine(`data: {"response":{"model":42}}`, "mapped", "public"))
+	require.Equal(t, `{"response":{"model":42}}`, replaceOpenAISSEModelData(`{"response":{"model":42}}`, "mapped", "public"))
 	require.Equal(t, `{"model":"public"}`, string(svc.replaceModelInResponseBody([]byte(`{"model":""}`), "mapped", "public")))
 }
 

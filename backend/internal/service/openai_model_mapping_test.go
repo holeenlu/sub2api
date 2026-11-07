@@ -1,6 +1,10 @@
 package service
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
+)
 
 func TestResolveOpenAIForwardModel(t *testing.T) {
 	tests := []struct {
@@ -356,8 +360,8 @@ func TestNormalizeCodexModel(t *testing.T) {
 	}
 
 	for input, expected := range cases {
-		if got := normalizeCodexModel(input); got != expected {
-			t.Fatalf("normalizeCodexModel(%q) = %q, want %q", input, got, expected)
+		if got := catalog.NormalizeCodexModel(input); got != expected {
+			t.Fatalf("catalog.NormalizeCodexModel(%q) = %q, want %q", input, got, expected)
 		}
 	}
 }

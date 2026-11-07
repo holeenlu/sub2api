@@ -61,7 +61,7 @@ func TestHandleCCStreamingFromAnthropic_PingFlushesImmediately(t *testing.T) {
 	finished := make(chan outcome, 1)
 	go func() {
 		result, err := (&GatewayService{}).handleCCStreamingFromAnthropic(
-			&http.Response{Body: reader}, context, "gpt-5", "claude-sonnet-4.5", nil, time.Now(),
+			&http.Response{Body: reader}, context, "gpt-5", "claude-sonnet-4.5", nil, time.Now(), true,
 		)
 		finished <- outcome{result: result, err: err}
 	}()
@@ -105,9 +105,6 @@ func TestHandleCCStreamingFromAnthropic_PingFlushesImmediately(t *testing.T) {
 	require.Contains(t, body, `"content":" world"`)
 	send("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}}`)
 	send("message_stop", `{"type":"message_stop"}`)
-	ping()
-	require.NotContains(t, body, "[DONE]")
-	require.NoError(t, upstream.Close())
 
 	select {
 	case got := <-finished:
@@ -116,12 +113,12 @@ func TestHandleCCStreamingFromAnthropic_PingFlushesImmediately(t *testing.T) {
 		require.Equal(t, 7, got.result.Usage.OutputTokens)
 		require.NotNil(t, got.result.FirstTokenMs)
 	case <-time.After(5 * time.Second):
-		t.Fatal("stream did not finish after EOF")
+		t.Fatal("stream did not finish at message_stop before EOF")
 	}
 	body = writer.Body.String()
 	require.NotContains(t, body, "event:")
 	require.NotContains(t, body, `"type":"ping"`)
-	require.Equal(t, 4, strings.Count(body, ": ping\n\n"))
+	require.Equal(t, 3, strings.Count(body, ": ping\n\n"))
 	require.Equal(t, 1, strings.Count(body, "data: [DONE]\n\n"))
 	require.True(t, strings.HasSuffix(body, "data: [DONE]\n\n"))
 	var content strings.Builder
@@ -161,9 +158,10 @@ func TestHandleCCStreamingFromAnthropic_PingDoesNotSetFirstToken(t *testing.T) {
 	context, _ := gin.CreateTestContext(writer)
 	result, err := (&GatewayService{}).handleCCStreamingFromAnthropic(
 		&http.Response{Body: io.NopCloser(strings.NewReader("event: ping\ndata: {\"type\":\"ping\"}\n\n"))},
-		context, "gpt-5", "claude-sonnet-4.5", nil, time.Now(),
+		context, "gpt-5", "claude-sonnet-4.5", nil, time.Now(), true,
 	)
-	require.NoError(t, err)
+	require.Error(t, err)
+	require.NotContains(t, writer.Body.String(), "[DONE]")
 	require.Nil(t, result.FirstTokenMs)
 	require.True(t, strings.HasPrefix(writer.Body.String(), ": ping\n\n"))
 }
@@ -181,12 +179,16 @@ func TestHandleCCStreamingFromAnthropic_PingWriteFailureStopsDownstream(t *testi
 			if withUsage {
 				stream += "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_failure\",\"usage\":{\"input_tokens\":10}}}\n\n"
 			}
-			stream += "event: ping\ndata: {\"type\":\"ping\"}\n\n" +
+			stream += "event: ping\ndata: {\"type\":\"ping\"}\n\n"
+			if !withUsage {
+				stream += "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_failure\",\"usage\":{\"input_tokens\":10}}}\n\n"
+			}
+			stream +=
 				"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":7}}\n\n" +
-				"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+					"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
 			result, err := (&GatewayService{}).handleCCStreamingFromAnthropic(
 				&http.Response{Body: io.NopCloser(strings.NewReader(stream))},
-				context, "gpt-5", "claude-sonnet-4.5", nil, time.Now(),
+				context, "gpt-5", "claude-sonnet-4.5", nil, time.Now(), true,
 			)
 			require.NoError(t, err)
 			require.True(t, writer.failed)
@@ -195,11 +197,12 @@ func TestHandleCCStreamingFromAnthropic_PingWriteFailureStopsDownstream(t *testi
 			require.Zero(t, writer.flushesAfterError)
 			require.NotContains(t, writer.Body.String(), "[DONE]")
 			require.Equal(t, 7, result.Usage.OutputTokens)
-			require.NotNil(t, result.FirstTokenMs)
+			require.True(t, result.ClientDisconnect)
 			if withUsage {
 				require.Equal(t, 10, result.Usage.InputTokens)
 			} else {
-				require.Zero(t, result.Usage.InputTokens)
+				require.Equal(t, 10, result.Usage.InputTokens)
+				require.Nil(t, result.FirstTokenMs)
 			}
 		})
 	}

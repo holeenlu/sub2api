@@ -43,6 +43,19 @@ func TestMergePreservingSensitiveCreds_OverwritesWhenIncomingProvidesSensitive(t
 	require.Equal(t, "sk-old", out["api_key"], "incoming 没传应保留")
 }
 
+func TestMergePreservingSensitiveCreds_ExplicitNullClearsPreviousRefreshToken(t *testing.T) {
+	existing := map[string]any{"access_token": "old-access", "refresh_token": "old-refresh"}
+	incoming := map[string]any{"access_token": "sk-ant-oat01-new", "refresh_token": nil, "scope": "user:inference"}
+
+	out := MergePreservingSensitiveCreds(existing, incoming)
+
+	require.Equal(t, "sk-ant-oat01-new", out["access_token"])
+	require.Equal(t, "user:inference", out["scope"])
+	require.NotContains(t, out, "refresh_token")
+	require.Equal(t, "old-refresh", existing["refresh_token"])
+	require.Contains(t, incoming, "refresh_token")
+}
+
 func TestMergePreservingSensitiveCreds_DoesNotMutateInputs(t *testing.T) {
 	existing := map[string]any{"refresh_token": "rt"}
 	incoming := map[string]any{"base_url": "x"}

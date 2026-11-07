@@ -63,7 +63,7 @@ func TestScopedAdminUsageReadDoesNotRecoverAccount(t *testing.T) {
 			a := &Account{ID: 1, Platform: platform, Type: AccountTypeOAuth, GroupIDs: []int64{1}, Status: StatusError, ErrorMessage: "unauthenticated", Credentials: map[string]any{"access_token": "token", "scope": "user:profile"}}
 			repo := &scopedUsageRecoveryRepo{stubQuotaAccountRepo: stubQuotaAccountRepo{accounts: map[int64]*Account{1: a}}}
 			cache := NewUsageCache()
-			cache.apiCache.Store(int64(1), &apiUsageCache{response: &ClaudeUsageResponse{}, timestamp: time.Now()})
+			cache.apiCache.Store(int64(1), &apiUsageCache{identity: anthropicCredentialIdentity(a), response: &ClaudeUsageResponse{}, timestamp: time.Now()})
 			svc := &AccountUsageService{accountRepo: repo, usageLogRepo: &usageBatchLogRepoStub{}, cache: cache}
 			ctx := scopedStatisticsServiceContext("accounts.usage.read")
 			adminaccess.FromContext(ctx).Policy.Rules[0].Platforms = []string{platform}
@@ -218,13 +218,13 @@ func (f scopedUsageRoundTripper) RoundTrip(r *http.Request) (*http.Response, err
 
 func TestScopedAdminOpenAIUsageRefreshNeverGeneratesModelRequests(t *testing.T) {
 	for _, tc := range []struct {
-		name                     string
-		restricted, shadow, full bool
-		wantModel                int
-		wantUsage                float64
+		name               string
+		restricted, shadow bool
+		wantModel          int
+		wantUsage          float64
 	}{
-		{"受限普通账户", true, false, false, 0, 37}, {"受限影子账户", true, true, false, 0, 67},
-		{"JWT普通账户", false, false, false, 1, 98}, {"全权密钥普通账户", false, false, true, 1, 98},
+		{"受限普通账户", true, false, 0, 37}, {"受限影子账户", true, true, 0, 67},
+		{"JWT普通账户", false, false, 1, 98},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			parentID := int64(2)
@@ -270,9 +270,6 @@ func TestScopedAdminOpenAIUsageRefreshNeverGeneratesModelRequests(t *testing.T) 
 			ctx := context.Background()
 			if tc.restricted {
 				ctx = scopedStatisticsServiceContext("accounts.usage.read")
-			}
-			if tc.full {
-				ctx = adminaccess.WithPrincipal(ctx, &adminaccess.Principal{Policy: adminaccess.Policy{FullAccess: true}})
 			}
 			usage, err := svc.GetUsageForAccount(ctx, a, true)
 			require.NoError(t, err)

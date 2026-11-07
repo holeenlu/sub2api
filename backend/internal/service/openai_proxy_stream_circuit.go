@@ -21,9 +21,6 @@ const (
 	// moment; counting each stream separately would trip the breaker from a
 	// single upstream event (#5056).
 	defaultOpenAIProxyStreamFailureCollapse = 3 * time.Second
-	// openAIProxyStreamFailOpenLogInterval rate-limits the fail-open warning
-	// so an outage-mode burst does not flood the log.
-	openAIProxyStreamFailOpenLogInterval = 5 * time.Second
 )
 
 type openAIProxyStreamCircuitSettings struct {
@@ -44,8 +41,8 @@ type openAIProxyStreamCircuitEntry struct {
 }
 
 // openAIProxyStreamCircuit is an in-process, proxy-ID keyed circuit. It is
-// intentionally bounded and ephemeral: a restart clears observations, while a
-// tripped entry expires automatically after its TTL.
+// bounded evidence collector. Trips also enter the existing Redis concurrency
+// repository, where a fenced lease controls recovery across instances/restarts.
 type openAIProxyStreamCircuit struct {
 	mu       sync.Mutex
 	settings openAIProxyStreamCircuitSettings
@@ -182,25 +179,6 @@ func (c *openAIProxyStreamCircuit) isBlocked(proxyID int64, now time.Time) bool 
 	return true
 }
 
-// activeBlockCount reports how many proxies are currently quarantined. It
-// gates the fail-open retry: a "no available accounts" selection result only
-// warrants a second, quarantine-blind pass when the circuit is actually
-// withholding capacity.
-func (c *openAIProxyStreamCircuit) activeBlockCount(now time.Time) int {
-	if c == nil || c.settings.disabled {
-		return 0
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	count := 0
-	for _, entry := range c.entries {
-		if !entry.blockedUntil.IsZero() && now.Before(entry.blockedUntil) {
-			count++
-		}
-	}
-	return count
-}
-
 func (c *openAIProxyStreamCircuit) ensureCapacityLocked(now time.Time) {
 	if len(c.entries) < c.settings.maxEntries {
 		return
@@ -245,6 +223,7 @@ func (s *OpenAIGatewayService) recordOpenAIProxyStreamDisconnect(account *Accoun
 	if !tripped {
 		return
 	}
+	s.blockSchedulingRecovery(proxyRecoveryScope(proxyID), time.Until(until))
 	logger.L().With(zap.String("component", "service.openai_gateway")).Warn(
 		"openai.proxy_quarantined_stream_disconnect",
 		zap.Int64("proxy_id", proxyID),
@@ -265,48 +244,10 @@ func (s *OpenAIGatewayService) clearOpenAIProxyStreamDisconnect(account *Account
 	}
 }
 
-// openAIProxyStreamQuarantineBypassKey marks a selection pass that must ignore
-// proxy quarantine. It is set for the second, fail-open selection attempt when
-// the first pass found no available account while the circuit was withholding
-// proxies: a degraded proxy is strictly better than answering 502 (#5056).
-type openAIProxyStreamQuarantineBypassKey struct{}
-
-func withOpenAIProxyStreamQuarantineBypass(ctx context.Context) context.Context {
-	return context.WithValue(ctx, openAIProxyStreamQuarantineBypassKey{}, true)
-}
-
-func openAIProxyStreamQuarantineBypassed(ctx context.Context) bool {
-	if ctx == nil {
-		return false
-	}
-	bypassed, _ := ctx.Value(openAIProxyStreamQuarantineBypassKey{}).(bool)
-	return bypassed
-}
-
 func (s *OpenAIGatewayService) isOpenAIProxyStreamQuarantined(ctx context.Context, account *Account) bool {
 	proxyID, ok := openAIProxyStreamCircuitProxyID(account)
 	if !ok {
 		return false
 	}
-	if openAIProxyStreamQuarantineBypassed(ctx) {
-		return false
-	}
-	circuit := s.getOpenAIProxyStreamCircuit()
-	return circuit != nil && circuit.isBlocked(proxyID, time.Now())
-}
-
-// logOpenAIProxyStreamQuarantineFailOpen emits a rate-limited warning when a
-// selection pass had to re-admit quarantined proxies to serve at all.
-func (s *OpenAIGatewayService) logOpenAIProxyStreamQuarantineFailOpen(requestedModel string, blockedProxies int) {
-	now := time.Now().UnixNano()
-	last := s.openaiProxyStreamFailOpenLogAt.Load()
-	if now-last < int64(openAIProxyStreamFailOpenLogInterval) ||
-		!s.openaiProxyStreamFailOpenLogAt.CompareAndSwap(last, now) {
-		return
-	}
-	logger.L().With(zap.String("component", "service.openai_gateway")).Warn(
-		"openai.proxy_stream_quarantine_fail_open",
-		zap.Int("blocked_proxies", blockedProxies),
-		zap.String("model", requestedModel),
-	)
+	return s.getOpenAIProxyStreamCircuit().isBlocked(proxyID, time.Now())
 }

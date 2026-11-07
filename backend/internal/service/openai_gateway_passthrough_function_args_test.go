@@ -89,6 +89,7 @@ func TestForwardResponsesChatCompletionsFallbackKeepsFunctionArgumentsSingle(t *
 		"",
 		"data: [DONE]",
 		"",
+		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,

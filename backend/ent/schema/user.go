@@ -43,6 +43,8 @@ func (User) Fields() []ent.Field {
 		field.String("password_hash").
 			MaxLen(255).
 			NotEmpty(),
+		field.Int64("session_generation").Default(0),
+		field.Int64("created_by").Optional().Nillable().Immutable(),
 		field.String("role").
 			MaxLen(20).
 			Default(domain.RoleUser),
@@ -134,7 +136,6 @@ func (User) Edges() []ent.Edge {
 			Through("user_allowed_groups", UserAllowedGroup.Type),
 		edge.To("usage_logs", UsageLog.Type),
 		edge.To("attribute_values", UserAttributeValue.Type),
-		edge.To("promo_code_usages", PromoCodeUsage.Type),
 		edge.To("payment_orders", PaymentOrder.Type),
 		edge.To("auth_identities", AuthIdentity.Type).
 			Annotations(entsql.OnDelete(entsql.Cascade)),

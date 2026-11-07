@@ -478,12 +478,26 @@ func inferStdLogLevel(msg string) Level {
 }
 
 // LegacyPrintf 用于平滑迁移历史的 printf 风格日志到结构化 logger。
+// 日志级别由消息关键字推断；调用方已明确级别时应使用 LegacyPrintfLevel。
 func LegacyPrintf(component, format string, args ...any) {
 	msg := normalizeStdLogMessage(fmt.Sprintf(format, args...))
 	if msg == "" {
 		return
 	}
+	legacyPrintfAt(inferStdLogLevel(msg), component, msg)
+}
 
+// LegacyPrintfLevel 以调用方指定的级别输出 printf 风格日志，跳过关键字推断，
+// 避免事件名或字段名（如 error_event、fallback_reason）把信息日志抬升为告警/错误。
+func LegacyPrintfLevel(level Level, component, format string, args ...any) {
+	msg := normalizeStdLogMessage(fmt.Sprintf(format, args...))
+	if msg == "" {
+		return
+	}
+	legacyPrintfAt(level, component, msg)
+}
+
+func legacyPrintfAt(level Level, component, msg string) {
 	initialized := global.Load() != nil
 	if !initialized {
 		// 在日志系统未初始化前，回退到标准库 log，避免测试/工具链丢日志。
@@ -495,9 +509,9 @@ func LegacyPrintf(component, format string, args ...any) {
 	if component != "" {
 		l = l.With(zap.String("component", component))
 	}
-	l = l.WithOptions(zap.AddCallerSkip(1))
+	l = l.WithOptions(zap.AddCallerSkip(2))
 
-	switch inferStdLogLevel(msg) {
+	switch level {
 	case LevelDebug:
 		l.Debug(msg, zap.Bool("legacy_printf", true))
 	case LevelWarn:

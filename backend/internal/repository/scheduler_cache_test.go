@@ -20,6 +20,16 @@ func TestFilterSchedulerCredentialsKeepsSubscriptionPlanType(t *testing.T) {
 	require.NotContains(t, filtered, "refresh_token")
 }
 
+func TestFilterSchedulerCredentialsKeepsAnthropicFableThreshold(t *testing.T) {
+	filtered := filterSchedulerCredentials(map[string]any{
+		"anthropic_fable_scheduling_threshold": 72,
+		"access_token":                         "secret-access-token",
+	})
+
+	require.Equal(t, 72, filtered["anthropic_fable_scheduling_threshold"])
+	require.NotContains(t, filtered, "access_token")
+}
+
 func TestFilterSchedulerCredentialsKeepsGeminiExplicitCacheKeys(t *testing.T) {
 	filtered := filterSchedulerCredentials(map[string]any{
 		"api_key":              "k",
@@ -123,5 +133,24 @@ func TestSchedulerMetadataAccountDropsInvalidUpstreamBillingProbe(t *testing.T) 
 		})
 
 		require.NotContains(t, metadata.Extra, service.UpstreamBillingProbeExtraKey)
+	}
+}
+
+func TestSchedulerMetadataPreservesCloudRoutingAndEligibility(t *testing.T) {
+	for _, identity := range []map[string]any{{}, {"client_id": "different-client"}, {"openai_auth_mode": "personal_access_token"}} {
+		identity["access_token"], identity["refresh_token"] = "secret-access", "secret-refresh"
+		identity["model_mapping"] = map[string]any{"alias": "upstream"}
+		account := service.Account{ID: 42, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+			Credentials: identity, Extra: map[string]any{service.OpenAICloudEnabledKey: true, "openai_excel_bps": true, "openai_passthrough": true}}
+		metadata := buildSchedulerMetadataAccount(account)
+		require.True(t, metadata.IsOpenAICloudConfigured())
+		require.Equal(t, account.IsOpenAICloudEnabled(), metadata.IsOpenAICloudEnabled())
+		require.False(t, metadata.IsExcelBPSEnabled())
+		for _, model := range []string{"alias", "not-allowed"} {
+			require.Equal(t, account.IsModelSupported(model), metadata.IsModelSupported(model))
+		}
+		require.Equal(t, account.SupportsOpenAIEndpointCapability(service.OpenAIEndpointCapabilityResponses), metadata.SupportsOpenAIEndpointCapability(service.OpenAIEndpointCapabilityResponses))
+		require.NotContains(t, metadata.Credentials, "access_token")
+		require.NotContains(t, metadata.Credentials, "refresh_token")
 	}
 }

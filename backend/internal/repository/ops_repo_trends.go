@@ -99,7 +99,7 @@ ORDER BY bucket ASC`
 
 	args := append(usageArgs, errorArgs...)
 
-	rows, err := r.db.QueryContext(ctx, q, args...)
+	rows, err := r.queryOpsRows(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +218,7 @@ FROM combined
 WHERE platform IS NOT NULL AND platform <> ''
 ORDER BY request_count DESC`
 
-	rows, err := r.db.QueryContext(ctx, q, start, end)
+	rows, err := r.queryOpsRows(ctx, q, start, end)
 	if err != nil {
 		return nil, err
 	}
@@ -295,7 +295,7 @@ WHERE group_id IS NOT NULL
 ORDER BY request_count DESC
 LIMIT $4`
 
-	rows, err := r.db.QueryContext(ctx, q, start, end, platform, limit)
+	rows, err := r.queryOpsRows(ctx, q, start, end, platform, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -452,17 +452,17 @@ func (r *opsRepository) GetErrorTrend(ctx context.Context, filter *service.OpsDa
 SELECT
   ` + bucketExpr + ` AS bucket,
   COUNT(*) FILTER (WHERE COALESCE(status_code, 0) >= 400) AS error_total,
-  COUNT(*) FILTER (WHERE COALESCE(status_code, 0) >= 400 AND is_business_limited) AS business_limited,
-  COUNT(*) FILTER (WHERE COALESCE(status_code, 0) >= 400 AND NOT is_business_limited) AS error_sla,
-  COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT is_business_limited AND COALESCE(upstream_status_code, status_code, 0) NOT IN (429, 529)) AS upstream_excl,
-  COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT is_business_limited AND COALESCE(upstream_status_code, status_code, 0) = 429) AS upstream_429,
-  COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT is_business_limited AND COALESCE(upstream_status_code, status_code, 0) = 529) AS upstream_529
+  COUNT(*) FILTER (WHERE COALESCE(status_code, 0) >= 400 AND ` + service.OpsSLABusinessLimitedSQL("") + `) AS business_limited,
+  COUNT(*) FILTER (WHERE COALESCE(status_code, 0) >= 400 AND NOT ` + service.OpsSLABusinessLimitedSQL("") + `) AS error_sla,
+  COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT ` + service.OpsSLABusinessLimitedSQL("") + ` AND COALESCE(upstream_status_code, status_code, 0) NOT IN (429, 529)) AS upstream_excl,
+  COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT ` + service.OpsSLABusinessLimitedSQL("") + ` AND COALESCE(upstream_status_code, status_code, 0) = 429) AS upstream_429,
+  COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT ` + service.OpsSLABusinessLimitedSQL("") + ` AND COALESCE(upstream_status_code, status_code, 0) = 529) AS upstream_529
 FROM ops_error_logs
 ` + where + `
 GROUP BY 1
 ORDER BY 1 ASC`
 
-	rows, err := r.db.QueryContext(ctx, q, args...)
+	rows, err := r.queryOpsRows(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -564,8 +564,8 @@ func (r *opsRepository) GetErrorDistribution(ctx context.Context, filter *servic
 SELECT
   COALESCE(upstream_status_code, status_code, 0) AS status_code,
   COUNT(*) AS total,
-  COUNT(*) FILTER (WHERE NOT is_business_limited) AS sla,
-  COUNT(*) FILTER (WHERE is_business_limited) AS business_limited
+  COUNT(*) FILTER (WHERE NOT ` + service.OpsSLABusinessLimitedSQL("") + `) AS sla,
+  COUNT(*) FILTER (WHERE ` + service.OpsSLABusinessLimitedSQL("") + `) AS business_limited
 FROM ops_error_logs
 ` + where + `
   AND COALESCE(status_code, 0) >= 400
@@ -573,7 +573,7 @@ GROUP BY 1
 ORDER BY total DESC
 LIMIT 20`
 
-	rows, err := r.db.QueryContext(ctx, q, args...)
+	rows, err := r.queryOpsRows(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}

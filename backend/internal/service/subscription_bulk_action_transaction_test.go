@@ -110,7 +110,8 @@ func TestBulkSubscriptionAction_RollsBackPostWriteFailureBeforeRetry(t *testing.
 				statusFailure:   tc.statusFailure,
 			}
 			svc := NewSubscriptionService(nil, repo, nil, client, nil)
-			t.Cleanup(svc.Stop)
+			require.NoError(t, svc.Start(context.Background()))
+			t.Cleanup(func() { _ = svc.Stop(context.Background()) })
 			input := &BulkSubscriptionActionInput{SubscriptionIDs: []int64{1}, Action: tc.action, Days: 7, Daily: true}
 
 			mock.ExpectBegin()

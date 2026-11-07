@@ -1,0 +1,19 @@
+group	sha	subject	paths	document
+00	6a0fce2a5b461772b8f155fc433861ce9c0c9fe1	chore(upstream): retain v0.2.16 version marker	1	docs/requirements/final-v0.2.16-2026-10-13/00-upstream-version.md
+01	32c844bb1227f1f689594263645ec5ced5a252be	chore(schema): preserve final migrations and entity schemas	65	docs/requirements/final-v0.2.16-2026-10-13/01-migration.md
+02	1d768c0227fbffdab8f00571b6831c7904ceee93	feat(auth): preserve roles sessions and usage export authorization	151	docs/requirements/final-v0.2.16-2026-10-13/02-identity.md
+03	50a767d4cae40071f38c68482e72974d2cce3039	fix(gateway): preserve tenant safety and inbound body failures	42	docs/requirements/final-v0.2.16-2026-10-13/03-gateway-security.md
+04	ec41f4a692e43dd478afc6d76ede94662229c391	feat(accounts): preserve setup tokens sticky history and Fable thresholds	60	docs/requirements/final-v0.2.16-2026-10-13/04-accounts.md
+05	89ea2f0943dd8e5b058f6588eb1662ef375ca753	fix(models): preserve final restrictions catalogs and discovery order	11	docs/requirements/final-v0.2.16-2026-10-13/05-models.md
+06	3475509f991f60e5024baef6a403262f96882621	fix(gateway): preserve recovery and harden stream failure accounting	89	docs/requirements/final-v0.2.16-2026-10-13/06-recovery.md
+07	b43cb9b55317ac9b3b96d2725c5fbe45f143f8f2	feat(bps): preserve Excel credentials and reliable HTTP WebSocket bridge	234	docs/requirements/final-v0.2.16-2026-10-13/07-bps.md
+08	281e593a72f9517a34ccfe9d0d61ea1173e38737	feat(gateway): normalize model capabilities and preserve protocol semantics	48	docs/requirements/final-v0.2.16-2026-10-13/08-thinking.md
+09	1e56464a1b21efa6df9b25f0bc2a779e6ecebe42	fix(billing): preserve final payment and refund invariants	37	docs/requirements/final-v0.2.16-2026-10-13/09-billing.md
+10	1202233ec0f9d81bb7497ab77ed97f498cf393e8	feat(usage): preserve analytics and add bounded snapshot exports	46	docs/requirements/final-v0.2.16-2026-10-13/10-usage.md
+11	70d9066cf366dadf1138fff97275f3698f3c23a1	feat(diagnostics): preserve metered probes and scheduled diagnostics	32	docs/requirements/final-v0.2.16-2026-10-13/11-diagnostics.md
+12	510d1b7aaececcdab59716ad14ec4535c320f67b	feat(clients): preserve setup catalogs and recovery downloads	47	docs/requirements/final-v0.2.16-2026-10-13/12-clients.md
+13	620075ed9ed9f99397a3168b165a5453e06d2135	feat(site): preserve final KDAN branding docs and presentation	225	docs/requirements/final-v0.2.16-2026-10-13/13-site.md
+14	a5cca508b19432792018e9a09b1c460721b5dfd6	feat(i18n): preserve translations and generated traditional Chinese	95	docs/requirements/final-v0.2.16-2026-10-13/14-localization.md
+15	db4fe49a590e20a98b47d2e3914fb6c9a84eb183	chore(delivery): preserve manual releases and update tooling	84	docs/requirements/final-v0.2.16-2026-10-13/15-delivery.md
+16	5fecd49f304cd0c64257c38eeaf5bbdabcefd78a	refactor(core): preserve final shared wiring and configuration	93	docs/requirements/final-v0.2.16-2026-10-13/16-integration.md
+17	e9d376836282226aecb40d0c9311ac20f3f93ed1	docs(requirements): consolidate final requirements and New API evidence	75	docs/requirements/final-v0.2.16-2026-10-13/17-records.md

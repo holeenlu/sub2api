@@ -10,11 +10,71 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/gateway/execution"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+// All public protocol writers share credentialFailoverClientResponse. Exercise
+// them with non-Grok account-auth failures, including an unrecognized reason,
+// so adding a new provider cannot silently relabel it as Grok or leak its cause.
+func TestNonGrokCredentialFailuresUseSafeGenericResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	writers := map[string]func(*gin.Context, *service.UpstreamFailoverError){
+		"openai_http": func(c *gin.Context, failure *service.UpstreamFailoverError) {
+			(&OpenAIGatewayHandler{}).handleFailoverExhausted(c, failure, false)
+		},
+		"openai_sse": func(c *gin.Context, failure *service.UpstreamFailoverError) {
+			(&OpenAIGatewayHandler{}).handleFailoverExhausted(c, failure, true)
+		},
+		"anthropic_http": func(c *gin.Context, failure *service.UpstreamFailoverError) {
+			(&OpenAIGatewayHandler{}).handleAnthropicFailoverExhausted(c, failure, false)
+		},
+		"chat_http": func(c *gin.Context, failure *service.UpstreamFailoverError) {
+			(&GatewayHandler{}).handleCCFailoverExhausted(c, failure, false)
+		},
+		"responses_http": func(c *gin.Context, failure *service.UpstreamFailoverError) {
+			(&GatewayHandler{}).handleResponsesFailoverExhausted(c, failure, false)
+		},
+		"websocket": func(c *gin.Context, failure *service.UpstreamFailoverError) {
+			result := markOpenAIWSTurnFailure(c, failure)
+			require.Equal(t, http.StatusServiceUnavailable, result.IntendedStatus)
+			if failure.Reason != "" {
+				require.Equal(t, string(failure.Reason), result.Code)
+			}
+			c.JSON(result.IntendedStatus, gin.H{"error": gin.H{"message": result.Message}})
+		},
+	}
+	for _, reason := range []service.GatewayFailureReason{
+		"credential_preparation_failed", "account_configuration_invalid",
+		"upstream_credentials_rejected", "basispoints_credentials_unavailable",
+		"basispoints_credentials_rejected", "unknown_provider_credentials", "",
+	} {
+		for protocol, write := range writers {
+			t.Run(string(reason)+"/"+protocol, func(t *testing.T) {
+				recorder := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(recorder)
+				failure := &service.UpstreamFailoverError{
+					Stage: service.GatewayFailureStageAccountAuth, Reason: reason,
+					StatusCode: http.StatusUnauthorized, ClientStatusCode: http.StatusTeapot,
+					ClientMessage: "refresh_token=must-not-leak",
+					ResponseBody:  []byte(`{"error":"client_secret=must-not-leak"}`),
+				}
+				write(c, failure)
+				if protocol == "openai_sse" {
+					require.Equal(t, http.StatusOK, recorder.Code)
+				} else {
+					require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+				}
+				require.Contains(t, recorder.Body.String(), "Upstream credentials temporarily unavailable")
+				require.NotContains(t, recorder.Body.String(), "Grok")
+				require.NotContains(t, recorder.Body.String(), "must-not-leak")
+			})
+		}
+	}
+}
 
 func TestGatewayChatCredentialStopDoesNotSelectAnotherAccountAndReturnsSafe503(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -29,7 +89,7 @@ func TestGatewayChatCredentialStopDoesNotSelectAnotherAccountAndReturnsSafe503(t
 	state := NewFailoverState(3, false)
 	action := state.HandleFailoverError(context.Background(), &mockTempUnscheduler{}, 71, service.PlatformGrok, 0, stopErr)
 
-	require.Equal(t, FailoverExhausted, action)
+	require.Equal(t, execution.RecoveryExhausted, action)
 	require.Zero(t, state.SwitchCount)
 	require.Empty(t, state.FailedAccountIDs)
 
@@ -417,7 +477,7 @@ func TestOpsWebSocketCredentialFailoverExhaustedIsRecorded(t *testing.T) {
 			Stage: string(service.GatewayFailureStageAccountAuth), Scope: string(service.GatewayFailureScopeAccount),
 			Reason: string(service.GrokCredentialReasonRevoked), Message: "Grok OAuth credentials require account action",
 		}})
-		closeOpenAIWSFailoverExhausted(c, nil, &service.UpstreamFailoverError{
+		markOpenAIWSTurnFailure(c, &service.UpstreamFailoverError{
 			Stage:             service.GatewayFailureStageAccountAuth,
 			Scope:             service.GatewayFailureScopeAccount,
 			Reason:            service.GrokCredentialReasonRevoked,

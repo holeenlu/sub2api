@@ -340,7 +340,7 @@ func newCachedBillingEnv(t *testing.T, balance float64, accountIDs ...int64) *ca
 	userRepo := &cachedBillingUserRepo{balance: balance}
 	usage := &cachedBillingUsageRepo{}
 	bcs := service.NewBillingCacheService(nil, userRepo, nil, nil, nil, nil, cfg, nil)
-	t.Cleanup(bcs.Stop)
+	cleanupHandlerBillingCache(t, bcs)
 	snapshot := service.NewSchedulerSnapshotService(&fakeSchedulerCache{accounts: scheduled}, nil, nil, nil, nil)
 	gw := service.NewGatewayService(nil, &fakeGroupRepo{group: group}, usage, nil, userRepo, nil, nil, nil, cfg, snapshot, nil,
 		billing, nil, &service.BillingCacheService{}, nil, nil, &service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
@@ -673,7 +673,7 @@ func enableCachedBillingReservations(t *testing.T, env *cachedBillingEnv, cache 
 	cfg := &config.Config{}
 	cfg.Billing.InflightReservation.Enabled = true
 	bcs := service.NewBillingCacheService(cache, nil, nil, nil, nil, nil, cfg, nil)
-	t.Cleanup(bcs.Stop)
+	cleanupHandlerBillingCache(t, bcs)
 	env.h.billingCacheService = bcs
 }
 
