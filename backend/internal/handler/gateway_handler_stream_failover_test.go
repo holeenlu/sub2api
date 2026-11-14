@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -15,6 +16,27 @@ import (
 // partialMessageStartSSE 模拟 handleStreamingResponse 已写入的首批 SSE 事件。
 const partialMessageStartSSE = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_01\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-5\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":1}}}\n\n" +
 	"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n"
+
+func TestGatewayClaudeKeepaliveRetryStageHandoff(t *testing.T) {
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	stop := service.StartSSEKeepalive(c, time.Millisecond)
+	defer stop()
+	require.Eventually(t, func() bool { return c.Writer.Size() > 0 }, time.Second, time.Millisecond)
+	finish := beginRetryOutputStage(c)
+	defer func() { _ = finish(nil) }()
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	metadata := "data: {\"type\":\"message_start\",\"message\":{\"id\":\"staged\"}}\n\n"
+	_, err := c.Writer.Write([]byte(metadata))
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		return service.OpenAICompactKeepaliveAdjustedWrittenSize(c) == len(metadata)
+	}, 2*time.Second, time.Millisecond)
+	require.NoError(t, finish(nil))
+	require.Contains(t, rec.Body.String(), ": keepalive\n\n")
+	require.True(t, strings.HasSuffix(rec.Body.String(), metadata))
+}
 
 // TestStreamWrittenGuard_MessagesPath_AbortFailoverOnSSEContentWritten 验证：
 // 当 Forward 在返回 UpstreamFailoverError 前已向客户端写入 SSE 内容时，
@@ -98,6 +120,44 @@ func TestStreamWrittenGuard_GeminiPath_AbortFailoverOnSSEContentWritten(t *testi
 	firstIdx := strings.Index(body, "event: message_start")
 	lastIdx := strings.LastIndex(body, "event: message_start")
 	assert.Equal(t, firstIdx, lastIdx, "Gemini 路径不得出现双 message_start")
+}
+
+func TestHandleFailoverExhausted_OverloadedError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for name, prefix := range map[string]string{
+		"before_output": "",
+		"message_start": partialMessageStartSSE,
+		"ping":          "event: ping\ndata: {\"type\":\"ping\"}\n\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			status := http.StatusServiceUnavailable
+			if prefix != "" {
+				_, err := c.Writer.Write([]byte(prefix))
+				require.NoError(t, err)
+				status = http.StatusOK // A started stream keeps its committed HTTP status.
+			}
+			h := &GatewayHandler{}
+			h.handleFailoverExhausted(c, &service.UpstreamFailoverError{
+				StatusCode:   529,
+				ResponseBody: []byte(`{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`),
+			}, service.PlatformAnthropic, prefix != "")
+
+			require.Equal(t, status, w.Code)
+			require.Equal(t, 529, c.GetInt(service.OpsUpstreamStatusCodeKey))
+			require.Equal(t, "Overloaded", c.GetString(service.OpsUpstreamErrorMessageKey))
+			require.Contains(t, w.Body.String(), `"type":"overloaded_error"`)
+			require.Contains(t, w.Body.String(), "Upstream service overloaded, please retry later")
+			require.NotContains(t, w.Body.String(), "forbidden")
+			if prefix != "" {
+				require.True(t, strings.HasPrefix(w.Body.String(), prefix))
+				require.Equal(t, 1, strings.Count(w.Body.String(), prefix))
+				require.Contains(t, w.Body.String()[len(prefix):], "data: ")
+			}
+		})
+	}
 }
 
 // TestStreamWrittenGuard_NoByteWritten_GuardNotTriggered 验证反向场景：

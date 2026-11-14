@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -248,7 +249,7 @@ func TestPinnedOpenAIModelsListMixedAccountsShareColdCacheAcrossGroups(t *testin
 	s.accountRepo = splitCodexModelsAccountRepo{all: map[int64][]Account{10: accounts, 11: accounts}}
 	groups := []*Group{
 		{ID: 10, Platform: PlatformOpenAI, CodexModelsManifestConfig: GroupCodexModelsManifestConfig{Enabled: true, AccountIDs: []int64{2, 1}},
-			ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"oauth-special", "shared-model"}}},
+			ModelAllowlist: catalog.ModelAllowlist{Enabled: true, Models: []string{"oauth-special", "shared-model"}}},
 		{ID: 11, Platform: PlatformOpenAI, CodexModelsManifestConfig: GroupCodexModelsManifestConfig{Enabled: true, AccountIDs: []int64{2, 1}}},
 	}
 	type result struct {

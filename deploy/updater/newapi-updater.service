@@ -1,0 +1,22 @@
+[Unit]
+Description=Restricted NewAPI manifest updater
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/python3 /opt/newapi-updater/newapi_updater.py --config /etc/newapi-updater/config.json
+Restart=on-failure
+RestartSec=5
+UMask=0077
+RuntimeDirectory=newapi-updater
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target

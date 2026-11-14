@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -36,6 +37,11 @@ func TestOpsServiceRecordErrorBatch_SanitizesAndBatches(t *testing.T) {
 					Message:            " token leaked ",
 					Detail:             `{"refresh_token":"secret"}`,
 				},
+				{
+					Kind:   OpsUpstreamRetryStopped,
+					Reason: string(OpenAIRetryStopDownstreamCommitted),
+					Detail: `{"downstream_token_events":1,"access_token":"secret"}`,
+				},
 			},
 		},
 		{
@@ -62,6 +68,13 @@ func TestOpsServiceRecordErrorBatch_SanitizesAndBatches(t *testing.T) {
 	require.NotNil(t, first.UpstreamErrorsJSON)
 	require.NotContains(t, *first.UpstreamErrorsJSON, "secret")
 	require.Contains(t, *first.UpstreamErrorsJSON, "[REDACTED]")
+	var events []*OpsUpstreamErrorEvent
+	require.NoError(t, json.Unmarshal([]byte(*first.UpstreamErrorsJSON), &events))
+	require.Len(t, events, 2)
+	var progress map[string]any
+	require.NoError(t, json.Unmarshal([]byte(events[1].Detail), &progress))
+	require.Equal(t, float64(1), progress["downstream_token_events"])
+	require.Equal(t, "[REDACTED]", progress["access_token"])
 
 	second := captured[1]
 	require.Equal(t, "upstream", second.ErrorPhase)
@@ -126,6 +139,7 @@ func TestOpsServiceRecordErrorPersistsExplicitAccountAuthStatusZero(t *testing.T
 				Stage: string(GatewayFailureStageAccountAuth), Scope: string(GatewayFailureScopeAccount),
 				Reason: string(GrokCredentialReasonRevoked), Message: "Grok OAuth credentials require account action",
 			},
+			{Kind: opsSchedulingTrace, Stage: "scheduling", Reason: "local_decisions", Detail: `{"events":[{"stage":"retry","action":"stopped"}]}`},
 		},
 	})
 

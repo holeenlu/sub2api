@@ -37,27 +37,76 @@ type AccountQuotaReader interface {
 	GetByID(ctx context.Context, id int64) (*Account, error)
 }
 
+type balanceNotificationSender interface {
+	SendEmail(context.Context, string, string, string) error
+}
+
+type balanceNotificationTemplateSender interface {
+	Send(context.Context, NotificationEmailSendInput) error
+}
+
 // BalanceNotifyService handles balance and quota threshold notifications.
 type BalanceNotifyService struct {
-	emailService             *EmailService
+	emailService             balanceNotificationSender
 	settingRepo              SettingRepository
 	accountRepo              AccountQuotaReader
-	notificationEmailService *NotificationEmailService
-	usageNotifications       *usageNotificationWorker
+	notificationEmailService balanceNotificationTemplateSender
+	tasks                    maintenanceTaskOwner
 }
 
 // NewBalanceNotifyService creates a new BalanceNotifyService.
 func NewBalanceNotifyService(emailService *EmailService, settingRepo SettingRepository, accountRepo AccountQuotaReader) *BalanceNotifyService {
-	return &BalanceNotifyService{
-		emailService:       emailService,
-		settingRepo:        settingRepo,
-		accountRepo:        accountRepo,
-		usageNotifications: newUsageNotificationWorker(),
+	svc := &BalanceNotifyService{settingRepo: settingRepo, accountRepo: accountRepo}
+	if emailService != nil {
+		svc.emailService = emailService
 	}
+	return svc
 }
 
 func (s *BalanceNotifyService) SetNotificationEmailService(notificationEmailService *NotificationEmailService) {
+	if notificationEmailService == nil {
+		s.notificationEmailService = nil
+		return
+	}
 	s.notificationEmailService = notificationEmailService
+}
+
+// Start registers notification admission before request producers start.
+func (s *BalanceNotifyService) Start(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	return s.tasks.start(ctx, nil)
+}
+
+// Drain is called after final Usage/Cloud settlements have handed off alerts.
+func (s *BalanceNotifyService) Drain(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	return s.tasks.drain(ctx)
+}
+
+// Stop cancels settings/SMTP IO and joins all admitted alerts, retaining the
+// completion handle if a transport fails to honor cancellation within ctx.
+func (s *BalanceNotifyService) Stop(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	return s.tasks.stop(ctx)
+}
+
+func (s *BalanceNotifyService) submitNotification(kind string, send func(context.Context)) {
+	if err := s.tasks.launch(func(ctx context.Context) {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("panic in notification", "kind", kind, "recover", r)
+			}
+		}()
+		send(ctx)
+	}); err != nil {
+		slog.Debug("notification not admitted", "kind", kind, "error", err)
+	}
 }
 
 // resolveBalanceThreshold returns the effective balance threshold.
@@ -75,15 +124,24 @@ func (s *BalanceNotifyService) CheckBalanceAfterDeduction(ctx context.Context, u
 	if !s.canNotifyBalance(user) {
 		return
 	}
-	effectiveThreshold, rechargeURL, ok := s.resolveUserEffectiveThreshold(ctx, user)
-	if !ok {
-		return
+	snapshot := *user
+	snapshot.BalanceNotifyExtraEmails = append([]NotifyEmailEntry(nil), user.BalanceNotifyExtraEmails...)
+	if user.BalanceNotifyThreshold != nil {
+		threshold := *user.BalanceNotifyThreshold
+		snapshot.BalanceNotifyThreshold = &threshold
 	}
-	newBalance := oldBalance - cost
-	if !crossedDownward(oldBalance, newBalance, effectiveThreshold) {
-		return
-	}
-	s.dispatchBalanceLowEmail(ctx, user, newBalance, effectiveThreshold, rechargeURL)
+	s.submitNotification("balance", func(ctx context.Context) {
+		user := &snapshot
+		effectiveThreshold, rechargeURL, ok := s.resolveUserEffectiveThreshold(ctx, user)
+		if !ok {
+			return
+		}
+		newBalance := oldBalance - cost
+		if !crossedDownward(oldBalance, newBalance, effectiveThreshold) {
+			return
+		}
+		s.dispatchBalanceLowEmail(ctx, user, newBalance, effectiveThreshold, rechargeURL)
+	})
 }
 
 // canNotifyBalance checks nil guards and user-level toggle.
@@ -120,7 +178,7 @@ func crossedDownward(oldV, newV, threshold float64) bool {
 	return oldV >= threshold && newV < threshold
 }
 
-// dispatchBalanceLowEmail sends within the bounded notification task.
+// dispatchBalanceLowEmail runs inside the admitted notification task.
 func (s *BalanceNotifyService) dispatchBalanceLowEmail(ctx context.Context, user *User, newBalance, threshold float64, rechargeURL string) {
 	siteName := s.getSiteName(ctx)
 	recipients := s.collectBalanceNotifyRecipients(user)
@@ -179,24 +237,36 @@ func (s *BalanceNotifyService) CheckAccountQuotaAfterIncrement(ctx context.Conte
 	if account == nil || s.emailService == nil || s.settingRepo == nil || cost <= 0 {
 		return
 	}
-	if !s.isAccountQuotaNotifyEnabled(ctx) {
-		return
+	snapshot := *account
+	snapshot.Extra = make(map[string]any, len(account.Extra))
+	for key, value := range account.Extra {
+		snapshot.Extra[key] = value
 	}
-	adminEmails := s.getAccountQuotaNotifyEmails(ctx)
-	if len(adminEmails) == 0 {
-		return
-	}
-
-	siteName := s.getSiteName(ctx)
-	var dims []quotaDim
 	if quotaState != nil {
-		dims = buildQuotaDimsFromState(account, quotaState)
-	} else {
-		freshAccount := s.fetchFreshAccount(ctx, account)
-		dims = buildQuotaDims(freshAccount)
-		account = freshAccount // use fresh data for alert metadata
+		value := *quotaState
+		quotaState = &value
 	}
-	s.checkQuotaDimCrossings(ctx, account, dims, cost, adminEmails, siteName)
+	s.submitNotification("quota", func(ctx context.Context) {
+		account := &snapshot
+		if !s.isAccountQuotaNotifyEnabled(ctx) {
+			return
+		}
+		adminEmails := s.getAccountQuotaNotifyEmails(ctx)
+		if len(adminEmails) == 0 {
+			return
+		}
+
+		siteName := s.getSiteName(ctx)
+		var dims []quotaDim
+		if quotaState != nil {
+			dims = buildQuotaDimsFromState(account, quotaState)
+		} else {
+			freshAccount := s.fetchFreshAccount(ctx, account)
+			dims = buildQuotaDims(freshAccount)
+			account = freshAccount // use fresh data for alert metadata
+		}
+		s.checkQuotaDimCrossings(ctx, account, dims, cost, adminEmails, siteName)
+	})
 }
 
 // fetchFreshAccount loads the latest account from DB; falls back to the snapshot on error.

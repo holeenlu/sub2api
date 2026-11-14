@@ -1,0 +1,376 @@
+<template>
+  <slot :platform-label="platformLabel" :type-label="typeLabel" :plan-label="planLabel" :expires-label="expiresLabel" :authorization-label="authorizationLabel" :privacy-badge="privacyBadge" :compact-meta="compactMeta" :compact-title="compactTitle">
+  <div v-bind="$attrs" class="inline-flex max-w-full flex-col items-start gap-1 text-xs font-medium">
+    <!-- Row 1: Platform + Type -->
+    <div v-if="!summary" class="inline-flex max-w-full flex-wrap items-center rounded-md">
+      <span :class="['inline-flex items-center gap-1 px-2 py-1', platformClass]">
+        <PlatformIcon :platform="platform" size="xs" />
+        <span>{{ platformLabel }}</span>
+      </span>
+      <span :class="['inline-flex items-center gap-1 px-1.5 py-1', typeClass]">
+        <!-- OAuth icon -->
+        <svg
+          v-if="type === 'oauth'"
+          class="h-3 w-3"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
+          />
+        </svg>
+        <!-- Setup Token icon -->
+        <Icon v-else-if="type === 'setup-token'" name="shield" size="xs" />
+        <!-- API Key icon -->
+        <Icon v-else-if="type === 'service_account'" name="cloud" size="xs" />
+        <Icon v-else name="key" size="xs" />
+        <span>{{ typeLabel }}</span>
+      </span>
+    </div>
+    <!-- Row 2: Recorded subscription, billing and privacy metadata -->
+    <div v-if="planLabel || (!summary && (privacyBadge || billingType))" class="inline-flex max-w-full flex-wrap items-center gap-1 rounded-md">
+      <span v-if="planLabel" :class="['inline-flex items-center gap-1 px-1.5 py-1', planBadgeClass]">
+        <GrokFreeIcon
+          v-if="isGrokFreePlan"
+          data-testid="grok-free-plan-icon"
+        />
+        <Icon
+          v-else-if="planIconName"
+          :name="planIconName"
+          size="xs"
+          data-testid="grok-plan-icon"
+          aria-hidden="true"
+        />
+        <span>{{ planLabel }}</span>
+      </span>
+      <span v-if="!summary && billingType" class="max-w-full break-words rounded bg-gray-100 px-1.5 py-1 text-gray-600 dark:bg-dark-700 dark:text-gray-300">{{ billingType }}</span>
+      <span
+        v-if="!summary && privacyBadge"
+        :class="['inline-flex items-center gap-1 px-1.5 py-1', privacyBadge.class]"
+        :title="privacyBadge.title"
+      >
+        <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" :d="privacyBadge.icon" />
+        </svg>
+        <span>{{ privacyBadge.label }}</span>
+      </span>
+    </div>
+    <!-- Row 3: Subscription expiration (non-free paid accounts only) -->
+    <div v-if="!summary && expiresLabel" class="text-[10px] leading-tight text-gray-400 dark:text-gray-500 pl-0.5" :title="subscriptionExpiresAt">
+      {{ expiresLabel }}
+    </div>
+    <span v-if="!summary && authorizationLabel" class="max-w-full rounded bg-gray-100 px-1.5 py-0.5 text-gray-500 dark:bg-dark-700 dark:text-gray-300">{{ authorizationLabel }}</span>
+    <div v-if="!summary && compactMeta" class="inline-flex items-center gap-1.5 pl-0.5 text-[11px] leading-4" :class="compactMeta.className" :title="compactTitle">
+      <span class="h-1.5 w-1.5 shrink-0 rounded-full" :class="compactMeta.dotClass" />
+      <span>{{ compactMeta.label }}</span>
+    </div>
+  </div>
+  </slot>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+import type { AccountPlatform } from '@/features/resources/api/platformTypes'
+import { platformLabel as sharedPlatformLabel } from '@/features/catalog'
+import { normalizePlanType, openAIPlanTypeLabel } from '@/features/resources'
+import GrokFreeIcon from '@/shared/ui/icons/GrokFreeIcon.vue'
+import PlatformIcon from '@/shared/ui/PlatformIcon.vue'
+import Icon from '@/shared/ui/icons/Icon.vue'
+import { formatDateTime } from '@/shared/lib/format'
+
+// Attributes belong to the default badge; a custom slot owns its own markup.
+defineOptions({ inheritAttrs: false })
+const { t } = useI18n()
+
+export interface AccountBadgeProps {
+  summary?: boolean
+  platform: AccountPlatform
+  // Vendor metadata may include future types; preserve their labels without casting the DTO.
+  type: string
+  authMode?: string
+  planType?: string
+  privacyMode?: string
+  subscriptionExpiresAt?: string
+  method?: string
+  billingType?: string
+  authorizationModes?: readonly ('native' | 'bps')[]
+  compact?: { mode?: unknown; supported?: unknown; checkedAt?: unknown }
+}
+
+const props = defineProps<AccountBadgeProps>()
+
+// Only display explicitly returned modes. Missing metadata does not imply Native access.
+const authorizationLabel = computed(() => {
+  if (props.platform !== 'openai') return ''
+  const native = props.authorizationModes?.includes('native')
+  const bps = props.authorizationModes?.includes('bps')
+  if (native && bps) return t('vendor.authorization.dual')
+  if (native) return t('vendor.authorization.native')
+  if (bps) return t('vendor.authorization.bps')
+  return ''
+})
+
+const platformLabel = computed(() => sharedPlatformLabel(props.platform))
+
+const normalizedAuthMode = computed(() =>
+  (props.authMode || '').trim().toLowerCase().replace(/[\s_-]+/g, '')
+)
+
+const typeLabel = computed(() => {
+  if (props.platform === 'openai' && props.type === 'oauth') {
+    if (normalizedAuthMode.value === 'agentidentity') return 'Agent Identity'
+    if (normalizedAuthMode.value === 'personalaccesstoken') return 'PAT'
+  }
+  if (props.method === 'setup-token-manual') return 'Setup Token'
+  if (props.method === 'setup-token') return 'OAuth Token'
+  if (props.method === 'refresh_token') return 'Refresh Token'
+  switch (props.type) {
+    case 'oauth':
+      return 'OAuth'
+    case 'setup-token':
+      return 'Token'
+    case 'apikey':
+      return 'Key'
+    case 'bedrock':
+      return 'AWS'
+    case 'service_account':
+      return 'Agent Platform (Vertex)'
+    default:
+      return props.type
+  }
+})
+
+const compactMeta = computed(() => {
+  if (!props.compact || props.platform !== 'openai' || !['oauth', 'apikey'].includes(props.type)) return null
+  const { mode, supported } = props.compact
+  const state = mode === 'force_on' ? 'active'
+    : mode === 'force_off' ? 'blocked'
+    : typeof supported === 'boolean' ? (supported ? 'active' : 'blocked') : 'auto'
+  if (state === 'active') return { label: t('admin.accounts.openai.compactSupported'), className: 'text-emerald-600 dark:text-emerald-300', dotClass: 'bg-emerald-500' }
+  if (state === 'blocked') return { label: t('admin.accounts.openai.compactUnsupported'), className: 'text-rose-600 dark:text-rose-300', dotClass: 'bg-rose-500' }
+  return { label: t('admin.accounts.openai.compactAuto'), className: 'text-slate-500 dark:text-slate-400', dotClass: 'bg-slate-300 dark:bg-slate-500' }
+})
+
+const compactTitle = computed(() => {
+  const label = compactMeta.value?.label || ''
+  const at = props.compact?.checkedAt
+  if (typeof at !== 'string' || !at || !Number.isFinite(Date.parse(at))) return label
+  return `${label} | ${t('admin.accounts.openai.compactLastChecked')}: ${formatDateTime(new Date(at))}`
+})
+
+const normalizedPlanType = computed(() => normalizePlanType(props.planType))
+
+// API keys can proxy another account's errors; legacy plan metadata is not their subscription.
+const isOpenAIAPIKey = computed(() => props.platform === 'openai' && props.type === 'apikey')
+
+const planLabel = computed(() => {
+  if (isOpenAIAPIKey.value) return ''
+  if (!normalizedPlanType.value) return ''
+  // ChatGPT 档位命名（Pro 100 / Pro 200 / Pro 500、Business / Business Premium）只适用于
+  // OpenAI：Antigravity 与 Grok 各自的 pro/team 沿用下面的通用标签。
+  if (props.platform === 'openai') {
+    const label = openAIPlanTypeLabel(props.planType)
+    if (label) return label
+  }
+  switch (normalizedPlanType.value) {
+    case 'plus':
+      return 'Plus'
+    case 'team':
+      return 'Team'
+    case 'chatgptpro':
+    case 'pro':
+      return 'Pro'
+    case 'free':
+    case 'basic':
+      return props.platform === 'grok' ? 'Grok Free' : 'Free'
+    case 'supergrok':
+      return 'SuperGrok'
+    case 'supergroklite':
+      return 'SuperGrok Lite'
+    case 'supergrokplus':
+      return 'SuperGrok Plus'
+    case 'supergrokheavy':
+      return 'SuperGrok Heavy'
+    case 'heavy':
+      return 'Heavy'
+    case 'xbasic':
+      return 'X Basic'
+    case 'abnormal':
+      return t('admin.accounts.subscriptionAbnormal')
+    default:
+      return props.planType
+  }
+})
+
+const isGrokFreePlan = computed(() =>
+  props.platform === 'grok' &&
+  (normalizedPlanType.value === 'free' ||
+    normalizedPlanType.value === 'basic' ||
+    normalizedPlanType.value === 'xbasic')
+)
+
+const planIconName = computed<'bolt' | null>(() => {
+  if (props.platform !== 'grok') return null
+  // Paid Grok tiers (SuperGrok / Heavy) share the bolt mark; free uses GrokFreeIcon.
+  if (
+    normalizedPlanType.value === 'supergrok' ||
+    normalizedPlanType.value === 'supergrokheavy' ||
+    normalizedPlanType.value === 'heavy' ||
+    normalizedPlanType.value.includes('heavy')
+  ) {
+    return 'bolt'
+  }
+  return null
+})
+
+const platformClass = computed(() => {
+  if (props.platform === 'anthropic') {
+    return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+  }
+  if (props.platform === 'openai') {
+    return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+  }
+  if (props.platform === 'antigravity') {
+    return 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+  }
+  if (props.platform === 'grok') {
+    return 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
+  }
+  if (props.platform === 'kimi') {
+    return 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400'
+  }
+  if (props.platform === 'zhipu') {
+    return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
+  }
+  if (props.platform === 'deepseek') {
+    return 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400'
+  }
+  if (props.platform === 'minimax') {
+    return 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400'
+  }
+  return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+})
+
+const typeClass = computed(() => {
+  if (props.platform === 'anthropic') {
+    return 'bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400'
+  }
+  if (props.platform === 'openai') {
+    return 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400'
+  }
+  if (props.platform === 'antigravity') {
+    return 'bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400'
+  }
+  if (props.platform === 'grok') {
+    return 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'
+  }
+  if (props.platform === 'kimi') {
+    return 'bg-pink-100 text-pink-600 dark:bg-pink-900/30 dark:text-pink-400'
+  }
+  if (props.platform === 'zhipu') {
+    return 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400'
+  }
+  if (props.platform === 'deepseek') {
+    return 'bg-teal-100 text-teal-600 dark:bg-teal-900/30 dark:text-teal-400'
+  }
+  if (props.platform === 'minimax') {
+    return 'bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400'
+  }
+  return 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400'
+})
+
+const planBadgeClass = computed(() => {
+  if (normalizedPlanType.value === 'abnormal') {
+    return 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400'
+  }
+  // Free stays muted gray; paid Grok tiers get distinct colors.
+  if (
+    normalizedPlanType.value === 'free' ||
+    normalizedPlanType.value === 'basic' ||
+    normalizedPlanType.value === 'xbasic'
+  ) {
+    return 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+  }
+  if (props.platform === 'grok' && normalizedPlanType.value) {
+    // Heavy / SuperGrok Heavy → purple
+    if (normalizedPlanType.value.includes('heavy')) {
+      return 'bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-300'
+    }
+    // SuperGrok → cyan
+    if (normalizedPlanType.value.includes('supergrok')) {
+      return 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300'
+    }
+    // Any other non-free Grok plan (future tiers) → amber so it still stands out
+    return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+  }
+  // OpenAI / other paid plan labels: keep readable distinction from free gray
+  if (normalizedPlanType.value === 'plus') {
+    return 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300'
+  }
+  if (normalizedPlanType.value === 'team' || normalizedPlanType.value === 'selfservebusinessprolite' ||
+    (props.platform === 'openai' && ['selfservebusinessusagebased', 'business', 'enterprise', 'ent26', 'enterprisecbpautomation', 'enterprisecbpusagebased', 'edu', 'eduplus', 'edupro'].includes(normalizedPlanType.value))) {
+    return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300'
+  }
+  if (
+    normalizedPlanType.value === 'pro' ||
+    normalizedPlanType.value === 'chatgptpro' ||
+    normalizedPlanType.value === 'prolite' ||
+    (props.platform === 'openai' && normalizedPlanType.value === 'promax')
+  ) {
+    return 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300'
+  }
+  return typeClass.value
+})
+
+// Subscription expiration label (non-free only)
+const expiresLabel = computed(() => {
+  if (isOpenAIAPIKey.value) return ''
+  if (!props.subscriptionExpiresAt || !props.planType) return ''
+  if (
+    normalizedPlanType.value === 'free' ||
+    normalizedPlanType.value === 'basic' ||
+    normalizedPlanType.value === 'xbasic'
+  ) return ''
+  try {
+    const d = new Date(props.subscriptionExpiresAt)
+    if (isNaN(d.getTime())) return ''
+    const yyyy = d.getFullYear()
+    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    const dd = String(d.getDate()).padStart(2, '0')
+    return `${t('admin.accounts.subscriptionExpires')} ${yyyy}-${mm}-${dd}`
+  } catch {
+    return ''
+  }
+})
+
+// Privacy badge — shows different states for OpenAI/Antigravity OAuth privacy setting
+const privacyBadge = computed(() => {
+  if (props.type !== 'oauth' || !props.privacyMode) return null
+  // 支持 OpenAI 和 Antigravity 平台
+  if (props.platform !== 'openai' && props.platform !== 'antigravity') return null
+
+  const shieldCheck = 'M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z'
+  const shieldX = 'M12 9v3.75m0-10.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285zM12 18h.008v.008H12V18z'
+  switch (props.privacyMode) {
+    // OpenAI states
+    case 'training_off':
+      return { label: 'Private', icon: shieldCheck, title: t('admin.accounts.privacyTrainingOff'), class: 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400' }
+    case 'training_set_cf_blocked':
+      return { label: 'CF', icon: shieldX, title: t('admin.accounts.privacyCfBlocked'), class: 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400' }
+    case 'training_set_failed':
+      return { label: 'Fail', icon: shieldX, title: t('admin.accounts.privacyFailed'), class: 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' }
+    // Antigravity states
+    case 'privacy_set':
+      return { label: 'Private', icon: shieldCheck, title: t('admin.accounts.privacyAntigravitySet'), class: 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400' }
+    case 'privacy_set_failed':
+      return { label: 'Fail', icon: shieldX, title: t('admin.accounts.privacyAntigravityFailed'), class: 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' }
+    default:
+      return null
+  }
+})
+</script>

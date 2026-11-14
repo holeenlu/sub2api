@@ -14,13 +14,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type userBalanceHistoryReader interface {
+	GetBalanceHistory(context.Context, int64, int, int, service.BalanceHistoryFilter) (*service.BalanceHistoryPage, error)
+}
+
 // UserHandler handles user-related requests
 type UserHandler struct {
+	balanceHistory        userBalanceHistoryReader
 	userService           *service.UserService
 	authService           *service.AuthService
 	emailService          *service.EmailService
 	emailCache            service.EmailCache
-	affiliateService      *service.AffiliateService
 	userPlatformQuotaRepo service.UserPlatformQuotaRepository
 }
 
@@ -30,15 +34,16 @@ func NewUserHandler(
 	authService *service.AuthService,
 	emailService *service.EmailService,
 	emailCache service.EmailCache,
-	affiliateService *service.AffiliateService,
 	userPlatformQuotaRepo service.UserPlatformQuotaRepository,
+	redeemService *service.RedeemService,
 ) *UserHandler {
 	return &UserHandler{
-		userService:           userService,
-		authService:           authService,
-		emailService:          emailService,
-		emailCache:            emailCache,
-		affiliateService:      affiliateService,
+		balanceHistory: redeemService,
+		userService:    userService,
+		authService:    authService,
+		emailService:   emailService,
+		emailCache:     emailCache,
+
 		userPlatformQuotaRepo: userPlatformQuotaRepo,
 	}
 }
@@ -192,44 +197,6 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	}
 
 	response.Success(c, profileResp)
-}
-
-// GetAffiliate returns the current user's affiliate details.
-// GET /api/v1/user/aff
-func (h *UserHandler) GetAffiliate(c *gin.Context) {
-	subject, ok := middleware2.GetAuthSubjectFromContext(c)
-	if !ok {
-		response.Unauthorized(c, "User not authenticated")
-		return
-	}
-
-	detail, err := h.affiliateService.GetAffiliateDetail(c.Request.Context(), subject.UserID)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, detail)
-}
-
-// TransferAffiliateQuota transfers all available affiliate quota into current balance.
-// POST /api/v1/user/aff/transfer
-func (h *UserHandler) TransferAffiliateQuota(c *gin.Context) {
-	subject, ok := middleware2.GetAuthSubjectFromContext(c)
-	if !ok {
-		response.Unauthorized(c, "User not authenticated")
-		return
-	}
-
-	transferred, balance, err := h.affiliateService.TransferAffiliateQuota(c.Request.Context(), subject.UserID)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-
-	response.Success(c, gin.H{
-		"transferred_quota": transferred,
-		"balance":           balance,
-	})
 }
 
 type StartIdentityBindingRequest struct {
@@ -636,4 +603,29 @@ func buildUserProfileSourceContext(provider string) *userProfileSourceContext {
 		Provider: provider,
 		Source:   provider,
 	}
+}
+
+// GetBalanceHistory GET /user/balance-history. All roles use their own JWT subject.
+func (h *UserHandler) GetBalanceHistory(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok || subject.UserID <= 0 {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	filter := service.BalanceHistoryFilter{Category: "balance"}
+	if err := c.ShouldBindQuery(&filter); err != nil {
+		response.BadRequest(c, "Invalid history filters")
+		return
+	}
+	if err := filter.Validate(); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	page, pageSize := response.ParsePagination(c)
+	result, err := h.balanceHistory.GetBalanceHistory(c.Request.Context(), subject.UserID, page, pageSize, filter)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
 }

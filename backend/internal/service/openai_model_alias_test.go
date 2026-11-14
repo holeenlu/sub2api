@@ -3,12 +3,13 @@ package service
 import (
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	"github.com/stretchr/testify/require"
 )
 
 func TestNormalizeKnownOpenAICodexModelGPT6Astra(t *testing.T) {
 	for _, model := range []string{"gpt-6-astra", "openai/gpt-6-astra", "OPENAI/GPT-6_ASTRA", "gpt-6", "openai/gpt-6"} {
-		require.Equal(t, "gpt-6-astra", normalizeKnownOpenAICodexModel(model))
+		require.Equal(t, "gpt-6-astra", catalog.NormalizeKnownOpenAICodexModel(model))
 	}
 }
 
@@ -25,7 +26,7 @@ func TestNormalizeKnownOpenAICodexModel_BareGPT56RoutesToSol(t *testing.T) {
 
 	for input, expected := range tests {
 		t.Run(input, func(t *testing.T) {
-			require.Equal(t, expected, normalizeKnownOpenAICodexModel(input))
+			require.Equal(t, expected, catalog.NormalizeKnownOpenAICodexModel(input))
 		})
 	}
 }

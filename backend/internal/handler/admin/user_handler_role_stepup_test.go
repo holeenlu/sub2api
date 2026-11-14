@@ -63,8 +63,42 @@ func TestUpdateUserKeepAdminRoleSkipsStepUp(t *testing.T) {
 func TestUpdateUserRegularRoleSkipsStepUp(t *testing.T) {
 	router, _ := setupRoleStepUpRouter(t)
 
-	rec := doJSON(t, router, http.MethodPut, "/api/v1/admin/users/1", map[string]any{"role": "user", "email": "u@example.com"})
+	rec := doJSON(t, router, http.MethodPut, "/api/v1/admin/users/1", map[string]any{"role": "user", "username": "Ordinary profile"})
 	require.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestUpdateUserKeepVendorRoleSkipsStepUp(t *testing.T) {
+	for _, role := range []string{service.RoleVendorLevel1, service.RoleVendorLevel2} {
+		t.Run(role, func(t *testing.T) {
+			router, adminSvc := setupRoleStepUpRouter(t)
+			adminSvc.users = append(adminSvc.users, service.User{ID: 3, Email: "vendor@example.com", Role: role, Status: service.StatusActive})
+			rec := doJSON(t, router, http.MethodPut, "/api/v1/admin/users/3", map[string]any{
+				"email": "vendor@example.com", "role": role, "username": "Supplier profile", "notes": "Updated notes",
+			})
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		})
+	}
+}
+
+func TestUserRoleBindingRejectsInvalidAssignments(t *testing.T) {
+	for _, tc := range []struct {
+		method string
+		path   string
+		role   string
+	}{
+		{http.MethodPut, "/api/v1/admin/users/1", "root"},
+		{http.MethodPost, "/api/v1/admin/users", service.RoleVendorLevel1},
+		{http.MethodPost, "/api/v1/admin/users", service.RoleVendorLevel2},
+	} {
+		t.Run(tc.method+"/"+tc.role, func(t *testing.T) {
+			router, _ := setupRoleStepUpRouter(t)
+			rec := doJSON(t, router, tc.method, tc.path, map[string]any{
+				"email": "user@example.com", "password": "pass123", "role": tc.role,
+			})
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			require.Contains(t, rec.Body.String(), "oneof")
+		})
+	}
 }
 
 func TestCreateAdminUserRequiresStepUp(t *testing.T) {

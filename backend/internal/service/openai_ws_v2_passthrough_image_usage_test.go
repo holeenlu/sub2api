@@ -73,7 +73,7 @@ func TestOpenAIWSPassthroughTurnResultCarriesImageUsage(t *testing.T) {
 		if readErr != nil {
 			return
 		}
-		_ = svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "sk-test", firstMessage, hooks)
+		_ = svc.ProxyResponsesWebSocketFromClient(openAIWSTestAdmissionContext(r.Context()), ginCtx, conn, account, "sk-test", firstMessage, hooks)
 	}))
 	defer wsServer.Close()
 

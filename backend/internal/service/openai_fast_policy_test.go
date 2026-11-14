@@ -504,12 +504,10 @@ func TestApplyOpenAIFastPolicyToBody_BlockReturnsTypedError(t *testing.T) {
 	require.Equal(t, string(body), string(updated)) // body not mutated on block
 }
 
-func TestSetOpenAIFastPolicySettings_Validation(t *testing.T) {
-	repo := &openAIFastPolicyRepoStub{values: map[string]string{}}
-	svc := NewSettingService(repo, &config.Config{})
+func TestEncodeOpenAIFastPolicySettings_Validation(t *testing.T) {
 
 	// Invalid action rejected
-	err := svc.SetOpenAIFastPolicySettings(context.Background(), &OpenAIFastPolicySettings{
+	_, err := EncodeOpenAIFastPolicySettings(&OpenAIFastPolicySettings{
 		Rules: []OpenAIFastPolicyRule{{
 			ServiceTier: OpenAIFastTierPriority,
 			Action:      "bogus",
@@ -519,7 +517,7 @@ func TestSetOpenAIFastPolicySettings_Validation(t *testing.T) {
 	require.Error(t, err)
 
 	// Invalid service_tier rejected
-	err = svc.SetOpenAIFastPolicySettings(context.Background(), &OpenAIFastPolicySettings{
+	_, err = EncodeOpenAIFastPolicySettings(&OpenAIFastPolicySettings{
 		Rules: []OpenAIFastPolicyRule{{
 			ServiceTier: "turbo",
 			Action:      BetaPolicyActionPass,
@@ -529,7 +527,7 @@ func TestSetOpenAIFastPolicySettings_Validation(t *testing.T) {
 	require.Error(t, err)
 
 	// Non-positive and duplicate user IDs are rejected.
-	err = svc.SetOpenAIFastPolicySettings(context.Background(), &OpenAIFastPolicySettings{
+	_, err = EncodeOpenAIFastPolicySettings(&OpenAIFastPolicySettings{
 		Rules: []OpenAIFastPolicyRule{{
 			ServiceTier: OpenAIFastTierPriority,
 			Action:      BetaPolicyActionPass,
@@ -539,7 +537,7 @@ func TestSetOpenAIFastPolicySettings_Validation(t *testing.T) {
 	})
 	require.Error(t, err)
 
-	err = svc.SetOpenAIFastPolicySettings(context.Background(), &OpenAIFastPolicySettings{
+	_, err = EncodeOpenAIFastPolicySettings(&OpenAIFastPolicySettings{
 		Rules: []OpenAIFastPolicyRule{{
 			ServiceTier: OpenAIFastTierPriority,
 			Action:      BetaPolicyActionPass,
@@ -549,8 +547,8 @@ func TestSetOpenAIFastPolicySettings_Validation(t *testing.T) {
 	})
 	require.Error(t, err)
 
-	// Valid settings persisted
-	err = svc.SetOpenAIFastPolicySettings(context.Background(), &OpenAIFastPolicySettings{
+	// Valid settings are encoded once for the atomic settings write.
+	encoded, err := EncodeOpenAIFastPolicySettings(&OpenAIFastPolicySettings{
 		Rules: []OpenAIFastPolicyRule{
 			{
 				ServiceTier: OpenAIFastTierPriority,
@@ -572,8 +570,8 @@ func TestSetOpenAIFastPolicySettings_Validation(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	got, err := svc.GetOpenAIFastPolicySettings(context.Background())
-	require.NoError(t, err)
+	var got OpenAIFastPolicySettings
+	require.NoError(t, json.Unmarshal([]byte(encoded), &got))
 	require.Len(t, got.Rules, 3)
 	require.Equal(t, OpenAIFastTierPriority, got.Rules[0].ServiceTier)
 	require.Equal(t, OpenAIFastTierUltrafast, got.Rules[1].ServiceTier)

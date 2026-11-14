@@ -5,6 +5,8 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -1348,6 +1350,323 @@ func (s *AccountRepoSuite) TestUpdateGrokOAuthCredentialsIfUnchanged_SkipsConcur
 	s.Require().Zero(outboxCount)
 }
 
+func nativeOpenAIRefreshIntegrationAccount(name string) *service.Account {
+	return &service.Account{
+		Name: name, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+		Status: service.StatusActive, Schedulable: true,
+		Credentials: map[string]any{
+			"access_token": "observed-at", "refresh_token": "observed-rt", "_token_version": int64(10),
+			"chatgpt_account_id": "workspace", "model_mapping": map[string]any{"client-model": "old-model"},
+		},
+	}
+}
+
+func (s *AccountRepoSuite) TestOpenAIOAuthRefreshCredentials_PreservesConcurrentSettings() {
+	account := mustCreateAccount(s.T(), s.client, nativeOpenAIRefreshIntegrationAccount("openai-refresh-concurrent-settings"))
+	proxy := mustCreateProxy(s.T(), s.client, &service.Proxy{Name: "openai-refresh-new-proxy"})
+	oldUntil := time.Now().UTC().Add(15 * time.Minute).Truncate(time.Microsecond)
+	newUntil := oldUntil.Add(time.Hour)
+	_, err := s.repo.sql.ExecContext(s.ctx, "UPDATE accounts SET temp_unschedulable_until=$2,temp_unschedulable_reason='observed failure' WHERE id=$1", account.ID, oldUntil)
+	s.Require().NoError(err)
+	observed, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	rotated := maps.Clone(observed.Credentials)
+	rotated["access_token"], rotated["refresh_token"], rotated["_token_version"] = "rotated-at", "rotated-rt", int64(11)
+	verifyCalls, claimCalls := 0, 0
+	var proof *service.VerifiedSupplyIdentity
+	var verifiedJSON []byte
+	s.repo.SetSupplyIdentityGuard(nativeIdentityGuardStub{
+		verify: func(ctx context.Context, input *service.Account) (*service.VerifiedSupplyIdentity, error) {
+			verifyCalls++
+			s.Require().Equal("rotated-at", input.GetCredential("access_token"))
+			verifiedJSON, err = json.Marshal(input.Credentials)
+			s.Require().NoError(err)
+			proof = new(service.VerifiedSupplyIdentity)
+			if verifyCalls > 1 {
+				s.Require().Equal("new", input.GetCredential("custom_setting"))
+				return proof, nil
+			}
+			// Interleave an administrator edit after verification has loaded the
+			// account and before the conditional credential UPDATE runs.
+			_, err := s.repo.sql.ExecContext(ctx, `UPDATE accounts SET
+				credentials=credentials || '{"model_mapping":{"client-model":"new-model"},"custom_setting":"new"}'::jsonb,
+				extra='{"routing_setting":"new"}',proxy_id=$2,concurrency=9,priority=17,
+				status='disabled',schedulable=FALSE,temp_unschedulable_until=$3,temp_unschedulable_reason='newer failure'
+				WHERE id=$1`, account.ID, proxy.ID, newUntil)
+			return proof, err
+		},
+		claim: func(ctx context.Context, tx service.VendorProxySQL, input *service.Account, identity *service.VerifiedSupplyIdentity) error {
+			claimCalls++
+			s.Require().Equal(account.ID, input.ID)
+			s.Require().Same(proof, identity)
+			inputJSON, err := json.Marshal(input.Credentials)
+			s.Require().NoError(err)
+			s.Require().JSONEq(string(verifiedJSON), string(inputJSON), "claim input must remain bound to the last verification")
+			var persistedJSON []byte
+			s.Require().NoError(scanSingleRow(ctx, tx, "SELECT credentials FROM accounts WHERE id=$1 FOR UPDATE", []any{account.ID}, &persistedJSON))
+			s.Require().JSONEq(string(verifiedJSON), string(persistedJSON), "real identity claims bind the entire persisted credential document")
+			return nil
+		},
+	})
+	cache := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cache
+
+	applied, err := s.repo.UpdateOpenAIOAuthCredentialsIfUnchanged(s.ctx, observed, rotated)
+
+	s.Require().NoError(err)
+	s.Require().True(applied, "independent settings must not discard a consumed, rotated refresh token")
+	s.Require().Equal(2, verifyCalls, "concurrent settings require a proof for the merged credential document")
+	s.Require().Equal(1, claimCalls)
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("rotated-at", got.GetCredential("access_token"))
+	s.Require().Equal("rotated-rt", got.GetCredential("refresh_token"))
+	s.Require().Equal(map[string]any{"client-model": "new-model"}, got.Credentials["model_mapping"])
+	s.Require().Equal("new", got.GetCredential("custom_setting"))
+	s.Require().Equal("new", got.Extra["routing_setting"])
+	s.Require().Equal(&proxy.ID, got.ProxyID)
+	s.Require().Equal(9, got.Concurrency)
+	s.Require().Equal(17, got.Priority)
+	s.Require().Equal(service.StatusDisabled, got.Status)
+	s.Require().False(got.Schedulable)
+	s.Require().Equal(&newUntil, got.TempUnschedulableUntil)
+	s.Require().Equal("newer failure", got.TempUnschedulableReason)
+	s.Require().Len(cache.setAccounts, 1)
+	s.Require().Equal(service.StatusDisabled, cache.setAccounts[0].Status)
+	s.Require().Equal("rotated-rt", cache.setAccounts[0].GetCredential("refresh_token"))
+	var outboxCount int
+	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql, "SELECT COUNT(*) FROM scheduler_outbox WHERE account_id=$1", []any{account.ID}, &outboxCount))
+	s.Require().Equal(1, outboxCount)
+}
+
+func (s *AccountRepoSuite) TestOpenAIOAuthRefreshCredentials_RejectsReauthorizedGrant() {
+	account := mustCreateAccount(s.T(), s.client, nativeOpenAIRefreshIntegrationAccount("openai-refresh-reauthorized"))
+	observed, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	rotated := maps.Clone(observed.Credentials)
+	rotated["access_token"], rotated["refresh_token"] = "late-at", "late-rt"
+	verifyCalls, claimCalls := 0, 0
+	s.repo.SetSupplyIdentityGuard(nativeIdentityGuardStub{
+		verify: func(ctx context.Context, _ *service.Account) (*service.VerifiedSupplyIdentity, error) {
+			verifyCalls++
+			_, err := s.repo.sql.ExecContext(ctx, `UPDATE accounts SET credentials=credentials ||
+				'{"access_token":"reauthorized-at","refresh_token":"reauthorized-rt","_token_version":11}'::jsonb WHERE id=$1`, account.ID)
+			return new(service.VerifiedSupplyIdentity), err
+		},
+		claim: func(context.Context, service.VendorProxySQL, *service.Account, *service.VerifiedSupplyIdentity) error {
+			claimCalls++
+			return nil
+		},
+	})
+	cache := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cache
+
+	applied, err := s.repo.UpdateOpenAIOAuthCredentialsIfUnchanged(s.ctx, observed, rotated)
+	s.Require().NoError(err)
+	s.Require().False(applied)
+	applied, err = s.repo.SetOpenAIOAuthRefreshErrorIfUnchanged(s.ctx, observed, "stale invalid_grant")
+	s.Require().NoError(err)
+	s.Require().False(applied)
+	applied, err = s.repo.SetOpenAIOAuthRefreshTempUnschedulableIfUnchanged(s.ctx, observed, time.Now().Add(time.Hour), "stale outage")
+	s.Require().NoError(err)
+	s.Require().False(applied)
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("reauthorized-rt", got.GetCredential("refresh_token"))
+	s.Require().Equal(service.StatusActive, got.Status)
+	s.Require().True(got.Schedulable)
+	s.Require().Empty(got.ErrorMessage)
+	s.Require().Nil(got.TempUnschedulableUntil)
+	s.Require().Equal(1, verifyCalls)
+	s.Require().Zero(claimCalls, "lost CAS must not claim the stale identity")
+	s.Require().Empty(cache.setAccounts)
+	var outboxCount int
+	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql, "SELECT COUNT(*) FROM scheduler_outbox WHERE account_id=$1", []any{account.ID}, &outboxCount))
+	s.Require().Zero(outboxCount, "stale success and failures must not publish scheduler events")
+}
+
+func (s *AccountRepoSuite) TestOpenAIOAuthRefreshFailure_PreservesLongerCooldownAndRecovers() {
+	account := mustCreateAccount(s.T(), s.client, nativeOpenAIRefreshIntegrationAccount("openai-refresh-current-failure"))
+	observed, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	until := time.Now().UTC().Add(time.Hour).Truncate(time.Microsecond)
+	cache := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cache
+	applied, err := s.repo.SetOpenAIOAuthRefreshTempUnschedulableIfUnchanged(s.ctx, observed, until, "longer outage")
+	s.Require().NoError(err)
+	s.Require().True(applied)
+	applied, err = s.repo.SetOpenAIOAuthRefreshTempUnschedulableIfUnchanged(s.ctx, observed, until.Add(-30*time.Minute), "shorter outage")
+	s.Require().NoError(err)
+	s.Require().False(applied)
+	current, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(&until, current.TempUnschedulableUntil)
+	s.Require().Equal("longer outage", current.TempUnschedulableReason)
+	s.Require().Equal(service.StatusActive, current.Status)
+	s.Require().True(current.Schedulable, "transient refresh failure must not permanently disable the account")
+	s.Require().Len(cache.setAccounts, 1)
+
+	verifyCalls, claimCalls := 0, 0
+	s.repo.SetSupplyIdentityGuard(nativeIdentityGuardStub{
+		verify: func(context.Context, *service.Account) (*service.VerifiedSupplyIdentity, error) {
+			verifyCalls++
+			return new(service.VerifiedSupplyIdentity), nil
+		},
+		claim: func(context.Context, service.VendorProxySQL, *service.Account, *service.VerifiedSupplyIdentity) error {
+			claimCalls++
+			return nil
+		},
+	})
+	rotated := maps.Clone(current.Credentials)
+	rotated["access_token"], rotated["refresh_token"] = "recovered-at", "recovered-rt"
+	applied, err = s.repo.UpdateOpenAIOAuthCredentialsIfUnchanged(s.ctx, current, rotated)
+	s.Require().NoError(err)
+	s.Require().True(applied)
+	current, err = s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Nil(current.TempUnschedulableUntil, "successful refresh clears its observed cooldown")
+	s.Require().Empty(current.TempUnschedulableReason)
+	s.Require().Equal(1, verifyCalls)
+	s.Require().Equal(1, claimCalls)
+
+	applied, err = s.repo.SetOpenAIOAuthRefreshErrorIfUnchanged(s.ctx, current, "current invalid_grant")
+	s.Require().NoError(err)
+	s.Require().True(applied)
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(service.StatusError, got.Status)
+	s.Require().False(got.Schedulable)
+	s.Require().Equal("current invalid_grant", got.ErrorMessage)
+	s.Require().Len(cache.setAccounts, 3)
+	var outboxCount int
+	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql, "SELECT COUNT(*) FROM scheduler_outbox WHERE account_id=$1", []any{account.ID}, &outboxCount))
+	s.Require().Equal(3, outboxCount, "only applied mutations publish scheduler events")
+}
+
+func (s *AccountRepoSuite) TestOpenAIOAuthRefresh_AdminCredentialsRemainFullReplacement() {
+	account := mustCreateAccount(s.T(), s.client, nativeOpenAIRefreshIntegrationAccount("openai-admin-replacement"))
+	verifyCalls, claimCalls := 0, 0
+	s.repo.SetSupplyIdentityGuard(nativeIdentityGuardStub{
+		verify: func(context.Context, *service.Account) (*service.VerifiedSupplyIdentity, error) {
+			verifyCalls++
+			return new(service.VerifiedSupplyIdentity), nil
+		},
+		claim: func(context.Context, service.VendorProxySQL, *service.Account, *service.VerifiedSupplyIdentity) error {
+			claimCalls++
+			return nil
+		},
+	})
+	replacement := map[string]any{"access_token": "admin-at", "refresh_token": "admin-rt"}
+	s.Require().NoError(s.repo.UpdateCredentials(s.ctx, account.ID, replacement))
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(replacement, got.Credentials, "explicit credential replacement must still remove omitted settings")
+	s.Require().Equal(1, verifyCalls)
+	s.Require().Equal(1, claimCalls)
+}
+
+func TestOpenAIOAuthRefreshClaimFailureRollsBackCredentialsAndOutbox(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t) // Exercise the repository's own transaction and rollback.
+	account := mustCreateAccount(t, client, nativeOpenAIRefreshIntegrationAccount("openai-refresh-claim-rollback"))
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM scheduler_outbox WHERE account_id=$1", account.ID)
+		_ = client.Account.DeleteOneID(account.ID).Exec(context.Background())
+	})
+	cache := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cache)
+	observed, err := repo.GetByID(ctx, account.ID)
+	require.NoError(t, err)
+	verifyCalls, claimCalls := 0, 0
+	proof := new(service.VerifiedSupplyIdentity)
+	repo.SetSupplyIdentityGuard(nativeIdentityGuardStub{
+		verify: func(_ context.Context, input *service.Account) (*service.VerifiedSupplyIdentity, error) {
+			verifyCalls++
+			require.Equal(t, "rejected-at", input.GetCredential("access_token"))
+			return proof, nil
+		},
+		claim: func(ctx context.Context, tx service.VendorProxySQL, input *service.Account, identity *service.VerifiedSupplyIdentity) error {
+			claimCalls++
+			require.Equal(t, account.ID, input.ID)
+			require.Same(t, proof, identity)
+			// A real write through the supplied transaction proves a rejected
+			// identity cannot leave either credentials or an outbox event behind.
+			_, err := tx.ExecContext(ctx, "INSERT INTO scheduler_outbox(event_type,account_id) VALUES($1,$2)", service.SchedulerOutboxEventAccountChanged, account.ID)
+			require.NoError(t, err)
+			return service.ErrVendorIdentityBound
+		},
+	})
+	rotated := maps.Clone(observed.Credentials)
+	rotated["access_token"], rotated["refresh_token"] = "rejected-at", "rejected-rt"
+
+	applied, err := repo.UpdateOpenAIOAuthCredentialsIfUnchanged(ctx, observed, rotated)
+
+	require.ErrorIs(t, err, service.ErrVendorIdentityBound)
+	require.False(t, applied)
+	require.Equal(t, 1, verifyCalls)
+	require.Equal(t, 1, claimCalls)
+	got, err := repo.GetByID(ctx, account.ID)
+	require.NoError(t, err)
+	require.Equal(t, observed.Credentials, got.Credentials)
+	require.Empty(t, cache.setAccounts)
+	var outboxCount int
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM scheduler_outbox WHERE account_id=$1", account.ID).Scan(&outboxCount))
+	require.Zero(t, outboxCount)
+}
+
+func TestOpenAIOAuthRefreshReverificationFailurePreservesConcurrentSettings(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	account := mustCreateAccount(t, client, nativeOpenAIRefreshIntegrationAccount("openai-refresh-reverification-rollback"))
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM scheduler_outbox WHERE account_id=$1", account.ID)
+		_ = client.Account.DeleteOneID(account.ID).Exec(context.Background())
+	})
+	cache := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cache)
+	observed, err := repo.GetByID(ctx, account.ID)
+	require.NoError(t, err)
+	verifyCalls, claimCalls := 0, 0
+	repo.SetSupplyIdentityGuard(nativeIdentityGuardStub{
+		verify: func(ctx context.Context, input *service.Account) (*service.VerifiedSupplyIdentity, error) {
+			verifyCalls++
+			require.Equal(t, "rotated-at", input.GetCredential("access_token"))
+			if verifyCalls == 1 {
+				_, err := integrationDB.ExecContext(ctx, `UPDATE accounts SET credentials=credentials ||
+					'{"model_mapping":{"client-model":"new-model"},"custom_setting":"new"}'::jsonb WHERE id=$1`, account.ID)
+				return new(service.VerifiedSupplyIdentity), err
+			}
+			require.Equal(t, "new", input.GetCredential("custom_setting"))
+			require.Equal(t, map[string]any{"client-model": "new-model"}, input.Credentials["model_mapping"])
+			return nil, service.ErrVendorIdentityUnverified
+		},
+		claim: func(context.Context, service.VendorProxySQL, *service.Account, *service.VerifiedSupplyIdentity) error {
+			claimCalls++
+			return nil
+		},
+	})
+	rotated := maps.Clone(observed.Credentials)
+	rotated["access_token"], rotated["refresh_token"] = "rotated-at", "rotated-rt"
+
+	applied, err := repo.UpdateOpenAIOAuthCredentialsIfUnchanged(ctx, observed, rotated)
+
+	require.ErrorIs(t, err, service.ErrVendorIdentityUnverified)
+	require.False(t, applied)
+	require.Equal(t, 2, verifyCalls)
+	require.Zero(t, claimCalls)
+	got, err := repo.GetByID(ctx, account.ID)
+	require.NoError(t, err)
+	want := maps.Clone(observed.Credentials)
+	want["model_mapping"] = map[string]any{"client-model": "new-model"}
+	want["custom_setting"] = "new"
+	require.Equal(t, want, got.Credentials, "rollback must retain the separately committed administrator edit")
+	require.Empty(t, cache.setAccounts)
+	var outboxCount int
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM scheduler_outbox WHERE account_id=$1", account.ID).Scan(&outboxCount))
+	require.Zero(t, outboxCount)
+}
+
 func (s *AccountRepoSuite) TestGrokOAuthConditionalMutation_DetachesBoundedSnapshotSync() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{
 		Name:        "grok-conditional-detached-sync",
@@ -1761,4 +2080,89 @@ func idsOfAccounts(accounts []service.Account) []int64 {
 		out = append(out, accounts[i].ID)
 	}
 	return out
+}
+
+func (s *AccountRepoSuite) TestRemovedAccountFieldsRejectWritesWithoutPartialChanges() {
+	account := &service.Account{
+		Name: "native-account", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token", "model_mapping": map[string]any{"client": "native"}},
+		Extra:       map[string]any{"codex_diagnostic_monitor": "preserve", "custom_bps_label": "allowed"},
+	}
+	s.Require().NoError(s.repo.Create(s.ctx, account))
+	before, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	for _, tc := range []struct {
+		field       string
+		credentials bool
+	}{
+		{"model_mapping_mode", true}, {"openai_excel_bps", false},
+		{"codex_turn_ticket:gpt-6-astra", false}, {"codex_ticket_harvest_enabled", false},
+		{"codex_allow_without_ticket", false}, {"openai_apikey_codex_identity", false}, {"model_catalog_snapshot", false},
+		{"openai_excel_bps_auto_recover_on_403", false}, {"openai_bps", false},
+		{"openai_bps_credential_state", false}, {"cost_multiplier", false}, {"cost_multiplier_auto_sync", false},
+	} {
+		s.Run(tc.field, func() {
+			creds, extra := maps.Clone(account.Credentials), maps.Clone(account.Extra)
+			if tc.credentials {
+				creds[tc.field] = "obsolete"
+			} else {
+				extra[tc.field] = "obsolete"
+			}
+			candidate := *account
+			candidate.ID, candidate.Name = 0, "must-not-be-created"
+			candidate.Credentials, candidate.Extra = creds, extra
+			s.Require().ErrorIs(s.repo.Create(s.ctx, &candidate), service.ErrUnsupportedAccountField)
+			s.Require().Zero(candidate.ID)
+			candidate.ID, candidate.Name = account.ID, "must-not-change"
+			s.Require().ErrorIs(s.repo.Update(s.ctx, &candidate), service.ErrUnsupportedAccountField)
+			changed, err := s.repo.BulkUpdate(s.ctx, []int64{account.ID}, service.AccountBulkUpdate{
+				Name: &candidate.Name, Credentials: creds, Extra: extra,
+			})
+			s.Require().ErrorIs(err, service.ErrUnsupportedAccountField)
+			s.Require().Zero(changed)
+			if tc.credentials {
+				s.Require().ErrorIs(s.repo.UpdateCredentials(s.ctx, account.ID, creds), service.ErrUnsupportedAccountField)
+				updated, err := s.repo.UpdateGrokOAuthCredentialsIfUnchanged(s.ctx, account.ID, account.Credentials, nil, creds)
+				s.Require().ErrorIs(err, service.ErrUnsupportedAccountField)
+				s.Require().False(updated)
+				s.Require().Contains(creds, tc.field, "rejected input must not be silently rewritten")
+			} else {
+				s.Require().ErrorIs(s.repo.UpdateExtra(s.ctx, account.ID, extra), service.ErrUnsupportedAccountField)
+				s.Require().Contains(extra, tc.field, "rejected input must not be silently rewritten")
+			}
+			after, err := s.repo.GetByID(s.ctx, account.ID)
+			s.Require().NoError(err)
+			s.Require().Equal(before, after, "rejected writes must preserve mappings, diagnostics, and the complete account")
+		})
+	}
+}
+
+func TestAccountRepositoryGrokVoiceOwnershipRemainsTenantBound(t *testing.T) {
+	ctx := context.Background()
+	tx := testTx(t)
+	_, err := tx.ExecContext(ctx, `CREATE TEMP TABLE gateway_media_voices (
+ account_id BIGINT,voice_id TEXT,user_id BIGINT,group_id BIGINT,metadata JSONB,created_at TIMESTAMPTZ DEFAULT NOW(),
+ PRIMARY KEY(account_id,voice_id)) ON COMMIT DROP`)
+	require.NoError(t, err)
+	repo := &accountRepository{sql: tx}
+	voice := &service.GatewayMediaVoice{ID: "voice-one", AccountID: 10, UserID: 20, GroupID: 30, Metadata: json.RawMessage(`{"voice_id":"voice-one"}`)}
+	require.NoError(t, repo.PutVoice(ctx, voice))
+	owned, err := repo.GetVoice(ctx, 30, 20, "voice-one")
+	require.NoError(t, err)
+	require.Equal(t, int64(10), owned.AccountID)
+	_, err = repo.GetVoice(ctx, 30, 21, "voice-one")
+	require.ErrorIs(t, err, service.ErrMediaNotOwned)
+	stolen := *voice
+	stolen.UserID = 21
+	require.ErrorIs(t, repo.PutVoice(ctx, &stolen), service.ErrMediaNotOwned)
+	require.NoError(t, repo.DeleteVoice(ctx, 30, 21, "voice-one"))
+	_, err = repo.GetVoice(ctx, 30, 20, "voice-one")
+	require.NoError(t, err)
+	foreign, err := repo.ListVoices(ctx, 31, 20)
+	require.NoError(t, err)
+	require.Empty(t, foreign)
+	require.NoError(t, repo.DeleteVoice(ctx, 30, 20, "voice-one"))
+	_, err = repo.GetVoice(ctx, 30, 20, "voice-one")
+	require.ErrorIs(t, err, service.ErrMediaNotOwned)
 }

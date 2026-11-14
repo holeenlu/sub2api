@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"math"
 	"net"
 	"net/http"
@@ -478,6 +479,11 @@ func handleQPSWebSocket(parentCtx context.Context, conn *websocket.Conn) {
 	defer pingTicker.Stop()
 
 	writeWithTimeout := func(messageType int, data []byte) error {
+		if messageType != websocket.CloseMessage {
+			if err := authz.Revalidate(ctx); err != nil {
+				return err
+			}
+		}
 		if err := conn.SetWriteDeadline(time.Now().Add(qpsWSWriteTimeout)); err != nil {
 			return err
 		}

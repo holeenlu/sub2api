@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"io"
 	"math/big"
 	"net"
 	"strings"
@@ -58,13 +59,26 @@ type fakeSMTPServer struct {
 	tlsConfig         *tls.Config
 	advertiseStartTLS bool
 
-	mu       sync.Mutex
-	commands []string
-	conns    atomic.Int64
-	wg       sync.WaitGroup
+	mu               sync.Mutex
+	commands         []string
+	conns            atomic.Int64
+	wg               sync.WaitGroup
+	active           map[net.Conn]struct{}
+	acceptDone       chan struct{}
+	stallAt          string
+	reached          chan struct{}
+	disconnected     chan struct{}
+	release          chan struct{}
+	reachedOnce      sync.Once
+	disconnectedOnce sync.Once
+	releaseOnce      sync.Once
 }
 
 func startFakeSMTPServer(t *testing.T, implicitTLS, advertiseStartTLS bool) (*fakeSMTPServer, int) {
+	return startStalledSMTPServer(t, implicitTLS, advertiseStartTLS, "")
+}
+
+func startStalledSMTPServer(t *testing.T, implicitTLS, advertiseStartTLS bool, stallAt string) (*fakeSMTPServer, int) {
 	t.Helper()
 	cert, pool := newSMTPTestCert(t)
 	prevPool := smtpTestRootCAs
@@ -79,29 +93,62 @@ func startFakeSMTPServer(t *testing.T, implicitTLS, advertiseStartTLS bool) (*fa
 		listener:          listener,
 		tlsConfig:         &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12},
 		advertiseStartTLS: advertiseStartTLS,
+		active:            make(map[net.Conn]struct{}), acceptDone: make(chan struct{}),
+		stallAt: stallAt, reached: make(chan struct{}), disconnected: make(chan struct{}), release: make(chan struct{}),
 	}
-	if implicitTLS {
+	if implicitTLS && stallAt != "implicit_tls" {
 		srv.listener = tls.NewListener(listener, srv.tlsConfig)
 	}
 	t.Cleanup(func() {
+		srv.releaseOnce.Do(func() { close(srv.release) })
 		_ = srv.listener.Close()
+		<-srv.acceptDone
+		srv.mu.Lock()
+		active := make([]net.Conn, 0, len(srv.active))
+		for conn := range srv.active {
+			active = append(active, conn)
+		}
+		srv.mu.Unlock()
+		for _, conn := range active {
+			_ = conn.Close()
+		}
 		srv.wg.Wait()
 	})
 
 	srv.wg.Add(1)
 	go func() {
 		defer srv.wg.Done()
+		defer close(srv.acceptDone)
 		for {
 			conn, err := srv.listener.Accept()
 			if err != nil {
 				return
 			}
+			srv.mu.Lock()
+			srv.active[conn] = struct{}{}
+			srv.mu.Unlock()
+			if tcp, ok := conn.(*net.TCPConn); ok && stallAt == "data_write" {
+				_ = tcp.SetReadBuffer(1024)
+			}
 			srv.conns.Add(1)
 			srv.wg.Add(1)
 			go func() {
 				defer srv.wg.Done()
-				defer func() { _ = conn.Close() }()
+				defer func() { _ = conn.Close(); srv.mu.Lock(); delete(srv.active, conn); srv.mu.Unlock() }()
 				_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+				if stallAt == "post_tls_record_error" {
+					tlsConn := conn.(*tls.Conn)
+					if err := tlsConn.Handshake(); err != nil {
+						return
+					}
+					// Oversized application-record header after a valid handshake.
+					_, _ = tlsConn.NetConn().Write([]byte{23, 3, 3, 255, 255})
+					_, _ = io.Copy(io.Discard, tlsConn.NetConn())
+					return
+				}
+				if srv.stall(conn, bufio.NewReader(conn), "implicit_tls") {
+					return
+				}
 				srv.serve(conn, srv.advertiseStartTLS)
 			}()
 		}
@@ -109,6 +156,29 @@ func startFakeSMTPServer(t *testing.T, implicitTLS, advertiseStartTLS bool) (*fa
 
 	port := listener.Addr().(*net.TCPAddr).Port
 	return srv, port
+}
+
+// stall only blocks a local test peer. data_write stops consuming after a
+// small body prefix, proving the sender is inside DATA rather than greeting IO.
+func (srv *fakeSMTPServer) stall(conn net.Conn, reader *bufio.Reader, stage string) bool {
+	if srv.stallAt != stage {
+		return false
+	}
+	if stage == "data_write" {
+		if _, err := io.ReadFull(reader, make([]byte, 64)); err != nil {
+			return true
+		}
+	}
+	srv.reachedOnce.Do(func() { close(srv.reached) })
+	if stage == "data_write" {
+		<-srv.release
+		if tcp, ok := conn.(*net.TCPConn); ok {
+			_ = tcp.SetReadBuffer(1 << 20)
+		}
+	}
+	_, _ = io.Copy(io.Discard, reader)
+	srv.disconnectedOnce.Do(func() { close(srv.disconnected) })
+	return true
 }
 
 func (srv *fakeSMTPServer) record(cmd string) {
@@ -137,6 +207,9 @@ func (srv *fakeSMTPServer) serve(conn net.Conn, allowStartTLS bool) {
 		}
 		return writer.Flush() == nil
 	}
+	if srv.stall(conn, reader, "greeting") {
+		return
+	}
 	if !writeLine("220 fake.test ESMTP ready") {
 		return
 	}
@@ -150,6 +223,9 @@ func (srv *fakeSMTPServer) serve(conn net.Conn, allowStartTLS bool) {
 		upper := strings.ToUpper(cmd)
 		switch {
 		case strings.HasPrefix(upper, "EHLO"), strings.HasPrefix(upper, "HELO"):
+			if srv.stall(conn, reader, "ehlo") {
+				return
+			}
 			ok := writeLine("250-fake.test")
 			if allowStartTLS {
 				ok = ok && writeLine("250-STARTTLS")
@@ -161,6 +237,9 @@ func (srv *fakeSMTPServer) serve(conn net.Conn, allowStartTLS bool) {
 			if !writeLine("220 2.0.0 ready to start TLS") {
 				return
 			}
+			if srv.stall(conn, reader, "starttls") {
+				return
+			}
 			tlsConn := tls.Server(conn, srv.tlsConfig)
 			if err := tlsConn.Handshake(); err != nil {
 				return
@@ -168,6 +247,9 @@ func (srv *fakeSMTPServer) serve(conn net.Conn, allowStartTLS bool) {
 			srv.serveUpgraded(tlsConn)
 			return
 		case strings.HasPrefix(upper, "AUTH"):
+			if srv.stall(conn, reader, "auth") {
+				return
+			}
 			if !writeLine("235 2.7.0 authentication successful") {
 				return
 			}
@@ -176,7 +258,13 @@ func (srv *fakeSMTPServer) serve(conn net.Conn, allowStartTLS bool) {
 				return
 			}
 		case upper == "DATA":
+			if srv.stall(conn, reader, "data_command") {
+				return
+			}
 			if !writeLine("354 go ahead") {
+				return
+			}
+			if srv.stall(conn, reader, "data_write") {
 				return
 			}
 			for {
@@ -188,10 +276,20 @@ func (srv *fakeSMTPServer) serve(conn net.Conn, allowStartTLS bool) {
 					break
 				}
 			}
+			if srv.stall(conn, reader, "data_ack") {
+				return
+			}
 			if !writeLine("250 message accepted") {
 				return
 			}
 		case upper == "QUIT":
+			if srv.stallAt == "quit_reject" {
+				_ = writeLine("500 non-standard quit")
+				return
+			}
+			if srv.stall(conn, reader, "quit") {
+				return
+			}
 			_ = writeLine("221 bye")
 			return
 		default:
@@ -207,10 +305,10 @@ func (srv *fakeSMTPServer) serveUpgraded(conn net.Conn) {
 	reader := bufio.NewReader(conn)
 	writer := bufio.NewWriter(conn)
 	// net/smtp 在 StartTLS 成功后会重新发送 EHLO，直接进入命令循环即可。
-	srv.serveCommands(reader, writer)
+	srv.serveCommands(conn, reader, writer)
 }
 
-func (srv *fakeSMTPServer) serveCommands(reader *bufio.Reader, writer *bufio.Writer) {
+func (srv *fakeSMTPServer) serveCommands(conn net.Conn, reader *bufio.Reader, writer *bufio.Writer) {
 	writeLine := func(line string) bool {
 		if _, err := writer.WriteString(line + "\r\n"); err != nil {
 			return false
@@ -227,10 +325,16 @@ func (srv *fakeSMTPServer) serveCommands(reader *bufio.Reader, writer *bufio.Wri
 		upper := strings.ToUpper(cmd)
 		switch {
 		case strings.HasPrefix(upper, "EHLO"), strings.HasPrefix(upper, "HELO"):
+			if srv.stall(conn, reader, "ehlo") {
+				return
+			}
 			if !(writeLine("250-fake.test") && writeLine("250-AUTH PLAIN LOGIN") && writeLine("250 8BITMIME")) {
 				return
 			}
 		case strings.HasPrefix(upper, "AUTH"):
+			if srv.stall(conn, reader, "auth") {
+				return
+			}
 			if !writeLine("235 2.7.0 authentication successful") {
 				return
 			}
@@ -239,7 +343,13 @@ func (srv *fakeSMTPServer) serveCommands(reader *bufio.Reader, writer *bufio.Wri
 				return
 			}
 		case upper == "DATA":
+			if srv.stall(conn, reader, "data_command") {
+				return
+			}
 			if !writeLine("354 go ahead") {
+				return
+			}
+			if srv.stall(conn, reader, "data_write") {
 				return
 			}
 			for {
@@ -251,10 +361,20 @@ func (srv *fakeSMTPServer) serveCommands(reader *bufio.Reader, writer *bufio.Wri
 					break
 				}
 			}
+			if srv.stall(conn, reader, "data_ack") {
+				return
+			}
 			if !writeLine("250 message accepted") {
 				return
 			}
 		case upper == "QUIT":
+			if srv.stallAt == "quit_reject" {
+				_ = writeLine("500 non-standard quit")
+				return
+			}
+			if srv.stall(conn, reader, "quit") {
+				return
+			}
 			_ = writeLine("221 bye")
 			return
 		default:
@@ -282,7 +402,7 @@ func TestSMTPConnectionImplicitTLS(t *testing.T) {
 	srv, port := startFakeSMTPServer(t, true, false)
 	svc := &EmailService{}
 
-	if err := svc.TestSMTPConnectionWithConfig(smtpTestConfig(port, true)); err != nil {
+	if err := svc.TestSMTPConnectionWithConfig(t.Context(), smtpTestConfig(port, true)); err != nil {
 		t.Fatalf("expected implicit TLS connection to succeed, got: %v", err)
 	}
 	if !srv.sawCommand("EHLO") {
@@ -296,7 +416,7 @@ func TestSMTPConnectionStartTLSFallbackWhenTLSEnabled(t *testing.T) {
 	srv, port := startFakeSMTPServer(t, false, true)
 	svc := &EmailService{}
 
-	if err := svc.TestSMTPConnectionWithConfig(smtpTestConfig(port, true)); err != nil {
+	if err := svc.TestSMTPConnectionWithConfig(t.Context(), smtpTestConfig(port, true)); err != nil {
 		t.Fatalf("expected STARTTLS fallback to succeed, got: %v", err)
 	}
 	if !srv.sawCommand("STARTTLS") {
@@ -312,7 +432,7 @@ func TestSMTPConnectionMandatoryStartTLSRefusesPlaintext(t *testing.T) {
 	srv, port := startFakeSMTPServer(t, false, false)
 	svc := &EmailService{}
 
-	err := svc.TestSMTPConnectionWithConfig(smtpTestConfig(port, true))
+	err := svc.TestSMTPConnectionWithConfig(t.Context(), smtpTestConfig(port, true))
 	if err == nil {
 		t.Fatal("expected error when server does not support STARTTLS")
 	}
@@ -330,7 +450,7 @@ func TestSMTPConnectionOpportunisticStartTLSWhenTLSDisabled(t *testing.T) {
 	srv, port := startFakeSMTPServer(t, false, true)
 	svc := &EmailService{}
 
-	if err := svc.TestSMTPConnectionWithConfig(smtpTestConfig(port, false)); err != nil {
+	if err := svc.TestSMTPConnectionWithConfig(t.Context(), smtpTestConfig(port, false)); err != nil {
 		t.Fatalf("expected opportunistic STARTTLS test connection to succeed, got: %v", err)
 	}
 	if !srv.sawCommand("STARTTLS") {
@@ -343,7 +463,7 @@ func TestSMTPConnectionPlainWhenNoStartTLS(t *testing.T) {
 	srv, port := startFakeSMTPServer(t, false, false)
 	svc := &EmailService{}
 
-	if err := svc.TestSMTPConnectionWithConfig(smtpTestConfig(port, false)); err != nil {
+	if err := svc.TestSMTPConnectionWithConfig(t.Context(), smtpTestConfig(port, false)); err != nil {
 		t.Fatalf("expected plain connection to succeed, got: %v", err)
 	}
 	if srv.sawCommand("STARTTLS") {
@@ -356,7 +476,7 @@ func TestSendEmailWithConfigStartTLSFallback(t *testing.T) {
 	srv, port := startFakeSMTPServer(t, false, true)
 	svc := &EmailService{}
 
-	err := svc.SendEmailWithConfig(smtpTestConfig(port, true), "rcpt@example.com", "subject", "<p>body</p>")
+	err := svc.SendEmailWithConfig(t.Context(), smtpTestConfig(port, true), "rcpt@example.com", "subject", "<p>body</p>")
 	if err != nil {
 		t.Fatalf("expected send via STARTTLS fallback to succeed, got: %v", err)
 	}
@@ -373,7 +493,7 @@ func TestSendEmailWithConfigImplicitTLS(t *testing.T) {
 	srv, port := startFakeSMTPServer(t, true, false)
 	svc := &EmailService{}
 
-	err := svc.SendEmailWithConfig(smtpTestConfig(port, true), "rcpt@example.com", "subject", "<p>body</p>")
+	err := svc.SendEmailWithConfig(t.Context(), smtpTestConfig(port, true), "rcpt@example.com", "subject", "<p>body</p>")
 	if err != nil {
 		t.Fatalf("expected send via implicit TLS to succeed, got: %v", err)
 	}

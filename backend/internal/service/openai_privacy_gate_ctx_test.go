@@ -52,11 +52,12 @@ func TestOpenAIGatewayService_PrivacyGateReadsAuthGroupFromContext(t *testing.T)
 				Hydrated: true, RequirePrivacySet: true,
 			})
 
+			require.True(t, svc.loadOpenAIGroupRequiresPrivacySet(ctx, &groupID))
+			require.Zero(t, groupRepo.calls.Load(), "privacy projection itself must not query the group table")
 			selection, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "", "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
 			require.NoError(t, err)
 			require.NotNil(t, selection)
 			require.Equal(t, int64(39112), selection.Account.ID)
-			require.Zero(t, groupRepo.calls.Load(), "privacy gate must not read the group table for the auth group")
 			if selection.ReleaseFunc != nil {
 				selection.ReleaseFunc()
 			}

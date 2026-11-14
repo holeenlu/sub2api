@@ -37,7 +37,7 @@ func (s *openaiOAuthClientStateStub) RefreshTokenWithClientID(ctx context.Contex
 func TestOpenAIOAuthService_ExchangeCode_StateRequired(t *testing.T) {
 	client := &openaiOAuthClientStateStub{}
 	svc := NewOpenAIOAuthService(nil, client)
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	svc.sessionStore.Set("sid", &openai.OAuthSession{
 		State:        "expected-state",
@@ -58,7 +58,7 @@ func TestOpenAIOAuthService_ExchangeCode_StateRequired(t *testing.T) {
 func TestOpenAIOAuthService_ExchangeCode_StateMismatch(t *testing.T) {
 	client := &openaiOAuthClientStateStub{}
 	svc := NewOpenAIOAuthService(nil, client)
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	svc.sessionStore.Set("sid", &openai.OAuthSession{
 		State:        "expected-state",
@@ -80,7 +80,7 @@ func TestOpenAIOAuthService_ExchangeCode_StateMismatch(t *testing.T) {
 func TestOpenAIOAuthService_ExchangeCode_StateMatch(t *testing.T) {
 	client := &openaiOAuthClientStateStub{}
 	svc := NewOpenAIOAuthService(nil, client)
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	svc.sessionStore.Set("sid", &openai.OAuthSession{
 		State:        "expected-state",

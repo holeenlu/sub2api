@@ -2,12 +2,14 @@ package admin
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/sysutil"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -18,184 +20,166 @@ import (
 
 // SystemHandler handles system-related operations
 type SystemHandler struct {
-	updateSvc systemUpdateService
-	lockSvc   *service.SystemOperationLockService
+	buildStatus systemBuildStatusService
+	lockSvc     systemOperationLocker
+	updater     systemOnlineUpdater
+	backupGate  systemUpdateBackupGate
 }
 
-// systemUpdateTimeout bounds a full in-place update or rollback: the release
-// manifest fetch plus a large binary download over slow links. It must stay
-// above the GitHub download client timeout (10 minutes) so the download owns
-// its own deadline.
-const systemUpdateTimeout = 15 * time.Minute
-
-// systemUpdateContext detaches a long-running update/rollback from the HTTP
-// request lifetime. Browsers and reverse proxies commonly abort idle requests
-// after 30-60s (axios default, nginx proxy_read_timeout), which canceled
-// c.Request.Context() mid-download and killed the update with
-// "download failed: context canceled" (#4504). The swap keeps running after a
-// client disconnect; a later retry then hits the system operation lock or
-// reports "Already up to date".
-func systemUpdateContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	base := context.Background()
-	if ctx != nil {
-		base = context.WithoutCancel(ctx)
-	}
-	return context.WithTimeout(base, systemUpdateTimeout)
+// systemBuildStatusService exposes version metadata and manual deployment status only.
+type systemBuildStatusService interface {
+	Status() service.BuildStatus
 }
 
-type systemUpdateService interface {
-	CheckUpdate(ctx context.Context, force bool) (*service.UpdateInfo, error)
-	PerformUpdate(ctx context.Context) error
-	Rollback() error
-	ListRollbackVersions(ctx context.Context) ([]service.RollbackVersion, error)
-	RollbackToVersion(ctx context.Context, version string) error
+type systemOperationLocker interface {
+	Acquire(context.Context, string) (*service.SystemOperationLock, error)
+	Release(context.Context, *service.SystemOperationLock, bool, string) error
+}
+
+type systemOnlineUpdater interface {
+	Status(context.Context) (*service.OnlineUpdateStatus, error)
+	Check(context.Context) (*service.OnlineUpdateStatus, error)
+	Start(context.Context, string, string) (*service.OnlineUpdateStatus, error)
+	EnsureIdle(context.Context) error
+}
+type systemUpdateBackupGate interface {
+	WithIdleMaintenance(context.Context, func(context.Context) error) error
+}
+
+// SetOnlineUpdater is called during dependency construction, before serving.
+func (h *SystemHandler) SetOnlineUpdater(updater systemOnlineUpdater, backup systemUpdateBackupGate) {
+	h.updater, h.backupGate = updater, backup
 }
 
 // NewSystemHandler creates a new SystemHandler
-func NewSystemHandler(updateSvc systemUpdateService, lockSvc *service.SystemOperationLockService) *SystemHandler {
+func NewSystemHandler(buildStatus systemBuildStatusService, lockSvc *service.SystemOperationLockService) *SystemHandler {
 	return &SystemHandler{
-		updateSvc: updateSvc,
-		lockSvc:   lockSvc,
+		buildStatus: buildStatus,
+		lockSvc:     lockSvc,
 	}
 }
 
 // GetVersion returns the current version
 // GET /api/v1/admin/system/version
 func (h *SystemHandler) GetVersion(c *gin.Context) {
-	info, _ := h.updateSvc.CheckUpdate(c.Request.Context(), false)
+	info := h.buildStatus.Status()
+	// Portal and admin clients receive the running backend version.
+	// This endpoint retains the existing live super-administrator authorization.
 	response.Success(c, gin.H{
-		"version": info.CurrentVersion,
+		"version":          info.CurrentVersion,
+		"upstream_version": info.UpstreamVersion,
+		"build_commit":     info.BuildCommit,
 	})
 }
 
-// CheckUpdates checks for available updates
-// GET /api/v1/admin/system/check-updates
-func (h *SystemHandler) CheckUpdates(c *gin.Context) {
-	force := c.Query("force") == "true"
-	info, err := h.updateSvc.CheckUpdate(c.Request.Context(), force)
-	if err != nil {
-		response.Error(c, http.StatusInternalServerError, err.Error())
+// Update endpoints accept only a live human super-administrator session. This
+// remains required when the site's optional step-up switch is disabled.
+func requireOnlineUpdateSession(c *gin.Context) bool {
+	actor, ok := authz.FromContext(c.Request.Context())
+	supplier, _ := authz.SupplierOrigin(c.Request.Context())
+	if !ok || actor.UserID <= 0 || actor.Role != authz.SuperAdmin || c.GetString("auth_method") != "jwt" || supplier {
+		response.Forbidden(c, "A super-administrator session on the main site is required")
+		return false
+	}
+	return true
+}
+func (h *SystemHandler) GetUpdateStatus(c *gin.Context) {
+	if !requireOnlineUpdateSession(c) {
 		return
 	}
-	response.Success(c, info)
-}
-
-// PerformUpdate downloads and applies the update
-// POST /api/v1/admin/system/update
-func (h *SystemHandler) PerformUpdate(c *gin.Context) {
-	operationID := buildSystemOperationID(c, "update")
-	payload := gin.H{"operation_id": operationID}
-	executeAdminIdempotentJSON(c, "admin.system.update", payload, service.DefaultSystemOperationIdempotencyTTL(), func(ctx context.Context) (any, error) {
-		lock, release, err := h.acquireSystemLock(ctx, operationID)
-		if err != nil {
-			return nil, err
-		}
-		var releaseReason string
-		succeeded := false
-		defer func() {
-			release(releaseReason, succeeded)
-		}()
-
-		updateCtx, cancel := systemUpdateContext(ctx)
-		defer cancel()
-
-		if err := h.updateSvc.PerformUpdate(updateCtx); err != nil {
-			if errors.Is(err, service.ErrNoUpdateAvailable) {
-				info, checkErr := h.updateSvc.CheckUpdate(updateCtx, false)
-				if checkErr != nil {
-					releaseReason = "SYSTEM_UPDATE_FAILED"
-					return nil, checkErr
-				}
-				succeeded = true
-				return gin.H{
-					"message":            "Already up to date",
-					"already_up_to_date": true,
-					"current_version":    info.CurrentVersion,
-					"latest_version":     info.LatestVersion,
-					"operation_id":       lock.OperationID(),
-				}, nil
-			}
-			releaseReason = "SYSTEM_UPDATE_FAILED"
-			return nil, err
-		}
-		succeeded = true
-
-		return gin.H{
-			"message":      "Update completed. Please restart the service.",
-			"need_restart": true,
-			"operation_id": lock.OperationID(),
-		}, nil
-	})
-}
-
-// GetRollbackVersions lists versions available for rollback
-// GET /api/v1/admin/system/rollback-versions
-func (h *SystemHandler) GetRollbackVersions(c *gin.Context) {
-	versions, err := h.updateSvc.ListRollbackVersions(c.Request.Context())
-	if err != nil {
-		response.Error(c, http.StatusInternalServerError, err.Error())
+	if h.updater == nil {
+		response.ErrorFrom(c, service.ErrOnlineUpdaterUnavailable)
 		return
 	}
-	response.Success(c, gin.H{
-		"versions": versions,
-	})
+	status, err := h.updater.Status(c.Request.Context())
+	if response.ErrorFrom(c, err) {
+		return
+	}
+	response.Success(c, status)
 }
-
-// Rollback restores a previous version.
-// Without a body (or with an empty version) it restores the local .backup binary
-// left by the last in-place update. With {"version": "x.y.z"} it downloads and
-// installs that specific release (must be one of the recent rollback versions).
-// POST /api/v1/admin/system/rollback
-func (h *SystemHandler) Rollback(c *gin.Context) {
+func (h *SystemHandler) CheckUpdate(c *gin.Context) {
+	if !requireOnlineUpdateSession(c) {
+		return
+	}
+	if h.updater == nil {
+		response.ErrorFrom(c, service.ErrOnlineUpdaterUnavailable)
+		return
+	}
+	var req struct{}
+	if !decodeOnlineUpdateRequest(c, &req) {
+		return
+	}
+	status, err := h.updater.Check(c.Request.Context())
+	if response.ErrorFrom(c, err) {
+		return
+	}
+	response.Success(c, status)
+}
+func (h *SystemHandler) StartUpdate(c *gin.Context) {
+	if !requireOnlineUpdateSession(c) {
+		return
+	}
 	var req struct {
-		Version string `json:"version"`
+		TargetCommit string `json:"target_commit"`
 	}
-	if c.Request.Body != nil && c.Request.ContentLength > 0 {
-		if err := c.ShouldBindJSON(&req); err != nil {
-			response.Error(c, http.StatusBadRequest, "invalid request body")
-			return
-		}
+	if !decodeOnlineUpdateRequest(c, &req) {
+		return
 	}
-	targetVersion := strings.TrimSpace(req.Version)
-
-	operation := "rollback"
-	if targetVersion != "" {
-		operation = "rollback:" + targetVersion
+	if !service.ValidOnlineUpdateCommit(req.TargetCommit) {
+		response.BadRequest(c, "Invalid target commit")
+		return
 	}
-	operationID := buildSystemOperationID(c, operation)
-	payload := gin.H{"operation_id": operationID, "version": targetVersion}
-	executeAdminIdempotentJSON(c, "admin.system.rollback", payload, service.DefaultSystemOperationIdempotencyTTL(), func(ctx context.Context) (any, error) {
-		lock, release, err := h.acquireSystemLock(ctx, operationID)
+	if h.updater == nil || h.backupGate == nil {
+		response.ErrorFrom(c, service.ErrOnlineUpdaterUnavailable)
+		return
+	}
+	operationID := buildSystemOperationID(c, "update")
+	executeAdminIdempotentJSON(c, "admin.system.update", req, service.DefaultSystemOperationIdempotencyTTL(), func(ctx context.Context) (any, error) {
+		// Browser cancellation cannot release the backup admission boundary while
+		// the host is still durably accepting a command. The ACK contains no remote
+		// GitHub IO; the independently bounded handoff survives a disconnected UI.
+		admissionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
+		defer cancel()
+		ctx = admissionCtx
+		_, release, err := h.acquireSystemLock(ctx, operationID)
 		if err != nil {
 			return nil, err
 		}
-		var releaseReason string
 		succeeded := false
-		defer func() {
-			release(releaseReason, succeeded)
-		}()
-
-		if targetVersion != "" {
-			// 指定版本回退同样要下载完整二进制，与更新一样和请求生命周期解耦。
-			rollbackCtx, cancel := systemUpdateContext(ctx)
-			defer cancel()
-			err = h.updateSvc.RollbackToVersion(rollbackCtx, targetVersion)
-		} else {
-			err = h.updateSvc.Rollback()
-		}
+		defer func() { release("", succeeded) }()
+		var status *service.OnlineUpdateStatus
+		// Backup/restore records and host job publication share the durable writer
+		// boundary. The host job, rather than this short HTTP lock, owns the update.
+		err = h.backupGate.WithIdleMaintenance(ctx, func(ctx context.Context) error {
+			var err error
+			status, err = h.updater.Start(ctx, req.TargetCommit, operationID)
+			return err
+		})
 		if err != nil {
-			releaseReason = "SYSTEM_ROLLBACK_FAILED"
 			return nil, err
 		}
 		succeeded = true
-
-		return gin.H{
-			"message":      "Rollback completed. Please restart the service.",
-			"need_restart": true,
-			"version":      targetVersion,
-			"operation_id": lock.OperationID(),
-		}, nil
+		return status, nil
 	})
+}
+func decodeOnlineUpdateRequest(c *gin.Context, value any) bool {
+	if c.Request.Body == nil {
+		response.BadRequest(c, "Invalid update request")
+		return false
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(value) != nil {
+		response.BadRequest(c, "Invalid update request")
+		return false
+	}
+	var extra any
+	if decoder.Decode(&extra) != io.EOF {
+		response.BadRequest(c, "Invalid update request")
+		return false
+	}
+	return true
 }
 
 // RestartService restarts the systemd service
@@ -208,19 +192,24 @@ func (h *SystemHandler) RestartService(c *gin.Context) {
 		if err != nil {
 			return nil, err
 		}
-		succeeded := false
-		defer func() {
-			release("", succeeded)
-		}()
+		if h.updater != nil {
+			if err := h.updater.EnsureIdle(ctx); err != nil {
+				release("ONLINE_UPDATE_BUSY", false)
+				return nil, err
+			}
+		}
 
 		// Schedule service restart in background after sending response
 		// This ensures the client receives the success response before the service restarts
 		go func() {
 			// Wait a moment to ensure the response is sent
 			time.Sleep(500 * time.Millisecond)
+			// Keep the shared lease until the exit occurs, rather than releasing it
+			// before the delayed restart and allowing a new host update in that gap.
 			sysutil.RestartServiceAsync()
+			time.Sleep(250 * time.Millisecond)
+			release("", true) // Non-Linux fallback; Linux has already exited.
 		}()
-		succeeded = true
 		return gin.H{
 			"message":      "Service restart initiated",
 			"operation_id": lock.OperationID(),

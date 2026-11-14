@@ -41,6 +41,12 @@ func alphaSearchResponsesSSE(output string) string {
 }
 
 func TestForwardAlphaSearchOAuthPreservesWire(t *testing.T) {
+	t.Run("native", func(t *testing.T) { testForwardAlphaSearchOAuthPreservesWire(t, false) })
+	t.Run("cloud_enabled", func(t *testing.T) { testForwardAlphaSearchOAuthPreservesWire(t, true) })
+}
+
+func testForwardAlphaSearchOAuthPreservesWire(t *testing.T, cloud bool) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{
 		"id":"search-session",
@@ -72,6 +78,7 @@ func TestForwardAlphaSearchOAuthPreservesWire(t *testing.T) {
 		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Concurrency: 1,
+		Extra:       map[string]any{OpenAICloudEnabledKey: cloud},
 		Credentials: map[string]any{
 			"access_token":       "oauth-token",
 			"chatgpt_account_id": "chatgpt-account",
@@ -83,6 +90,8 @@ func TestForwardAlphaSearchOAuthPreservesWire(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, 1, result.WebSearchCalls)
+	require.Equal(t, UsageAuthorizationModeNative, result.AuthorizationMode)
+	require.False(t, result.CloudManagedBilling, "search uses ordinary per-call billing, not a Cloud settlement root")
 	require.Equal(t, "gpt-5.6-sol", result.Model)
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.JSONEq(t, `{"encrypted_output":"ciphertext","output":"search result"}`, recorder.Body.String())
@@ -216,6 +225,7 @@ func TestForwardAlphaSearchPATBackfillsMissingChatGPTAccountMetadata(t *testing.
 		Body:       io.NopCloser(strings.NewReader(alphaSearchResponsesSSE("search result"))),
 	}}
 	oauthService := NewOpenAIOAuthService(nil, nil)
+	startSessionOwnerTest(t, oauthService)
 	service := &OpenAIGatewayService{
 		cfg:                 &config.Config{},
 		httpUpstream:        upstream,

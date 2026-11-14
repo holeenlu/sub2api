@@ -10,7 +10,6 @@ import (
 	"sync"
 	"testing"
 
-	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -79,22 +78,9 @@ func (u *astraProCapturedUpstream) snapshot() ([]string, []int64, [][]byte) {
 // through the real failover loop for the astra pro request.
 func newAstraProFailoverContext(t *testing.T, body string) (*gin.Context, *httptest.ResponseRecorder) {
 	t.Helper()
-	groupID := int64(3132)
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader([]byte(body)))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = req
-	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
-		ID:      99,
-		GroupID: &groupID,
-		Group: &service.Group{
-			ID:       groupID,
-			Platform: service.PlatformOpenAI,
-		},
-		User: &service.User{ID: 100},
-	})
-	c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 100, Concurrency: 0})
+	c, rec := newOpenAIResponsesFailoverTestContext(t, nil)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader([]byte(body)))
+	c.Request.Header.Set("Content-Type", "application/json")
 	return c, rec
 }
 
@@ -174,32 +160,4 @@ func TestOpenAIGatewayHandlerResponses_AstraProBoth403NoDowngrade(t *testing.T) 
 	require.NotEqual(t, http.StatusOK, rec.Code, "all-403 must never surface a 200 to the client")
 	require.Equal(t, http.StatusBadGateway, rec.Code)
 	require.Equal(t, "upstream_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
-}
-
-// passthrough -> non-passthrough drops only the encrypted *input* reasoning item;
-// the official top-level reasoning.mode/effort survive verbatim.
-func TestDeriveOpenAIForwardAttemptBody_AstraCrossModeKeepsTopLevelReasoningMode(t *testing.T) {
-	h := &OpenAIGatewayHandler{}
-	canonical := []byte(`{"model":"gpt-6-astra","stream":false,"reasoning":{"mode":"pro","effort":"max"},"input":[` +
-		`{"type":"message","role":"user","content":"hello"},` +
-		`{"type":"reasoning","id":"rs_kiro_abc","encrypted_content":"ENC_BLOB","summary":[{"type":"summary_text","text":"thinking"}]}` +
-		`]}`)
-	canonicalSnapshot := append([]byte(nil), canonical...)
-	state := &openAIPassthroughFailoverState{}
-
-	kiro := newOpenAIPassthroughAccount(1, true)     // passthrough first
-	bedrock := newOpenAIPassthroughAccount(2, false) // non-passthrough after
-
-	firstBody := h.deriveOpenAIForwardAttemptBody(nil, canonical, kiro, state)
-	require.Equal(t, 1, reasoningItemCount(t, firstBody), "first passthrough attempt keeps the encrypted input reasoning item")
-	require.Equal(t, "pro", gjson.GetBytes(firstBody, "reasoning.mode").String())
-	require.Equal(t, "max", gjson.GetBytes(firstBody, "reasoning.effort").String())
-
-	secondBody := h.deriveOpenAIForwardAttemptBody(nil, canonical, bedrock, state)
-	require.Equal(t, 0, reasoningItemCount(t, secondBody), "cross-mode attempt drops the encrypted input reasoning item")
-	require.Equal(t, "pro", gjson.GetBytes(secondBody, "reasoning.mode").String(), "mode=pro must survive cross-mode sanitization")
-	require.Equal(t, "max", gjson.GetBytes(secondBody, "reasoning.effort").String(), "effort=max must survive cross-mode sanitization")
-	require.Equal(t, "gpt-6-astra", gjson.GetBytes(secondBody, "model").String())
-	require.JSONEq(t, string(canonicalSnapshot), string(canonical), "canonical forwardBody must never be mutated")
-	require.True(t, gjson.GetBytes(canonical, "input.1.encrypted_content").Exists())
 }

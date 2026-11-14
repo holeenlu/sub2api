@@ -80,6 +80,16 @@ func PasswordHash(v string) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldPasswordHash, v))
 }
 
+// SessionGeneration applies equality check predicate on the "session_generation" field. It's identical to SessionGenerationEQ.
+func SessionGeneration(v int64) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldSessionGeneration, v))
+}
+
+// CreatedBy applies equality check predicate on the "created_by" field. It's identical to CreatedByEQ.
+func CreatedBy(v int64) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldCreatedBy, v))
+}
+
 // Role applies equality check predicate on the "role" field. It's identical to RoleEQ.
 func Role(v string) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldRole, v))
@@ -438,6 +448,96 @@ func PasswordHashEqualFold(v string) predicate.User {
 // PasswordHashContainsFold applies the ContainsFold predicate on the "password_hash" field.
 func PasswordHashContainsFold(v string) predicate.User {
 	return predicate.User(sql.FieldContainsFold(FieldPasswordHash, v))
+}
+
+// SessionGenerationEQ applies the EQ predicate on the "session_generation" field.
+func SessionGenerationEQ(v int64) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldSessionGeneration, v))
+}
+
+// SessionGenerationNEQ applies the NEQ predicate on the "session_generation" field.
+func SessionGenerationNEQ(v int64) predicate.User {
+	return predicate.User(sql.FieldNEQ(FieldSessionGeneration, v))
+}
+
+// SessionGenerationIn applies the In predicate on the "session_generation" field.
+func SessionGenerationIn(vs ...int64) predicate.User {
+	return predicate.User(sql.FieldIn(FieldSessionGeneration, vs...))
+}
+
+// SessionGenerationNotIn applies the NotIn predicate on the "session_generation" field.
+func SessionGenerationNotIn(vs ...int64) predicate.User {
+	return predicate.User(sql.FieldNotIn(FieldSessionGeneration, vs...))
+}
+
+// SessionGenerationGT applies the GT predicate on the "session_generation" field.
+func SessionGenerationGT(v int64) predicate.User {
+	return predicate.User(sql.FieldGT(FieldSessionGeneration, v))
+}
+
+// SessionGenerationGTE applies the GTE predicate on the "session_generation" field.
+func SessionGenerationGTE(v int64) predicate.User {
+	return predicate.User(sql.FieldGTE(FieldSessionGeneration, v))
+}
+
+// SessionGenerationLT applies the LT predicate on the "session_generation" field.
+func SessionGenerationLT(v int64) predicate.User {
+	return predicate.User(sql.FieldLT(FieldSessionGeneration, v))
+}
+
+// SessionGenerationLTE applies the LTE predicate on the "session_generation" field.
+func SessionGenerationLTE(v int64) predicate.User {
+	return predicate.User(sql.FieldLTE(FieldSessionGeneration, v))
+}
+
+// CreatedByEQ applies the EQ predicate on the "created_by" field.
+func CreatedByEQ(v int64) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldCreatedBy, v))
+}
+
+// CreatedByNEQ applies the NEQ predicate on the "created_by" field.
+func CreatedByNEQ(v int64) predicate.User {
+	return predicate.User(sql.FieldNEQ(FieldCreatedBy, v))
+}
+
+// CreatedByIn applies the In predicate on the "created_by" field.
+func CreatedByIn(vs ...int64) predicate.User {
+	return predicate.User(sql.FieldIn(FieldCreatedBy, vs...))
+}
+
+// CreatedByNotIn applies the NotIn predicate on the "created_by" field.
+func CreatedByNotIn(vs ...int64) predicate.User {
+	return predicate.User(sql.FieldNotIn(FieldCreatedBy, vs...))
+}
+
+// CreatedByGT applies the GT predicate on the "created_by" field.
+func CreatedByGT(v int64) predicate.User {
+	return predicate.User(sql.FieldGT(FieldCreatedBy, v))
+}
+
+// CreatedByGTE applies the GTE predicate on the "created_by" field.
+func CreatedByGTE(v int64) predicate.User {
+	return predicate.User(sql.FieldGTE(FieldCreatedBy, v))
+}
+
+// CreatedByLT applies the LT predicate on the "created_by" field.
+func CreatedByLT(v int64) predicate.User {
+	return predicate.User(sql.FieldLT(FieldCreatedBy, v))
+}
+
+// CreatedByLTE applies the LTE predicate on the "created_by" field.
+func CreatedByLTE(v int64) predicate.User {
+	return predicate.User(sql.FieldLTE(FieldCreatedBy, v))
+}
+
+// CreatedByIsNil applies the IsNil predicate on the "created_by" field.
+func CreatedByIsNil() predicate.User {
+	return predicate.User(sql.FieldIsNull(FieldCreatedBy))
+}
+
+// CreatedByNotNil applies the NotNil predicate on the "created_by" field.
+func CreatedByNotNil() predicate.User {
+	return predicate.User(sql.FieldNotNull(FieldCreatedBy))
 }
 
 // RoleEQ applies the EQ predicate on the "role" field.
@@ -1576,29 +1676,6 @@ func HasAttributeValues() predicate.User {
 func HasAttributeValuesWith(preds ...predicate.UserAttributeValue) predicate.User {
 	return predicate.User(func(s *sql.Selector) {
 		step := newAttributeValuesStep()
-		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
-			for _, p := range preds {
-				p(s)
-			}
-		})
-	})
-}
-
-// HasPromoCodeUsages applies the HasEdge predicate on the "promo_code_usages" edge.
-func HasPromoCodeUsages() predicate.User {
-	return predicate.User(func(s *sql.Selector) {
-		step := sqlgraph.NewStep(
-			sqlgraph.From(Table, FieldID),
-			sqlgraph.Edge(sqlgraph.O2M, false, PromoCodeUsagesTable, PromoCodeUsagesColumn),
-		)
-		sqlgraph.HasNeighbors(s, step)
-	})
-}
-
-// HasPromoCodeUsagesWith applies the HasEdge predicate on the "promo_code_usages" edge with a given conditions (other predicates).
-func HasPromoCodeUsagesWith(preds ...predicate.PromoCodeUsage) predicate.User {
-	return predicate.User(func(s *sql.Selector) {
-		step := newPromoCodeUsagesStep()
 		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
 			for _, p := range preds {
 				p(s)

@@ -1,0 +1,20 @@
+{
+  "repository": "holeenlu/sub2api",
+  "branch": "main",
+  "tag": "NewAPI/latest",
+  "project_directory": "/opt/newapi",
+  "project_name": "newapi",
+  "compose_file": "/opt/newapi/compose.yaml",
+  "manifest_file": "/opt/newapi/release-manifest.json",
+  "services": {
+    "api": "api",
+    "web": "web",
+    "vendor-portal": "vendor",
+    "web-direct": "web"
+  },
+  "socket": "/run/newapi-updater/control.sock",
+  "socket_gid": 1000,
+  "api_uid": 1000,
+  "state_directory": "/var/lib/newapi-updater",
+  "health_timeout": 600
+}

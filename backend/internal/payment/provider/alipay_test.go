@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/smartwalle/alipay/v3"
@@ -486,18 +485,14 @@ func TestAlipayQueryRefundMapsStatus(t *testing.T) {
 
 	const outRequestNo = "sub2_7-refund-1760500000000000000"
 	ok := alipay.Error{Code: alipay.CodeSuccess, Msg: "Success"}
-	settled := time.Now().Add(-alipayRefundQueryNotFoundGrace - time.Minute)
 	for _, tc := range []struct {
-		name        string
-		rsp         *alipay.TradeFastPayRefundQueryRsp
-		requestedAt time.Time
-		wantStatus  string
+		name       string
+		rsp        *alipay.TradeFastPayRefundQueryRsp
+		wantStatus string
 	}{
-		{name: "success", rsp: &alipay.TradeFastPayRefundQueryRsp{Error: ok, OutRequestNo: outRequestNo, RefundAmount: "12.50", RefundStatus: alipayRefundStatusSucc}, requestedAt: settled, wantStatus: payment.ProviderStatusSuccess},
-		{name: "record without final status", rsp: &alipay.TradeFastPayRefundQueryRsp{Error: ok, OutRequestNo: outRequestNo, RefundAmount: "12.50"}, requestedAt: settled, wantStatus: payment.ProviderStatusPending},
-		{name: "no refund record after grace", rsp: &alipay.TradeFastPayRefundQueryRsp{Error: ok}, requestedAt: settled, wantStatus: payment.ProviderStatusFailed},
-		{name: "no refund record within grace", rsp: &alipay.TradeFastPayRefundQueryRsp{Error: ok}, requestedAt: time.Now().Add(-time.Minute), wantStatus: payment.ProviderStatusPending},
-		{name: "no refund record with unknown request time", rsp: &alipay.TradeFastPayRefundQueryRsp{Error: ok}, wantStatus: payment.ProviderStatusPending},
+		{name: "success", rsp: &alipay.TradeFastPayRefundQueryRsp{Error: ok, OutRequestNo: outRequestNo, RefundAmount: "12.50", RefundStatus: alipayRefundStatusSucc}, wantStatus: payment.ProviderStatusSuccess},
+		{name: "record without final status", rsp: &alipay.TradeFastPayRefundQueryRsp{Error: ok, OutRequestNo: outRequestNo, RefundAmount: "12.50"}, wantStatus: payment.ProviderStatusPending},
+		{name: "missing record is not a definitive failure", rsp: &alipay.TradeFastPayRefundQueryRsp{Error: ok}, wantStatus: payment.ProviderStatusPending},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			alipayTradeFastPayRefundQuery = func(_ context.Context, _ *alipay.Client, param alipay.TradeFastPayRefundQuery) (*alipay.TradeFastPayRefundQueryRsp, error) {
@@ -507,7 +502,7 @@ func TestAlipayQueryRefundMapsStatus(t *testing.T) {
 				return tc.rsp, nil
 			}
 			provider := &Alipay{client: &alipay.Client{}}
-			resp, err := provider.QueryRefund(context.Background(), payment.RefundQueryRequest{OrderID: "sub2_7", RefundID: outRequestNo, RequestedAt: tc.requestedAt})
+			resp, err := provider.QueryRefund(context.Background(), payment.RefundQueryRequest{OrderID: "sub2_7", RefundID: outRequestNo})
 			if err != nil {
 				t.Fatalf("QueryRefund() error = %v", err)
 			}
@@ -533,9 +528,8 @@ func TestAlipayQueryRefundBusinessFailureKeepsRefundPending(t *testing.T) {
 		}
 		provider := &Alipay{client: &alipay.Client{}}
 		resp, err := provider.QueryRefund(context.Background(), payment.RefundQueryRequest{
-			OrderID:     "sub2_7",
-			RefundID:    "sub2_7-refund-1",
-			RequestedAt: time.Now().Add(-24 * time.Hour),
+			OrderID:  "sub2_7",
+			RefundID: "sub2_7-refund-1",
 		})
 		if err == nil {
 			t.Fatalf("code %q: QueryRefund() = %+v, want error", rspErr.Code, resp)
@@ -569,5 +563,11 @@ func TestAlipayQueryRefundErrorsKeepRefundPending(t *testing.T) {
 
 	if _, err := provider.QueryRefund(context.Background(), payment.RefundQueryRequest{OrderID: "sub2_7", RefundID: "sub2_7-refund-1"}); err == nil {
 		t.Fatal("gateway error must be returned so the refund stays pending")
+	}
+	alipayTradeFastPayRefundQuery = func(context.Context, *alipay.Client, alipay.TradeFastPayRefundQuery) (*alipay.TradeFastPayRefundQueryRsp, error) {
+		return &alipay.TradeFastPayRefundQueryRsp{Error: alipay.Error{Code: alipay.CodeSuccess}, OutRequestNo: "other-refund-1", RefundStatus: alipayRefundStatusSucc}, nil
+	}
+	if _, err := provider.QueryRefund(context.Background(), payment.RefundQueryRequest{OrderID: "sub2_7", RefundID: "sub2_7-refund-1"}); err == nil || !strings.Contains(err.Error(), "identity mismatch") {
+		t.Fatalf("foreign refund must not settle this order: %v", err)
 	}
 }

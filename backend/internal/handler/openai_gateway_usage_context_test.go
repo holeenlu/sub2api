@@ -2,7 +2,12 @@ package handler
 
 import (
 	"context"
+	"github.com/Wei-Shaw/sub2api/internal/host"
+	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/stretchr/testify/require"
@@ -38,4 +43,26 @@ func TestOpenAISubmitUsageRecordTaskCopiesRequestContext(t *testing.T) {
 
 	require.Equal(t, "openai-client-request-123", gotClientRequestID)
 	require.Equal(t, "openai-request-456", gotRequestID)
+}
+
+func TestUsageFieldsSnapshotSurvivesPooledGinContextReuse(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/responses", nil).WithContext(context.WithValue(context.Background(), ctxkey.RequestedPublicModel, "model-A"))
+	fields := clientRequestedUsageFields(c, service.ChannelMappingResult{}, "fallback", "upstream")
+	pool := host.NewUsageWorker(host.UsageWorkerOptions{WorkerCount: 1, QueueSize: 4})
+	startHandlerUsageWorker(t, pool)
+	release := make(chan struct{})
+	started := make(chan struct{})
+	done := make(chan string, 1)
+	pool.Submit(func(context.Context) { close(started); <-release })
+	<-started
+	pool.Submit(func(context.Context) { done <- fields.OriginalModel })
+	c.Request = httptest.NewRequest("POST", "/v1/responses", nil).WithContext(context.WithValue(context.Background(), ctxkey.RequestedPublicModel, "model-B"))
+	close(release)
+	select {
+	case model := <-done:
+		require.Equal(t, "model-A", model)
+	case <-time.After(time.Second):
+		t.Fatal("worker did not run")
+	}
 }

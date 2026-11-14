@@ -69,11 +69,23 @@ func runSecurityAudit(c *gin.Context, reqLog *zap.Logger, coordinator *securitya
 	if c == nil || c.Request == nil {
 		return nil
 	}
+	if c.Request.URL != nil && !strings.HasSuffix(c.Request.URL.Path, "/count_tokens") && !strings.HasSuffix(c.Request.URL.Path, "/input_tokens") {
+		c.Request = c.Request.WithContext(service.WithSchedulingQuotaRequest(c.Request.Context(), body, protocol, apiKey))
+	}
 	cacheCompletion := cachesSecurityAuditCompletion(stage)
 	if cacheCompletion {
 		if completed, exists := c.Get(securityAuditCompletedContextKey); exists && completed == true {
 			return nil
 		}
+	}
+	if legacy != nil {
+		input := buildContentModerationInput(c, apiKey, subject, protocol, model, body)
+		requestCtx := c.Request.Context()
+		c.Request = c.Request.WithContext(service.WithUpstreamRefusalObserver(requestCtx, func() {
+			if err := legacy.RememberUpstreamRefusal(requestCtx, input); err != nil && reqLog != nil {
+				reqLog.Warn("content_moderation.refusal_feedback_failed", zap.Error(err))
+			}
+		}))
 	}
 	if coordinator == nil {
 		legacyDecision := runContentModeration(c, reqLog, legacy, apiKey, subject, protocol, model, body)
@@ -84,10 +96,13 @@ func runSecurityAudit(c *gin.Context, reqLog *zap.Logger, coordinator *securitya
 		decision.Legacy = &securityaudit.LegacyDecision{
 			Allowed: legacyDecision.Allowed, Blocked: legacyDecision.Blocked, Flagged: legacyDecision.Flagged,
 			Message: legacyDecision.Message, StatusCode: legacyDecision.StatusCode,
-			ErrorCode: "content_policy_violation", Action: legacyDecision.Action,
+			ErrorCode: legacyDecision.ErrorCode(), Action: legacyDecision.Action,
 		}
 		if legacyDecision.Blocked {
-			decision.Kind, decision.HTTPStatus, decision.ErrorCode, decision.ClientMessage, decision.AllowNextStage = securityaudit.DecisionBlock, contentModerationStatus(legacyDecision), "content_policy_violation", legacyDecision.Message, false
+			decision.Kind, decision.HTTPStatus, decision.ErrorCode, decision.ClientMessage, decision.AllowNextStage = securityaudit.DecisionBlock, contentModerationStatus(legacyDecision), legacyDecision.ErrorCode(), legacyDecision.Message, false
+			if decision.ErrorCode == service.ContentModerationErrorUnavailable {
+				decision.Kind = securityaudit.DecisionUnavailable
+			}
 		}
 		if decision.AllowNextStage && cacheCompletion {
 			c.Set(securityAuditCompletedContextKey, true)
@@ -164,6 +179,7 @@ func buildSecurityAuditRequest(c *gin.Context, apiKey *service.APIKey, subject m
 		APIKeyID: legacy.APIKeyID, APIKeyName: legacy.APIKeyName, GroupID: cloneSecurityAuditGroupID(legacy.GroupID),
 		GroupName: legacy.GroupName, Provider: legacy.Provider, Endpoint: legacy.Endpoint,
 		Protocol: legacy.Protocol, Model: legacy.Model, Body: body, Stage: strings.TrimSpace(stage),
+		DeviceID: legacy.DeviceID,
 	}
 	if apiKey != nil && apiKey.User != nil {
 		request.Username = apiKey.User.Username

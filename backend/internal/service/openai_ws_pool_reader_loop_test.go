@@ -581,7 +581,7 @@ func TestOpenAIWSConnPingDoesNotBlockWrite(t *testing.T) {
 	require.Eventually(t, func() bool { return fake.pinging.Load() == 1 }, time.Second, 5*time.Millisecond)
 
 	started := time.Now()
-	require.NoError(t, conn.writeJSONWithTimeout(context.Background(), map[string]any{"type": "response.create"}, time.Second))
+	require.NoError(t, conn.writeJSONWithTimeout(context.Background(), map[string]any{"type": "session.update"}, time.Second))
 	require.Less(t, time.Since(started), 300*time.Millisecond, "写请求不应等待 ping 的 pong")
 	require.EqualValues(t, 1, fake.pinging.Load(), "写完成时 ping 仍应在等待 pong")
 }

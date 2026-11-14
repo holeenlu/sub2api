@@ -168,8 +168,6 @@ scanRoot:
 						firstUserCaptured = true
 					}
 				default:
-					// Match Chat: reminders appended after conversation/tool items
-					// must not change the identity of an existing session.
 					systemPrefixOpen = false
 				}
 				if !firstUserCaptured && item.Get("type").String() == "input_text" {

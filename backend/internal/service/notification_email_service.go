@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 )
 
 const (
@@ -228,11 +230,6 @@ func shouldFallbackNotificationEmail(err error) bool {
 	return errors.As(err, &configErr)
 }
 
-func isNotificationEmailDeliveryError(err error) bool {
-	var deliveryErr notificationEmailDeliveryError
-	return errors.As(err, &deliveryErr)
-}
-
 func (s *NotificationEmailService) ListEventInfos() []NotificationEmailEventInfo {
 	infos := make([]NotificationEmailEventInfo, 0, len(notificationEmailEventDefinitions))
 	for _, event := range notificationEmailEventOrder {
@@ -247,9 +244,26 @@ func (s *NotificationEmailService) SupportedLocales() []string {
 	return append([]string(nil), notificationEmailLocales...)
 }
 
+// Authentication templates can deliver credentials for any site user. They
+// cannot be delegated with ordinary content editing. Internal rendering remains
+// available so a restricted operator can still trigger legitimate notifications.
+func (s *NotificationEmailService) CheckTemplateManagement(ctx context.Context, event string) error {
+	info, _, err := s.eventInfo(event)
+	if err != nil {
+		return err
+	}
+	if actor, ok := authz.FromContext(ctx); ok && actor.Role != authz.SuperAdmin && info.Category == "auth" {
+		return ErrAdminPermissionDenied
+	}
+	return nil
+}
+
 func (s *NotificationEmailService) ListTemplates(ctx context.Context) ([]NotificationEmailTemplate, error) {
 	items := make([]NotificationEmailTemplate, 0, len(notificationEmailEventOrder)*len(notificationEmailLocales))
 	for _, event := range notificationEmailEventOrder {
+		if s.CheckTemplateManagement(ctx, event) != nil {
+			continue
+		}
 		for _, locale := range notificationEmailLocales {
 			tmpl, err := s.GetTemplate(ctx, event, locale)
 			if err != nil {
@@ -307,6 +321,9 @@ func (s *NotificationEmailService) GetTemplate(ctx context.Context, event, local
 }
 
 func (s *NotificationEmailService) UpdateTemplate(ctx context.Context, event, locale, subject, htmlBody string) (NotificationEmailTemplate, error) {
+	if err := s.CheckTemplateManagement(ctx, event); err != nil {
+		return NotificationEmailTemplate{}, err
+	}
 	_, normalizedEvent, err := s.eventInfo(event)
 	if err != nil {
 		return NotificationEmailTemplate{}, err
@@ -331,6 +348,9 @@ func (s *NotificationEmailService) UpdateTemplate(ctx context.Context, event, lo
 }
 
 func (s *NotificationEmailService) RestoreOfficialTemplate(ctx context.Context, event, locale string) (NotificationEmailTemplate, error) {
+	if err := s.CheckTemplateManagement(ctx, event); err != nil {
+		return NotificationEmailTemplate{}, err
+	}
 	_, normalizedEvent, err := s.eventInfo(event)
 	if err != nil {
 		return NotificationEmailTemplate{}, err
@@ -343,6 +363,9 @@ func (s *NotificationEmailService) RestoreOfficialTemplate(ctx context.Context, 
 }
 
 func (s *NotificationEmailService) PreviewTemplate(ctx context.Context, input NotificationEmailPreviewInput) (NotificationEmailPreview, error) {
+	if err := s.CheckTemplateManagement(ctx, input.Event); err != nil {
+		return NotificationEmailPreview{}, err
+	}
 	_, normalizedEvent, err := s.eventInfo(input.Event)
 	if err != nil {
 		return NotificationEmailPreview{}, err

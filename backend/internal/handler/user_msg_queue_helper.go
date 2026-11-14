@@ -88,13 +88,8 @@ func (h *UserMsgQueueHelper) waitForLockWithPing(
 ) (func(), error) {
 	needPing := isStream && h.pingFormat != ""
 
-	var flusher http.Flusher
 	if needPing {
-		var ok bool
-		flusher, ok = c.Writer.(http.Flusher)
-		if !ok {
-			needPing = false
-		}
+		defer service.GuardSSEWrites(c)()
 	}
 
 	var pingCh <-chan time.Time
@@ -126,7 +121,9 @@ func (h *UserMsgQueueHelper) waitForLockWithPing(
 				return nil, err
 			}
 			recordGatewayStreamHeartbeat(c, written)
-			flusher.Flush()
+			if err := http.NewResponseController(c.Writer).Flush(); err != nil {
+				return nil, err
+			}
 
 		case <-timer.C:
 			result, err := h.queueService.TryAcquire(ctx, accountID)
@@ -197,12 +194,8 @@ func (h *UserMsgQueueHelper) ThrottleWithPing(
 
 	// 延迟期间发送 SSE ping（复用 waitForLockWithPing 的 ping 逻辑）
 	needPing := isStream && h.pingFormat != ""
-	var flusher http.Flusher
 	if needPing {
-		flusher, _ = c.Writer.(http.Flusher)
-		if flusher == nil {
-			needPing = false
-		}
+		defer service.GuardSSEWrites(c)()
 	}
 
 	var pingCh <-chan time.Time
@@ -233,7 +226,9 @@ func (h *UserMsgQueueHelper) ThrottleWithPing(
 				return err
 			}
 			recordGatewayStreamHeartbeat(c, written)
-			flusher.Flush()
+			if err := http.NewResponseController(c.Writer).Flush(); err != nil {
+				return err
+			}
 		case <-timer.C:
 			return nil
 		}

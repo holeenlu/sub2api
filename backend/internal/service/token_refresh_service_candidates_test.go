@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -69,11 +70,71 @@ func (r *tokenRefreshCandidateRepo) ListOAuthRefreshCandidatePage(_ context.Cont
 	return page, nil
 }
 
-func (r *tokenRefreshCandidateRepo) UpdateCredentials(_ context.Context, id int64, _ map[string]any) error {
+func (r *tokenRefreshCandidateRepo) GetByID(_ context.Context, id int64) (*Account, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.updatedCredentialIDs = append(r.updatedCredentialIDs, id)
-	return nil
+	for i := range r.accounts {
+		if r.accounts[i].ID == id {
+			return snapshotOAuthRefreshAccount(&r.accounts[i]), nil
+		}
+	}
+	return nil, ErrAccountNotFound
+}
+
+func (r *tokenRefreshCandidateRepo) UpdateCredentials(_ context.Context, id int64, credentials map[string]any) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := range r.accounts {
+		if r.accounts[i].ID == id {
+			r.accounts[i].Credentials = credentials
+			r.updatedCredentialIDs = append(r.updatedCredentialIDs, id)
+			return nil
+		}
+	}
+	return ErrAccountNotFound
+}
+
+func (r *tokenRefreshCandidateRepo) UpdateOpenAIOAuthCredentialsIfUnchanged(_ context.Context, expected *Account, credentials map[string]any) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := range r.accounts {
+		current := &r.accounts[i]
+		if current.ID == expected.ID && isNativeOpenAIOAuthRefresh(current) && reflect.DeepEqual(current.Credentials, expected.Credentials) {
+			current.Credentials = credentials
+			r.updatedCredentialIDs = append(r.updatedCredentialIDs, current.ID)
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (r *tokenRefreshCandidateRepo) SetOpenAIOAuthRefreshErrorIfUnchanged(_ context.Context, expected *Account, reason string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := range r.accounts {
+		current := &r.accounts[i]
+		if current.ID == expected.ID && current.IsActive() && reflect.DeepEqual(current.Credentials, expected.Credentials) {
+			current.Status, current.Schedulable, current.ErrorMessage = StatusError, false, reason
+			r.setErrorCalls++
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (r *tokenRefreshCandidateRepo) SetOpenAIOAuthRefreshTempUnschedulableIfUnchanged(_ context.Context, expected *Account, until time.Time, reason string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := range r.accounts {
+		current := &r.accounts[i]
+		if current.ID == expected.ID && current.IsActive() && reflect.DeepEqual(current.Credentials, expected.Credentials) {
+			current.TempUnschedulableUntil, current.TempUnschedulableReason = &until, reason
+			r.setTempUnschedCalls++
+			r.lastTempUnschedReason = reason
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (r *tokenRefreshCandidateRepo) SetError(context.Context, int64, string) error {
@@ -111,6 +172,10 @@ func (r *tokenRefreshTestRefresher) Refresh(context.Context, *Account) (map[stri
 		return nil, r.err
 	}
 	return map[string]any{"access_token": "new-access-token", "refresh_token": "new-refresh-token"}, nil
+}
+
+func (r *tokenRefreshTestRefresher) CacheKey(account *Account) string {
+	return OpenAITokenCacheKey(account)
 }
 
 func TestTokenRefreshService_ProcessRefreshUsesOAuthRefreshCandidates(t *testing.T) {
@@ -179,11 +244,13 @@ func TestTokenRefreshService_ProcessRefreshUsesOAuthRefreshCandidates(t *testing
 			},
 		},
 	}
+	refresher := &tokenRefreshTestRefresher{}
 	svc := &TokenRefreshService{
 		accountRepo:    repo,
+		refreshAPI:     NewOAuthRefreshAPI(repo, nil),
 		candidatePager: repo,
 		registrations: []tokenRefreshRegistration{
-			{platform: PlatformOpenAI, refresher: &tokenRefreshTestRefresher{}},
+			{platform: PlatformOpenAI, refresher: refresher, executor: refresher},
 			{platform: PlatformGemini, refresher: &tokenRefreshTestRefresher{}},
 			{platform: PlatformAntigravity, refresher: &tokenRefreshTestRefresher{}},
 		},
@@ -222,6 +289,7 @@ func TestTokenRefreshService_RefreshFailureDoesNotCallPrivacy(t *testing.T) {
 				},
 			}
 			account := &Account{
+				Status:   StatusActive,
 				ID:       11,
 				Platform: PlatformOpenAI,
 				Type:     AccountTypeOAuth,
@@ -231,7 +299,10 @@ func TestTokenRefreshService_RefreshFailureDoesNotCallPrivacy(t *testing.T) {
 				},
 			}
 
-			err := svc.refreshWithRetry(context.Background(), account, &tokenRefreshTestRefresher{err: tt.err}, nil, time.Hour)
+			repo.accounts = []Account{*account}
+			svc.SetRefreshAPI(NewOAuthRefreshAPI(repo, nil))
+			refresher := &tokenRefreshTestRefresher{err: tt.err}
+			err := svc.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
 
 			require.Error(t, err)
 			if isNonRetryableRefreshError(tt.err) {

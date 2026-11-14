@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
@@ -52,7 +53,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	// account has no model_mapping, matching the Chat Completions path and xAI's
 	// actual Responses model IDs.
 	upstreamModel = xai.ResolveGrokTextResponsesModelID(upstreamModel, grokDefaultResponsesModel)
-	if isGrokImageGenerationModel(upstreamModel) {
+	if catalog.IsGrokImageGenerationModel(upstreamModel) {
 		return nil, fmt.Errorf("model %s is an image model and is not available on the Responses endpoint; use /v1/images/generations instead", upstreamModel)
 	}
 	patchedBody, clientToolMapping, err := patchGrokResponsesBodyWithClientTools(body, upstreamModel)
@@ -115,7 +116,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 			return nil, buildErr
 		}
 
-		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account, vendorDispatchGroup(c))
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if err != nil {
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
@@ -179,6 +180,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 			UpstreamRequestID:  firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id")),
 			Kind:               kind,
 			Message:            upstreamMsg,
+			Detail:             s.opsUpstreamErrorDetail(respBody),
 		})
 		errCtx := withGrokTeamRateLimitModel(ctx, upstreamModel)
 		s.handleGrokAccountUpstreamError(errCtx, account, resp.StatusCode, resp.Header, respBody)
@@ -249,20 +251,18 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	}
 	reasoningEffort := extractOpenAIReasoningEffortFromBody(patchedBody, originalModel)
 	result := &OpenAIForwardResult{
-		RequestID:                     firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id")),
-		UpstreamHeaders:               resp.Header,
-		ResponseID:                    responseID,
-		Usage:                         *usage,
-		Model:                         originalModel,
-		UpstreamModel:                 upstreamModel,
-		UpstreamResponseModel:         observedUpstreamResponseModel(c),
-		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
-		ReasoningEffort:               reasoningEffort,
-		Stream:                        reqStream,
-		OpenAIWSMode:                  false,
-		ResponseHeaders:               resp.Header.Clone(),
-		Duration:                      time.Since(startTime),
-		FirstTokenMs:                  firstTokenMs,
+		RequestID:       firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id")),
+		UpstreamHeaders: resp.Header,
+		ResponseID:      responseID,
+		Usage:           *usage,
+		Model:           originalModel,
+		UpstreamModel:   upstreamModel,
+		ReasoningEffort: reasoningEffort,
+		Stream:          reqStream,
+		OpenAIWSMode:    false,
+		ResponseHeaders: resp.Header.Clone(),
+		Duration:        time.Since(startTime),
+		FirstTokenMs:    firstTokenMs,
 	}
 	// Propagate search/image counters from the shared Responses handler — without
 	// this, stream/JSON counting runs but search_price_per_1k / image bills never apply.
@@ -1408,7 +1408,7 @@ func (s *OpenAIGatewayService) describeGrokComposerImage(
 		proxyURL = account.Proxy.URL()
 	}
 
-	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account, vendorDispatchGroup(c))
 	if err != nil {
 		return "", OpenAIUsage{}, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
@@ -1434,6 +1434,7 @@ func (s *OpenAIGatewayService) describeGrokComposerImage(
 			UpstreamRequestID:  firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id")),
 			Kind:               kind,
 			Message:            upstreamMsg,
+			Detail:             s.opsUpstreamErrorDetail(respBody),
 		})
 		s.handleGrokAccountUpstreamError(withGrokTeamRateLimitModel(ctx, grokComposerImageBridgeVisionModel), account, resp.StatusCode, resp.Header, respBody)
 		if s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody) {

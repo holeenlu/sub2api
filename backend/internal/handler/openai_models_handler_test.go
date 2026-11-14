@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -63,7 +64,7 @@ func TestOrdinaryPinnedModelsUsesSelectedAccountsAndFinalETag(t *testing.T) {
 
 	otherGroup := *group
 	otherGroup.ID++
-	otherGroup.ModelAllowlist = service.GroupModelAllowlist{Enabled: true, Models: []string{"text-embedding-3-large", "special-model"}}
+	otherGroup.ModelAllowlist = catalog.ModelAllowlist{Enabled: true, Models: []string{"text-embedding-3-large", "special-model"}}
 	filtered := performOrdinaryPinnedModelsRequest(t, h, &otherGroup, "/v1/models", first.Header().Get("ETag"))
 	require.Equal(t, http.StatusOK, filtered.Code)
 	require.Equal(t, []string{"text-embedding-3-large", "special-model"}, ordinaryPinnedModelIDs(t, filtered))
@@ -108,7 +109,7 @@ func TestOrdinaryPinnedModelsFailureAndEmptyPolicies(t *testing.T) {
 			upstream := &codexModelsPinnedHTTPUpstream{bodies: bodies, statuses: tc.statuses}
 			h := newPinnedCodexTestHandler(accounts, upstream, 3)
 			group := &service.Group{ID: 92, Platform: service.PlatformOpenAI,
-				ModelAllowlist:            service.GroupModelAllowlist{Enabled: len(tc.selected) > 0, Models: tc.selected},
+				ModelAllowlist:            catalog.ModelAllowlist{Enabled: len(tc.selected) > 0, Models: tc.selected},
 				CodexModelsManifestConfig: service.GroupCodexModelsManifestConfig{Enabled: true, AccountIDs: tc.accountIDs, FallbackToScheduler: tc.fallback}}
 			recorder := performOrdinaryPinnedModelsRequest(t, h, group, "/v1/models", "")
 			require.Equal(t, tc.wantStatus, recorder.Code, recorder.Body.String())
@@ -160,7 +161,7 @@ func TestPinnedModelsAllowlistExpandsWildcardsForBothRepresentations(t *testing.
 			upstream := &codexModelsPinnedHTTPUpstream{bodies: map[int64]string{1: body}}
 			h := newPinnedCodexTestHandler(accounts, upstream, 3)
 			group := &service.Group{ID: 95, Platform: service.PlatformOpenAI,
-				ModelAllowlist:            service.GroupModelAllowlist{Enabled: true, Models: []string{"public-b", "public-*"}},
+				ModelAllowlist:            catalog.ModelAllowlist{Enabled: true, Models: []string{"public-b", "public-*"}},
 				CodexModelsManifestConfig: service.GroupCodexModelsManifestConfig{Enabled: true, AccountIDs: []int64{1}}}
 			if codex {
 				recorder := performPinnedCodexModelsRequest(t, h, group, "")
@@ -195,7 +196,7 @@ func TestPinnedModelsMappingFollowsUpstreamDiscoveryForBothRepresentations(t *te
 			upstream := &codexModelsPinnedHTTPUpstream{bodies: map[int64]string{2: body}}
 			h := newPinnedCodexTestHandler(accounts, upstream, 3)
 			group := &service.Group{ID: 94, Platform: service.PlatformOpenAI,
-				ModelAllowlist:            service.GroupModelAllowlist{Enabled: true, Models: []string{"custom-concrete", "public-alias", "unselected-alias", "missing-alias"}},
+				ModelAllowlist:            catalog.ModelAllowlist{Enabled: true, Models: []string{"custom-concrete", "public-alias", "unselected-alias", "missing-alias"}},
 				CodexModelsManifestConfig: service.GroupCodexModelsManifestConfig{Enabled: true, AccountIDs: []int64{2}}}
 			var recorder *httptest.ResponseRecorder
 			if codex {

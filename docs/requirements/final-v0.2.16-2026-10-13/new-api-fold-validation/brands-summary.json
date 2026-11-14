@@ -1,0 +1,56 @@
+[
+  {
+    "name": "TapModels-unit",
+    "command": [
+      "go",
+      "test",
+      "-p",
+      "2",
+      "-tags=unit",
+      "./internal/config",
+      "./internal/server",
+      "-count=1"
+    ],
+    "exit": 0,
+    "seconds": 22.91
+  },
+  {
+    "name": "TapModels-build",
+    "command": [
+      "go",
+      "build",
+      "-p",
+      "2",
+      "./..."
+    ],
+    "exit": 0,
+    "seconds": 19.39
+  },
+  {
+    "name": "tokensavy-unit",
+    "command": [
+      "go",
+      "test",
+      "-p",
+      "2",
+      "-tags=unit",
+      "./internal/config",
+      "./internal/server",
+      "-count=1"
+    ],
+    "exit": 0,
+    "seconds": 14.53
+  },
+  {
+    "name": "tokensavy-build",
+    "command": [
+      "go",
+      "build",
+      "-p",
+      "2",
+      "./..."
+    ],
+    "exit": 0,
+    "seconds": 14.8
+  }
+]

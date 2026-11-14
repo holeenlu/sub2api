@@ -1,0 +1,12 @@
+# Opt in only after installing the root-owned host updater and its socket directory.
+services:
+  api:
+    environment:
+      NEWAPI_UPDATER_SOCKET: /run/newapi-updater/control.sock
+    volumes:
+      - type: bind
+        source: /run/newapi-updater
+        target: /run/newapi-updater
+        read_only: true
+        bind:
+          create_host_path: false

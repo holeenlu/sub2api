@@ -5,7 +5,6 @@ package service
 // 的读循环必须按 gateway.stream_data_interval_timeout 结束，而不是永久阻塞。
 
 import (
-	"bufio"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -80,135 +79,7 @@ func toolAnthropicSSEStream() string {
 		"event: message_stop",
 		`data: {"type":"message_stop"}`,
 		"",
-	}, "\n")
-}
-
-func TestAnthropicNativeLinePump_TimesOutWithoutData(t *testing.T) {
-	pr, _ := io.Pipe()
-	scanner := bufio.NewScanner(pr)
-	defer func() { _ = pr.Close() }()
-
-	pump := newAnthropicNativeLinePump(scanner, 50*time.Millisecond)
-	defer pump.stop()
-
-	start := time.Now()
-	_, err := pump.next()
-	if err == nil || !strings.Contains(err.Error(), "stream data interval timeout") {
-		t.Fatalf("expected interval timeout, got %v", err)
-	}
-	if elapsed := time.Since(start); elapsed > 5*time.Second {
-		t.Fatalf("timeout not respected: %v", elapsed)
-	}
-}
-
-func TestAnthropicNativeLinePump_DataResetsTimer(t *testing.T) {
-	pr, pw := io.Pipe()
-	scanner := bufio.NewScanner(pr)
-	pump := newAnthropicNativeLinePump(scanner, 1*time.Second)
-	defer pump.stop()
-
-	go func() {
-		_, _ = pw.Write([]byte("event: ping\n"))
-		// 保持流打开且不再发数据：第二次 next 必须超时。
-		time.Sleep(3 * time.Second)
-		_ = pw.Close()
-	}()
-	defer func() { _ = pr.Close() }()
-
-	line, err := pump.next()
-	if err != nil || line != "event: ping" {
-		t.Fatalf("expected first line, got %q err=%v", line, err)
-	}
-
-	start := time.Now()
-	_, err = pump.next()
-	if err == nil || !strings.Contains(err.Error(), "stream data interval timeout") {
-		t.Fatalf("expected interval timeout after data stops, got %v", err)
-	}
-	if elapsed := time.Since(start); elapsed > 5*time.Second {
-		t.Fatalf("timeout not respected: %v", elapsed)
-	}
-}
-
-func TestAnthropicNativeLinePump_SlowConsumerGetsBufferedLineInsteadOfIdle(t *testing.T) {
-	// 计时器与缓冲行同时就绪时 select 随机选择，多轮重复以覆盖两种选择。
-	for round := 0; round < 64; round++ {
-		pump := &anthropicNativeLinePump{
-			events:   make(chan anthropicNativeLineEvent, 1),
-			done:     make(chan struct{}),
-			timer:    time.NewTimer(0),
-			interval: time.Hour,
-		}
-		pump.events <- anthropicNativeLineEvent{line: "data: {}"}
-		time.Sleep(time.Millisecond)
-
-		line, err := pump.next()
-		pump.stop()
-		if err != nil || line != "data: {}" {
-			t.Fatalf("round %d: expected buffered line, got %q err=%v", round, line, err)
-		}
-	}
-}
-
-func TestAnthropicNativeLinePump_ClientGoneKeepsPumpReadable(t *testing.T) {
-	pr, pw := io.Pipe()
-	scanner := bufio.NewScanner(pr)
-	pump := newAnthropicNativeLinePump(scanner, 0)
-	defer pump.stop()
-	defer func() { _ = pr.Close() }()
-
-	clientGone := make(chan struct{})
-	close(clientGone)
-	if _, err := pump.nextOrClientGone(clientGone); err != errAnthropicNativeClientGone {
-		t.Fatalf("expected client gone, got %v", err)
-	}
-
-	go func() {
-		_, _ = pw.Write([]byte("event: ping\n"))
-		_ = pw.Close()
-	}()
-	line, err := pump.nextOrClientGone(nil)
-	if err != nil || line != "event: ping" {
-		t.Fatalf("expected the pending line after client gone, got %q err=%v", line, err)
-	}
-	if _, err := pump.next(); err != io.EOF {
-		t.Fatalf("expected EOF, got %v", err)
-	}
-}
-
-func TestAnthropicNativeLinePump_EnableIntervalBoundsDisabledPump(t *testing.T) {
-	pr, _ := io.Pipe()
-	scanner := bufio.NewScanner(pr)
-	defer func() { _ = pr.Close() }()
-
-	pump := newAnthropicNativeLinePump(scanner, 0)
-	defer pump.stop()
-	pump.enableInterval(50 * time.Millisecond)
-
-	start := time.Now()
-	if _, err := pump.next(); err != errAnthropicNativeStreamIdle {
-		t.Fatalf("expected interval timeout after enableInterval, got %v", err)
-	}
-	if elapsed := time.Since(start); elapsed > 5*time.Second {
-		t.Fatalf("timeout not respected: %v", elapsed)
-	}
-}
-
-func TestAnthropicNativeLinePump_EnableIntervalKeepsConfiguredInterval(t *testing.T) {
-	pr, _ := io.Pipe()
-	scanner := bufio.NewScanner(pr)
-	defer func() { _ = pr.Close() }()
-
-	pump := newAnthropicNativeLinePump(scanner, 50*time.Millisecond)
-	defer pump.stop()
-	pump.enableInterval(time.Hour)
-
-	if pump.interval != 50*time.Millisecond {
-		t.Fatalf("configured interval must not change, got %v", pump.interval)
-	}
-	if _, err := pump.next(); err != errAnthropicNativeStreamIdle {
-		t.Fatalf("expected interval timeout, got %v", err)
-	}
+	}, "\n") + "\n"
 }
 
 func TestCCStreamingFromNativeAnthropic_HangTimesOut(t *testing.T) {

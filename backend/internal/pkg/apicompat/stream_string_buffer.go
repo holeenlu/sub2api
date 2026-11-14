@@ -28,21 +28,3 @@ func appendIndexedStreamString(buffers *map[int]*strings.Builder, index int, cur
 	(*buffers)[index] = buffer
 	return value
 }
-
-// streamStringBytes keeps matching bytes for APIs that require []byte without
-// copying the growing public string on every call. The shared snapshot also
-// detects sequentially diverging state copies: a mismatch creates a new buffer
-// instead of overwriting another state's accumulated prefix.
-type streamStringBytes struct {
-	data     []byte
-	snapshot string
-}
-
-func appendStreamStringBytes(buffer **streamStringBytes, previous, current, delta string) []byte {
-	if *buffer == nil || (*buffer).snapshot != previous {
-		*buffer = &streamStringBytes{data: append([]byte(nil), previous...)}
-	}
-	(*buffer).data = append((*buffer).data, delta...)
-	(*buffer).snapshot = current
-	return (*buffer).data
-}

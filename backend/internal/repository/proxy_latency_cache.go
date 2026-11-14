@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/redis/go-redis/v9"
@@ -70,5 +71,12 @@ func (c *proxyLatencyCache) SetProxyLatency(ctx context.Context, proxyID int64, 
 	if err != nil {
 		return err
 	}
-	return c.rdb.Set(ctx, proxyLatencyKey(proxyID), payload, 0).Err()
+	ttl := time.Duration(0)
+	if info.ConfigVersion > 0 {
+		ttl = 24 * time.Hour
+		// A test may finish after an endpoint edit and a newer test. Compare in
+		// Redis too, so the late write cannot erase the newer cached snapshot.
+		return c.rdb.Eval(ctx, `local old=redis.call('GET',KEYS[1]); if old then local ok,v=pcall(cjson.decode,old); if ok and tonumber(v.config_version or 0)>tonumber(ARGV[2]) then return 0 end end; redis.call('SET',KEYS[1],ARGV[1],'PX',ARGV[3]); return 1`, []string{proxyLatencyKey(proxyID)}, payload, info.ConfigVersion, ttl.Milliseconds()).Err()
+	}
+	return c.rdb.Set(ctx, proxyLatencyKey(proxyID), payload, ttl).Err()
 }

@@ -52,7 +52,7 @@ func TestGrokOAuthServiceRefreshTokenPreservesOriginalRefreshTokenWhenNotRotated
 			ExpiresIn:   3600,
 		},
 	})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	info, err := svc.RefreshToken(context.Background(), "original-refresh-token", "", "client-id")
 	require.NoError(t, err)
@@ -63,7 +63,7 @@ func TestGrokOAuthServiceRefreshTokenPreservesOriginalRefreshTokenWhenNotRotated
 
 func TestGrokOAuthServiceRefreshTokenRejectsEmptyUpstreamResponse(t *testing.T) {
 	svc := NewGrokOAuthService(nil, &grokOAuthClientStub{})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	require.NotPanics(t, func() {
 		info, err := svc.RefreshToken(context.Background(), "refresh-token", "", "client-id")
@@ -76,7 +76,7 @@ func TestGrokOAuthServiceRefreshTokenRejectsEmptyUpstreamResponse(t *testing.T) 
 func TestGrokOAuthServiceExchangeCodeConsumesOnlyAfterValidation(t *testing.T) {
 	client := &grokOAuthClientStub{}
 	svc := NewGrokOAuthService(nil, client)
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	auth, err := svc.GenerateAuthURL(context.Background(), nil, "")
 	require.NoError(t, err)
@@ -109,7 +109,8 @@ func TestGrokOAuthServiceExchangeCodeConsumesOnlyAfterValidation(t *testing.T) {
 
 func TestGrokOAuthServiceExchangeCodeRejectsMissingClientWithoutConsumingSession(t *testing.T) {
 	svc := NewGrokOAuthService(nil, nil)
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
+
 	auth, err := svc.GenerateAuthURL(context.Background(), nil, "")
 	require.NoError(t, err)
 
@@ -120,14 +121,15 @@ func TestGrokOAuthServiceExchangeCodeRejectsMissingClientWithoutConsumingSession
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "GROK_OAUTH_CLIENT_NOT_CONFIGURED")
-	_, ok := svc.sessionStore.Get(auth.SessionID)
+	_, ok := svc.sessionStore.Get(context.Background(), auth.SessionID)
 	require.True(t, ok)
 }
 
 func TestGrokOAuthServiceExchangeCodeRequiresStateForBareCode(t *testing.T) {
 	client := &grokOAuthClientStub{}
 	svc := NewGrokOAuthService(nil, client)
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
+
 	auth, err := svc.GenerateAuthURL(context.Background(), nil, "")
 	require.NoError(t, err)
 
@@ -138,14 +140,15 @@ func TestGrokOAuthServiceExchangeCodeRequiresStateForBareCode(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "GROK_OAUTH_STATE_REQUIRED")
 	require.Zero(t, client.exchangeCalls)
-	_, ok := svc.sessionStore.Get(auth.SessionID)
+	_, ok := svc.sessionStore.Get(context.Background(), auth.SessionID)
 	require.True(t, ok)
 }
 
 func TestGrokOAuthServiceExchangeCodeRejectsRedirectURIOverride(t *testing.T) {
 	client := &grokOAuthClientStub{}
 	svc := NewGrokOAuthService(nil, client)
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
+
 	auth, err := svc.GenerateAuthURL(context.Background(), nil, "")
 	require.NoError(t, err)
 
@@ -171,7 +174,7 @@ func TestGrokOAuthServiceExchangeCodeRejectsRedirectURIOverride(t *testing.T) {
 
 func TestGrokOAuthServiceExternalFlowsRejectMissingClient(t *testing.T) {
 	svc := NewGrokOAuthService(nil, nil)
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	_, err := svc.RefreshToken(context.Background(), "refresh-token", "", "")
 	require.Error(t, err)
@@ -184,7 +187,7 @@ func TestGrokOAuthServiceExternalFlowsRejectMissingClient(t *testing.T) {
 
 func TestGrokOAuthServiceBuildAccountCredentialsDefaultsToSubscriptionProxy(t *testing.T) {
 	svc := NewGrokOAuthService(nil, &grokOAuthClientStub{})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	credentials := svc.BuildAccountCredentials(&GrokTokenInfo{
 		AccessToken: "access-token",
@@ -203,7 +206,7 @@ func TestGrokOAuthServiceConvertFromSSOExtractsBuildClaims(t *testing.T) {
 			ExpiresIn:    3600,
 		},
 	})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	info, err := svc.ConvertFromSSO(context.Background(), "sso-token", nil)
 	require.NoError(t, err)
@@ -228,7 +231,7 @@ func TestGrokOAuthServiceRefreshAccountTokenOverwritesStaleTierFromNewJWT(t *tes
 			ExpiresIn:   3600,
 		},
 	})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	account := &Account{
 		Platform: PlatformGrok,
@@ -257,7 +260,7 @@ func TestGrokOAuthServiceRefreshAccountTokenIgnoresIDTokenTierWhenAccessTokenHas
 			ExpiresIn:   3600,
 		},
 	})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	account := &Account{
 		Platform: PlatformGrok,
@@ -281,7 +284,7 @@ func TestGrokOAuthServiceRefreshAccountTokenKeepsStoredTierWhenJWTHasNoClaim(t *
 			ExpiresIn:   3600,
 		},
 	})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	account := &Account{
 		Platform: PlatformGrok,
@@ -306,7 +309,7 @@ func TestGrokOAuthServiceValidateSSOTokenReturnsOAuthTokensWithoutPersistingSSO(
 			ExpiresIn:    3600,
 		},
 	})
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	info, err := svc.ValidateSSOToken(context.Background(), "sso-token", nil)
 	require.NoError(t, err)
@@ -333,7 +336,7 @@ func TestGrokOAuthServiceAuthorizePasswordUsesLoginThenSSOAuthorize(t *testing.T
 	cfg := &config.Config{}
 	cfg.Gateway.Grok.PasswordAuthEnabled = true
 	svc := NewGrokOAuthService(nil, client, cfg)
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	require.True(t, svc.GetCapabilities().PasswordAuthEnabled)
 	info, err := svc.AuthorizePassword(context.Background(), " user@example.com ", "  super-secret  ", nil)
@@ -350,7 +353,7 @@ func TestGrokOAuthServiceAuthorizePasswordUsesLoginThenSSOAuthorize(t *testing.T
 func TestGrokOAuthServiceAuthorizePasswordDisabledByDefault(t *testing.T) {
 	client := &grokOAuthClientStub{}
 	svc := NewGrokOAuthService(nil, client)
-	defer svc.Stop()
+	startSessionOwnerTest(t, svc)
 
 	require.False(t, svc.GetCapabilities().PasswordAuthEnabled)
 	_, err := svc.AuthorizePassword(context.Background(), "user@example.com", "secret", nil)

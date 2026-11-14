@@ -95,7 +95,9 @@ func TestOpenAIResponsesOrphanPrecheckPreservesSanitizer(t *testing.T) {
 			require.NoError(t, decodeOpenAIJSONUseNumber([]byte(body), &actual))
 			apply := func(request map[string]any) bool {
 				input, _ := request["input"].([]any)
-				return sanitizeOpenAIResponsesOrphanToolOutputs(request, input, firstNonEmptyString(request["previous_response_id"]) != "")
+				changed, err := sanitizeOpenAIResponsesOrphanToolOutputs(request, input, firstNonEmptyString(request["previous_response_id"]) != "")
+				require.NoError(t, err)
+				return changed
 			}
 			wantChanged := apply(expected)
 			gotChanged := false
@@ -183,7 +185,7 @@ func FuzzOpenAIResponsesOrphanPrecheck(f *testing.F) {
 		// Preserve the old initial first-key array gate, then compare with the
 		// authoritative decoder/sanitizer's last-key behavior.
 		input, _ := request["input"].([]any)
-		if sanitizeOpenAIResponsesOrphanToolOutputs(request, input, firstNonEmptyString(request["previous_response_id"]) != "") && !mayNeedCleanup {
+		if changed, err := sanitizeOpenAIResponsesOrphanToolOutputs(request, input, firstNonEmptyString(request["previous_response_id"]) != ""); (changed || err != nil) && !mayNeedCleanup {
 			t.Fatal("precheck missed required cleanup")
 		}
 	})

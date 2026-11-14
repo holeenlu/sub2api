@@ -2,326 +2,164 @@ package handler
 
 import (
 	"context"
-	"net/http"
+	"errors"
 	"time"
 
-	"github.com/gin-gonic/gin"
-
+	"github.com/Wei-Shaw/sub2api/internal/gateway/execution"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
 
-// TempUnscheduler 用于 HandleFailoverError 中同账号重试耗尽后的临时封禁。
-// GatewayService 隐式实现此接口。
+// TempUnscheduler is implemented by GatewayService. Health policy stays there.
 type TempUnscheduler interface {
-	TempUnscheduleRetryableError(ctx context.Context, accountID int64, failoverErr *service.UpstreamFailoverError)
+	TempUnscheduleRetryableError(context.Context, int64, *service.UpstreamFailoverError)
 }
 
-// FailoverAction 表示 failover 错误处理后的下一步动作
-type FailoverAction int
-
-const (
-	// FailoverContinue 继续循环（同账号重试或切换账号，调用方统一 continue）
-	FailoverContinue FailoverAction = iota
-	// FailoverExhausted 切换次数耗尽（调用方应返回错误响应）
-	FailoverExhausted
-	// FailoverCanceled context 已取消（调用方应直接 return）
-	FailoverCanceled
-)
-
-const (
-	// maxSameAccountRetries 同账号重试次数默认上限（针对 RetryableOnSameAccount 错误）。
-	// 生产调用方通常传入账号级配置 account.GetPoolModeRetryCount()，该常量仅作兜底/测试默认值。
-	maxSameAccountRetries = 3
-	// sameAccountRetryDelay 同账号重试间隔
-	sameAccountRetryDelay = 500 * time.Millisecond
-	// maxRequestScopedRetryDelay 限制请求级瞬时错误的指数退避上限，避免高重试配置
-	// 将单次请求拖入分钟级等待。
-	maxRequestScopedRetryDelay = 8 * time.Second
-	// singleAccountBackoffDelay 单账号分组 503 退避重试固定延时。
-	// Service 层在 SingleAccountRetry 模式下已做充分原地重试（最多 3 次、总等待 30s），
-	// Handler 层只需短暂间隔后重新进入 Service 层即可。
-	singleAccountBackoffDelay = 2 * time.Second
-	// maxProfitVetoAttempts 单次请求内允许的分组利润门终检否决次数上限。
-	// 利润否决不产生上游请求，因此不会推进 SwitchCount；没有独立上限的话，
-	// 「选号 → 终检否决 → 重选」在候选池与账号快照短暂不一致时可以空转很久。
-	// 取值与 maxAccountSwitches 默认值一致：混合定价的大分组仍有充分重选机会，
-	// 同时把整池越线时的无谓选号开销限制在常数级。
-	maxProfitVetoAttempts = 10
-)
-
-// profitVetoExhaustedMessage 是利润否决次数耗尽时返回给客户端的文案。
-// 语义上等同于「无可用账号」：候选账号都不满足分组的利润约束。
 const profitVetoExhaustedMessage = "No available accounts: all candidates rejected by group profit control"
 
-func sameAccountRetryDelayFor(failoverErr *service.UpstreamFailoverError, retryCount int) time.Duration {
-	if failoverErr == nil {
-		return sameAccountRetryDelay
-	}
-	if failoverErr.SameAccountRetryDelay > 0 {
-		return failoverErr.SameAccountRetryDelay
-	}
-	if !failoverErr.RequestScopedTransient || retryCount <= 1 {
-		return sameAccountRetryDelay
-	}
-
-	delay := sameAccountRetryDelay
-	for i := 1; i < retryCount; i++ {
-		if delay >= maxRequestScopedRetryDelay/2 {
-			return maxRequestScopedRetryDelay
-		}
-		delay *= 2
-	}
-	return delay
+// FailoverState retains only ingress error/scheduler payloads. Embedded Recovery
+// is the sole owner of counters, exclusions, replay and cache-billing state; no
+// values are copied back and forth. Remove this adapter when remaining service
+// error/Account consumers use typed execution facts and scheduler ports.
+type FailoverState struct {
+	*execution.Recovery
+	LastFailoverErr *service.UpstreamFailoverError
+	OpenAIOAuth429  service.OpenAIOAuth429FailoverState
 }
 
-func sameAccountRetryAllowed(failoverErr *service.UpstreamFailoverError, retryCount, retryLimit int) bool {
-	if failoverErr == nil || !failoverErr.RetryableOnSameAccount {
-		return false
+func NewFailoverState(maxSwitches int, hasBoundSession bool) *FailoverState {
+	return &FailoverState{Recovery: execution.NewRecovery(maxSwitches, hasBoundSession)}
+}
+func recoveryFailure(f *service.UpstreamFailoverError) *execution.RecoveryFailure {
+	if f == nil {
+		return nil
 	}
-	if !sameAccountRetryDeadlineAllows(failoverErr) {
-		return false
+	return &execution.RecoveryFailure{
+		StatusCode: f.StatusCode, ContentRefusal: service.IsUpstreamContentRefusal(f.ResponseBody),
+		RetryNextAccount: f.ShouldRetryNextAccount(), RetryableOnSameAccount: f.RetryableOnSameAccount,
+		SameAccountRetryDelay: f.SameAccountRetryDelay, SameAccountRetryDeadline: f.SameAccountRetryDeadline,
+		SameAccountRetryMax: f.SameAccountRetryMax, RequestScopedTransient: f.RequestScopedTransient,
+		RequestNotSent: f.RequestNotSent, RejectedBeforeGeneration: f.RejectedBeforeGeneration,
+		ForceCacheBilling: f.ForceCacheBilling, CredentialFailure: f.IsCredentialFailure(),
+		TargetExhausted: f.Reason == "recovery_target_exhausted", CapacityShed: f.IsOpenAICapacityShed(),
+		SwitchLimitExempt: f.Reason == service.ExcelBPSRateLimitedReason,
 	}
-	// Error-specific caps (Grok capacity/stream-idle) remain hard limits even
-	// when the error also carries a freshly reconstructed deadline.
-	if failoverErr.SameAccountRetryMax > 0 {
-		if retryLimit <= 0 {
-			return false
-		}
-		if failoverErr.SameAccountRetryMax < retryLimit {
-			retryLimit = failoverErr.SameAccountRetryMax
-		}
-		return retryCount < retryLimit
-	}
-	// OAuth 429 explicitly opts into a deadline window. It is intentionally not
-	// bounded by the ordinary/default pool retry count.
-	if !failoverErr.SameAccountRetryDeadline.IsZero() {
-		return true
-	}
-	return retryLimit > 0 && retryCount < retryLimit
 }
 
-// sameAccountRetryDeadlineAllows prevents a retry from starting after the
-// service-provided same-account retry window has elapsed.
-func sameAccountRetryDeadlineAllows(failoverErr *service.UpstreamFailoverError) bool {
-	return failoverErr == nil || failoverErr.SameAccountRetryDeadline.IsZero() || time.Now().Before(failoverErr.SameAccountRetryDeadline)
+// Thin adapters for image/search/media consumers outside this write set. Remove
+// them when those loops consume Recovery directly; none contains retry policy.
+func sameAccountRetryDelayFor(f *service.UpstreamFailoverError, count int) time.Duration {
+	return execution.SameAccountRetryDelay(recoveryFailure(f), count)
 }
-
-// effectiveSameAccountRetryLimit applies an error-specific cap without
-// overriding an explicit account setting of zero (which disables retries).
-func effectiveSameAccountRetryLimit(failoverErr *service.UpstreamFailoverError, account *service.Account) int {
+func sameAccountRetryAllowed(f *service.UpstreamFailoverError, count, limit int) bool {
+	return execution.SameAccountRetryAllowed(recoveryFailure(f), count, limit, time.Now())
+}
+func effectiveSameAccountRetryLimit(f *service.UpstreamFailoverError, account *service.Account) int {
 	if account == nil {
 		return 0
 	}
-	limit := account.GetPoolModeRetryCount()
-	if limit > 0 && failoverErr != nil && failoverErr.SameAccountRetryMax > 0 && failoverErr.SameAccountRetryMax < limit {
-		return failoverErr.SameAccountRetryMax
-	}
-	return limit
+	return execution.EffectiveSameAccountRetryLimit(recoveryFailure(f), account.GetPoolModeRetryCount())
 }
 
-// FailoverState 跨循环迭代共享的 failover 状态
-type FailoverState struct {
-	SwitchCount           int
-	MaxSwitches           int
-	FailedAccountIDs      map[int64]struct{}
-	SameAccountRetryCount map[int64]int
-	LastFailoverErr       *service.UpstreamFailoverError
-	ForceCacheBilling     bool
-	hasBoundSession       bool
-
-	// profitVetoedAccountIDs 记录被分组利润门终检否决的账号，是 FailedAccountIDs
-	// 的子集。之所以单独维护：HandleSelectionExhausted 的 503 退避分支会清空
-	// FailedAccountIDs，而利润否决在同一请求内的判定不会改变（下游倍率 D 已在
-	// 请求开始冻结），被清空的账号会被立即重选并再次否决，形成没有任何上游请求、
-	// SwitchCount 也不前进的活锁。清空后必须把它们放回排除集。
-	profitVetoedAccountIDs map[int64]struct{}
-	// profitVetoCount 本次请求累计的利润否决次数，用于 maxProfitVetoAttempts 上限。
-	profitVetoCount int
+// failoverRuntime binds narrow callbacks to the existing request owner. It owns
+// no budget, never sends, and does not start background work. Response-aware
+// gating preserves the native route's correlated-failure accounting.
+type failoverRuntime struct {
+	accountID    int64
+	account      *service.Account
+	failure      *service.UpstreamFailoverError
+	responseGate bool
+	unscheduler  TempUnscheduler
+	scheduler    openAIRecoveryScheduler
+	state        *FailoverState
 }
 
-// NewFailoverState 创建 failover 状态
-func NewFailoverState(maxSwitches int, hasBoundSession bool) *FailoverState {
-	return &FailoverState{
-		MaxSwitches:            maxSwitches,
-		FailedAccountIDs:       make(map[int64]struct{}),
-		SameAccountRetryCount:  make(map[int64]int),
-		hasBoundSession:        hasBoundSession,
-		profitVetoedAccountIDs: make(map[int64]struct{}),
-	}
+var _ execution.RecoveryBudget = (*failoverRuntime)(nil)
+var _ execution.RecoveryAccounts = (*failoverRuntime)(nil)
+
+func (p *failoverRuntime) OutputCommitted(ctx context.Context) bool {
+	return service.TurnOutputCommitted(ctx)
 }
-
-// RecordProfitVeto 记录一次分组利润门终检否决：把账号加入排除列表（同时登记到
-// 利润否决集，使其不被 503 退避分支清掉）并递增否决计数。
-//
-// 返回 FailoverContinue 表示调用方可以继续重选下一个账号；返回 FailoverExhausted
-// 表示本次请求的利润否决次数已达上限，调用方应按「无可用账号」终止，
-// 不得继续 continue。
-func (s *FailoverState) RecordProfitVeto(accountID int64) FailoverAction {
-	s.FailedAccountIDs[accountID] = struct{}{}
-	if s.profitVetoedAccountIDs == nil {
-		s.profitVetoedAccountIDs = make(map[int64]struct{})
+func (p *failoverRuntime) RetryAllowed(ctx context.Context) bool {
+	var body []byte
+	if p.responseGate && p.failure != nil {
+		body = p.failure.ResponseBody
 	}
-	s.profitVetoedAccountIDs[accountID] = struct{}{}
-	s.profitVetoCount++
-	if s.profitVetoCount >= maxProfitVetoAttempts {
-		return FailoverExhausted
-	}
-	return FailoverContinue
+	return service.OpenAITurnRetryAllowed(ctx, p.accountID, body)
 }
-
-// ProfitVetoCount 返回本次请求累计的利润否决次数（供日志使用）。
-func (s *FailoverState) ProfitVetoCount() int { return s.profitVetoCount }
-
-// allExclusionsAreProfitVetoed 判断排除列表是否已全部由利润门否决贡献。
-// 此时清空 FailedAccountIDs 会被原样恢复，退避重试不会带来任何新候选。
-func (s *FailoverState) allExclusionsAreProfitVetoed() bool {
-	if len(s.profitVetoedAccountIDs) == 0 || len(s.FailedAccountIDs) == 0 {
-		return false
-	}
-	for id := range s.FailedAccountIDs {
-		if _, ok := s.profitVetoedAccountIDs[id]; !ok {
-			return false
+func (p *failoverRuntime) Prepare(ctx context.Context) error {
+	return service.PrepareTurnRecovery(ctx, p.failure)
+}
+func (p *failoverRuntime) Wait(ctx context.Context, delay time.Duration) error {
+	return service.WaitOpenAITurnRetry(ctx, delay)
+}
+func (p *failoverRuntime) Pin(ctx context.Context) { service.PinTurnRetryAccount(ctx, p.account) }
+func (p *failoverRuntime) Exclude(ctx context.Context) {
+	service.ExcludeTurnRecoveryAccount(ctx, p.account, p.failure)
+	service.PinTurnRetryAccount(ctx, nil)
+}
+func (p *failoverRuntime) TempUnschedule(ctx context.Context) {
+	p.unscheduler.TempUnscheduleRetryableError(ctx, p.accountID, p.failure)
+}
+func (p *failoverRuntime) StopSwitch(_ context.Context, count int) bool {
+	return p.scheduler.ShouldStopOpenAIOAuth429Failover(p.account, p.failure.StatusCode, count, &p.state.OpenAIOAuth429)
+}
+func (p *failoverRuntime) ports(log *zap.Logger, event string) execution.RecoveryPorts {
+	return execution.RecoveryPorts{Budget: p, Accounts: p, Retrying: func(count, limit int, delay time.Duration) {
+		if log != nil {
+			log.Warn(event, zap.Int64("account_id", p.accountID), zap.Int("upstream_status", p.failure.StatusCode),
+				zap.Int("retry_limit", limit), zap.Int("retry_count", count), zap.Duration("retry_delay", delay))
 		}
+	}}
+}
+func waitOpenAISameAccountRetry(ctx context.Context, account *service.Account, failure *service.UpstreamFailoverError, counts map[int64]int, log *zap.Logger, event string) (bool, error) {
+	if account == nil || failure == nil {
+		return false, nil
 	}
-	return true
+	runtime := &failoverRuntime{accountID: account.ID, account: account, failure: failure}
+	return execution.RetrySameAccount(ctx, account.ID, recoveryFailure(failure), account.GetPoolModeRetryCount(), counts, runtime.ports(log, event))
 }
 
-// HandleFailoverError 处理 UpstreamFailoverError，返回下一步动作。
-// 包含：缓存计费判断、同账号重试、临时封禁、切换计数、Antigravity 延时。
-func (s *FailoverState) HandleFailoverError(
-	ctx context.Context,
-	gatewayService TempUnscheduler,
-	accountID int64,
-	platform string,
-	retryLimit int,
-	failoverErr *service.UpstreamFailoverError,
-) FailoverAction {
-	// 客户端已断开：failover 只会用已取消的 context 重新选号并必然失败，
-	// 不应再被当成账号耗尽处理（误报 502）。
-	if ctx != nil && ctx.Err() != nil {
-		return FailoverCanceled
+func (s *FailoverState) HandleFailoverError(ctx context.Context, gateway TempUnscheduler, accountID int64, platform string, retryLimit int, failure *service.UpstreamFailoverError) execution.RecoveryAction {
+	started := time.Now()
+	if ctx.Err() == nil {
+		s.LastFailoverErr = failure
 	}
-	s.LastFailoverErr = failoverErr
-	if failoverErr == nil || !failoverErr.ShouldRetryNextAccount() {
-		return FailoverExhausted
+	runtime := &failoverRuntime{accountID: accountID, account: service.TurnRetryAccount(ctx), failure: failure, unscheduler: gateway}
+	log := logger.FromContext(ctx)
+	ports := runtime.ports(log, "gateway.failover_same_account_retry")
+	ports.Retrying = func(count, limit int, delay time.Duration) {
+		log.Warn("gateway.failover_same_account_retry", zap.Int64("account_id", accountID), zap.Int("upstream_status", failure.StatusCode),
+			zap.Int("same_account_retry_count", count), zap.Int("same_account_retry_max", limit), zap.Duration("retry_delay", delay))
 	}
-
-	// 同账号重试不算切换账号，粘性会话仅在实际切换时强制缓存计费。
-	retryCount := s.SameAccountRetryCount[accountID]
-	sameAccountRetry := sameAccountRetryAllowed(failoverErr, retryCount, retryLimit)
-	if needForceCacheBilling(s.hasBoundSession, failoverErr, sameAccountRetry) {
-		s.ForceCacheBilling = true
+	ports.Switching = func(count int) {
+		log.Warn("gateway.failover_switch_account", zap.Int64("account_id", accountID), zap.Int("upstream_status", failure.StatusCode),
+			zap.Int("switch_count", count), zap.Int("max_switches", s.MaxSwitches))
 	}
-
-	// 同账号重试：对 RetryableOnSameAccount 的临时性错误，先在同一账号上重试。
-	// 重试次数上限 retryLimit 由调用方传入（账号级 pool_mode_retry_count 配置）。
-	if sameAccountRetry {
-		s.SameAccountRetryCount[accountID]++
-		retryDelay := sameAccountRetryDelayFor(failoverErr, s.SameAccountRetryCount[accountID])
-		logger.FromContext(ctx).Warn("gateway.failover_same_account_retry",
-			zap.Int64("account_id", accountID),
-			zap.Int("upstream_status", failoverErr.StatusCode),
-			zap.Int("same_account_retry_count", s.SameAccountRetryCount[accountID]),
-			zap.Int("same_account_retry_max", retryLimit),
-			zap.Duration("retry_delay", retryDelay),
-		)
-		if !sleepWithContext(ctx, retryDelay) {
-			return FailoverCanceled
-		}
-		return FailoverContinue
-	}
-
-	// 同账号重试用尽，执行临时封禁
-	if failoverErr.RetryableOnSameAccount {
-		gatewayService.TempUnscheduleRetryableError(ctx, accountID, failoverErr)
-	}
-
-	// 加入失败列表
-	s.FailedAccountIDs[accountID] = struct{}{}
-
-	// 检查是否耗尽
-	if s.SwitchCount >= s.MaxSwitches {
-		return FailoverExhausted
-	}
-
-	// 递增切换计数
-	s.SwitchCount++
-	logger.FromContext(ctx).Warn("gateway.failover_switch_account",
-		zap.Int64("account_id", accountID),
-		zap.Int("upstream_status", failoverErr.StatusCode),
-		zap.Int("switch_count", s.SwitchCount),
-		zap.Int("max_switches", s.MaxSwitches),
-	)
-
-	// Antigravity 平台换号线性递增延时
+	var switchDelayStep time.Duration
 	if platform == service.PlatformAntigravity {
-		delay := time.Duration(s.SwitchCount-1) * time.Second
-		if !sleepWithContext(ctx, delay) {
-			return FailoverCanceled
-		}
+		switchDelayStep = time.Second
 	}
-
-	return FailoverContinue
+	result := s.Recovery.RecoverFailure(ctx, accountID, recoveryFailure(failure), retryLimit, switchDelayStep, ports)
+	if result.Err != nil && result.Action != execution.RecoveryCanceled {
+		s.LastFailoverErr = &service.UpstreamFailoverError{StatusCode: 503, Stage: "selection", Reason: service.GatewayFailureReason(result.Reason), Cause: result.Err, ClientMessage: result.Err.Error()}
+	}
+	service.RecordSchedulingDecision(ctx, service.SchedulingDecision{Stage: "retry", Action: "decided", Reason: result.Reason, AccountID: accountID, DurationMs: time.Since(started).Milliseconds()})
+	log.Info("gateway.retry_decision", zap.String("reason", result.Reason), zap.Int("action", int(result.Action)),
+		zap.Int64("account_id", accountID), zap.Int("switch_count", s.SwitchCount), zap.Int("same_account_retry_count", s.SameAccountRetryCount[accountID]))
+	return result.Action
 }
-
-// HandleSelectionExhausted 处理选号失败（所有候选账号都在排除列表中）时的退避重试决策。
-// 针对 Antigravity 单账号分组的 503 (MODEL_CAPACITY_EXHAUSTED) 场景：
-// 清除排除列表、等待退避后重新选号。
-//
-// 返回 FailoverContinue 时，调用方应设置 SingleAccountRetry context 并 continue。
-// 返回 FailoverExhausted 时，调用方应返回错误响应。
-// 返回 FailoverCanceled 时，调用方应直接 return。
-func (s *FailoverState) HandleSelectionExhausted(ctx context.Context) FailoverAction {
-	// 客户端已断开时选号失败是 context canceled 的必然结果，
-	// 不代表账号耗尽，直接按取消终止。
-	if ctx.Err() != nil {
-		return FailoverCanceled
+func (s *FailoverState) HandleSelectionExhausted(ctx context.Context, selectionErrors ...error) execution.RecoveryAction {
+	pinned := service.TurnRetryAccount(ctx)
+	var id int64
+	if pinned != nil {
+		id = pinned.ID
 	}
-
-	if s.LastFailoverErr != nil &&
-		s.LastFailoverErr.StatusCode == http.StatusServiceUnavailable &&
-		s.SwitchCount <= s.MaxSwitches {
-
-		// 排除列表全由利润门否决贡献时，清空后会被原样恢复：退避重试拿不到
-		// 任何新候选，而利润否决不推进 SwitchCount，退避条件将永远成立。
-		// 这里直接判定耗尽，避免每 2s 空转一轮的活锁。
-		if s.allExclusionsAreProfitVetoed() {
-			logger.FromContext(ctx).Warn("gateway.failover_selection_exhausted_by_profit_veto",
-				zap.Int("profit_veto_count", s.profitVetoCount),
-				zap.Int("excluded_accounts", len(s.FailedAccountIDs)),
-			)
-			return FailoverExhausted
-		}
-
-		logger.FromContext(ctx).Warn("gateway.failover_single_account_backoff",
-			zap.Duration("backoff_delay", singleAccountBackoffDelay),
-			zap.Int("switch_count", s.SwitchCount),
-			zap.Int("max_switches", s.MaxSwitches),
-		)
-		if !sleepWithContext(ctx, singleAccountBackoffDelay) {
-			return FailoverCanceled
-		}
-		logger.FromContext(ctx).Warn("gateway.failover_single_account_retry",
-			zap.Int("switch_count", s.SwitchCount),
-			zap.Int("max_switches", s.MaxSwitches),
-		)
-		s.FailedAccountIDs = make(map[int64]struct{})
-		// 利润门否决的账号不参与退避重试的解除：判定依据（冻结的下游倍率）在
-		// 同一请求内不变，放它们回池只会被再次否决。
-		for id := range s.profitVetoedAccountIDs {
-			s.FailedAccountIDs[id] = struct{}{}
-		}
-		return FailoverContinue
-	}
-	return FailoverExhausted
-}
-
-// needForceCacheBilling 判断 failover 时是否需要强制缓存计费。
-// 粘性会话实际切换账号、或上游明确标记时，将 input_tokens 转为 cache_read 计费。
-func needForceCacheBilling(hasBoundSession bool, failoverErr *service.UpstreamFailoverError, sameAccountRetry bool) bool {
-	return (hasBoundSession && !sameAccountRetry) || (failoverErr != nil && failoverErr.ForceCacheBilling)
+	runtime := &failoverRuntime{account: pinned, failure: s.LastFailoverErr}
+	emptyPool := len(selectionErrors) == 0 || errors.Is(selectionErrors[0], service.ErrNoAvailableAccounts)
+	return s.Recovery.SelectionExhausted(ctx, id, pinned != nil, emptyPool, recoveryFailure(s.LastFailoverErr), runtime.ports(nil, "")).Action
 }
 
 // failoverClientGone 判断下游客户端是否已断开（请求 context 已取消）。
@@ -357,4 +195,81 @@ func sleepWithContext(ctx context.Context, d time.Duration) bool {
 	case <-time.After(d):
 		return true
 	}
+}
+
+// The scheduler still owns live account-health/429 policy, not recovery counts.
+type openAIRecoveryScheduler interface {
+	RecordOpenAIAccountSwitch()
+	ShouldStopOpenAIOAuth429Failover(*service.Account, int, int, *service.OpenAIOAuth429FailoverState) bool
+}
+
+func (s *FailoverState) nativeRecoveryPorts(account *service.Account, failure *service.UpstreamFailoverError, scheduler openAIRecoveryScheduler, log *zap.Logger) execution.RecoveryPorts {
+	var accountID int64
+	if account != nil {
+		accountID = account.ID
+	}
+	runtime := &failoverRuntime{accountID: accountID, account: account, failure: failure, responseGate: true, scheduler: scheduler, state: s}
+	ports := runtime.ports(log, "openai.recovery_same_account")
+	ports.Switching = func(count int) {
+		scheduler.RecordOpenAIAccountSwitch()
+		if log != nil {
+			log.Warn("openai.recovery_switch_account", zap.Int64("account_id", accountID), zap.Int("upstream_status", failure.StatusCode),
+				zap.Int("switch_count", count), zap.Int("max_switches", s.MaxSwitches))
+		}
+	}
+	return ports
+}
+func recordOpenAIRecoveryStop(c *gin.Context, account *service.Account, result execution.RecoveryResult) {
+	switch result.Reason {
+	case "turn_budget", "context_not_portable", "account_switch_limit":
+		service.RecordOpenAIRetryStop(c, account, service.OpenAIRetryStopReason(result.Reason))
+	}
+}
+func (s *FailoverState) RecoverOpenAI(ctx context.Context, c *gin.Context, account *service.Account, failure *service.UpstreamFailoverError, portable, retrySame bool, scheduler openAIRecoveryScheduler, log *zap.Logger) (execution.RecoveryAction, error) {
+	// Missing service entities cannot be projected. Cancellation keeps priority;
+	// all valid-input recovery policy is owned by execution.
+	if ctx.Err() != nil {
+		return execution.RecoveryCanceled, ctx.Err()
+	}
+	if account == nil || failure == nil {
+		return execution.RecoveryExhausted, nil
+	}
+	s.LastFailoverErr = failure
+	fact := recoveryFailure(failure)
+	result := s.Recovery.RecoverBoundAccount(ctx, account.ID, fact, portable, retrySame, account.GetPoolModeRetryCount(), s.nativeRecoveryPorts(account, failure, scheduler, log))
+	failure.RetryableOnSameAccount, failure.SameAccountRetryMax = fact.RetryableOnSameAccount, fact.SameAccountRetryMax
+	recordOpenAIRecoveryStop(c, account, result)
+	return result.Action, result.Err
+}
+
+// RecoverOpenAISelection projects the selection and continuation facts. The
+// core alone decides whether the failed pinned owner may be moved; the caller
+// retains protocol-specific mapping of the original selection/upstream errors.
+func (s *FailoverState) RecoverOpenAISelection(ctx context.Context, c *gin.Context, selectionErr error, body []byte, scheduler openAIRecoveryScheduler, log *zap.Logger) (execution.RecoveryAction, bool) {
+	pinned := service.TurnRetryAccount(ctx)
+	selected := execution.SelectionFailure{
+		HasPinned:     pinned != nil,
+		PoolExhausted: errors.Is(selectionErr, service.ErrNoAvailableAccounts),
+		Portable:      openAIForwardAccountReplayAllowed(c, pinned, body, s.LastFailoverErr),
+	}
+	if pinned != nil {
+		selected.PinnedAccountID = pinned.ID
+	}
+	result, handled := s.Recovery.RecoverUnavailableOwner(ctx, selected, recoveryFailure(s.LastFailoverErr), s.nativeRecoveryPorts(pinned, s.LastFailoverErr, scheduler, log))
+	if handled {
+		recordOpenAIRecoveryStop(c, pinned, result)
+	}
+	return result.Action, handled
+}
+
+// BeginOperation clears service-owned error/scheduler payloads only when the
+// execution owner accepts a newer client operation. Duplicate turn callbacks
+// cannot erase a failure or replenish recovery counts for the current operation.
+func (s *FailoverState) BeginOperation(sequence uint64) bool {
+	if !s.Recovery.BeginOperation(sequence) {
+		return false
+	}
+	s.LastFailoverErr = nil
+	s.OpenAIOAuth429 = service.OpenAIOAuth429FailoverState{}
+	return true
 }

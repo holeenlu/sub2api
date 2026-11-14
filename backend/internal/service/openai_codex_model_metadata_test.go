@@ -915,3 +915,42 @@ func TestCodexAliasFailoverMappingHonorsModelRouting(t *testing.T) {
 }
 
 // Scenario: mixed groups prefer capability metadata synced for the routed account.
+
+func TestExperimentalToolsIntersectionAndScope(t *testing.T) {
+	require.JSONEq(t, "[]", string(deriveCloudCodexToolCapabilities()["experimental_supported_tools"]), "Cloud capability ceiling must come from the existing policy matrix")
+	first := Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "first"}}
+	second := Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "second"}}
+	_, metadata, err := extractUpstreamModelCatalog([]byte(`{"models":[{"slug":"gpt-6-luna","experimental_supported_tools":["clock","send_user_message_async","clock"]}]}`), false)
+	require.NoError(t, err)
+	first.SetUpstreamModelMetadataSnapshot(UpstreamModelMetadataSnapshot{Models: metadata})
+	_, other, err := extractUpstreamModelCatalog([]byte(`{"models":[{"slug":"gpt-6-luna","experimental_supported_tools":["clock","another"]}]}`), false)
+	require.NoError(t, err)
+	second.SetUpstreamModelMetadataSnapshot(UpstreamModelMetadataSnapshot{Models: other})
+	body := []byte(`{"models":[{"slug":"gpt-6-luna","experimental_supported_tools":["unverified"]}]}`)
+	out, changed, err := restrictCodexExperimentalToolsManifest(body, []Account{first, second}, &Group{Platform: PlatformOpenAI})
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.JSONEq(t, `{"models":[{"slug":"gpt-6-luna","experimental_supported_tools":["clock"]}]}`, string(out))
+	second.Credentials["api_key"] = "replacement"
+	out, _, err = restrictCodexExperimentalToolsManifest(body, []Account{first, second}, &Group{Platform: PlatformOpenAI})
+	require.NoError(t, err)
+	require.JSONEq(t, `{"models":[{"slug":"gpt-6-luna","experimental_supported_tools":[]}]}`, string(out))
+	for _, invalid := range []string{`[123]`, `{"clock":true}`, `[""]`} {
+		_, valid := decodeCodexExperimentalTools([]byte(invalid))
+		require.False(t, valid)
+	}
+}
+
+func TestExperimentalToolsPersistPartialMetadataAndLiveWithdrawal(t *testing.T) {
+	_, live, err := extractUpstreamModelCatalog([]byte(`{"models":[{"slug":"private-model","experimental_supported_tools":["clock"]}]}`), false)
+	require.NoError(t, err)
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	saved := map[string]UpstreamModelMetadata{}
+	retainLiveCodexExperimentalMetadata(saved, live, []string{"private-model"}, account)
+	require.JSONEq(t, `["clock"]`, string(saved["private-model"].CodexToolCapabilities["experimental_supported_tools"]))
+	account.SetUpstreamModelMetadataSnapshot(UpstreamModelMetadataSnapshot{Models: saved})
+	withdrawn := map[string]UpstreamModelMetadata{}
+	retainLiveCodexExperimentalMetadata(withdrawn, map[string]UpstreamModelMetadata{}, []string{"private-model"}, account)
+	require.JSONEq(t, `[]`, string(withdrawn["private-model"].CodexToolCapabilities["experimental_supported_tools"]))
+	require.JSONEq(t, `["clock"]`, string(saved["private-model"].CodexToolCapabilities["experimental_supported_tools"]))
+}

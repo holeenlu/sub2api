@@ -37,6 +37,7 @@ func compatCyberUpstreamSSE() string {
 		`event: response.failed`,
 		`data: {"type":"response.failed","response":{"id":"resp_cyber","object":"response","model":"gpt-5.5","status":"failed","output":[],"error":{"code":"cyber_policy","message":"flagged for cyber policy"}}}`,
 		"",
+		"",
 	}, "\n")
 }
 

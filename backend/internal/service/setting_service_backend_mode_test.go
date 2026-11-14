@@ -82,7 +82,7 @@ func (s *bmUpdateRepoStub) SetMultiple(ctx context.Context, settings map[string]
 }
 
 func (s *bmUpdateRepoStub) GetAll(ctx context.Context) (map[string]string, error) {
-	panic("unexpected GetAll call")
+	return s.updates, nil
 }
 
 func (s *bmUpdateRepoStub) Delete(ctx context.Context, key string) error {
@@ -190,7 +190,7 @@ func TestUpdateSettings_InvalidatesBackendModeCache(t *testing.T) {
 	}
 	svc := NewSettingService(repo, &config.Config{})
 
-	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+	err := updateSystemSettingsForTest(svc, context.Background(), &SystemSettings{
 		BackendModeEnabled: false,
 	})
 	require.NoError(t, err)

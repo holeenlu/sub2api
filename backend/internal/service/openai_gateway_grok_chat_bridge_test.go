@@ -294,6 +294,7 @@ func TestForwardGrokChatViaResponsesNonStreamingRejectsCompletedResponseWithoutU
 		"",
 		`data: {"type":"response.completed","sequence_number":1,"response":{"id":"resp_missing_usage","object":"response","model":"grok-4.5","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok"}]}]}}`,
 		"",
+		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -716,6 +717,7 @@ func grokChatBridgeCompletedResponse(responseID string, cachedTokens int) *http.
 		`data: {"type":"response.output_text.delta","sequence_number":0,"delta":"cached ok"}`,
 		"",
 		`data: {"type":"response.completed","sequence_number":1,"response":{"id":"` + responseID + `","object":"response","model":"grok-4.5","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"cached ok"}]}],"usage":{"input_tokens":9908,"output_tokens":12,"total_tokens":9920,"input_tokens_details":{"cached_tokens":` + strconv.Itoa(cachedTokens) + `}}}}`,
+		"",
 		"",
 	}, "\n")
 	return &http.Response{

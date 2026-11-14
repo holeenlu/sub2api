@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -123,6 +124,7 @@ func TestClassifyOpenAIWSReconnectReason(t *testing.T) {
 }
 
 func TestOpenAIWSErrorHTTPStatus(t *testing.T) {
+	require.Equal(t, http.StatusGatewayTimeout, openAIWSErrorHTTPStatus([]byte(`{"type":"error","error":{"type":"server_error","code":"first_output_timeout"}}`)))
 	require.Equal(t, http.StatusBadRequest, openAIWSErrorHTTPStatus([]byte(`{"type":"error","error":{"type":"invalid_request_error","code":"invalid_request","message":"invalid input"}}`)))
 	require.Equal(t, http.StatusUnauthorized, openAIWSErrorHTTPStatus([]byte(`{"type":"error","error":{"type":"authentication_error","code":"invalid_api_key","message":"auth failed"}}`)))
 	require.Equal(t, http.StatusForbidden, openAIWSErrorHTTPStatus([]byte(`{"type":"error","error":{"type":"permission_error","code":"forbidden","message":"forbidden"}}`)))
@@ -131,6 +133,25 @@ func TestOpenAIWSErrorHTTPStatus(t *testing.T) {
 }
 
 func TestResolveOpenAIWSFallbackErrorResponse(t *testing.T) {
+	t.Run("remote_message_too_big", func(t *testing.T) {
+		closeErr := fmt.Errorf("failed to get reader: received close frame: %w", coderws.CloseError{Code: coderws.StatusMessageTooBig})
+		for _, err := range []error{closeErr, wrapOpenAIWSFallback("message_too_big", closeErr), wrapOpenAIWSFallback("prewarm_message_too_big", closeErr)} {
+			status, kind, message, upstream, ok := resolveOpenAIWSFallbackErrorResponse(err)
+			require.True(t, ok)
+			require.Equal(t, http.StatusRequestEntityTooLarge, status)
+			require.Equal(t, "invalid_request_error", kind)
+			require.Contains(t, message, "WebSocket message size limit")
+			require.Contains(t, upstream, "StatusMessageTooBig")
+		}
+	})
+
+	t.Run("local_read_limit_and_untyped_text_are_not_request_rejections", func(t *testing.T) {
+		for _, err := range []error{coderws.ErrMessageTooBig, errors.New("received close frame: status = StatusMessageTooBig"), wrapOpenAIWSFallback("message_too_big", coderws.ErrMessageTooBig)} {
+			_, _, _, _, ok := resolveOpenAIWSFallbackErrorResponse(err)
+			require.False(t, ok)
+		}
+	})
+
 	t.Run("previous_response_not_found", func(t *testing.T) {
 		statusCode, errType, clientMessage, upstreamMessage, ok := resolveOpenAIWSFallbackErrorResponse(
 			wrapOpenAIWSFallback("previous_response_not_found", errors.New("previous response not found")),
@@ -184,6 +205,18 @@ func TestWriteOpenAIWSFallbackErrorResponseMarksDefaultClientRouteUnknown(t *tes
 	require.Equal(t, opsProxyNameUnknown, events[0].ProxyName)
 }
 
+func TestWriteOpenAIWSFallbackErrorDoesNotAppendAfterOutput(t *testing.T) {
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	_, err := c.Writer.WriteString("data: partial-output\n\n")
+	require.NoError(t, err)
+	svc := &OpenAIGatewayService{}
+	require.False(t, svc.writeOpenAIWSFallbackErrorResponse(c, &Account{ID: 38}, coderws.CloseError{Code: coderws.StatusMessageTooBig}))
+	require.Equal(t, "data: partial-output\n\n", rec.Body.String())
+	_, recorded := c.Get(OpsUpstreamErrorsKey)
+	require.False(t, recorded)
+}
+
 func TestWriteOpenAIWSFallbackErrorResponseKeepsManagedProxy(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -201,6 +234,27 @@ func TestWriteOpenAIWSFallbackErrorResponseKeepsManagedProxy(t *testing.T) {
 	require.NotNil(t, events[0].ProxyID)
 	require.Equal(t, proxyID, *events[0].ProxyID)
 	require.Equal(t, "ws-proxy", events[0].ProxyName)
+}
+
+func TestWriteOpenAIWSFallbackErrorAfterHTTPHeartbeat(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	stop := StartSSEKeepalive(c, time.Hour)
+	defer stop()
+	value, _ := c.Get(openAICompactSSEKeepaliveKey)
+	require.True(t, value.(*openAICompactSSEKeepalive).beat())
+	stop()
+	require.True(t, c.Writer.Written())
+	require.False(t, openAIStreamClientOutputStarted(c, false))
+	svc := &OpenAIGatewayService{}
+	require.True(t, svc.writeOpenAIWSFallbackErrorResponse(c, &Account{ID: 42, Platform: PlatformOpenAI}, wrapOpenAIWSFallback("auth_failed", errors.New("unauthorized"))))
+	events := parseCompactBridgeSSE(t, stripKeepaliveComments(recorder.Body.String()))
+	require.Len(t, events, 1)
+	require.Equal(t, "response.failed", events[0][0])
+	require.True(t, openAIStreamClientOutputStarted(c, false))
+	require.True(t, IsResponseCommitted(c))
 }
 
 func TestOpsUpstreamWSProxyAttributionNeverReportsDirect(t *testing.T) {
@@ -307,4 +361,12 @@ func TestShouldLogOpenAIWSPayloadSchema(t *testing.T) {
 
 	svc.cfg.Gateway.OpenAIWS.PayloadLogSampleRate = 1
 	require.True(t, svc.shouldLogOpenAIWSPayloadSchema(2))
+}
+
+// Test-only adapters and reference algorithms; production uses the current entrypoints.
+func classifyOpenAIWSErrorEvent(message []byte) (string, bool) {
+	if len(message) == 0 {
+		return "event_error", false
+	}
+	return classifyOpenAIWSErrorEventFromRaw(parseOpenAIWSErrorEventFields(message))
 }

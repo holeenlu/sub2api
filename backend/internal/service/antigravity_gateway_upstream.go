@@ -47,7 +47,7 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 	// 能力维度 sanitize：Anthropic-compatible 上游透传路径也需要保证 body↔beta header
 	// 对称。客户端 anthropic-beta header 不含 context-management-2025-06-27 但 body 带
 	// context_management 时 strip，与 Anthropic 直连 / Bedrock / Vertex 路径保持一致。
-	clientBeta := c.GetHeader("anthropic-beta")
+	clientBeta := getRequestTokenListHeader(c.Request, "anthropic-beta")
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, clientBeta); changed {
 		body = sanitized
 	}
@@ -78,7 +78,7 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 	}
 
 	// 发送请求
-	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+	resp, err := qualifiedAccountUpstream(s.accountRepo, s.httpUpstream, account, vendorDispatchGroup(c), s.settingService).Do(req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
 		logger.LegacyPrintf("service.antigravity_gateway", "%s upstream request failed: %v", prefix, err)
 		return nil, fmt.Errorf("upstream request failed: %w", err)
@@ -161,6 +161,9 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 
 // streamUpstreamResponse 透传上游 SSE 流并提取 Claude usage
 func (s *AntigravityGatewayService) streamUpstreamResponse(c *gin.Context, resp *http.Response, startTime time.Time) *antigravityStreamResult {
+	defer GuardSSEWrites(c)()
+	drain := newOpenAIHTTPUsageDrain(streamWriteContext(c), resp.Body.Close)
+	defer drain.stop()
 	usage := &ClaudeUsage{}
 	var firstTokenMs *int
 
@@ -170,7 +173,7 @@ func (s *AntigravityGatewayService) streamUpstreamResponse(c *gin.Context, resp 
 		maxLineSize = s.settingService.cfg.Gateway.MaxLineSize
 	}
 	scanner.Buffer(make([]byte, 64*1024), maxLineSize)
-	scanner.Split(newBoundedSSESplit(s.settingService.cfg, maxLineSize, nil))
+	scanner.Split(newBoundedSSESplit(s.antigravitySSEConfig(), maxLineSize, nil))
 
 	type scanEvent struct {
 		line string
@@ -178,7 +181,7 @@ func (s *AntigravityGatewayService) streamUpstreamResponse(c *gin.Context, resp 
 	}
 	events := make(chan scanEvent, 16)
 	done := make(chan struct{})
-	queueBudget := newSSEQueueBudget(s.settingService.cfg)
+	queueBudget := newSSEQueueBudget(s.antigravitySSEConfig())
 	sendEvent := func(ev scanEvent) bool {
 		if !queueBudget.acquire(len(ev.line), done) {
 			return false
@@ -237,14 +240,16 @@ func (s *AntigravityGatewayService) streamUpstreamResponse(c *gin.Context, resp 
 	}
 	lastDataAt := time.Now()
 
-	flusher, _ := c.Writer.(http.Flusher)
-	cw := newAntigravityClientWriter(c.Writer, flusher, "antigravity upstream")
+	cw := newAntigravityClientWriter(c.Writer, "antigravity upstream")
 
 	for {
+		if drain.disconnected() {
+			cw.disconnected = true
+		}
 		select {
 		case ev, ok := <-events:
-			if ok {
-				queueBudget.release(len(ev.line))
+			if drain.disconnected() {
+				cw.disconnected = true
 			}
 			if !ok {
 				return &antigravityStreamResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: cw.Disconnected()}

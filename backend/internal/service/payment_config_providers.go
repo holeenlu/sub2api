@@ -191,9 +191,6 @@ func (s *PaymentConfigService) CreateProviderInstance(ctx context.Context, req C
 			return nil, err
 		}
 	}
-	if err := s.validateVisibleMethodEnablementConflicts(ctx, 0, req.ProviderKey, typesStr, req.Enabled); err != nil {
-		return nil, err
-	}
 	if req.Enabled {
 		if err := s.validateProviderConfig(req.ProviderKey, req.Config); err != nil {
 			return nil, err
@@ -305,16 +302,9 @@ func (s *PaymentConfigService) UpdateProviderInstance(ctx context.Context, id in
 		pendingOrderCount = &count
 		return count, nil
 	}
-	nextEnabled := current.Enabled
-	if req.Enabled != nil {
-		nextEnabled = *req.Enabled
-	}
 	nextSupportedTypes := current.SupportedTypes
 	if req.SupportedTypes != nil {
 		nextSupportedTypes = joinTypes(req.SupportedTypes)
-	}
-	if err := s.validateVisibleMethodEnablementConflicts(ctx, id, current.ProviderKey, nextSupportedTypes, nextEnabled); err != nil {
-		return nil, err
 	}
 	var mergedConfig map[string]string
 	if req.Config != nil {

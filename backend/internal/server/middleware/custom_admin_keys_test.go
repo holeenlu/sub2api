@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/adminaccess"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -38,12 +39,13 @@ func TestScopedAdminKeyAuthDefaultDenyAndCreatorStatus(t *testing.T) {
 	key, _, err := settings.CreateScopedAdminKey(context.Background(), service.ScopedAdminKeyInput{Name: "只读", Enabled: true, Policy: adminaccess.Policy{GlobalPermissions: []string{"users.read"}}}, 9)
 	require.NoError(t, err)
 	active := true
+	role := service.RoleSuperAdmin
 	users := service.NewUserService(&stubUserRepo{getByID: func(context.Context, int64) (*service.User, error) {
 		status := service.StatusActive
 		if !active {
 			status = "disabled"
 		}
-		return &service.User{ID: 9, Role: service.RoleAdmin, Status: status}, nil
+		return &service.User{ID: 9, Role: role, Status: status}, nil
 	}}, nil, nil, nil)
 	r := gin.New()
 	r.Use(gin.HandlerFunc(NewAdminAuthMiddleware(nil, users, settings, nil)))
@@ -60,6 +62,13 @@ func TestScopedAdminKeyAuthDefaultDenyAndCreatorStatus(t *testing.T) {
 		r.ServeHTTP(w, req)
 		require.Equal(t, tc.status, w.Code, tc.path)
 	}
+	role = service.RoleAdmin
+	reqOrdinary := httptest.NewRequest("GET", "/api/v1/admin/users", nil)
+	reqOrdinary.Header.Set("x-api-key", key)
+	deniedOrdinary := httptest.NewRecorder()
+	r.ServeHTTP(deniedOrdinary, reqOrdinary)
+	require.Equal(t, 401, deniedOrdinary.Code, "普通管理员不能继承全站机器密钥")
+	role = service.RoleSuperAdmin
 	active = false
 	req := httptest.NewRequest("GET", "/api/v1/admin/users", nil)
 	req.Header.Set("x-api-key", key)
@@ -116,35 +125,31 @@ func TestScopedAdminKeyMissingDependenciesFailClosed(t *testing.T) {
 	require.Equal(t, 401, w.Code)
 }
 
-func TestAdminFullAccessKeepsIdentityAndJWTBoundary(t *testing.T) {
+func TestScopedAdminKeyRevalidatesScopeWithoutLegacyKey(t *testing.T) {
 	repo := &adminAuthKeyRepo{}
 	settings := service.NewSettingService(nil, nil)
 	settings.SetScopedAdminKeyRepository(repo)
-	key, _, err := settings.CreateScopedAdminKey(context.Background(), service.ScopedAdminKeyInput{Name: "兼容", Enabled: true, ConfirmFullAccess: true, Policy: adminaccess.Policy{FullAccess: true}}, 9)
+	key, _, err := settings.CreateScopedAdminKey(context.Background(), service.ScopedAdminKeyInput{Name: "scope", Enabled: true, Policy: adminaccess.Policy{GlobalPermissions: []string{"users.read"}}}, 9)
 	require.NoError(t, err)
 	users := service.NewUserService(&stubUserRepo{getByID: func(context.Context, int64) (*service.User, error) {
-		return &service.User{ID: 9, Role: service.RoleAdmin, Status: service.StatusActive}, nil
+		return &service.User{ID: 9, Role: service.RoleSuperAdmin, Status: service.StatusActive}, nil
 	}}, nil, nil, nil)
-	r := gin.New()
-	r.Use(gin.HandlerFunc(NewAdminAuthMiddleware(nil, users, settings, nil)))
-	r.GET("/api/v1/admin/future", func(c *gin.Context) {
-		require.NotNil(t, adminaccess.FromContext(c.Request.Context()))
-		require.Nil(t, adminaccess.RestrictedFromContext(c.Request.Context()))
-		require.Equal(t, service.AuditAuthMethodAdminAPIKey, c.GetString("auth_method"))
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAdminAuthMiddleware(nil, users, settings, nil)))
+	router.GET("/api/v1/admin/users", func(c *gin.Context) {
+		actor, ok := authz.FromContext(c.Request.Context())
+		require.True(t, ok)
+		require.Equal(t, service.AuditAuthMethodAdminAPIKey, actor.AuthMethod)
+		require.NoError(t, authz.Revalidate(c.Request.Context()))
+		changed := *repo.item
+		changed.Policy = adminaccess.Policy{}
+		repo.item = &changed
+		require.Error(t, authz.Revalidate(c.Request.Context()), "策略撤销后不能继续输出")
 		c.Status(204)
 	})
-	r.POST("/api/v1/admin/settings/admin-api-keys", func(c *gin.Context) { t.Fatal("全权key不能管理密钥") })
-	r.GET("/api/v1/admin/interactive", func(c *gin.Context) {
-		require.False(t, enforceStepUp(c, nil, nil, nil))
-	})
-	for _, tc := range []struct {
-		method, path string
-		status       int
-	}{{"GET", "/api/v1/admin/future", 204}, {"POST", "/api/v1/admin/settings/admin-api-keys", 403}, {"GET", "/api/v1/admin/interactive", 403}} {
-		w := httptest.NewRecorder()
-		req := httptest.NewRequest(tc.method, tc.path, nil)
-		req.Header.Set("x-api-key", key)
-		r.ServeHTTP(w, req)
-		require.Equal(t, tc.status, w.Code, w.Body.String())
-	}
+	req := httptest.NewRequest("GET", "/api/v1/admin/users", nil)
+	req.Header.Set("x-api-key", key)
+	out := httptest.NewRecorder()
+	router.ServeHTTP(out, req)
+	require.Equal(t, 204, out.Code)
 }

@@ -1,16 +1,20 @@
 package openai
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/sessionstore"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 )
 
 // OpenAI OAuth Constants (from CRS project - Codex CLI client)
@@ -41,30 +45,28 @@ const (
 
 // OAuthSession stores OAuth flow state for OpenAI
 type OAuthSession struct {
-	State        string    `json:"state"`
-	CodeVerifier string    `json:"code_verifier"`
-	ClientID     string    `json:"client_id,omitempty"`
-	ProxyURL     string    `json:"proxy_url,omitempty"`
-	RedirectURI  string    `json:"redirect_uri"`
-	CreatedAt    time.Time `json:"created_at"`
+	Authorization *authz.Lease `json:"authorization,omitempty"`
+	State         string       `json:"state"`
+	CodeVerifier  string       `json:"code_verifier"`
+	ClientID      string       `json:"client_id,omitempty"`
+	ProxyURL      string       `json:"proxy_url,omitempty"`
+	RedirectURI   string       `json:"redirect_uri"`
+	CreatedAt     time.Time    `json:"created_at"`
 }
 
 // SessionStore manages OAuth sessions in memory
 type SessionStore struct {
+	*sessionstore.Lifecycle
 	mu       sync.RWMutex
 	sessions map[string]*OAuthSession
-	stopOnce sync.Once
-	stopCh   chan struct{}
 }
 
 // NewSessionStore creates a new session store
 func NewSessionStore() *SessionStore {
 	store := &SessionStore{
 		sessions: make(map[string]*OAuthSession),
-		stopCh:   make(chan struct{}),
 	}
-	// Start cleanup goroutine
-	go store.cleanup()
+	store.Lifecycle = sessionstore.NewLifecycle(5*time.Minute, func(context.Context) { store.cleanup() })
 	return store
 }
 
@@ -97,34 +99,16 @@ func (s *SessionStore) Delete(sessionID string) {
 	delete(s.sessions, sessionID)
 }
 
-// Stop stops the cleanup goroutine
-func (s *SessionStore) Stop() {
-	s.stopOnce.Do(func() {
-		close(s.stopCh)
-	})
-}
-
-// cleanup removes expired sessions periodically
 func (s *SessionStore) cleanup() {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-s.stopCh:
-			return
-		case <-ticker.C:
-			s.mu.Lock()
-			for id, session := range s.sessions {
-				if time.Since(session.CreatedAt) > SessionTTL {
-					delete(s.sessions, id)
-				}
-			}
-			s.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, session := range s.sessions {
+		if time.Since(session.CreatedAt) > SessionTTL {
+			delete(s.sessions, id)
 		}
 	}
 }
 
-// GenerateRandomBytes generates cryptographically secure random bytes
 func GenerateRandomBytes(n int) ([]byte, error) {
 	b := make([]byte, n)
 	_, err := rand.Read(b)
@@ -179,6 +163,19 @@ func base64URLEncode(data []byte) string {
 // BuildAuthorizationURL builds the OpenAI OAuth authorization URL
 func BuildAuthorizationURL(state, codeChallenge, redirectURI string) string {
 	return BuildAuthorizationURLForPlatform(state, codeChallenge, redirectURI, OAuthPlatformOpenAI)
+}
+
+// BuildExcelAuthorizationURL follows the public add-in's browser PKCE flow.
+// The callback stays on the registered official origin; the operator returns
+// its URL to the admin UI for state validation and server-side exchange.
+func BuildExcelAuthorizationURL(state, codeChallenge string) string {
+	params := url.Values{
+		"client_id": {ExcelClientID}, "response_type": {"code"},
+		"redirect_uri": {ExcelRedirectURI}, "scope": {"openid offline_access email profile organization.read"},
+		"state": {state}, "code_challenge_method": {"S256"}, "code_challenge": {codeChallenge},
+		"audience": {"https://api.openai.com/v1"}, "platform": {"PC"},
+	}
+	return ExcelAuthorizeURL + "?" + params.Encode()
 }
 
 // BuildAuthorizationURLForPlatform builds authorization URL by platform.
@@ -411,3 +408,7 @@ func (c *IDTokenClaims) GetUserInfo() *UserInfo {
 
 	return info
 }
+
+const ExcelClientID = "app_fnr0pYvVwwFDocDumLG3H2Bp"
+const ExcelAuthorizeURL = "https://auth.openai.com/api/accounts/authorize"
+const ExcelRedirectURI = "https://bps.openai.com/basispoints/extension/360590d7-f8f9-4d88-bf75-0edfe0a4b9f3/auth/callback"

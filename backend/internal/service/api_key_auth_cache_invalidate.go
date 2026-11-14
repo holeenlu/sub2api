@@ -4,6 +4,9 @@ import "context"
 
 // InvalidateAuthCacheByKey 清除指定 API Key 的认证缓存
 func (s *APIKeyService) InvalidateAuthCacheByKey(ctx context.Context, key string) {
+	if DeferManagementCommit(ctx, func(committedCtx context.Context) { s.InvalidateAuthCacheByKey(committedCtx, key) }) {
+		return
+	}
 	if key == "" {
 		return
 	}
@@ -13,6 +16,9 @@ func (s *APIKeyService) InvalidateAuthCacheByKey(ctx context.Context, key string
 
 // InvalidateAuthCacheByUserID 清除用户相关的 API Key 认证缓存
 func (s *APIKeyService) InvalidateAuthCacheByUserID(ctx context.Context, userID int64) {
+	if DeferManagementCommit(ctx, func(committedCtx context.Context) { s.InvalidateAuthCacheByUserID(committedCtx, userID) }) {
+		return
+	}
 	if userID <= 0 {
 		return
 	}
@@ -25,6 +31,9 @@ func (s *APIKeyService) InvalidateAuthCacheByUserID(ctx context.Context, userID 
 
 // InvalidateAuthCacheByGroupID 清除分组相关的 API Key 认证缓存
 func (s *APIKeyService) InvalidateAuthCacheByGroupID(ctx context.Context, groupID int64) {
+	if DeferManagementCommit(ctx, func(committedCtx context.Context) { s.InvalidateAuthCacheByGroupID(committedCtx, groupID) }) {
+		return
+	}
 	if groupID <= 0 {
 		return
 	}

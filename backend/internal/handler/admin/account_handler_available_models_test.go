@@ -604,3 +604,23 @@ func TestAccountHandlerGetAvailableModels_TypeSafeOnlyReturnsJev(t *testing.T) {
 		require.Equal(t, "jev-latest", resp.Data[0].ID)
 	}
 }
+
+func TestAccountHandlerGetAvailableModels_CloudIgnoresNativePassthroughBypass(t *testing.T) {
+	svc := &availableModelsAdminService{stubAdminService: newStubAdminService(), account: service.Account{
+		ID: 44, Name: "cloud", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive,
+		Credentials: map[string]any{"model_mapping": map[string]any{"public-alias": "gpt-6-luna"}},
+		Extra:       map[string]any{service.OpenAICloudEnabledKey: true, "openai_passthrough": true},
+	}}
+	router := setupAvailableModelsRouter(svc)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/44/models", nil))
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Len(t, response.Data, 1)
+	require.Equal(t, "public-alias", response.Data[0].ID)
+}

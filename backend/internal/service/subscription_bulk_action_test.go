@@ -108,7 +108,8 @@ func TestBulkSubscriptionAction_PartialSuccessAndDeduplication(t *testing.T) {
 				repo.subscriptions[id] = sub
 			}
 			svc := NewSubscriptionService(nil, repo, nil, nil, nil)
-			t.Cleanup(svc.Stop)
+			require.NoError(t, svc.Start(context.Background()))
+			t.Cleanup(func() { _ = svc.Stop(context.Background()) })
 
 			result, err := svc.BulkSubscriptionAction(context.Background(), &BulkSubscriptionActionInput{
 				SubscriptionIDs: []int64{2, 404, 1, 2, 404}, Action: action, Days: 7, Daily: true, Weekly: true,
@@ -182,7 +183,8 @@ func TestBulkSubscriptionAction_CancellationPreservesCompletedResults(t *testing
 		afterMutation: cancel,
 	}
 	svc := NewSubscriptionService(nil, repo, nil, nil, nil)
-	t.Cleanup(svc.Stop)
+	require.NoError(t, svc.Start(context.Background()))
+	t.Cleanup(func() { _ = svc.Stop(context.Background()) })
 	result, err := svc.BulkSubscriptionAction(ctx, &BulkSubscriptionActionInput{SubscriptionIDs: []int64{1, 2, 3}, Action: "revoke"})
 	require.NoError(t, err)
 	require.Equal(t, 1, result.SuccessCount)
@@ -220,7 +222,8 @@ func TestBulkSubscriptionAction_DoesNotExposeInternalErrors(t *testing.T) {
 				err:                        tc.err,
 			}
 			svc := NewSubscriptionService(nil, repo, nil, nil, nil)
-			t.Cleanup(svc.Stop)
+			require.NoError(t, svc.Start(context.Background()))
+			t.Cleanup(func() { _ = svc.Stop(context.Background()) })
 			result, err := svc.BulkSubscriptionAction(context.Background(), &BulkSubscriptionActionInput{SubscriptionIDs: []int64{1}, Action: "revoke"})
 			require.NoError(t, err)
 			require.Equal(t, 1, result.FailedCount)

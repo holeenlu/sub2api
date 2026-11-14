@@ -94,10 +94,14 @@ func buildClient(opts Options) (*http.Client, error) {
 		rt = newValidatedTransport(transport)
 	}
 	rt = servertiming.WrapRoundTripper(rt)
-	return &http.Client{
+	client := &http.Client{
 		Transport: rt,
 		Timeout:   opts.Timeout,
-	}, nil
+	}
+	if _, u, e := proxyurl.Parse(opts.ProxyURL); e == nil && proxyutil.IsVendorProxy(u) {
+		client.CheckRedirect = proxyutil.VendorRedirectPolicy(client.CheckRedirect)
+	}
+	return client, nil
 }
 
 func buildTransport(opts Options) (*http.Transport, error) {

@@ -38,7 +38,7 @@ AND ul.duration_ms IS NOT NULL
 GROUP BY 1, 3
 ORDER BY 3 ASC`
 
-	rows, err := r.db.QueryContext(ctx, q, args...)
+	rows, err := r.queryOpsRows(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}

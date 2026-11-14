@@ -40,12 +40,12 @@ func TestGatewayUsageKeepsModelAfterGinContextReuse(t *testing.T) {
 			usageRepo := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
 			billingRepo := &compatStreamUsageBillingRepo{}
 			billingCache := service.NewBillingCacheService(newHandlerInflightCache(100), nil, nil, nil, nil, nil, cfg, nil)
-			t.Cleanup(billingCache.Stop)
-			upstream := &compatStreamUsageUpstream{response: &http.Response{
+			cleanupHandlerBillingCache(t, billingCache)
+			upstream := &compatStreamUsageUpstream{responses: []*http.Response{{
 				StatusCode: http.StatusOK,
 				Body:       io.NopCloser(strings.NewReader(compatStreamUsagePartialStream + compatStreamUsageCompletion)),
 				Header:     http.Header{"X-Request-Id": []string{"usage-context-reuse"}},
-			}}
+			}}}
 			gw := service.NewGatewayService(
 				nil, &fakeGroupRepo{group: group}, usageRepo, billingRepo, nil, nil, nil, nil, cfg,
 				snapshot, nil, service.NewBillingService(cfg, nil), nil, nil, nil, upstream,

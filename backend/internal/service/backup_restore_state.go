@@ -27,6 +27,11 @@ func (s *BackupService) beginBackupRestore(ctx context.Context, id string) (*Bac
 		if records[i].RestoreStatus == "running" {
 			return nil, ErrRestoreInProgress
 		}
+		if s.onlineUpdateGuard != nil {
+			if err := s.onlineUpdateGuard(ctx); err != nil {
+				return nil, err
+			}
+		}
 		records[i].RestoreStatus = "running"
 		records[i].RestoreStartedAt = time.Now().Format(time.RFC3339)
 		records[i].RestoreError = ""

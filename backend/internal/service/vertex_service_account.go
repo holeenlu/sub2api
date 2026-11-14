@@ -384,6 +384,17 @@ func setVertexGeminiAuth(ctx context.Context, req *http.Request, account *Accoun
 	return nil
 }
 
+func vertexAPIHost(location string) string {
+	switch location {
+	case "global":
+		return vertexGlobalHost
+	case "us", "eu":
+		return "aiplatform." + location + ".rep.googleapis.com"
+	default:
+		return location + "-aiplatform.googleapis.com"
+	}
+}
+
 func buildVertexGeminiURL(projectID, location, model, action string, stream bool) (string, error) {
 	projectID = strings.TrimSpace(projectID)
 	location = strings.TrimSpace(location)
@@ -404,13 +415,9 @@ func buildVertexGeminiURL(projectID, location, model, action string, stream bool
 	if err := validateVertexGeminiAction(action); err != nil {
 		return "", err
 	}
-	host := fmt.Sprintf("%s-aiplatform.googleapis.com", location)
-	if location == "global" {
-		host = vertexGlobalHost
-	}
 	u := fmt.Sprintf(
 		"https://%s/v1/projects/%s/locations/%s/publishers/google/models/%s:%s",
-		host,
+		vertexAPIHost(location),
 		url.PathEscape(projectID),
 		url.PathEscape(location),
 		url.PathEscape(model),
@@ -442,14 +449,10 @@ func buildVertexAnthropicURL(projectID, location, model string, stream bool) (st
 	if stream {
 		action = "streamRawPredict"
 	}
-	host := fmt.Sprintf("%s-aiplatform.googleapis.com", location)
-	if location == "global" {
-		host = "aiplatform.googleapis.com"
-	}
 	escapedModel := strings.ReplaceAll(url.PathEscape(model), "%40", "@")
 	return fmt.Sprintf(
 		"https://%s/v1/projects/%s/locations/%s/publishers/anthropic/models/%s:%s",
-		host,
+		vertexAPIHost(location),
 		url.PathEscape(projectID),
 		url.PathEscape(location),
 		escapedModel,
@@ -469,11 +472,27 @@ func normalizeVertexAnthropicModelID(model string) string {
 }
 
 func buildVertexAnthropicRequestBody(body []byte) ([]byte, error) {
-	var payload map[string]any
+	return buildVertexAnthropicBody(body, false)
+}
+
+// Adapted from sub4api a3eaf63afc672ffedf7844e6cfc5cb6750d52a3e.
+// RawMessage preserves numeric precision without float64 conversion. count_tokens
+// requires the actual model in its payload; Messages puts it in the URL.
+func buildVertexAnthropicBody(body []byte, countTokens bool) ([]byte, error) {
+	var payload map[string]json.RawMessage
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, fmt.Errorf("parse anthropic vertex request body: %w", err)
 	}
-	delete(payload, "model")
-	payload["anthropic_version"] = vertexAnthropicVersion
+	if payload == nil {
+		return nil, errors.New("anthropic vertex request body must be an object")
+	}
+	if !countTokens {
+		delete(payload, "model")
+	}
+	version, err := json.Marshal(vertexAnthropicVersion)
+	if err != nil {
+		return nil, err
+	}
+	payload["anthropic_version"] = version
 	return json.Marshal(payload)
 }

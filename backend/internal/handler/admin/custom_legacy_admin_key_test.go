@@ -50,7 +50,7 @@ func legacyKeyRequest(handler gin.HandlerFunc) *httptest.ResponseRecorder {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/api/v1/admin/settings/admin-api-key/regenerate", nil)
 	c.Set("auth_method", service.AuditAuthMethodJWT)
-	c.Set("user_role", "admin")
+	c.Set("user_role", "super_admin")
 	handler(c)
 	return w
 }

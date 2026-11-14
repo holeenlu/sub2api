@@ -3,17 +3,26 @@ package service
 import (
 	"context"
 	"crypto/subtle"
+	"fmt"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
+	"github.com/redis/go-redis/v9"
+
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
 // OpenAIOAuthService handles OpenAI OAuth authentication flows
 type OpenAIOAuthService struct {
+	rdb                  *redis.Client
+	excelAccountRepo     AccountRepository
+	excelEncryptor       SecretEncryptor
 	sessionStore         *openai.SessionStore
 	proxyRepo            ProxyRepository
 	oauthClient          OpenAIOAuthClient
@@ -21,8 +30,13 @@ type OpenAIOAuthService struct {
 }
 
 // NewOpenAIOAuthService creates a new OpenAI OAuth service
-func NewOpenAIOAuthService(proxyRepo ProxyRepository, oauthClient OpenAIOAuthClient) *OpenAIOAuthService {
+func NewOpenAIOAuthService(proxyRepo ProxyRepository, oauthClient OpenAIOAuthClient, shared ...*redis.Client) *OpenAIOAuthService {
+	var rdb *redis.Client
+	if len(shared) > 0 {
+		rdb = shared[0]
+	}
 	return &OpenAIOAuthService{
+		rdb:          rdb,
 		sessionStore: openai.NewSessionStore(),
 		proxyRepo:    proxyRepo,
 		oauthClient:  oauthClient,
@@ -42,7 +56,15 @@ type OpenAIAuthURLResult struct {
 }
 
 // GenerateAuthURL generates an OpenAI OAuth authorization URL
-func (s *OpenAIOAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64, redirectURI, platform string) (*OpenAIAuthURLResult, error) {
+func (s *OpenAIOAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64, redirectURI, platform string, profiles ...string) (*OpenAIAuthURLResult, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
+	if _, scoped := authz.VendorScopeFromContext(ctx); scoped {
+		return nil, authz.ErrAuthorizationExpired
+	}
 	// Generate PKCE values
 	state, err := openai.GenerateState()
 	if err != nil {
@@ -80,20 +102,35 @@ func (s *OpenAIOAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64
 	}
 	normalizedPlatform := normalizeOpenAIOAuthPlatform(platform)
 	clientID, _ := openai.OAuthClientConfigByPlatform(normalizedPlatform)
+	excel := len(profiles) > 0 && profiles[0] == "excel"
+	if excel {
+		clientID = openai.ExcelClientID
+		redirectURI = openai.ExcelRedirectURI
+	}
 
 	// Store session
 	session := &openai.OAuthSession{
-		State:        state,
-		CodeVerifier: codeVerifier,
-		ClientID:     clientID,
-		RedirectURI:  redirectURI,
-		ProxyURL:     proxyURL,
-		CreatedAt:    time.Now(),
+		Authorization: authz.CaptureLease(ctx),
+		State:         state,
+		CodeVerifier:  codeVerifier,
+		ClientID:      clientID,
+		RedirectURI:   redirectURI,
+		ProxyURL:      proxyURL,
+		CreatedAt:     time.Now(),
 	}
-	s.sessionStore.Set(sessionID, session)
+	if s.rdb != nil {
+		if err := oauth.PutSharedSession(ctx, s.rdb, "oauth:openai:"+sessionID, session, openai.SessionTTL); err != nil {
+			return nil, err
+		}
+	} else {
+		s.sessionStore.Set(sessionID, session)
+	}
 
 	// Build authorization URL
 	authURL := openai.BuildAuthorizationURLForPlatform(state, codeChallenge, redirectURI, normalizedPlatform)
+	if excel {
+		authURL = openai.BuildExcelAuthorizationURL(state, codeChallenge)
+	}
 
 	return &OpenAIAuthURLResult{
 		AuthURL:   authURL,
@@ -131,10 +168,30 @@ type OpenAITokenInfo struct {
 
 // ExchangeCode exchanges authorization code for tokens
 func (s *OpenAIOAuthService) ExchangeCode(ctx context.Context, input *OpenAIExchangeCodeInput) (*OpenAITokenInfo, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
+	if _, scoped := authz.VendorScopeFromContext(ctx); scoped {
+		return nil, authz.ErrAuthorizationExpired
+	}
+	if input == nil || input.SessionID == "" || strings.TrimSpace(input.Code) == "" {
+		return nil, fmt.Errorf("invalid OAuth exchange input")
+	}
 	// Get session
 	session, ok := s.sessionStore.Get(input.SessionID)
+	var raw string
+	if s.rdb != nil {
+		var err error
+		session, raw, err = oauth.ReadSharedSession[openai.OAuthSession](ctx, s.rdb, "oauth:openai:"+input.SessionID)
+		ok = err == nil
+	}
 	if !ok {
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_SESSION_NOT_FOUND", "session not found or expired")
+	}
+	if err := authz.CheckLease(ctx, session.Authorization, "accounts.authorize"); err != nil {
+		return nil, err
 	}
 	if input.State == "" {
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_STATE_REQUIRED", "oauth state is required")
@@ -157,7 +214,7 @@ func (s *OpenAIOAuthService) ExchangeCode(ctx context.Context, input *OpenAIExch
 
 	// Use redirect URI from session or input
 	redirectURI := session.RedirectURI
-	if input.RedirectURI != "" {
+	if input.RedirectURI != "" && session.ClientID != openai.ExcelClientID {
 		redirectURI = input.RedirectURI
 	}
 	clientID := strings.TrimSpace(session.ClientID)
@@ -165,6 +222,14 @@ func (s *OpenAIOAuthService) ExchangeCode(ctx context.Context, input *OpenAIExch
 		clientID = openai.ClientID
 	}
 
+	// Atomically claim before the remote side effect; failures are not replayable.
+	if s.rdb != nil {
+		if _, err := oauth.CompareSwapSession(ctx, s.rdb, "oauth:openai:"+input.SessionID, raw, nil); err != nil {
+			return nil, oauth.ErrSessionConflict
+		}
+	} else if !s.sessionStore.Consume(input.SessionID, session) {
+		return nil, oauth.ErrSessionConflict
+	}
 	// Exchange code for token
 	tokenResp, err := s.oauthClient.ExchangeCode(ctx, input.Code, session.CodeVerifier, redirectURI, proxyURL, clientID)
 	if err != nil {
@@ -180,6 +245,10 @@ func (s *OpenAIOAuthService) ExchangeCode(ctx context.Context, input *OpenAIExch
 		} else {
 			userInfo = claims.GetUserInfo()
 		}
+	}
+
+	if err := authz.CheckLease(ctx, session.Authorization, "accounts.authorize"); err != nil {
+		return nil, err
 	}
 
 	// Delete session after successful exchange
@@ -202,18 +271,30 @@ func (s *OpenAIOAuthService) ExchangeCode(ctx context.Context, input *OpenAIExch
 		tokenInfo.PlanType = userInfo.PlanType
 	}
 
-	s.enrichTokenInfo(ctx, tokenInfo, proxyURL)
+	if clientID != openai.ExcelClientID {
+		s.enrichTokenInfo(ctx, tokenInfo, proxyURL)
+	}
 
 	return tokenInfo, nil
 }
 
 // RefreshToken refreshes an OpenAI OAuth token
 func (s *OpenAIOAuthService) RefreshToken(ctx context.Context, refreshToken string, proxyURL string) (*OpenAITokenInfo, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	return s.RefreshTokenWithClientID(ctx, refreshToken, proxyURL, "")
 }
 
 // RefreshTokenWithClientID refreshes an OpenAI OAuth token with optional client_id.
 func (s *OpenAIOAuthService) RefreshTokenWithClientID(ctx context.Context, refreshToken string, proxyURL string, clientID string) (*OpenAITokenInfo, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	tokenResp, err := s.oauthClient.RefreshTokenWithClientID(ctx, refreshToken, proxyURL, clientID)
 	if err != nil {
 		return nil, err
@@ -249,7 +330,9 @@ func (s *OpenAIOAuthService) RefreshTokenWithClientID(ctx context.Context, refre
 		tokenInfo.PlanType = userInfo.PlanType
 	}
 
-	s.enrichTokenInfo(ctx, tokenInfo, proxyURL)
+	if clientID != openai.ExcelClientID {
+		s.enrichTokenInfo(ctx, tokenInfo, proxyURL)
+	}
 
 	return tokenInfo, nil
 }
@@ -337,6 +420,11 @@ func resolveChatGPTSubscriptionAccountID(tokenInfo *OpenAITokenInfo, orgID strin
 
 // RefreshAccountToken refreshes token for an OpenAI OAuth account
 func (s *OpenAIOAuthService) RefreshAccountToken(ctx context.Context, account *Account) (*OpenAITokenInfo, error) {
+	ctx, finish, err := s.sessionStore.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	if account.Platform != PlatformOpenAI {
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_INVALID_ACCOUNT", "account is not an OpenAI account")
 	}
@@ -379,7 +467,9 @@ func (s *OpenAIOAuthService) RefreshAccountToken(ctx context.Context, account *A
 				tokenInfo.ExpiresAt = expiresAt.Unix()
 				tokenInfo.ExpiresIn = int64(time.Until(*expiresAt).Seconds())
 			}
-			s.enrichTokenInfo(ctx, tokenInfo, proxyURL)
+			if tokenInfo.ClientID != openai.ExcelClientID {
+				s.enrichTokenInfo(ctx, tokenInfo, proxyURL)
+			}
 			return tokenInfo, nil
 		}
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_NO_REFRESH_TOKEN", "no refresh token available")
@@ -439,8 +529,19 @@ func (s *OpenAIOAuthService) BuildAccountCredentials(tokenInfo *OpenAITokenInfo)
 }
 
 // Stop stops the session store cleanup goroutine
-func (s *OpenAIOAuthService) Stop() {
-	s.sessionStore.Stop()
+// Start explicitly starts the session owner; constructors do not start workers.
+func (s *OpenAIOAuthService) Start(ctx context.Context) error {
+	return s.sessionStore.Start(ctx)
+}
+
+// Drain rejects new OAuth work and waits for admitted operations and the janitor.
+func (s *OpenAIOAuthService) Drain(ctx context.Context) error {
+	return s.sessionStore.Drain(ctx)
+}
+
+// Stop cancels and joins the same owner, retaining join state after a timeout.
+func (s *OpenAIOAuthService) Stop(ctx context.Context) error {
+	return s.sessionStore.Stop(ctx)
 }
 
 func normalizeOpenAIOAuthPlatform(platform string) string {

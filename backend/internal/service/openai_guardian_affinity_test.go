@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	gatewaysession "github.com/Wei-Shaw/sub2api/internal/gateway/session"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -132,7 +133,6 @@ func TestOpenAIGatewayService_GuardianParentAffinitySelectsParentAccountAcrossSc
 				},
 			}
 			cfg := &config.Config{}
-			cfg.Gateway.OpenAIWS.LBTopK = 2
 			cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:" + parentHash: 39001}}
 			svc := &OpenAIGatewayService{
 				accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
@@ -424,6 +424,7 @@ func TestOpenAIGatewayService_PreviousResponseSimpleModeIgnoresGroupMembership(t
 	}
 	responseID := "resp_simple_mode_cross_group"
 	require.NoError(t, store.BindResponseAccount(context.Background(), groupID, responseID, bound.ID, time.Hour))
+	require.NoError(t, store.BindResponseMode(context.Background(), groupID, responseID, gatewaysession.ResponseModeNative, time.Hour))
 
 	directSelection, err := svc.SelectAccountByPreviousResponseID(
 		context.Background(), &groupID, responseID, codexAutoReviewModel, nil, false,

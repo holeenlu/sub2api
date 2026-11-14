@@ -5,6 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+
 	"io"
 	"net/http"
 	"strings"
@@ -63,9 +66,9 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 	}
 	targetURL := buildOpenAIEmbeddingsURL(validatedURL)
 
-	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx, defaultUpstreamCompletionTimeout)
+	defer releaseUpstreamCtx()
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, http.MethodPost, targetURL, bytes.NewReader(upstreamBody))
-	releaseUpstreamCtx()
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
@@ -92,7 +95,7 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account, vendorDispatchGroup(c))
 	if err != nil {
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
 		setOpsUpstreamError(c, 0, safeErr, "")
@@ -164,14 +167,15 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 	writeOpenAIEmbeddingsUpstreamResponse(c, resp, respBody, s.responseHeaderFilter)
 
 	return &OpenAIForwardResult{
-		RequestID:       firstNonEmptyString(resp.Header.Get("x-request-id"), resp.Header.Get("request-id")),
-		UpstreamHeaders: resp.Header,
-		Usage:           extractOpenAIEmbeddingsUsage(respBody),
-		Model:           originalModel,
-		BillingModel:    billingModel,
-		UpstreamModel:   upstreamModel,
-		Stream:          false,
-		Duration:        time.Since(startTime),
+		AuthorizationMode: nativeOpenAIUsageAuthorizationMode(account),
+		RequestID:         firstNonEmptyString(resp.Header.Get("x-request-id"), resp.Header.Get("request-id")),
+		UpstreamHeaders:   resp.Header,
+		Usage:             extractOpenAIEmbeddingsUsage(respBody),
+		Model:             originalModel,
+		BillingModel:      billingModel,
+		UpstreamModel:     upstreamModel,
+		Stream:            false,
+		Duration:          time.Since(startTime),
 	}, nil
 }
 
@@ -219,6 +223,7 @@ func extractOpenAIEmbeddingsUsage(body []byte) OpenAIUsage {
 	)
 	cacheReadTokens := openAICacheReadTokensFromUsage(usage)
 	cacheCreationTokens := openAICacheCreationTokensFromUsage(usage)
+	cacheWrites := apicompat.CacheWriteTokensDetailsFromUsage(usage, cacheCreationTokens)
 	// 多模态 embedding（如 doubao-embedding-vision）回传图文 token 拆分，
 	// 用于图文不同价计费；纯文本 embedding 该字段为 0，行为不变。
 	imageInputTokens := firstPositiveGJSONInt(
@@ -231,6 +236,8 @@ func extractOpenAIEmbeddingsUsage(body []byte) OpenAIUsage {
 		OutputTokens:             outputTokens,
 		CacheReadInputTokens:     cacheReadTokens,
 		CacheCreationInputTokens: cacheCreationTokens,
+		CacheCreation30mTokens:   cacheWrites.TTL30mTokens,
+		CacheCreation12hTokens:   cacheWrites.TTL12hTokens,
 	}
 }
 

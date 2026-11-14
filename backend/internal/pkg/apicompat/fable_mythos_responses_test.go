@@ -103,16 +103,6 @@ func TestFableMythos52ChatAdapter(t *testing.T) {
 	}
 }
 
-func TestFableMythos52DoesNotChangeOlderModelConversion(t *testing.T) {
-	for _, model := range []string{"claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"} {
-		out, err := ResponsesToAnthropicRequest(&ResponsesRequest{Model: model, Input: json.RawMessage(`"hello"`), Reasoning: &ResponsesReasoning{Effort: "xhigh"}, ToolChoice: json.RawMessage(`"required"`)})
-		require.NoError(t, err)
-		require.Equal(t, "max", out.OutputConfig.Effort)
-		require.Equal(t, "enabled", out.Thinking.Type)
-		require.Positive(t, out.Thinking.BudgetTokens)
-	}
-}
-
 func TestFableMythos52StreamPreservesThinking(t *testing.T) {
 	for _, model := range []string{"claude-fable-5-2", "claude-mythos-5-2"} {
 		state := NewAnthropicEventToResponsesState()

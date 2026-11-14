@@ -17,10 +17,10 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
-func TestUsageBillingRepositoryApply_DeduplicatesBalanceBilling(t *testing.T) {
+func TestUsageBillingTransaction_DeduplicatesBalanceBilling(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)
-	repo := NewUsageBillingRepository(client, integrationDB)
+	repo := &usageBillingRepository{db: integrationDB}
 
 	user := mustCreateUser(t, client, &service.User{
 		Email:        fmt.Sprintf("usage-billing-user-%d@example.com", time.Now().UnixNano()),
@@ -50,13 +50,13 @@ func TestUsageBillingRepositoryApply_DeduplicatesBalanceBilling(t *testing.T) {
 		APIKeyRateLimitCost: 1.25,
 	}
 
-	result1, err := repo.Apply(ctx, cmd)
+	result1, err := repo.applyUsageBillingTransaction(ctx, cmd)
 	require.NoError(t, err)
 	require.NotNil(t, result1)
 	require.True(t, result1.Applied)
 	require.True(t, result1.APIKeyQuotaExhausted)
 
-	result2, err := repo.Apply(ctx, cmd)
+	result2, err := repo.applyUsageBillingTransaction(ctx, cmd)
 	require.NoError(t, err)
 	require.NotNil(t, result2)
 	require.False(t, result2.Applied)
@@ -82,10 +82,10 @@ func TestUsageBillingRepositoryApply_DeduplicatesBalanceBilling(t *testing.T) {
 	require.Equal(t, 1, dedupCount)
 }
 
-func TestUsageBillingRepositoryApply_DeduplicatesSubscriptionBilling(t *testing.T) {
+func TestUsageBillingTransaction_DeduplicatesSubscriptionBilling(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)
-	repo := NewUsageBillingRepository(client, integrationDB)
+	repo := &usageBillingRepository{db: integrationDB}
 
 	user := mustCreateUser(t, client, &service.User{
 		Email:        fmt.Sprintf("usage-billing-sub-user-%d@example.com", time.Now().UnixNano()),
@@ -117,11 +117,11 @@ func TestUsageBillingRepositoryApply_DeduplicatesSubscriptionBilling(t *testing.
 		SubscriptionCost: 2.5,
 	}
 
-	result1, err := repo.Apply(ctx, cmd)
+	result1, err := repo.applyUsageBillingTransaction(ctx, cmd)
 	require.NoError(t, err)
 	require.True(t, result1.Applied)
 
-	result2, err := repo.Apply(ctx, cmd)
+	result2, err := repo.applyUsageBillingTransaction(ctx, cmd)
 	require.NoError(t, err)
 	require.False(t, result2.Applied)
 
@@ -130,10 +130,10 @@ func TestUsageBillingRepositoryApply_DeduplicatesSubscriptionBilling(t *testing.
 	require.InDelta(t, 2.5, dailyUsage, 0.000001)
 }
 
-func TestUsageBillingRepositoryApply_RequestFingerprintConflict(t *testing.T) {
+func TestUsageBillingTransaction_RequestFingerprintConflict(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)
-	repo := NewUsageBillingRepository(client, integrationDB)
+	repo := &usageBillingRepository{db: integrationDB}
 
 	user := mustCreateUser(t, client, &service.User{
 		Email:        fmt.Sprintf("usage-billing-conflict-user-%d@example.com", time.Now().UnixNano()),
@@ -147,7 +147,7 @@ func TestUsageBillingRepositoryApply_RequestFingerprintConflict(t *testing.T) {
 	})
 
 	requestID := uuid.NewString()
-	_, err := repo.Apply(ctx, &service.UsageBillingCommand{
+	_, err := repo.applyUsageBillingTransaction(ctx, &service.UsageBillingCommand{
 		RequestID:   requestID,
 		APIKeyID:    apiKey.ID,
 		UserID:      user.ID,
@@ -155,7 +155,7 @@ func TestUsageBillingRepositoryApply_RequestFingerprintConflict(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = repo.Apply(ctx, &service.UsageBillingCommand{
+	_, err = repo.applyUsageBillingTransaction(ctx, &service.UsageBillingCommand{
 		RequestID:   requestID,
 		APIKeyID:    apiKey.ID,
 		UserID:      user.ID,
@@ -164,10 +164,10 @@ func TestUsageBillingRepositoryApply_RequestFingerprintConflict(t *testing.T) {
 	require.ErrorIs(t, err, service.ErrUsageBillingRequestConflict)
 }
 
-func TestUsageBillingRepositoryApply_DeletedAPIKeyStillBillsBalance(t *testing.T) {
+func TestUsageBillingTransaction_DeletedAPIKeyStillBillsBalance(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)
-	repo := NewUsageBillingRepository(client, integrationDB)
+	repo := &usageBillingRepository{db: integrationDB}
 
 	user := mustCreateUser(t, client, &service.User{
 		Email:        fmt.Sprintf("usage-billing-deleted-key-user-%d@example.com", time.Now().UnixNano()),
@@ -190,7 +190,7 @@ func TestUsageBillingRepositoryApply_DeletedAPIKeyStillBillsBalance(t *testing.T
 	require.NoError(t, err)
 
 	requestID := uuid.NewString()
-	result, err := repo.Apply(ctx, &service.UsageBillingCommand{
+	result, err := repo.applyUsageBillingTransaction(ctx, &service.UsageBillingCommand{
 		RequestID:           requestID,
 		APIKeyID:            apiKey.ID,
 		UserID:              user.ID,
@@ -219,10 +219,10 @@ func TestUsageBillingRepositoryApply_DeletedAPIKeyStillBillsBalance(t *testing.T
 	require.Equal(t, 1, dedupCount)
 }
 
-func TestUsageBillingRepositoryApply_DeletedAccountStillBillsBalance(t *testing.T) {
+func TestUsageBillingTransaction_DeletedAccountStillBillsBalance(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)
-	repo := NewUsageBillingRepository(client, integrationDB)
+	repo := &usageBillingRepository{db: integrationDB}
 
 	user := mustCreateUser(t, client, &service.User{
 		Email:        fmt.Sprintf("usage-billing-deleted-account-user-%d@example.com", time.Now().UnixNano()),
@@ -244,7 +244,7 @@ func TestUsageBillingRepositoryApply_DeletedAccountStillBillsBalance(t *testing.
 	require.NoError(t, err)
 
 	requestID := uuid.NewString()
-	result, err := repo.Apply(ctx, &service.UsageBillingCommand{
+	result, err := repo.applyUsageBillingTransaction(ctx, &service.UsageBillingCommand{
 		RequestID:        requestID,
 		APIKeyID:         apiKey.ID,
 		UserID:           user.ID,
@@ -267,10 +267,10 @@ func TestUsageBillingRepositoryApply_DeletedAccountStillBillsBalance(t *testing.
 	require.Equal(t, 1, dedupCount)
 }
 
-func TestUsageBillingRepositoryApply_UpdatesAccountQuota(t *testing.T) {
+func TestUsageBillingTransaction_UpdatesAccountQuota(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)
-	repo := NewUsageBillingRepository(client, integrationDB)
+	repo := &usageBillingRepository{db: integrationDB}
 
 	user := mustCreateUser(t, client, &service.User{
 		Email:        fmt.Sprintf("usage-billing-account-user-%d@example.com", time.Now().UnixNano()),
@@ -289,7 +289,7 @@ func TestUsageBillingRepositoryApply_UpdatesAccountQuota(t *testing.T) {
 		},
 	})
 
-	_, err := repo.Apply(ctx, &service.UsageBillingCommand{
+	_, err := repo.applyUsageBillingTransaction(ctx, &service.UsageBillingCommand{
 		RequestID:        uuid.NewString(),
 		APIKeyID:         apiKey.ID,
 		UserID:           user.ID,
@@ -305,10 +305,10 @@ func TestUsageBillingRepositoryApply_UpdatesAccountQuota(t *testing.T) {
 }
 
 // service_account 只设总上限：累加 quota_used；日/周用量只在设置了对应 limit 时累加，未跨越上限不入队调度 outbox。
-func TestUsageBillingRepositoryApply_UpdatesServiceAccountQuota(t *testing.T) {
+func TestUsageBillingTransaction_UpdatesServiceAccountQuota(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)
-	repo := NewUsageBillingRepository(client, integrationDB)
+	repo := &usageBillingRepository{db: integrationDB}
 
 	user := mustCreateUser(t, client, &service.User{
 		Email:        fmt.Sprintf("usage-billing-sa-user-%d@example.com", time.Now().UnixNano()),
@@ -329,7 +329,7 @@ func TestUsageBillingRepositoryApply_UpdatesServiceAccountQuota(t *testing.T) {
 	})
 
 	for _, cost := range []float64{2.25, 1.5} {
-		_, err := repo.Apply(ctx, &service.UsageBillingCommand{
+		_, err := repo.applyUsageBillingTransaction(ctx, &service.UsageBillingCommand{
 			RequestID:        uuid.NewString(),
 			APIKeyID:         apiKey.ID,
 			UserID:           user.ID,
@@ -358,10 +358,10 @@ func TestUsageBillingRepositoryApply_UpdatesServiceAccountQuota(t *testing.T) {
 	require.Zero(t, outboxCount, "service_account under its limit must not enqueue scheduler outbox")
 }
 
-func TestUsageBillingRepositoryApply_EnqueuesSchedulerOutboxOnQuotaCrossing(t *testing.T) {
+func TestUsageBillingTransaction_EnqueuesSchedulerOutboxOnQuotaCrossing(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)
-	repo := NewUsageBillingRepository(client, integrationDB)
+	repo := &usageBillingRepository{db: integrationDB}
 
 	newFixture := func(t *testing.T, extra map[string]any) (int64, int64) {
 		t.Helper()
@@ -397,7 +397,7 @@ func TestUsageBillingRepositoryApply_EnqueuesSchedulerOutboxOnQuotaCrossing(t *t
 			"quota_daily_limit": 10.0,
 		})
 		// 第一次低于日限额：不应入队 outbox
-		_, err := repo.Apply(ctx, &service.UsageBillingCommand{
+		_, err := repo.applyUsageBillingTransaction(ctx, &service.UsageBillingCommand{
 			RequestID:        uuid.NewString(),
 			APIKeyID:         apiKeyID,
 			AccountID:        accountID,
@@ -408,7 +408,7 @@ func TestUsageBillingRepositoryApply_EnqueuesSchedulerOutboxOnQuotaCrossing(t *t
 		require.Equal(t, 0, outboxCountFor(t, accountID), "below limit should not enqueue")
 
 		// 第二次跨越日限额：应入队一次 outbox
-		_, err = repo.Apply(ctx, &service.UsageBillingCommand{
+		_, err = repo.applyUsageBillingTransaction(ctx, &service.UsageBillingCommand{
 			RequestID:        uuid.NewString(),
 			APIKeyID:         apiKeyID,
 			AccountID:        accountID,
@@ -419,7 +419,7 @@ func TestUsageBillingRepositoryApply_EnqueuesSchedulerOutboxOnQuotaCrossing(t *t
 		require.Equal(t, 1, outboxCountFor(t, accountID), "crossing daily limit should enqueue once")
 
 		// 再次递增（已超）：不应重复入队
-		_, err = repo.Apply(ctx, &service.UsageBillingCommand{
+		_, err = repo.applyUsageBillingTransaction(ctx, &service.UsageBillingCommand{
 			RequestID:        uuid.NewString(),
 			APIKeyID:         apiKeyID,
 			AccountID:        accountID,
@@ -434,7 +434,7 @@ func TestUsageBillingRepositoryApply_EnqueuesSchedulerOutboxOnQuotaCrossing(t *t
 		apiKeyID, accountID := newFixture(t, map[string]any{
 			"quota_weekly_limit": 10.0,
 		})
-		_, err := repo.Apply(ctx, &service.UsageBillingCommand{
+		_, err := repo.applyUsageBillingTransaction(ctx, &service.UsageBillingCommand{
 			RequestID:        uuid.NewString(),
 			APIKeyID:         apiKeyID,
 			AccountID:        accountID,
@@ -449,7 +449,7 @@ func TestUsageBillingRepositoryApply_EnqueuesSchedulerOutboxOnQuotaCrossing(t *t
 		apiKeyID, accountID := newFixture(t, map[string]any{
 			"quota_limit": 10.0,
 		})
-		_, err := repo.Apply(ctx, &service.UsageBillingCommand{
+		_, err := repo.applyUsageBillingTransaction(ctx, &service.UsageBillingCommand{
 			RequestID:        uuid.NewString(),
 			APIKeyID:         apiKeyID,
 			AccountID:        accountID,
@@ -459,7 +459,7 @@ func TestUsageBillingRepositoryApply_EnqueuesSchedulerOutboxOnQuotaCrossing(t *t
 		require.NoError(t, err)
 		require.Equal(t, 0, outboxCountFor(t, accountID), "below limit should not enqueue")
 
-		_, err = repo.Apply(ctx, &service.UsageBillingCommand{
+		_, err = repo.applyUsageBillingTransaction(ctx, &service.UsageBillingCommand{
 			RequestID:        uuid.NewString(),
 			APIKeyID:         apiKeyID,
 			AccountID:        accountID,
@@ -613,10 +613,10 @@ func TestDashboardAggregationRepositoryCleanupUsageBillingDedup_BatchDeletesOldR
 	require.Equal(t, 1, archivedCount)
 }
 
-func TestUsageBillingRepositoryApply_DeduplicatesAgainstArchivedKey(t *testing.T) {
+func TestUsageBillingTransaction_DeduplicatesAgainstArchivedKey(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)
-	repo := NewUsageBillingRepository(client, integrationDB)
+	repo := &usageBillingRepository{db: integrationDB}
 	aggRepo := newDashboardAggregationRepositoryWithSQL(integrationDB)
 
 	user := mustCreateUser(t, client, &service.User{
@@ -638,7 +638,7 @@ func TestUsageBillingRepositoryApply_DeduplicatesAgainstArchivedKey(t *testing.T
 		BalanceCost: 1.25,
 	}
 
-	result1, err := repo.Apply(ctx, cmd)
+	result1, err := repo.applyUsageBillingTransaction(ctx, cmd)
 	require.NoError(t, err)
 	require.True(t, result1.Applied)
 
@@ -650,11 +650,34 @@ func TestUsageBillingRepositoryApply_DeduplicatesAgainstArchivedKey(t *testing.T
 	require.NoError(t, err)
 	require.NoError(t, aggRepo.CleanupUsageBillingDedup(ctx, time.Now().UTC().AddDate(0, 0, -365)))
 
-	result2, err := repo.Apply(ctx, cmd)
+	result2, err := repo.applyUsageBillingTransaction(ctx, cmd)
 	require.NoError(t, err)
 	require.False(t, result2.Applied)
 
 	var balance float64
 	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT balance FROM users WHERE id = $1", user.ID).Scan(&balance))
 	require.InDelta(t, 98.75, balance, 0.000001)
+}
+
+func TestUsageBillingRepositoryActualCostMatchesNumericDebit(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	user := mustCreateUser(t, client, &service.User{Balance: 100})
+	key := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: uuid.NewString(), Name: "precision-review", Quota: 100})
+	account := mustCreateAccount(t, client, &service.Account{Name: uuid.NewString()})
+	id := uuid.NewString()
+	cost := 0.000078125
+	log := &service.UsageLog{RequestID: id, UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID, Model: "precision-review", CreatedAt: time.Now(), TotalCost: cost, ActualCost: cost, BillingStatus: "settled"}
+	cmd := &service.UsageBillingCommand{RequestID: id, UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID, BalanceCost: cost, APIKeyQuotaCost: cost, UsageLog: log}
+	repo := &usageBillingRepository{db: integrationDB}
+	result, err := repo.Apply(ctx, cmd)
+	require.NoError(t, err)
+	require.True(t, result.Applied)
+	var debit, quota, recorded string
+	var debitMatchesQuota, debitMatchesLog bool
+	query := "SELECT (100-u.balance)::text, k.quota_used::text, l.actual_cost::text, (100-u.balance)=k.quota_used, (100-u.balance)=l.actual_cost FROM users u JOIN api_keys k ON k.user_id=u.id JOIN usage_logs l ON l.api_key_id=k.id WHERE u.id=$1 AND k.id=$2 AND l.request_id=$3"
+	require.NoError(t, integrationDB.QueryRowContext(ctx, query, user.ID, key.ID, id).Scan(&debit, &quota, &recorded, &debitMatchesQuota, &debitMatchesLog))
+	t.Logf("SQL numeric values: balance_debit=%s key_quota=%s usage_actual_cost=%s", debit, quota, recorded)
+	require.True(t, debitMatchesQuota, "existing command quantization must keep balance and key quota consistent")
+	require.True(t, debitMatchesLog, "usage actual_cost must equal the amount actually debited, without float comparison tolerances")
 }

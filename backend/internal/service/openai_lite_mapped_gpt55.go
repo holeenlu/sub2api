@@ -1,12 +1,12 @@
 package service
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -26,16 +26,30 @@ func applyMappedGPT55LiteCompatibility(req *http.Request, account *Account, body
 	}
 	// The Codex non-Lite endpoint accepts additional_tools, namespaces and
 	// reasoning.context=all_turns. Preserve them and all history/tool results.
+	changed := false
 	if isOpenAIResponsesLiteWebSocketPayload(body) {
 		var err error
 		body, err = sjson.DeleteBytes(body, "client_metadata."+responsesLiteWSMetadataKey)
 		if err != nil {
 			return fmt.Errorf("remove mapped GPT-5.5 Lite metadata: %w", err)
 		}
-		req.Body = io.NopCloser(bytes.NewReader(body))
+		changed = true
+	}
+	// This boundary actually changes Lite to standard Responses. Apply the
+	// standard-only history declaration now, without mutating the ingress
+	// request that a later failover could send to a native Lite model.
+	if next, added, err := ensureOpenAIOAuthWebSearchToolForHistoryBody(body, false); err != nil {
+		return fmt.Errorf("normalize mapped GPT-5.5 search history: %w", err)
+	} else if added {
+		body, changed = next, true
+	}
+	if changed {
+		if req.Body != nil {
+			_ = req.Body.Close()
+		}
+		req.Body = httputil.NewPrereadBody(body)
 		req.ContentLength = int64(len(body))
-		savedBody := append([]byte(nil), body...)
-		req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(savedBody)), nil }
+		req.GetBody = func() (io.ReadCloser, error) { return httputil.NewPrereadBody(body), nil }
 	}
 	req.Header.Del(responsesLiteHeader)
 	return nil

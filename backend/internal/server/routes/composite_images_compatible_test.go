@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
@@ -102,7 +103,11 @@ func TestCompositeCompatibleImagesEndToEnd(t *testing.T) {
 			repo := compatibleImagesAccounts{accounts: accounts}
 			upstream, usage := &compatibleImagesUpstream{}, &compatibleImagesUsage{}
 			billingCache := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
-			t.Cleanup(billingCache.Stop)
+			t.Cleanup(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				require.NoError(t, billingCache.Stop(ctx))
+			})
 			gateway := service.NewOpenAIGatewayService(repo, usage, nil, nil, nil, nil, nil, cfg, nil, nil, service.NewBillingService(cfg, nil), nil, billingCache, upstream, &service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil)
 			imagesHandler := handler.NewOpenAIGatewayHandler(gateway, service.NewConcurrencyService(nil), billingCache, service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg), nil, nil, nil, nil, cfg)
 			publicModel := model

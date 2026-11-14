@@ -1,0 +1,286 @@
+group	kind	status	added_lines	deleted_lines	base_mode	base_blob	final_mode	final_blob	path
+B4	tooling	M	3	3	100644	cd64a92f5497f90e163387d1641bc6f0f84368d4	100644	fac73afec0b82aef113347b34c46a55a34c51806	.dockerignore
+B4	tooling	M	17	4	100644	2ab7e7c5f5ff19d26133517b51bc66ea7a8349a7	100644	86d99ae826bfa81d642d131b6afb570b8884d87f	.gitignore
+B4	tooling	M	9	9	100644	a1934c8fbcf4706e389ff00414342da82cf13ec9	100644	cb23a9123dac4b941346740254b4a3863403ca04	.goreleaser.simple.yaml
+B4	tooling	M	35	35	100644	4c5c2102fbe2b48e4dbb4023dd42f1521767b6b5	100644	c3983d33efdf031aae6fcee9637709a1272a05cf	.goreleaser.yaml
+B3	documentation	M	2	2	100644	81388a50a5d90f9285fa2873a5e848b09e0b3b3e	100644	161151060f89ee5fd8c6c56afef6f0424385f685	DEV_GUIDE.md
+B4	tooling	M	19	19	100644	a1244bccaf5f1f21b327a11fbaebb4e4e5885104	100644	e402dbaaf3be1a5ee3fec15732cf776ab87cdfb6	Dockerfile
+B4	tooling	M	13	13	100644	350ae24f435173f91097a3b837e4abbb9efba0f8	100644	03d484ee9cedd831d9e64008fb813a0bb4fd9205	Dockerfile.goreleaser
+B3	documentation	M	47	37	100644	ee079248566a48b39f98360c8b240cae0bd7e35b	100644	7500a0d1fa527795875bf73d0f51d0805a22ce17	README.md
+B3	documentation	M	31	29	100644	3a4da2dcafc5c95505e4794197d9d8052117343e	100644	ab58efe465b826b4880207e33c9dd4373c895bf6	README_CN.md
+B3	documentation	M	30	28	100644	1cc990ea5a7003ceca59ca0215ec0f69c7c3eecb	100644	71f95b43a245222488209b4b83cfd32eb783c0bb	README_JA.md
+B3	asset	M	7	41	100644	99d55509ff6ce9664b3ff89f59a6be912d4b83eb	100644	9c4a5db370e97bfd9c1a7cf8725a87149cf4aa1a	assets/logo.svg
+B3	asset	M	12	29	100644	618c57221039a49ffd4f61ee3bb3b8c16816145d	100644	c88b60b1cd6f1969c87177cb89847042a4769ba2	assets/wordmark.svg
+B1	source	M	4	4	100644	1165cab1655d43082f8851cf398f31d82be596d9	100644	5c74f70e7ba0d257052ad7b0f8e46b2451585906	backend/internal/config/config.go
+B1	source	M	4	4	100644	1ed8e1a02873e10ddf8bf1e1d525dd26ca9a97dd	100644	bd06d53978cc28e14650375d8f6c5a7ae540e0df	backend/internal/pkg/logger/options.go
+B1	test	M	2	2	100644	d99960a04f09744e38233efa12c64d566450384d	100644	657b6c54205e2d7d53f7c5494a88533db077881d	backend/internal/pkg/logger/options_test.go
+B1	source	M	1	1	100644	34d299788b03c5fbc06648bcfc36e04472ff9d5f	100644	289cf7015a38b4ee245e38783c449edf4a83f60f	backend/internal/pkg/sysutil/restart.go
+B1	source	M	2	2	100644	806b0776d0769aca2372632d690d1e84024f5dbb	100644	d7ee2d1512d90a1189467138c2f3ac440c214ba5	backend/internal/platform/liveattestation/attestation.go
+B1	test	M	2	2	100644	9c383108da69cc06cccb4bdf26d1c21f0939f1a6	100644	2593b92b5952745f8c17b0afd9bcec87799680f4	backend/internal/server/api_contract_test.go
+B1	source	M	2	2	100644	e52e126aa9cbb6aaa0ec1bdbb6b093170b4247c6	100644	e465aed70ac18b73ae0e0143b4dff9d87911cf9e	backend/internal/service/admin_compliance.go
+B1	source	M	4	10	100644	5a8b24cec79a19708547b20308eabccd2d46cd33	100644	424c400358b779f16eaf98ecc7f18b275524c9ba	backend/internal/service/brand.go
+B1	source	M	1	1	100644	afc92c566ccd1f9cda3416a01799f14ea846c887	100644	fcb62781d9512752eeab7201f2bc6e9342d83e28	backend/internal/service/data_management_service.go
+B1	source	M	4	4	100644	32f7c73cf1256b8b96d0e0c0582b55bfc076e8ed	100644	d99dd74ae0176bcf3734e3abf89add4bc715d804	backend/internal/service/update_service.go
+B1	test	M	12	0	100644	af3b61065890c0cefdb2396a6c93eaed7eda73b9	100644	20905cb634830de48ebb67a6d118844f9b625644	backend/internal/service/update_service_test.go
+B1	source	M	3	3	100644	0d1eddbd05dd44b8cc5090a304c3819bb04e8b15	100644	ff8c6922d147014a18a9f1c6da4e8dd0f6b3d79c	backend/internal/setup/cli.go
+B1	source	M	1	1	100644	fac87dd5a3a6fb2bf45ee4b251fc38ef3dfc7330	100644	fda10431e4da17d4d9be7f69af340c47fb9f0f73	backend/internal/setup/setup.go
+B1	source	M	1	1	100644	a39fbee1cc7747fdedcc2403c61cbce086ec4927	100644	f1d29a31be1a7bd9c37f5f8a5495b4fd6f175f3a	backend/internal/web/embed_on.go
+B1	test	M	12	12	100644	b2809eadc113877531cf0bee8fa8cb5010dd0c77	100644	e8de99902013f81c758a8a878e15e5048e212b5a	backend/internal/web/embed_test.go
+B3	documentation	M	9	9	100644	21f1e707f1997bf30d94fc89bd98494b835221c8	100644	9b6cfa36e958581616eaab4ce0bbd6b7d586f281	backend/pkg/pluginapi/README.md
+B3	documentation	M	1	1	100644	34c1292831f486f948e5f78f114d327e833f2d32	100644	98e1733446957026fb1f5a61abb2cc6dc7557d9e	backend/pkg/pluginapi/docs/development.md
+B3	documentation	M	1	1	100644	9cfea1c1a6a17587c21608e4663c7b41372a3402	100644	d3ff741b2fcd566829fbbbdfd3c9ce694544c341	backend/pkg/pluginapi/docs/package-format.md
+B3	documentation	M	2	2	100644	7bc330693d0a2a69f56debe0c4924e666fcf8c55	100644	cb95c820fda1a8c3380c90b9382af6383bfb4a5d	backend/pkg/pluginapi/docs/security.md
+B3	tooling	M	1	1	100644	1a01b3e5ccefafe5cc80c40733235db5d649fcb8	100644	be3005eca95d0b30bc876e0ed4dc2711387a4640	backend/pkg/pluginapi/v1/manifest.schema.json
+B4	tooling	M	15	15	100644	3acc6df609260abfe1a10f69f7b832060e30cf77	100644	6b93689f406f6e562b95a3cc12f2179148b68388	deploy/.env.example
+B4	tooling	M	1	1	100644	c7a5a968a2669dffcd7ceeb69f1b7e53d97d48f8	100644	f50b75652a2854ef7423ebeaddc884135e158c8d	deploy/.gitignore
+B4	documentation	M	38	38	100644	ccb3d238cb2891b8fb1755d0a123e859ba432ee1	100644	3dd9b4fe48075f0bd45aaed76b57c56fcedc110d	deploy/APPLE_CONTAINER.md
+B4	tooling	M	2	2	100644	b8ef3d2198eee9fda56e433cef0e5475abb33dd3	100644	2c7da78e9a743b672ed43e83a0a245ad6eeb128e	deploy/Caddyfile
+B4	documentation	M	17	17	100644	b812a07f7bc4e148761d0698ee3c47d9f94fbe17	100644	5346528951c8fd5d08f011d856daba7538166184	deploy/DATAMANAGEMENTD_CN.md
+B4	documentation	M	13	13	100644	1be94a0d5abe171319d8f6978328caca0bfa12b9	100644	373654aef1fd5d26c93320ae7771c8415116e246	deploy/DOCKER.md
+B4	tooling	M	12	12	100644	b9200470f9cd448f8f7ba36377e3474780872209	100644	18b8ae5b2ec7a2a4cd9f860751804364863d60cc	deploy/Dockerfile
+B4	documentation	M	10	10	100644	211ab86554b03e960baf9ad8285738c0888f7bc5	100644	ce58da8fbee0e83e5168618f634dd40c524fa969	deploy/EDGE_SECURITY.md
+B4	documentation	M	58	57	100644	4ea2c1d2367dcc58d61af93d80dc7e9bd08ff868	100644	a2dbad60bd3f63ae949274b5322198af8bfdc884	deploy/README.md
+B4	tooling	M	39	39	100755	59041f93b5c471f44580592ceb157aa276f91e3b	100755	3fca1eaaa1b1de9d269dac508548a983f5d48a99	deploy/apple-container.sh
+B4	tooling	M	1	1	100755	5c476bd130266c172fc22653e80c4f966f2a3fd1	100755	7a145cbda1bfdd479f5389d4bb1910ebf9b24f45	deploy/build_image.sh
+B4	tooling	M	20	20	100644	1be2ddf4fe679e50f52738b2fd29b3533ccbd8f1	100644	bc6bc97506f0a8a23789f87a9a950a083b9da5cd	deploy/config.example.yaml
+B4	tooling	M	19	19	100644	d42e0e36df9297ecaa7dbd07e4fc34c474b36e53	100644	39a905ce5ca88f725f56e2b9e6c395d7f19b3adc	deploy/docker-compose.dev.yml
+B4	tooling	M	21	21	100644	ce4a9b3b65737c0e09509ffb7c6beadd586417a9	100644	7e763e9ebe8f4f06f2121f931048c875b79d15db	deploy/docker-compose.local.yml
+B4	tooling	M	11	11	100644	83fabaa6eb5be3d9631c28cf778ee78b6c384c11	100644	fc79d9f7f27b62bd21a795898035646063faee86	deploy/docker-compose.standalone.yml
+B4	tooling	M	8	8	100644	077a1dd0c88f7d1f119771f48589020da37e6e4c	100644	594221880e0433f0a4a664933fc17c1641f811ae	deploy/docker-compose.wsl.yml
+B4	tooling	M	21	21	100644	b401c00fc918b676aa1236a37384f546f0ab8703	100644	afc2f736c5998f4defcfb8e6801583c57f5ad0d7	deploy/docker-compose.yml
+B4	tooling	M	6	6	100644	3185b7af1b7b984533e3708e035db870c49483ac	100644	ab49e8a3bd32d0ec55f17b69b50b25f70560ac3f	deploy/docker-deploy.sh
+B4	tooling	M	6	6	100644	c362f2c8e5731d8064cbb213f932f05848bbbfe1	100644	03ff59022b616bd246fa719b420b39170fc48406	deploy/docker-entrypoint.sh
+B4	tooling	M	16	16	100644	ca0a90054f8e5d52274400750960085abacfd466	100644	c100d320b80611a190044bb2372411917780434d	deploy/install-datamanagementd.sh
+B4	tooling	M	4	1275	100644	fe5821caa0060c216b5cdeb8ecee69b7ce6e8ebe	100755	194a1f8bb2f829699c688ca85390f0ac824c582c	deploy/install.sh
+B4	tooling	D	0	22	100644	cd738ac6020246d736cf3ad2a3381c92ae30dbdc			deploy/kdan-datamanagementd.service
+B4	tooling	D	0	33	100644	716161cfafeb8cf42b4da21fd23617d9cc043f0b			deploy/kdan.service
+B4	test	M	31	31	100755	b99adad20075666ac3511c26bfc39871247a83e4	100755	020ebebccf21c4fe056637a74b2ae9e81a73fec6	deploy/tests/apple-container-test.sh
+B4	test	M	1	1	100644	e4ac880750ab9671815ae5c5a0f7f07673011c58	100644	bf811414699bf0e35f0be21d788e0a59cf6c4a95	deploy/tests/docker-compose-gateway-env-test.sh
+B4	test	M	2	2	100755	faae734f3641a5f57728e12eaaeb9dec6ca106c1	100755	c1c3ea961db5f8f6990c78145bdf1c9ccd6374e8	deploy/tests/docker-compose-security-test.sh
+B4	test	M	2	2	100755	96cc5e19db5a8f8ecbd28731a43689670ef45708	100755	e6cab64ce203d92f00eecc7bdde4a9ad0ce4fad0	deploy/tests/docker-runtime-resources-test.sh
+B4	test	M	4	4	100755	d75ab54a6071279df8d1b0ad22dc3d5ea3bea134	100755	de2d09659e21453bc990bd5bf02de58bbedaa549	deploy/tests/fixtures/bin/container
+B4	test	M	5	99	100755	2124ca17b6ac52b63f25dbebc68b083bde187182	100755	24557b7e5806fc0fef5547b76b161f37f905bae2	deploy/tests/install-github-token-test.sh
+B4	test	A	101	0			100644	cfe0601677a4b8b2641c570344fda865660588a4	deploy/tests/test_tokensavy.py
+B4	tooling	A	22	0			100644	3f312178ce2da316ad4c0f9b89158482666fcde5	deploy/tokensavy-datamanagementd.service
+B4	tooling	A	33	0			100644	35e647ba93c9a98f2998c23ab42a27b30c999491	deploy/tokensavy.service
+B4	tooling	A	26	0			100644	89e939215a928c07707fb9c3f516a1a59bb48273	deploy/tokensavy/.env.example
+B4	tooling	A	10	0			100644	cda5b0b90d3eb58b33de7ec0aa23f0f770e9d306	deploy/tokensavy/Caddyfile
+B4	documentation	A	77	0			100644	09e4a64e16dfc647ca1e613df5bfe09f4e12a361	deploy/tokensavy/README.md
+B4	tooling	A	12	0			100644	55b368609537057717d64475334ba905c30d9084	deploy/tokensavy/compose.source.yaml
+B4	tooling	A	375	0			100644	aab0a30b3c5799085db30c6d31752c41edf045f9	deploy/tokensavy/compose.yaml
+B4	tooling	A	65	0			100644	20e9c34bc2aaa2aaae8cb332175d5afc4e761cb5	deploy/tokensavy/init.py
+B5	documentation	M	6	6	100644	0ced3602b47a93b3686721a05707522f35f9e7c6	100644	79d90e733a56637fdbbaf10b552a125db25883e8	docs/ADMIN_PAYMENT_INTEGRATION_API.md
+B5	documentation	A	20	0			100644	f16f5a0140db1b6db1021635d40acf139ee910e7	docs/AI_COORDINATION_BASELINE.md
+B5	documentation	M	9	9	100644	1e293763682a8ef83b8dcf2d10bf2153b12eaaaf	100644	6d0e6a1358304f0aa07994481d35296dc16d5de1	docs/BATCH_IMAGE_MVP.md
+B5	documentation	A	182	0			100644	649dd579653f56a366d4b40688cd60898ee17444	docs/CUSTOMIZATION_REVIEW_2026-09-08.md
+B5	documentation	M	6	6	100644	d123c38db210e3a80b42d230f3aa8aaffa505055	100644	22e0d4fc86ef75df288eafa0c4ffd026463ab07e	docs/PAYMENT.md
+B5	documentation	M	6	6	100644	abe94375d4cc245bcdd3da5e9289ff38e14ea44d	100644	c25442052a8972d46db186075bc9e6e1fa330468	docs/PAYMENT_CN.md
+B5	documentation	M	11	11	100644	0c254b7e4bc931abd495d3fec135bb2a8342a764	100644	9cc19fafdfcbc5ab0c9e9a71a31486fa090950d7	docs/PLUGIN_DEVELOPMENT.md
+B5	documentation	A	171	0			100644	87c1177ac795dd91a88af64f4e5da0912821fd5c	docs/PROJECT_CUSTOMIZATION_WORKFLOW.md
+B5	documentation	A	36	0			100644	cbe81a122b0b205f767ac12123bf5ba838f94062	docs/TAPMODELS_DOCS_ACCEPTANCE.md
+B3	documentation	M	4	4	100644	fc32ece78d99ea94b429b70921c801cf589b5632	100644	acf35622630713a946c18c6d0090eea51dba196a	docs/legal/admin-compliance.en.md
+B3	documentation	M	4	4	100644	76b066916b2ec8bf9c1428778d57a26528e1184f	100644	fc04f5259aae600f328c1c58266e199d76e4e8aa	docs/legal/admin-compliance.ja.md
+B3	documentation	M	4	4	100644	0e7a5890da01e8fe70e9ca1347ed3907e87b74f3	100644	5d72474b47eff096473e862c91d7eb8f048eef01	docs/legal/admin-compliance.zh-TW.md
+B3	documentation	M	4	4	100644	0515546468501cd6ec8739a6ad4639d1dbee57ab	100644	ed469a1e332de785b49fb255bc5c733b76037dba	docs/legal/admin-compliance.zh.md
+B5	documentation	A	23	0			100644	2ee3d4be7181dd4d3a03c1f41c062849e489d335	docs/requirements/final-2026-10-07/BRAND.md
+B5	documentation	A	45	0			100644	2a4452369fc76e80e92ecd6ad01092423e8188ba	docs/tapmodels-ci.md
+B3	source	M	1	1	100644	a3ec7ec441cde7e7d085d43c082765078ca4a942	100644	5bd3a2c5274b0f8d97a0dbffbd294be5271f4530	frontend/index.html
+B2	documentation	M	4	4	100644	70aea895cd57f609a402cb48ad7baa085bae1e7e	100644	bab65775ee68942229f6230c596acf367398a6ef	frontend/public/downloads/SHA256SUMS.txt
+B2	asset	M	-	-	100644	67187d758ec92a8b1e9c50dbded71d41ed5760cb	100644	4efa2ebe900f60318eb957a214da43382fca84dd	frontend/public/downloads/gpt-image-flare.zip
+B2	asset	M	-	-	100644	f331ca18ad5f1afc3242bb3d5da2d2f98c9dbd4d	100644	f279b57ea0a711ec5651f946ed80c9bbeb0ff4d0	frontend/public/downloads/gpt-image-sunburst.zip
+B2	asset	D	-	-	100644	2de1b14e30cfbc8746dd771563c72b1b4b24e5a5			frontend/public/downloads/kdan-claude-session-recovery.zip
+B2	source	D	0	22	100644	19107bbfab94f74a5ca9dfce223712a7410472cd			frontend/public/downloads/kdan-claude-session-recovery/Find-ClaudeSessions.ps1
+B2	documentation	D	0	60	100644	b7c6b571fabcdf765a721cb0f9ca7defb7c72f38			frontend/public/downloads/kdan-claude-session-recovery/README.md
+B2	source	D	0	11	100644	79ed3d5456066ef019c21a6fb4061efc0c69e953			frontend/public/downloads/kdan-claude-session-recovery/find-claude-sessions.sh
+B2	source	D	0	213	100644	0d52b59aa64e04cb840b97eee4c912190382a282			frontend/public/downloads/kdan-claude-session-recovery/find_claude_sessions.py
+B2	asset	D	-	-	100644	c5503655470e9f19581e363fd43c904f7365abfe			frontend/public/downloads/kdan-codex-session-repair.zip
+B2	documentation	D	0	78	100644	76d61afab5a7cf1c57843db07d87ea9984f83575			frontend/public/downloads/kdan-codex-session-repair/README.md
+B2	source	D	0	40	100644	ac522d1f4c6bae51101218b2da06f816baeab7ad			frontend/public/downloads/kdan-codex-session-repair/RepairSessions.ps1
+B2	source	D	0	11	100755	37bac53b4bdc29c9a920338d80290a8f2479b154			frontend/public/downloads/kdan-codex-session-repair/repair-sessions.sh
+B2	source	D	0	714	100644	5847299d706429423784b731e4cc61793d470704			frontend/public/downloads/kdan-codex-session-repair/repair_sessions.py
+B2	source	D	0	125	100644	4d9c564c33c4b7638f055b89bf4448c5271e4cd3			frontend/public/downloads/kdan-codex-session-repair/resume_sessions.py
+B2	documentation	D	0	38	100644	37f6f7c2f133174bc19efb7c852abde67cfb582b			frontend/public/downloads/kdan-image-skills/gpt-image-flare/SKILL.md
+B2	tooling	D	0	4	100644	3ec39d2e29f773fbcde458e1bbd838a9b19e9bcd			frontend/public/downloads/kdan-image-skills/gpt-image-flare/agents/openai.yaml
+B2	documentation	D	0	1	100644	f347defd9db53761ce39ca8fb90121f7e07fa352			frontend/public/downloads/kdan-image-skills/gpt-image-flare/requirements.txt
+B2	source	D	0	285	100644	4eff064d9d9464b1377407a122e1bffe390990d0			frontend/public/downloads/kdan-image-skills/gpt-image-flare/scripts/generate.py
+B2	documentation	D	0	38	100644	71136ab282eff142c8b58a9e49fe38e41d2b1196			frontend/public/downloads/kdan-image-skills/gpt-image-sunburst/SKILL.md
+B2	tooling	D	0	4	100644	546068d2104a1fd99298ffbafc4875128b200a8c			frontend/public/downloads/kdan-image-skills/gpt-image-sunburst/agents/openai.yaml
+B2	documentation	D	0	1	100644	f347defd9db53761ce39ca8fb90121f7e07fa352			frontend/public/downloads/kdan-image-skills/gpt-image-sunburst/requirements.txt
+B2	source	D	0	285	100644	dfc87e3aac93e79adc95038a44bb7fee79f17c61			frontend/public/downloads/kdan-image-skills/gpt-image-sunburst/scripts/generate.py
+B2	asset	A	-	-			100644	cba1dab398ca8e5f9b45780ff828f7be9692051c	frontend/public/downloads/session-repair.zip
+B2	documentation	A	77	0			100644	176019dedee5e9104fc72d5469b88d285a286bef	frontend/public/downloads/session-repair/README.md
+B2	source	A	40	0			100644	ac522d1f4c6bae51101218b2da06f816baeab7ad	frontend/public/downloads/session-repair/RepairSessions.ps1
+B2	source	A	11	0			100755	37bac53b4bdc29c9a920338d80290a8f2479b154	frontend/public/downloads/session-repair/repair-sessions.sh
+B2	source	A	714	0			100644	a4343ab1146567b469daa94d595d217969759809	frontend/public/downloads/session-repair/repair_sessions.py
+B2	asset	A	-	-			100644	52e99d1c295def50794445314cdcf99105f6cbeb	frontend/public/downloads/tokensavy-claude-session-recovery.zip
+B2	source	A	22	0			100644	19107bbfab94f74a5ca9dfce223712a7410472cd	frontend/public/downloads/tokensavy-claude-session-recovery/Find-ClaudeSessions.ps1
+B2	documentation	A	60	0			100644	a30dd801d5c4a0103cfc96d62523faee057d047a	frontend/public/downloads/tokensavy-claude-session-recovery/README.md
+B2	source	A	11	0			100644	79ed3d5456066ef019c21a6fb4061efc0c69e953	frontend/public/downloads/tokensavy-claude-session-recovery/find-claude-sessions.sh
+B2	source	A	213	0			100644	0d52b59aa64e04cb840b97eee4c912190382a282	frontend/public/downloads/tokensavy-claude-session-recovery/find_claude_sessions.py
+B2	asset	A	-	-			100644	d9c169f4aa806be00f61f133363fe57eeed707f1	frontend/public/downloads/tokensavy-codex-session-repair.zip
+B2	documentation	A	38	0			100644	7d605e8377aa454d9449d1804a2d8420dc47efda	frontend/public/downloads/tokensavy-image-skills/gpt-image-flare/SKILL.md
+B2	tooling	A	4	0			100644	3ec39d2e29f773fbcde458e1bbd838a9b19e9bcd	frontend/public/downloads/tokensavy-image-skills/gpt-image-flare/agents/openai.yaml
+B2	documentation	A	1	0			100644	f347defd9db53761ce39ca8fb90121f7e07fa352	frontend/public/downloads/tokensavy-image-skills/gpt-image-flare/requirements.txt
+B2	source	A	285	0			100644	ee90d90c20121ba21fac343d2dcd05bb36c509e4	frontend/public/downloads/tokensavy-image-skills/gpt-image-flare/scripts/generate.py
+B2	documentation	A	38	0			100644	1db982a28778bfdc256fda3e82940a4903dccaf3	frontend/public/downloads/tokensavy-image-skills/gpt-image-sunburst/SKILL.md
+B2	tooling	A	4	0			100644	546068d2104a1fd99298ffbafc4875128b200a8c	frontend/public/downloads/tokensavy-image-skills/gpt-image-sunburst/agents/openai.yaml
+B2	documentation	A	1	0			100644	f347defd9db53761ce39ca8fb90121f7e07fa352	frontend/public/downloads/tokensavy-image-skills/gpt-image-sunburst/requirements.txt
+B2	source	A	285	0			100644	396e7d71050a3f273e3a0d3987f52e0a4583b62b	frontend/public/downloads/tokensavy-image-skills/gpt-image-sunburst/scripts/generate.py
+B2	documentation	A	78	0			100644	c847c078c7def68f8b7bde22dda7a84f50f1d8a7	frontend/public/downloads/tokensavy-session-repair/README.md
+B2	source	A	40	0			100644	ac522d1f4c6bae51101218b2da06f816baeab7ad	frontend/public/downloads/tokensavy-session-repair/Repair-TokensavySessions.ps1
+B2	source	A	11	0			100755	37bac53b4bdc29c9a920338d80290a8f2479b154	frontend/public/downloads/tokensavy-session-repair/repair-sessions.sh
+B2	source	A	714	0			100644	42bdf7d3f8f3a6fc88c7ed53cda542f56aa9a397	frontend/public/downloads/tokensavy-session-repair/repair_sessions.py
+B2	source	A	125	0			100644	4d9c564c33c4b7638f055b89bf4448c5271e4cd3	frontend/public/downloads/tokensavy-session-repair/resume_sessions.py
+B3	documentation	A	287	0			100644	6b9f09c8be9504edc8d904d0da8d10b47d7520d8	frontend/public/guides/payment.en.md
+B3	documentation	A	295	0			100644	d2ea5ea2d285b8513392aa1dae7e759cd5b0da3b	frontend/public/guides/payment.zh.md
+B2	documentation	M	5	5	100644	76406c433b3609a9157cb5726c5c135116f79a9e	100644	d460b1c0b8120acedec50b0e08bc64cbbbfe482c	frontend/public/install/README.md
+B2	source	M	5	6	100755	45d491867882ddca17c86536dc9d7abaef732d4b	100755	103331ddaa35375170b80914b5d88f11ac7b3568	frontend/public/install/claude-code.sh
+B2	source	M	9	10	100755	a9764da36b5f82a819d8d2917aa7da63568068d4	100755	c70bc1da0adf8b2f9b2505e338902b0ea907b31a	frontend/public/install/codex.sh
+B3	asset	M	7	41	100644	99d55509ff6ce9664b3ff89f59a6be912d4b83eb	100644	9c4a5db370e97bfd9c1a7cf8725a87149cf4aa1a	frontend/public/logo.svg
+B3	source	M	1	1	100644	3534eaf3c3f04847b5cb42a68b547eca40673847	100644	d4da452733e3997ea4e92a25e89f308914cea2aa	frontend/src/components/home/GatewayShowcase.vue
+B2	source	M	24	24	100644	fea2a45da4f6981966c820cd63b7c5ad666db38a	100644	d31a6127953aed297a9f34e18d27b167851f33e4	frontend/src/components/keys/UseKeyModal.vue
+B2	test	M	12	12	100644	17be77a725e4362b0e511063dc90bb41b1df524d	100644	fff5955a0a49b935ab02c1f599198bfce1e8f5c2	frontend/src/components/keys/__tests__/UseKeyModal.spec.ts
+B3	documentation	M	1	1	100644	731c81f909e181f9c89f9dab53818e8ff6086f18	100644	3abc34041694c4faec118e6d2d21136f31695da6	frontend/src/components/layout/README.md
+B3	source	M	22	26	100644	b89432dc3b700aaaf56930feef72c72e0749311c	100644	f5a1add912bc79d91a4784a1ab9445360863a772	frontend/src/config/brand.ts
+B3	test	M	1	1	100644	45597a175d55382ba54ffe9e9abec1a44dc0c1e9	100644	6622da4acf566a5d64e1e1d978e4d20f487d55d5	frontend/src/content/docs/__tests__/examples.spec.ts
+B3	documentation	M	3	3	100644	da7b3de7947e3654febb35f431fa0e36fd5563f7	100644	5d673fb58b9845365646c7fcf5e6630672ce980e	frontend/src/content/docs/en/api/chat/anthropic-messages.md
+B3	documentation	M	6	6	100644	1ee6416fc5a43339956a741ad48ba4d0a3e033e4	100644	bd8a043fe0d0a9e64c04fac34d905142af607021	frontend/src/content/docs/en/api/chat/gemini-native.md
+B3	documentation	M	3	3	100644	b0ae8a29af8edf81f4158ba11cf6570be33d43fc	100644	6ed98c8d22a325c940d99495bff1b5463031da26	frontend/src/content/docs/en/api/chat/grok-native.md
+B3	documentation	M	3	3	100644	3e604024ad7f9d0e65a5351cb2af9f647b12d0a2	100644	6042391759aef16925872ec86b8d1e6fa6f91f8a	frontend/src/content/docs/en/api/chat/openai-chat.md
+B3	documentation	M	4	4	100644	52eb0af5c00eeef908e13c847a7f9d682e00260e	100644	1cfc0ba0911433f51cc3d11ac4409d4df26a780f	frontend/src/content/docs/en/api/chat/openai-responses.md
+B3	documentation	M	5	5	100644	f7c42b0a7e4a661a8041d27991894399a2f287e2	100644	72dbd369ce50ed58762890657c1a04e22898d0aa	frontend/src/content/docs/en/api/image/openai-image.md
+B3	documentation	M	1	1	100644	42d8d5e5d9879c708482d2b771e0f960e4bd3279	100644	d4de49f04898066d55cdd23ef99cc51a092999f6	frontend/src/content/docs/en/api/protocols.md
+B3	documentation	M	3	3	100644	c6d1a58516fbf5f8f1f7c36f89403dc4a3e530dd	100644	c939ba3275d81f8a7d63d1773490ce081bc28bd9	frontend/src/content/docs/en/api/query/embeddings.md
+B3	documentation	M	3	3	100644	1662ad000b25dfeb4e20403098edea839555ce18	100644	2f768547de5660fc4971cad7f21081d140aeb348	frontend/src/content/docs/en/api/query/models.md
+B3	documentation	M	6	6	100644	1159f2cbe788319a73141f2565e0d28c7c5e9d75	100644	c50dc8fc9279aa34d0704b1efd4d14b4a9fdb1d6	frontend/src/content/docs/en/api/query/token-count.md
+B3	documentation	M	10	11	100644	8bfbb849f581cd5984b0ad4f35201af53a231372	100644	e2268aae49922c686a4410cec1f93b72f48731ae	frontend/src/content/docs/en/apps/claude-code.md
+B3	documentation	M	3	3	100644	00f7db27386a1ce857c1b891cf8080e558756237	100644	584d46de8bd3ce7124cc57dfd22d330d002bbade	frontend/src/content/docs/en/apps/claude-desktop.md
+B3	documentation	M	12	13	100644	16cc417cd4b29c260405900750bb7ccca21511b6	100644	3460b2260e236c3a70d98acfe5d33c5600a51202	frontend/src/content/docs/en/apps/codex.md
+B3	documentation	M	3	3	100644	a7c1643a2864c2583e94856097492f574b009f0f	100644	f4e922e47b47ed8a36b477c60455ec9046e4b379	frontend/src/content/docs/en/apps/console.md
+B3	documentation	M	6	6	100644	f567a9f94854ecf2016cc04b3265ed17dbf77114	100644	0ab1e253c2049bb1a2cc5a58d605c82be741b179	frontend/src/content/docs/en/apps/image-skills.md
+B3	documentation	M	4	4	100644	ea8b2025912f20d1906620d41028a3758b8fa7eb	100644	27330aaf3134f86afb267dc137e781f68033c2c7	frontend/src/content/docs/en/apps/index.md
+B3	documentation	M	1	1	100644	c7768338fe09dc517f1c62586fde3133f216a61e	100644	25dda4caafe0da86e6b34562647afabcb2f2d923	frontend/src/content/docs/en/apps/session-recovery-claude.md
+B3	documentation	M	4	4	100644	1ecb3863f7f59aa0753832ce36bb10754deb5505	100644	ef127f40c22ab3ca690a2f29fdc7e5f0f0c08474	frontend/src/content/docs/en/apps/session-recovery-codex.md
+B3	documentation	M	4	4	100644	0c903edda2d22aab37179dd98502305c2ed43fa4	100644	196575dc7a856e196a4b909f7f968f8625af9673	frontend/src/content/docs/en/authentication.md
+B3	documentation	M	2	2	100644	43cbe6fe666e2a885021c5af6eae8a5c849d0100	100644	9ebdd2435ceca8e82ec2878adcdb39afd641b172	frontend/src/content/docs/en/downloads.md
+B3	documentation	M	1	1	100644	20c56abedb5e255593db260495c5fbbdb22e51fb	100644	2d55bb6afbb2f2113122d823f76bbdeeb4d9c49e	frontend/src/content/docs/en/errors.md
+B3	documentation	M	1	1	100644	3d2d2348ed273075f11316ed80d9dbcdc808fcc1	100644	b3a91c28cb56f87a1ca9bb88a28375248aa774a3	frontend/src/content/docs/en/limits.md
+B3	documentation	M	2	2	100644	542b8ca84f0d873556e239838dc72b3b13ef52d7	100644	15c05502ed317b3b3f900d65d96a587312093d04	frontend/src/content/docs/en/pricing.md
+B3	documentation	M	1	1	100644	2fd2203bc8a78ad9c37e774091236963c956294c	100644	a17f42c5884905be66880317d5cc2fb74ee3ebb6	frontend/src/content/docs/en/quickstart.md
+B3	documentation	M	4	4	100644	8e4a853082b91461bee472aaed9985ae5b959425	100644	87852275f0b1732c4e011a54c4e417b0a1be5318	frontend/src/content/docs/examples.ts
+B3	documentation	M	6	6	100644	cc0687e7fee4c8cb68e938b9f971ec13e012abcd	100644	dd9794254231eb6d6b3e5620e898f3bc4b463441	frontend/src/content/docs/ja/api/chat/gemini-native.md
+B3	documentation	M	3	3	100644	988604039abd61693afa2530dc2f405ffcadbd78	100644	0c8966645c7bfdc8f1751e3b3ffed1b07fcb0105	frontend/src/content/docs/ja/api/chat/grok-native.md
+B3	documentation	M	1	1	100644	18f18bd989a676f16fb65b2ab3dede2060504c10	100644	a5003ae9ecc6c934a233e5de44316b002ebf90b3	frontend/src/content/docs/ja/api/protocols.md
+B3	documentation	M	3	3	100644	8acdfb5274c6401bfa6f01de57adfe54f3b242e0	100644	8ff9b7f94531182877153bc1c5e067890da542fd	frontend/src/content/docs/ja/api/query/embeddings.md
+B3	documentation	M	6	6	100644	c6e09b2ecfcf9e13c2f003efedf975629821386f	100644	8fad97bbd88da1f6ad6fd5ee346c5a162b8512d1	frontend/src/content/docs/ja/api/query/token-count.md
+B3	documentation	M	10	10	100644	71dc5edc4e27798848221e3eb01d903980c5a3cc	100644	4fbebc7b37546da4fea7f8c12f98ae529133acf5	frontend/src/content/docs/ja/apps/claude-code.md
+B3	documentation	M	3	3	100644	f2bf12d97195228e42ede3ab3a091c0acccf1c49	100644	1c93f2b949bd9ccbe47c5a920a2fee584645c73d	frontend/src/content/docs/ja/apps/claude-desktop.md
+B3	documentation	M	9	9	100644	107f1fb63d07b13661d4017d6e0fe1906b1883eb	100644	f07f91ce44401191807d76df4bd4219c506b2646	frontend/src/content/docs/ja/apps/codex.md
+B3	documentation	M	2	2	100644	31ac2ef64b6d53525ee280f14ae4c6089a9bbccf	100644	1632e4cfaaf6c30cdc12c837c62224c328fdc5ee	frontend/src/content/docs/ja/apps/console.md
+B3	documentation	M	6	6	100644	beeab7438c37db17c48d2c508d89cc12de7dae18	100644	056fc28250eb39661e1a046373476ab42bac4fbd	frontend/src/content/docs/ja/apps/image-skills.md
+B3	documentation	M	4	4	100644	276cb2e02f9429d1fe0101d54f7ea1160988a9b8	100644	a91d82579bcd818d1988078b03d8ae775acab5a2	frontend/src/content/docs/ja/apps/index.md
+B3	documentation	M	1	1	100644	8cd26266b7d174ccdc9d4d6dde330f9cec3c6f07	100644	38831c563e200bff360ccf516e793ae25839cf78	frontend/src/content/docs/ja/apps/session-recovery-claude.md
+B3	documentation	M	4	4	100644	eb0fb4fa125542253f6ed43370cc7a0c0eddf657	100644	a01f31eba674d146b0520b05d24ad3a93f5cd44a	frontend/src/content/docs/ja/apps/session-recovery-codex.md
+B3	documentation	M	2	2	100644	67c5a589492b4e4a6dd512527c4e44338961e8bb	100644	9cb7f04f9504cd4acc3f136be04774ddda03fb49	frontend/src/content/docs/ja/downloads.md
+B3	documentation	M	2	2	100644	41a23d185fe25b527fd74332b2262a634e639130	100644	e7a5172fd9a7e94fc7a2cab61cd122e565123e45	frontend/src/content/docs/ja/pricing.md
+B3	documentation	M	3	3	100644	f22015e6661777323ae8bd91aa14bf3d6d55a785	100644	38680131184797e42646e6c011744bd672997219	frontend/src/content/docs/zh-TW/api/chat/anthropic-messages.md
+B3	documentation	M	6	6	100644	0b14fcca593af8eff34d62eb3f67a9952a5e52d2	100644	34f1d5aca7f453825350c5c6cf136548da7a254a	frontend/src/content/docs/zh-TW/api/chat/gemini-native.md
+B3	documentation	M	3	3	100644	29c6f08b47373f4d54cee4b71052afa876017133	100644	c03d3334dca2575384b9ae59dd37a84ad5bf0cc9	frontend/src/content/docs/zh-TW/api/chat/grok-native.md
+B3	documentation	M	3	3	100644	25da4429b27f7c2643ff2289c3114c7d1b3465be	100644	4aceeda900c6d759a7db552b3da402d32bf1e47c	frontend/src/content/docs/zh-TW/api/chat/openai-chat.md
+B3	documentation	M	3	3	100644	234a6e16d75e8e0a29cc528d6fdc074dbc4fc929	100644	93ced523dddd3224ccbce6849c3c027abe74bfb3	frontend/src/content/docs/zh-TW/api/chat/openai-responses.md
+B3	documentation	M	5	5	100644	6749ddf9c99e53ab64623380a72241b1e0eae832	100644	8076221092132d2a84cfad6140030c6b957445fc	frontend/src/content/docs/zh-TW/api/image/openai-image.md
+B3	documentation	M	1	1	100644	c43b7f21f4b63ecb0a274e02706d3b4cb3107b20	100644	aee0504e2b64f3104715b13886e5bfd9bf0e753e	frontend/src/content/docs/zh-TW/api/protocols.md
+B3	documentation	M	3	3	100644	c97b5d9dc2787bfa6ae83b153aea1a966b9d270f	100644	41d11dab62e9faecfecfe73654b6b4ab70dac9db	frontend/src/content/docs/zh-TW/api/query/embeddings.md
+B3	documentation	M	3	3	100644	c2dc0d6de85e3ac257231d856ff62758609ec36e	100644	692e37e3ae53e4504c85a12ca54a4deb7bfb5b59	frontend/src/content/docs/zh-TW/api/query/models.md
+B3	documentation	M	6	6	100644	060acd7f3c00378a6b77b9d81b214755dfb43d81	100644	8b3b20ce184ec7fa53d6a17e600966b2f2dc4884	frontend/src/content/docs/zh-TW/api/query/token-count.md
+B3	documentation	M	12	13	100644	af50213719df73b54168ddd0f3c9a1dbc0cc834a	100644	ea942225eaec8dcbc9bba2784f45445521030bac	frontend/src/content/docs/zh-TW/apps/claude-code.md
+B3	documentation	M	4	4	100644	55b60e57d0656cf2e6f30023da5a66f6e5363890	100644	f1b24fc81bc5f2983ef0865b65a28e25a0becd11	frontend/src/content/docs/zh-TW/apps/claude-desktop.md
+B3	documentation	M	14	15	100644	6b4060090e6ba3565d7b737b0801d9c1e2ca8994	100644	6a042b029228b548dcad75e5ba003879029edddd	frontend/src/content/docs/zh-TW/apps/codex.md
+B3	documentation	M	7	7	100644	4806b840b1e1d23be34114001406211faf8f6287	100644	9ce80e5648c265ca46997d61cf7d7460122b316f	frontend/src/content/docs/zh-TW/apps/console.md
+B3	documentation	M	7	7	100644	302319522ec8b4b69af4026128ccb68d36614425	100644	6f1587578492b850dce9e8278cf77ac466359344	frontend/src/content/docs/zh-TW/apps/image-skills.md
+B3	documentation	M	3	3	100644	47bbb9cfdd24b6167bb09ba3acd60ed21a91b28f	100644	b61a48f8db90fd1669578724adff239d82fc3213	frontend/src/content/docs/zh-TW/apps/index.md
+B3	documentation	M	1	1	100644	2edc4a53d93c031b6ca46ec1a35ab6b925f713c8	100644	b9d8d42438e25d0d4c893ec3f9fdb5fc15552fb3	frontend/src/content/docs/zh-TW/apps/session-recovery-claude.md
+B3	documentation	M	4	4	100644	cbb65761fdc202e80c35b2423846de5b2a8437f0	100644	b26f6e1cfd2a437f6ffbd7f410e1fcd9cf2958a4	frontend/src/content/docs/zh-TW/apps/session-recovery-codex.md
+B3	documentation	M	5	5	100644	807fbc9fa5a08f9a028f9345d728ec02acd414d5	100644	c3f1122d9b280d4f3fa33f0513fca9c6caa8b91e	frontend/src/content/docs/zh-TW/authentication.md
+B3	documentation	M	2	2	100644	238c8867e8b20f2db6fff453d9c71df9d77ec855	100644	ee8f7370c1cc6c3429c4b5e247ea74e1a4785adb	frontend/src/content/docs/zh-TW/downloads.md
+B3	documentation	M	1	1	100644	66b48bfa23f7aa90c6b645f16aa6fee7fbb805f1	100644	fda7656341e5670347c13588509e06d29ad6aa1c	frontend/src/content/docs/zh-TW/errors.md
+B3	documentation	M	1	1	100644	e49f02cdb6a10b637a7d05389410cd10e6a09684	100644	d3dbd731547a02c021970198549fcb333eb43dcc	frontend/src/content/docs/zh-TW/limits.md
+B3	documentation	M	1	1	100644	dcbefd3a2f593729e7c4433568e877d4acdac284	100644	60254bb8bc7f584e578eca00648bf8571ac5afc3	frontend/src/content/docs/zh-TW/pricing.md
+B3	documentation	M	3	3	100644	4d0fbacae39581a52902706839e0b46000e13c82	100644	6da29fa8532dc51dffcc26e4cd506ee19729a576	frontend/src/content/docs/zh-TW/quickstart.md
+B3	documentation	M	3	3	100644	5e1a68434583cbc627161bbc5288ba1e19a893cb	100644	5c5674581c25d05f2dfef4453a498f30969d5a52	frontend/src/content/docs/zh/api/chat/anthropic-messages.md
+B3	documentation	M	6	6	100644	b613a9136fb7ba9bb591046cb02b5ce1488fb5de	100644	5d9936019b330a8e2e5b0b435880af0616224140	frontend/src/content/docs/zh/api/chat/gemini-native.md
+B3	documentation	M	3	3	100644	621c3904b7fee3484535bf1a76ee39a1495f7d8f	100644	15f6f5620da462a77b16927ec8fd204a125ca048	frontend/src/content/docs/zh/api/chat/grok-native.md
+B3	documentation	M	3	3	100644	2434e6f1b074b14c9f4dbb192fe31f81232b7304	100644	37b296350894350d155df13086fd22cf55f13b80	frontend/src/content/docs/zh/api/chat/openai-chat.md
+B3	documentation	M	3	3	100644	6efe97e0f5b8fd7f8e1586c3e0b30dc8203064c7	100644	4696e83d5a79d1c87d42371937d486883ec7f5d6	frontend/src/content/docs/zh/api/chat/openai-responses.md
+B3	documentation	M	5	5	100644	51dbf622728881dbe78bb66385689be0cf6dd3f3	100644	f566d1f04a93e31249254d966b44497f3e11000a	frontend/src/content/docs/zh/api/image/openai-image.md
+B3	documentation	M	1	1	100644	b653c004413aaf84c3e3c5090103fa7789879558	100644	4136b4b9ed1c5f0ef7d702cb056c60960980d05d	frontend/src/content/docs/zh/api/protocols.md
+B3	documentation	M	3	3	100644	99c0df962f90c8f40108f5f4f17fc24cd3452ad8	100644	fbf4f6f88cf2b004b7182278aaab2a822bc82956	frontend/src/content/docs/zh/api/query/embeddings.md
+B3	documentation	M	3	3	100644	8a5c16e9ef81f8ccf7fe446065f62a1be62f352c	100644	73f7012003c90659278cb655aa83c49038f60c4d	frontend/src/content/docs/zh/api/query/models.md
+B3	documentation	M	6	6	100644	e8a59e8194a68248dc2b241e5e67aa25c859a7bb	100644	e5b21c5a10c87b7bb8d851d067095532b25ca995	frontend/src/content/docs/zh/api/query/token-count.md
+B3	documentation	M	12	13	100644	3bf237841cd863f465bfcd8c47939dcdcd9dd70b	100644	46d39b0ae0a285046728fdce91d1a0c0568590e8	frontend/src/content/docs/zh/apps/claude-code.md
+B3	documentation	M	4	4	100644	f5c84769388fc7b924e2b26c457f1deb32b2f7b8	100644	4ec7f840193fc42b052615cee2598a8402797098	frontend/src/content/docs/zh/apps/claude-desktop.md
+B3	documentation	M	14	15	100644	35a4ccb4e44a444083055305dea4c6303462dfc7	100644	13b7f55acc45c3ac34fd7d9499ee879b1ae43bc0	frontend/src/content/docs/zh/apps/codex.md
+B3	documentation	M	7	7	100644	f391a1d54ce9a3cb06425935ee38cedfb3f1941c	100644	b035bf1c7f33d3fe62d519cda3c587ee2b683f39	frontend/src/content/docs/zh/apps/console.md
+B3	documentation	M	7	7	100644	463bae955f2181337fdccb566df3795459ecae38	100644	753243f4d3ddb8e3948b23d8b33e61c7e91717ef	frontend/src/content/docs/zh/apps/image-skills.md
+B3	documentation	M	3	3	100644	8d54e659be4b4a45bef646d1b3a45b359c707e63	100644	173e864a0ea028416bce0430f6c488f13999615d	frontend/src/content/docs/zh/apps/index.md
+B3	documentation	M	1	1	100644	0b430890c3e1002ad4573777ae66633cc840225b	100644	7a8053a94f18af4586594f9f3fafce4f853731ea	frontend/src/content/docs/zh/apps/session-recovery-claude.md
+B3	documentation	M	4	4	100644	ff72bbfc970cf083cfbd09cfef53a2af16c75dcc	100644	de564a96059beae184535b07d14e12072f21f272	frontend/src/content/docs/zh/apps/session-recovery-codex.md
+B3	documentation	M	5	5	100644	3feb05d07b9a1adbbfefbfab2472a4724138162b	100644	524b4ae93e959a6a8ca35acef82404b531f76f10	frontend/src/content/docs/zh/authentication.md
+B3	documentation	M	2	2	100644	1459710498f681bef479eac6cee515ce8598295e	100644	247e887d0248cf46f9c495b6d1fbc6b43108538d	frontend/src/content/docs/zh/downloads.md
+B3	documentation	M	1	1	100644	9368ef569d4b63d8ecff63481c55c7b129e5a59f	100644	d3474f18e2a60c5b9e4593b12a515251ad72e207	frontend/src/content/docs/zh/errors.md
+B3	documentation	M	1	1	100644	b69f3fa5f1c45f1b2606aa18ba84b96e89cc8213	100644	4cfc5bac4d29fe5ee7b500eb0c4dd0106a229917	frontend/src/content/docs/zh/limits.md
+B3	documentation	M	1	1	100644	aa8bb643425a021367d53aa7ab75c098cec23bbf	100644	db6c5e07532c2fb75d39fc1d4b77483590e718b1	frontend/src/content/docs/zh/pricing.md
+B3	documentation	M	3	3	100644	0f931c0ded039ded536105e666d697086ba85789	100644	7e53ac3d1b053eff82e9720fc85cdf46e99b4c46	frontend/src/content/docs/zh/quickstart.md
+B3	source	M	2	2	100644	812444960c2303ab36ca48cbbae875ce1dc869ef	100644	2affb21a1979eecc44b5685e64e5d2df63495a40	frontend/src/i18n/locales/en/admin/accounts.ts
+B3	source	M	1	1	100644	740160de78a8189dbdc036867fc704caef737a33	100644	6ac865ce93afb4348d2743effcf7a4bafd02a06c	frontend/src/i18n/locales/en/admin/overview.ts
+B3	source	M	2	2	100644	b02cc0afe0d137b34bb80a31c8b9c4112eb3bd2d	100644	92da5b1cab05bd58655098516926fac0eee429e9	frontend/src/i18n/locales/en/admin/settings.ts
+B3	source	M	1	1	100644	7b1b5c8195008e1fca25e35c1bc86c2c4c88b16e	100644	b198c3694ea64171b5e2fe6a63b91bd30b5f2746	frontend/src/i18n/locales/en/common.ts
+B3	source	M	5	5	100644	ffde3015a1ec959bc21babb6c35038ce910192c3	100644	3a86ce47eb2829f2a88a0d0467624e00bee72fe9	frontend/src/i18n/locales/en/dashboard.ts
+B3	source	M	6	6	100644	c8f162b3856a2caa5f42b3c7182d56c00288e691	100644	55abbd9a5d49508d89c10d2e4a0d5de6e4257b50	frontend/src/i18n/locales/en/docs.ts
+B3	source	M	3	3	100644	4335519070536681884a908012e993485896e401	100644	648c1bde94761cd1c25056460c7ecd3e96942bf3	frontend/src/i18n/locales/en/landing.ts
+B3	source	M	2	2	100644	457dbc1fe748c1c9f1eef7c46c47b09b6dc36956	100644	9da12c2f8bfce1f90a6e28ae9826467b51db042d	frontend/src/i18n/locales/en/misc.ts
+B3	source	M	2	2	100644	94ef8a577512dfd050c34a30701559f050437e9b	100644	f7fe83b50b48f7c261bec3544264b10d108413e1	frontend/src/i18n/locales/ja/admin/accounts.ts
+B3	source	M	1	1	100644	9c521511f81552357150c1070a63b5d9d1df3847	100644	d915f9c6a3167867ff580de97cf010ef23d14297	frontend/src/i18n/locales/ja/admin/overview.ts
+B3	source	M	2	2	100644	1939a3ec2e0511cdfc1f1cea28276856cd6eaf09	100644	4196367141d846e8b01e8a727bdad0923018bf0b	frontend/src/i18n/locales/ja/admin/settings.ts
+B3	source	M	1	1	100644	3a579f9f3d746ebe3e73666cf78709a4bcabab1d	100644	278c9586c44be2ca601ae509110608d047db9a85	frontend/src/i18n/locales/ja/common.ts
+B3	source	M	5	5	100644	0cff4da390adb0bf9b5704c312dc251b863166b5	100644	df61eadfce09c816f50b4e6d65ac959a676db50e	frontend/src/i18n/locales/ja/dashboard.ts
+B3	source	M	5	5	100644	74200c50f1bf4a0bd80ea6dd7b5c35e64ebd8533	100644	5dcea918dcc2bf1f3d458df3b5930fdfb446fb41	frontend/src/i18n/locales/ja/docs.ts
+B3	source	M	3	3	100644	27e98f1842c786c2691fe1bb688b8a868b7002fa	100644	307e3facffafe5a8a90dac006de142ab71eb039d	frontend/src/i18n/locales/ja/landing.ts
+B3	generated	M	2	2	100644	ed0f196ed308cdda24571d99c2296beff50df778	100644	3ea02b2fb48bd4f6a9311d0ae1e991ee08ce6c9c	frontend/src/i18n/locales/zh-TW/admin/accounts.ts
+B3	generated	M	1	1	100644	f627581e7b5bc81b1b25466f9998041be02043d3	100644	9a22581927b61cbdbe2285fe1cdb84826242acea	frontend/src/i18n/locales/zh-TW/admin/overview.ts
+B3	generated	M	2	2	100644	1d652817f2a9013878c7c65506b95b52e8ef3973	100644	ba769e9a69fe7da93ea367c9f56b223a5c23b6c3	frontend/src/i18n/locales/zh-TW/admin/settings.ts
+B3	generated	M	1	1	100644	6ec59b11fedbe43a6da5c476cbf54f32b345ef23	100644	0f70c213aac00b514f49e32558ea0f02fc04121b	frontend/src/i18n/locales/zh-TW/common.ts
+B3	generated	M	6	6	100644	183a334658b15a8c0e11c8ea63a9d7dc9b71fd96	100644	921da6459abedc7914fd27c03b9844c7a28f283f	frontend/src/i18n/locales/zh-TW/dashboard.ts
+B3	generated	M	8	8	100644	fa82fcc9d93644fd9885fbba6fd293eb8277370a	100644	77a04debab356c80bac09cb3a15bf998346155f5	frontend/src/i18n/locales/zh-TW/docs.ts
+B3	generated	M	2	2	100644	63d7bfce8de712a6ecb3f2013ba9b6a223eb3892	100644	0e62eb36cf3111a4ae44430f94cf9c680c4ee33c	frontend/src/i18n/locales/zh-TW/landing.ts
+B3	generated	M	2	2	100644	ce8b052eb6212da749ba17c0c6c1e0604e08c01a	100644	fd79699228927646b7c9c25383f14dc03b4d02c7	frontend/src/i18n/locales/zh-TW/misc.ts
+B3	source	M	2	2	100644	722ac4149c80f3926fedc5c426739728a66fd920	100644	f9d41e0609cc72ad2901f3efa5f40ae9fbff61f0	frontend/src/i18n/locales/zh/admin/accounts.ts
+B3	source	M	1	1	100644	6128ac1322e1d6a9b4b4f4cbf6f3e95d4e1eb707	100644	5ed0e8d2dd9653df0d0a473a36a2c9757c43910c	frontend/src/i18n/locales/zh/admin/overview.ts
+B3	source	M	2	2	100644	010511eac614378372dae791a4854722e2518f72	100644	fcc2e67e5695b80596acc8e07180405ca73c6376	frontend/src/i18n/locales/zh/admin/settings.ts
+B3	source	M	1	1	100644	e6c95e9c86666d858533d0c52806ae0f2dd462a8	100644	8f521ddded50a441c273c56a80a89f5a8fd7827e	frontend/src/i18n/locales/zh/common.ts
+B3	source	M	6	6	100644	97dbf5cd5790cb75899a7e233c1a8b143bf0f16b	100644	b668e69fb3ac5dba3c80baabb8cd2c7b804a76d6	frontend/src/i18n/locales/zh/dashboard.ts
+B3	source	M	8	8	100644	ad8dc47c460d75a82bb0142500ffc682bf0a560f	100644	6054b00763eb46d33f94bfcb7a36a97d9b9db2b3	frontend/src/i18n/locales/zh/docs.ts
+B3	source	M	2	2	100644	79247f74abbc8378b1f7a90356a0465109080ab2	100644	b108cf39d9d2a48b8e2bfcffc828bf5721f65a8d	frontend/src/i18n/locales/zh/landing.ts
+B3	source	M	2	2	100644	da7d6ba6e80fdcd91e7d7d778eed75db7e25a703	100644	f69eee3319c783c405769aad3c0f9e9f64da4d22	frontend/src/i18n/locales/zh/misc.ts
+B3	documentation	M	1	1	100644	232dfce15783fb4f041ecd22edf73baba9d715dc	100644	e34d09a2ea00eea140188dad285bad4d633db839	frontend/src/router/README.md
+B3	documentation	M	1	1	100644	f67cf88cd665d4b071910933e1d26032cbd99fdf	100644	3a60919e339b3df0b5290ec556988f1bd920d80c	frontend/src/stores/README.md
+B3	source	M	6	37	100644	d72750a5ac8d760e834b60cabce6795754b3ece1	100644	88bf982c06f81716b8838cb56f5c738bcff3f568	frontend/src/views/HomeView.vue
+B3	source	M	1	1	100644	a6c06489ab466441b887b8d829193116a0de7905	100644	647274b18e5392be57a396669b082b44285b911a	frontend/src/views/admin/AccountsView.vue
+B3	source	M	1	1	100644	948703f7514e6a1c7853e7296d39859f5ca820e9	100644	18ef4e9047004d46bf0d7787cbed207b65e1635b	frontend/src/views/admin/ProxiesView.vue
+B3	test	M	4	4	100644	430d308511372ab74e98153ca89e0500c517dd07	100644	7c7e2c7bb20557742379850088607b78cc6734b4	frontend/src/views/admin/__tests__/SettingsView.spec.ts
+B3	documentation	M	1	1	100644	9d8ba8e16e157b78e8bfb3b5e5a14817a4984b25	100644	9724be8e27289736da4de03b333633abf72a180b	frontend/src/views/auth/README.md
+B3	documentation	M	2	2	100644	b4d7950323842b71bf5b76457c3c976e57740be2	100644	3b0ae5be2e5c4abab478b06ccd1a2d52cb2af371	frontend/src/views/auth/USAGE_EXAMPLES.md
+B3	documentation	M	7	7	100644	a77cbd0f832b333bb379e60fc7c4287985759e19	100644	74f443927d8e07c20f9e8c8732f012919b646d9f	frontend/src/views/auth/VISUAL_GUIDE.md
+B3	source	M	2	2	100644	5fea015b1f0e89a5d178a7f377f7704c3f2b7c6d	100644	cca5104d68db6049fd38190a75a4e946b26e7cdd	frontend/src/views/setup/SetupWizardView.vue
+B3	source	M	1	1	100644	bf17a308f2902e5f48f6cd656c0dc96819d5feae	100644	c1aab3e83c29ed7b54f72e3a8ebbf118199b049e	frontend/src/views/user/BatchImageGuideView.vue
+B3	source	M	1	1	100644	816ee24950f3d02899f4a0c92f7ab006f254b5e7	100644	267de197ec27e3c6b47284e46c9bcda533c16156	frontend/vite.config.ts
+B3	documentation	M	2	2	100644	8ddb0673d4da218424851c3ebc7cdf53e8181967	100644	7e8b004225a328960b1acc7d1b022919af56cda5	skills/sub2api-admin/SKILL.md
+B3	tooling	M	3	3	100644	7f4d1d88068e5f9a45fbbb20e6a45c520b35a200	100644	ce89507c399384565546677c871c969c71b12d70	skills/sub2api-admin/agents/openai.yaml
+B3	documentation	M	2	2	100644	56def87b949bc5d937f6acdf19d1f4008886eb13	100644	9e1c25740b91ccf1d2231e412188a5aa5d2bc6b8	skills/sub2api-admin/references/admin-cli.md
+B2	tooling	M	8	8	100644	5c470f81b170c89260a0a8ff5102508e98b37611	100644	293c9737397d4fa695ef99021ee2cb282402aa28	tools/build_docs_downloads.py
+B2	test	M	1	1	100644	83d65aa0ebb2eebf9e998246d3b3a6c62774f9d4	100644	c46638193bbe5ba14d8508a5a0fba00217dcd86f	tools/tests/test_claude_session_recovery.py
+B2	test	M	8	8	100644	069907f8cb5a53bdf18c2f486e78b4791ab7eb71	100644	73c99d8274c7d4ace827f0083801e169d5fa3af2	tools/tests/test_docs_downloads.py
+B2	test	M	16	16	100644	647364dbe4a544f667ec46a619835eab2a2b5227	100644	d6e009f1d8dca69cea8f81201bba167e8281d9a7	tools/tests/test_image_skills.py
+B2	test	M	6	6	100644	91458f51bef25cff4442989a294452e78f00e266	100644	8cbfe4eeea0d9106103792fb3f67f691d3986eba	tools/tests/test_session_recovery_commands.py
+B2	test	M	3	3	100644	113beee76040f38a7ecf3a74d6a2323ff8c496fc	100644	0cd038f6d9e1d5e0e6710aa9e093479e8d6bd366	tools/tests/test_session_repair.py
+B2	documentation	M	2	2	100644	f17e1756b4cd69fa2991ffb76bc5667069bdf03a	100644	ad4b360396753a4c2da8bc60538d7abd623478e8	tools/zh-tw/README.md

@@ -192,7 +192,7 @@ func TestOpenAIProfitControlStickyBindingOccursOnlyAfterTerminalAdmission(t *tes
 	require.NoError(t, svc.BindStickySessionAfterProfitAdmission(ctx, &groupID, sessionHash, cheapID))
 	require.Equal(t, expensiveID, cache.sessionBindings[cacheKey], "终检通过的 fallback 账号不得覆盖原粘性绑定")
 
-	cache.sessionBindings[cacheKey] = 0
+	delete(cache.sessionBindings, cacheKey)
 	require.NoError(t, svc.BindStickySessionAfterProfitAdmission(ctx, &groupID, sessionHash, cheapID))
 	require.Equal(t, cheapID, cache.sessionBindings[cacheKey], "无既有绑定时应在终检通过后建立粘性")
 }

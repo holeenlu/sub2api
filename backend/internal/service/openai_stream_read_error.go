@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 )
 
 const (
@@ -44,10 +46,10 @@ func newOpenAIUpstreamStreamReadError(err error) error {
 	}
 }
 
-// shouldClassifyOpenAIUpstreamStreamReadError excludes cancellation and
-// response-size enforcement from upstream retry.
+// Only caller-owned cancellation, turn budgets and response-size enforcement
+// are excluded. A canceled upstream read alone does not prove the client left.
 func shouldClassifyOpenAIUpstreamStreamReadError(err error, contexts ...context.Context) bool {
-	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrUpstreamResponseBodyTooLarge) {
+	if err == nil || IsTurnBudgetError(err) || errors.Is(err, ErrUpstreamResponseBodyTooLarge) {
 		return false
 	}
 	for _, ctx := range contexts {
@@ -83,4 +85,69 @@ func classifyOpenAIUpstreamStreamReadError(err error) (code, message string) {
 		}
 	}
 	return OpenAIUpstreamStreamReadErrorCode, "Upstream response stream was interrupted"
+}
+
+// HTTP response readers use detached upstream contexts for final usage. Bound
+// that drain independently of upstream pings, just like the native WS reader.
+// This guard closes the existing body to unblock both scanners and buffered reads.
+type openAIHTTPUsageDrain struct {
+	ctx                           context.Context
+	mu                            sync.Mutex
+	closeBody                     func() error
+	timer                         *time.Timer
+	stopContexts                  []func() bool
+	stopped, triggered, completed bool
+}
+
+func newOpenAIHTTPUsageDrain(ctx context.Context, closeBody func() error, additional ...context.Context) *openAIHTTPUsageDrain {
+	d := &openAIHTTPUsageDrain{closeBody: closeBody, ctx: ctx}
+	for _, observed := range append(additional, ctx) {
+		if observed != nil {
+			d.stopContexts = append(d.stopContexts, context.AfterFunc(observed, d.start))
+		}
+	}
+	return d
+}
+func (d *openAIHTTPUsageDrain) start() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.stopped || d.triggered {
+		return
+	}
+	d.triggered = true
+	d.timer = time.AfterFunc(openAIWSUsageDrainTimeout, func() {
+		if d.closeBody != nil {
+			_ = d.closeBody()
+		}
+	})
+}
+func (d *openAIHTTPUsageDrain) disconnected() bool {
+	canceled := d.ctx != nil && d.ctx.Err() != nil
+	if canceled {
+		d.start()
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return !d.completed && (d.triggered || canceled)
+}
+
+// A successfully flushed protocol completion wins over simultaneous cancellation.
+// Callers must still retain actual write/flush failures; this is not a receipt.
+func (d *openAIHTTPUsageDrain) complete() {
+	d.stop()
+	d.mu.Lock()
+	d.completed = true
+	d.mu.Unlock()
+}
+
+func (d *openAIHTTPUsageDrain) stop() {
+	for _, stop := range d.stopContexts {
+		stop()
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.stopped = true
+	if d.timer != nil {
+		d.timer.Stop()
+	}
 }

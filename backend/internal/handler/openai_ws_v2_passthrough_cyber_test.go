@@ -47,6 +47,7 @@ func newOpenAIWSPassthroughHandlerHarness(t *testing.T, upstreamURL string, sett
 
 	groupID := int64(4301)
 	account := service.Account{
+		GroupIDs:    []int64{groupID},
 		ID:          9951,
 		Name:        "openai-ws-passthrough-cyber",
 		Platform:    service.PlatformOpenAI,
@@ -102,6 +103,10 @@ func newOpenAIWSPassthroughHandlerHarness(t *testing.T, upstreamURL string, sett
 		GroupID: &groupID,
 		User:    &service.User{ID: 1751, Status: service.StatusActive},
 	}
+	apiKey.Status = service.StatusActive
+	apiKey.Group = &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	h.apiKeyService = newWSGroupPricingAPIKeyService(&wsGroupPricingAPIKeyRepoStub{apiKey: *apiKey, group: *apiKey.Group})
+	h.cfg = cfg
 	handlerDone := make(chan struct{})
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
@@ -232,6 +237,18 @@ func TestOpenAIResponsesWebSocketV2PassthroughCyberMarkIsConsumedAfterTurn(t *te
 }
 
 func TestOpenAIResponsesWebSocketV2PassthroughNonCyberTurnAllowsFollowup(t *testing.T) {
+	for _, firstEvent := range []string{
+		`{"type":"response.completed","response":{"id":"resp_non_cyber_handler_turn_1","model":"gpt-5.1","usage":{"input_tokens":2,"output_tokens":1}}}`,
+		`{"type":"response.failed","response":{"id":"resp_non_cyber_handler_turn_1","error":{"code":"session_blocked_by_cyber_policy","message":"Start a new conversation"}}}`,
+	} {
+		t.Run(gjson.Get(firstEvent, "type").String(), func(t *testing.T) {
+			assertOpenAINonCyberTurnAllowsFollowup(t, firstEvent)
+		})
+	}
+}
+
+func assertOpenAINonCyberTurnAllowsFollowup(t *testing.T, firstUpstreamEvent string) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 
 	upstreamDone := make(chan struct{})
@@ -247,9 +264,8 @@ func TestOpenAIResponsesWebSocketV2PassthroughNonCyberTurnAllowsFollowup(t *test
 		cancelRead()
 		require.NoError(t, err)
 
-		firstCompleted := []byte(`{"type":"response.completed","response":{"id":"resp_non_cyber_handler_turn_1","model":"gpt-5.1","usage":{"input_tokens":2,"output_tokens":1}}}`)
 		writeCtx, cancelWrite := context.WithTimeout(r.Context(), 3*time.Second)
-		err = conn.Write(writeCtx, coderws.MessageText, firstCompleted)
+		err = conn.Write(writeCtx, coderws.MessageText, []byte(firstUpstreamEvent))
 		cancelWrite()
 		require.NoError(t, err)
 

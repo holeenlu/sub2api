@@ -121,7 +121,13 @@ func TestOpenAICapacityShedHonorsRetryAfter(t *testing.T) {
 		{name: "http milliseconds", headers: http.Header{"Retry-After-Ms": []string{"6000"}}, want: 6 * time.Second},
 		{name: "body seconds", body: `{"error":{"headers":{"retry-after":"7"},"message":"Our servers are currently overloaded. Please try again later."}}`, want: 7 * time.Second},
 		{name: "body milliseconds", body: `{"response":{"error":{"headers":{"retry-after-ms":"7000"},"message":"Our servers are currently overloaded. Please try again later."}}}`, want: 7 * time.Second},
-		{name: "bounded", headers: http.Header{"Retry-After": []string{"60"}}, want: openAIRequestScopedRetryMaxDelay},
+		{name: "long upstream delay is not shortened", headers: http.Header{"Retry-After": []string{"60"}}, want: time.Minute},
+		{name: "long upstream milliseconds are not shortened", headers: http.Header{"Retry-After-Ms": []string{"30000"}}, want: 30 * time.Second},
+		{name: "long stream error delay is not shortened", body: `{"response":{"error":{"headers":{"retry-after":"30"}}}}`, want: 30 * time.Second},
+		{name: "duration overflow stays beyond budget", headers: http.Header{"Retry-After": []string{"99999999999999999999"}}, want: time.Duration(1<<63 - 1)},
+		{name: "float overflow stays beyond budget", headers: http.Header{"Retry-After": []string{strings.Repeat("9", 400)}}, want: time.Duration(1<<63 - 1)},
+		{name: "invalid nonfinite seconds", headers: http.Header{"Retry-After": []string{"Inf"}}},
+		{name: "invalid nonfinite milliseconds", headers: http.Header{"Retry-After-Ms": []string{"NaN"}}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			failoverErr := newOpenAIUpstreamFailoverError(
@@ -135,6 +141,13 @@ func TestOpenAICapacityShedHonorsRetryAfter(t *testing.T) {
 			require.Equal(t, test.want, failoverErr.SameAccountRetryDelay)
 		})
 	}
+	t.Run("HTTP date remains the upstream boundary", func(t *testing.T) {
+		retryAt := time.Now().Add(time.Minute).UTC().Truncate(time.Second)
+		before := time.Now()
+		delay := openAIRequestScopedRetryDelay(http.Header{"Retry-After": []string{retryAt.Format(http.TimeFormat)}}, nil)
+		require.GreaterOrEqual(t, delay, time.Until(retryAt))
+		require.LessOrEqual(t, delay, retryAt.Sub(before))
+	})
 }
 
 // 上游降载的真实序列是「event: error → event: response.failed」。error 帧不算
@@ -197,6 +210,7 @@ func TestOpenAIStreamMetadataAndKeepaliveBeforeOverloadFailOver(t *testing.T) {
 		"",
 		"event: error",
 		`data: {"type":"error","error":{"type":"service_unavailable_error","message":"Our servers are currently overloaded. Please try again later."}}`,
+		"",
 		"",
 	}, "\n")
 
@@ -432,6 +446,7 @@ func TestOpenAIStreamCapacityShedAfterOutputRewritesCodeForClient(t *testing.T) 
 			"event: response.failed",
 			`data: {"type":"response.failed","response":{"id":"resp_1","status":"failed","error":{"code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}},"sequence_number":3}`,
 			"",
+			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-shed-after-output"}},
 	}
@@ -452,6 +467,12 @@ func TestOpenAIStreamCapacityShedAfterOutputRewritesCodeForClient(t *testing.T) 
 	require.True(t, logSink.ContainsMessage("gateway.failover_suppressed_after_semantic_output"))
 	require.True(t, logSink.ContainsFieldValue("path", "native_sse"))
 	require.True(t, logSink.ContainsFieldValue("upstream_request_id", "rid-shed-after-output"))
+	raw, ok := c.Get(OpsUpstreamErrorsKey)
+	require.True(t, ok)
+	events := raw.([]*OpsUpstreamErrorEvent)
+	require.Equal(t, OpsUpstreamRetryStopped, events[len(events)-1].Kind)
+	require.Equal(t, string(OpenAIRetryStopDownstreamCommitted), events[len(events)-1].Reason)
+	require.Equal(t, http.StatusServiceUnavailable, LastOpsUpstreamAttempt(events).UpstreamStatusCode)
 }
 
 func TestOpenAIStreamProcessingFailureAfterOutputIsRecorded(t *testing.T) {
@@ -465,6 +486,7 @@ func TestOpenAIStreamProcessingFailureAfterOutputIsRecorded(t *testing.T) {
 		"",
 		"event: response.failed",
 		`data: {"type":"response.failed","response":{"id":"resp_processing_failure","status":"failed","error":{"code":"server_error","message":"An error occurred while processing your request. Please include the request ID rid-processing-failure in your message."}}}`,
+		"",
 		"",
 	}, "\n")
 
@@ -499,7 +521,10 @@ func TestOpenAIStreamProcessingFailureAfterOutputIsRecorded(t *testing.T) {
 			events, ok := rawEvents.([]*OpsUpstreamErrorEvent)
 			require.True(t, ok)
 			require.NotEmpty(t, events)
-			event := events[len(events)-1]
+			require.Equal(t, OpsUpstreamRetryStopped, events[len(events)-1].Kind)
+			require.Equal(t, string(OpenAIRetryStopDownstreamCommitted), events[len(events)-1].Reason)
+			event := LastOpsUpstreamAttempt(events)
+			require.NotNil(t, event)
 			require.Equal(t, "stream_failed", event.Kind)
 			require.Equal(t, "rid-processing-failure", event.UpstreamRequestID)
 			require.Contains(t, event.Message, "An error occurred while processing your request")
@@ -582,4 +607,33 @@ func TestCodexOutboundVersionHasSingleSource(t *testing.T) {
 	require.GreaterOrEqual(t, CompareVersions(codexCLIVersion, codexUpstreamMinVersion), 0,
 		"codexCLIVersion=%q 不得低于上游最低门槛 %q", codexCLIVersion, codexUpstreamMinVersion,
 	)
+}
+
+// ChatGPT reports a response-protection outage as a bare error frame and ends
+// the stream with nothing else. The gateway used to synthesize a
+// response.failed for the client instead of failing over, although the same
+// error sent as response.failed did fail over.
+func TestOpenAIStreamResponseProtectionBareErrorFailsOver(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	bareError := []string{
+		"event: error",
+		`data: {"type":"error","error":{"code":"upstream_error","message":"response protection is unavailable","type":"internal_error"}}`,
+		"",
+	}
+	for _, keepalive := range []int{0, 10} {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+		svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize, StreamKeepaliveInterval: keepalive}}}
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(strings.Join(bareError, "\n"))),
+			Header:     http.Header{"X-Request-Id": []string{"rid-protection"}},
+		}
+
+		_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Name: "acc"}, time.Now(), "model", "model")
+		var failoverErr *UpstreamFailoverError
+		require.ErrorAs(t, err, &failoverErr, "keepalive=%d", keepalive)
+		require.Empty(t, rec.Body.String(), "keepalive=%d", keepalive)
+	}
 }

@@ -3,10 +3,17 @@
 package handler
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	coderws "github.com/coder/websocket"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsExpectedGrokRealtimeClose(t *testing.T) {
@@ -48,5 +55,42 @@ func TestGrokRealtimeBillingResultUsesForcedUniqueID(t *testing.T) {
 	}
 	if first.AudioUsage == nil || first.AudioUsage.Mode != "realtime" || first.AudioUsage.DurationOrUnits != 1.5 {
 		t.Fatalf("unexpected audio usage: %#v", first.AudioUsage)
+	}
+}
+
+type grokUserSlotRejectCache struct {
+	service.ConcurrencyCache
+	users []int64
+}
+
+func (f *grokUserSlotRejectCache) AcquireUserSlot(_ context.Context, userID int64, _ int, _ string) (bool, error) {
+	f.users = append(f.users, userID)
+	return false, nil
+}
+func (f *grokUserSlotRejectCache) IncrementWaitCount(context.Context, int64, int) (bool, error) {
+	return false, nil
+}
+
+func TestGrokVoiceAndRealtimeEnforceUserConcurrencyBeforeUpstream(t *testing.T) {
+	for _, realtime := range []bool{false, true} {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodGet, "/v1/realtime", nil)
+		if realtime {
+			c.Request.Header.Set("Upgrade", "websocket")
+			c.Request.Header.Set("Connection", "Upgrade")
+		}
+		c.Set("api_key", &service.APIKey{ID: 9, UserID: 7, Group: &service.Group{Platform: service.PlatformGrok}})
+		c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 7, Concurrency: 1})
+		cache := &grokUserSlotRejectCache{}
+		h := &OpenAIGatewayHandler{gatewayService: &service.OpenAIGatewayService{}, billingCacheService: &service.BillingCacheService{}, apiKeyService: &service.APIKeyService{}}
+		h.concurrencyHelper = NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatNone, time.Millisecond)
+		if realtime {
+			h.GrokRealtime(c)
+		} else {
+			h.GrokVoice(c, "tts")
+		}
+		require.Equal(t, []int64{7}, cache.users)
+		require.Equal(t, http.StatusTooManyRequests, w.Code)
 	}
 }

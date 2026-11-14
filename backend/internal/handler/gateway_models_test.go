@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -138,7 +139,7 @@ func TestGatewayCompositeRouteModelsAppearInBothCatalogs(t *testing.T) {
 			h := newGatewayModelsHandlerForTest(accounts, tc.repo)
 			group := &service.Group{ID: groupID, Platform: service.PlatformComposite}
 			if tc.allowlist != nil {
-				group.ModelAllowlist = service.GroupModelAllowlist{Enabled: true, Models: tc.allowlist}
+				group.ModelAllowlist = catalog.ModelAllowlist{Enabled: true, Models: tc.allowlist}
 			}
 			for _, endpoint := range []string{"models", "codex"} {
 				rec := httptest.NewRecorder()
@@ -333,7 +334,7 @@ func TestGatewayModels_UnmappedOpenAIAccountsSupplementMappedModels(t *testing.T
 	tests := []struct {
 		name     string
 		accounts []service.Account
-		config   service.GroupModelAllowlist
+		config   catalog.ModelAllowlist
 		want     []string
 	}{
 		{
@@ -354,13 +355,13 @@ func TestGatewayModels_UnmappedOpenAIAccountsSupplementMappedModels(t *testing.T
 		{
 			name:     "custom list can select defaults and aliases",
 			accounts: accounts,
-			config:   service.GroupModelAllowlist{Enabled: true, Models: []string{alias, "gpt-5.6-sol", sparkModel, "unknown-model"}},
+			config:   catalog.ModelAllowlist{Enabled: true, Models: []string{alias, "gpt-5.6-sol", sparkModel, "unknown-model"}},
 			want:     []string{alias, "gpt-5.6-sol", sparkModel},
 		},
 		{
 			name:     "unavailable custom selection remains empty",
 			accounts: accounts,
-			config:   service.GroupModelAllowlist{Enabled: true, Models: []string{"unknown-model"}},
+			config:   catalog.ModelAllowlist{Enabled: true, Models: []string{"unknown-model"}},
 			want:     []string{},
 		},
 		{
@@ -492,7 +493,7 @@ func TestGatewayCodexModels_CustomModelsListFiltersCompositeManifest(t *testing.
 		Group: &service.Group{
 			ID:       groupID,
 			Platform: service.PlatformComposite,
-			ModelAllowlist: service.GroupModelAllowlist{
+			ModelAllowlist: catalog.ModelAllowlist{
 				Enabled: true,
 				Models:  []string{"grok-4.6"},
 			},
@@ -559,7 +560,7 @@ func TestGatewayModels_GeminiGroupFallsBackToGeminiModels(t *testing.T) {
 	var got gatewayModelsResponseForTest
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	require.Equal(t, "list", got.Object)
-	require.Contains(t, modelIDsForTest(got.Data), "gemini-3.5-flash")
+	require.Contains(t, modelIDsForTest(got.Data), "gemini-2.5-flash")
 	require.NotContains(t, modelIDsForTest(got.Data), "claude-sonnet-4-6")
 }
 
@@ -765,7 +766,7 @@ func TestGatewayModels_CustomModelsListDisabledKeepsOriginalModels(t *testing.T)
 		Group: &service.Group{
 			ID:       groupID,
 			Platform: service.PlatformOpenAI,
-			ModelAllowlist: service.GroupModelAllowlist{
+			ModelAllowlist: catalog.ModelAllowlist{
 				Enabled: false,
 				Models:  []string{"gpt-5.5"},
 			},
@@ -812,7 +813,7 @@ func TestGatewayModels_CustomModelsListFiltersAndOrdersMappedModels(t *testing.T
 		Group: &service.Group{
 			ID:       groupID,
 			Platform: service.PlatformOpenAI,
-			ModelAllowlist: service.GroupModelAllowlist{
+			ModelAllowlist: catalog.ModelAllowlist{
 				Enabled: true,
 				Models:  []string{"gpt-5.5", "missing-model", "gpt-5.4"},
 			},
@@ -904,7 +905,7 @@ func TestGatewayModels_CompositeCustomModelsListFiltersAcrossConcretePlatforms(t
 		Group: &service.Group{
 			ID:       groupID,
 			Platform: service.PlatformComposite,
-			ModelAllowlist: service.GroupModelAllowlist{
+			ModelAllowlist: catalog.ModelAllowlist{
 				Enabled: true,
 				Models:  []string{"gemini-2.5-flash", "missing-model", "ag-custom-model", "gpt-5.5", "kimi-custom", "glm-custom", "deepseek-custom", "minimax-custom"},
 			},
@@ -1124,7 +1125,7 @@ func TestGatewayModels_CustomModelsListKeepsConcreteModelAllowedByWildcardMappin
 		Group: &service.Group{
 			ID:       groupID,
 			Platform: service.PlatformAnthropic,
-			ModelAllowlist: service.GroupModelAllowlist{
+			ModelAllowlist: catalog.ModelAllowlist{
 				Enabled: true,
 				Models:  []string{"claude-sonnet-4-6"},
 			},
@@ -1175,7 +1176,7 @@ func TestGatewayModels_AnthropicCustomModelsListIncludesOAuthClaudeAndMappedDeep
 		Group: &service.Group{
 			ID:       groupID,
 			Platform: service.PlatformAnthropic,
-			ModelAllowlist: service.GroupModelAllowlist{
+			ModelAllowlist: catalog.ModelAllowlist{
 				Enabled: true,
 				Models:  []string{"claude-fable-5", "claude-opus-4-8", "deepseek-v4-pro"},
 			},
@@ -1226,7 +1227,7 @@ func TestGatewayModels_AnthropicCustomModelsListDisabledKeepsMappedModelList(t *
 		Group: &service.Group{
 			ID:       groupID,
 			Platform: service.PlatformAnthropic,
-			ModelAllowlist: service.GroupModelAllowlist{
+			ModelAllowlist: catalog.ModelAllowlist{
 				Enabled: false,
 				Models:  []string{"claude-fable-5", "deepseek-v4-pro"},
 			},
@@ -1267,7 +1268,7 @@ func TestGatewayModels_AnthropicCustomModelsListIncludesOAuthClaudeWithoutMappin
 		Group: &service.Group{
 			ID:       groupID,
 			Platform: service.PlatformAnthropic,
-			ModelAllowlist: service.GroupModelAllowlist{
+			ModelAllowlist: catalog.ModelAllowlist{
 				Enabled: true,
 				Models:  []string{"claude-opus-4-6-thinking", "claude-sonnet-4-5"},
 			},
@@ -1312,7 +1313,7 @@ func TestGatewayModels_CustomModelsListCanReturnEmptyWhenSelectionsUnavailable(t
 		Group: &service.Group{
 			ID:       groupID,
 			Platform: service.PlatformOpenAI,
-			ModelAllowlist: service.GroupModelAllowlist{
+			ModelAllowlist: catalog.ModelAllowlist{
 				Enabled: true,
 				Models:  []string{"gpt-5.5"},
 			},
@@ -1349,7 +1350,7 @@ func TestGatewayModels_CustomModelsListFiltersDefaultFallbackModels(t *testing.T
 		Group: &service.Group{
 			ID:       groupID,
 			Platform: service.PlatformOpenAI,
-			ModelAllowlist: service.GroupModelAllowlist{
+			ModelAllowlist: catalog.ModelAllowlist{
 				Enabled: true,
 				Models:  []string{"gpt-5.5", "legacy-gpt-2024", "gpt-5.4"},
 			},
@@ -1386,7 +1387,7 @@ func TestGatewayModels_OpenAICustomModelsListKeepsOpenAIResponseShapeForDefaultF
 		Group: &service.Group{
 			ID:       groupID,
 			Platform: service.PlatformOpenAI,
-			ModelAllowlist: service.GroupModelAllowlist{
+			ModelAllowlist: catalog.ModelAllowlist{
 				Enabled: true,
 				Models:  []string{"gpt-5.5", "gpt-5.4"},
 			},
@@ -1652,7 +1653,7 @@ func TestGatewayModels_GPT6SolLunaDiscoveryRespectsGroupAndAccountRestrictions(t
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-			c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: tc.selected}}})
+			c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, ModelAllowlist: catalog.ModelAllowlist{Enabled: true, Models: tc.selected}}})
 			h.Models(c)
 			require.Equal(t, http.StatusOK, rec.Code)
 			var got gatewayModelsResponseForTest
@@ -1730,7 +1731,7 @@ func TestGatewayModels_CompositeExactRoutesRespectTypeSafeIsolation(t *testing.T
 		t.Run(name, func(t *testing.T) {
 			group := &service.Group{ID: groupID, Platform: service.PlatformComposite}
 			if allowlisted {
-				group.ModelAllowlist = service.GroupModelAllowlist{Enabled: true, Models: []string{
+				group.ModelAllowlist = catalog.ModelAllowlist{Enabled: true, Models: []string{
 					"systemone-any-alias", "systemone-responses-alias", "systemone-legacy-alias", "jev-latest", "responses-alias", "image-alias",
 				}}
 			}
@@ -1828,7 +1829,7 @@ func TestGatewayModels_CompositeCodexFiltersEffectiveResponsesRoutes(t *testing.
 					}, &gatewayModelsRouteRepoStub{routes: routes})
 					group := &service.Group{ID: groupID, Platform: service.PlatformComposite}
 					if allowlisted {
-						group.ModelAllowlist = service.GroupModelAllowlist{Enabled: true, Models: []string{scenario.model, "responses-control"}}
+						group.ModelAllowlist = catalog.ModelAllowlist{Enabled: true, Models: []string{scenario.model, "responses-control"}}
 					}
 					for _, codex := range []bool{false, true} {
 						recorder := httptest.NewRecorder()
@@ -1873,7 +1874,7 @@ func TestGatewayModels_CompositeCodexRouteLookupErrorKeepsFallback(t *testing.T)
 			h := newGatewayModelsHandlerForTest(&gatewayModelsAccountRepoStub{}, &gatewayModelsRouteRepoStub{err: errors.New("unavailable")})
 			group := &service.Group{ID: groupID, Platform: service.PlatformComposite}
 			if allowlisted {
-				group.ModelAllowlist = service.GroupModelAllowlist{Enabled: true, Models: []string{model}}
+				group.ModelAllowlist = catalog.ModelAllowlist{Enabled: true, Models: []string{model}}
 			}
 			recorder := httptest.NewRecorder()
 			ctx, _ := gin.CreateTestContext(recorder)

@@ -167,7 +167,7 @@ func TestSSETransportDefaultsAndFirstOutputGuardCompose(t *testing.T) {
 
 func TestSSEConfiguredLargeFrameLimitRemainsAvailable(t *testing.T) {
 	defaults := newBoundedSSELineReader(strings.NewReader(""), nil)
-	require.Equal(t, 500<<20, defaults.maxLineSize)
+	require.Equal(t, 128<<20, defaults.maxLineSize)
 	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: 64 << 20}}
 	configured := newBoundedSSELineReader(strings.NewReader(""), cfg)
 	require.Equal(t, 64<<20, configured.maxLineSize)

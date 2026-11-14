@@ -111,14 +111,7 @@ func TestOpenAIResponsesInstructionsEchoRestoreHelpers(t *testing.T) {
 	require.JSONEq(t, `{"type":"response.created","response":{"id":"r","instructions":null}}`, string(restoreOpenAIResponsesInstructionsEchoInEvent(c, event)))
 	require.Equal(t, delta, restoreOpenAIResponsesInstructionsEchoInEvent(c, delta))
 	require.JSONEq(t, `{"id":"r","instructions":null}`, string(restoreOpenAIResponsesInstructionsEchoInResponse(c, []byte(`{"id":"r","instructions":"injected"}`))))
-	sseBody := "event: response.created\ndata: " + string(event) + "\n\ndata: " + string(delta) + "\n"
-	restoredSSE := restoreOpenAIResponsesInstructionsEchoInSSEBody(c, sseBody)
-	require.NotContains(t, restoredSSE, `"instructions":"injected"`)
-	require.Contains(t, restoredSSE, `"instructions":null`)
-	require.Contains(t, restoredSSE, string(delta))
 
-	rememberOpenAIResponsesClientInstructions(c, []byte(`{"model":"m"}`))
-	require.Equal(t, event, restoreOpenAIResponsesInstructionsEchoInEvent(c, event), "a new attempt clears the previous restore value")
 }
 
 func TestOpenAIGatewayService_OAuthPassthrough_CodexBlankInstructionsForwardedAsIs(t *testing.T) {

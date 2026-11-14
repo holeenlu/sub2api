@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"github.com/Wei-Shaw/sub2api/internal/authz"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,6 +16,7 @@ import (
 
 type adminUsageRepoCapture struct {
 	service.UsageLogRepository
+	listRows     []service.UsageLog
 	listParams   pagination.PaginationParams
 	listFilters  usagestats.UsageLogFilters
 	statsFilters usagestats.UsageLogFilters
@@ -23,7 +25,7 @@ type adminUsageRepoCapture struct {
 func (s *adminUsageRepoCapture) ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters usagestats.UsageLogFilters) ([]service.UsageLog, *pagination.PaginationResult, error) {
 	s.listParams = params
 	s.listFilters = filters
-	return []service.UsageLog{}, &pagination.PaginationResult{
+	return s.listRows, &pagination.PaginationResult{
 		Total:    0,
 		Page:     params.Page,
 		PageSize: params.PageSize,
@@ -216,4 +218,53 @@ func TestAdminUsageStatsInvalidStream(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestAdminUsagePaginationRespectsExportGrantAfterQueryCaching(t *testing.T) {
+	for _, exported := range []bool{false, true} {
+		repo := &adminUsageRepoCapture{}
+		h := NewUsageHandler(service.NewUsageService(repo, nil, nil, nil), nil, nil, nil)
+		r := gin.New()
+		r.GET("/admin/usage", func(c *gin.Context) { _ = c.Query("sort_by"); c.Next() }, h.List)
+		actor := authz.Subject{Role: authz.Admin, PolicyVersion: 1, Permissions: []string{"usage.read"}}
+		if exported {
+			actor.Permissions = append(actor.Permissions, "usage.export")
+		}
+		req := httptest.NewRequest(http.MethodGet, "/admin/usage?page_size=1000", nil)
+		req = req.WithContext(authz.WithSubject(req.Context(), actor))
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		require.Equal(t, 200, rec.Code)
+		if exported {
+			require.Equal(t, 1000, repo.listParams.PageSize)
+		} else {
+			require.Equal(t, 100, repo.listParams.PageSize)
+		}
+	}
+}
+
+func TestAdminUsageAccountIdentityProjection(t *testing.T) {
+	for _, role := range []string{authz.Admin, authz.SuperAdmin} {
+		t.Run(role, func(t *testing.T) {
+			repo := &adminUsageRepoCapture{listRows: []service.UsageLog{{ID: 1, UserID: 2, AccountID: 991, ActualCost: 0.5, Account: &service.Account{ID: 991, Name: "private-upstream@example.com"}}}}
+			h := NewUsageHandler(service.NewUsageService(repo, nil, nil, nil), nil, nil, nil)
+			router := gin.New()
+			router.Use(func(c *gin.Context) {
+				c.Request = c.Request.WithContext(authz.WithSubject(c.Request.Context(), authz.Subject{Role: role, UserID: 2, ManagementRequest: true, Permissions: []string{"usage.read", "accounts.read", "billing.cost.read"}}))
+				c.Next()
+			})
+			router.GET("/api/v1/admin/usage", h.List)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/usage", nil))
+			require.Equal(t, http.StatusOK, rec.Code)
+			if role == authz.SuperAdmin {
+				require.Contains(t, rec.Body.String(), "private-upstream@example.com")
+			} else {
+				require.NotContains(t, rec.Body.String(), "private-upstream")
+				require.NotContains(t, rec.Body.String(), `"account_id"`)
+				require.NotContains(t, rec.Body.String(), `"authorization_mode"`)
+			}
+			require.Contains(t, rec.Body.String(), `"actual_cost":0.5`)
+		})
+	}
 }

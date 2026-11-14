@@ -14,11 +14,11 @@ type responsesDiscoveredToolIdentity struct {
 	ambiguous bool
 }
 
-// promoteResponsesToolSearchDiscoveries makes successfully discovered client
+// PromoteResponsesToolSearchDiscoveries makes successfully discovered client
 // tools callable for function-only upstreams. The original tool_search_output
 // remains request history and is normalized separately; declarations are
 // appended after static tools so the client's declaration order stays stable.
-func promoteResponsesToolSearchDiscoveries(req map[string]any) (bool, error) {
+func PromoteResponsesToolSearchDiscoveries(req map[string]any) (bool, error) {
 	tools, ok := req["tools"].([]any)
 	if !ok || len(tools) == 0 || !hasResponsesToolSearchDeclaration(tools) {
 		return false, nil

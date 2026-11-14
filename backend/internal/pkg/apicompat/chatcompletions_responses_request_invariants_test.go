@@ -185,3 +185,29 @@ func TestNormalize_DropsOrphanToolReply(t *testing.T) {
 		require.NotEqualf(t, "tool", m.Role, "orphan tool reply should have been dropped")
 	}
 }
+
+func TestChatToolsPreserveAnthropicControlsAcrossBridge(t *testing.T) {
+	raw := []byte(`{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"hello"}],"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object","properties":{}},"strict":true,"eager_input_streaming":true,"cache_control":{"type":"ephemeral","ttl":"1h"}}}]}`)
+	var chat ChatCompletionsRequest
+	require.NoError(t, json.Unmarshal(raw, &chat))
+	responses, err := ChatCompletionsToResponses(&chat)
+	require.NoError(t, err)
+	anthropic, err := ResponsesToAnthropicRequest(responses)
+	require.NoError(t, err)
+	require.Len(t, anthropic.Tools, 1)
+	require.NotNil(t, anthropic.Tools[0].Strict)
+	require.True(t, *anthropic.Tools[0].Strict)
+	require.NotNil(t, anthropic.Tools[0].EagerInputStreaming)
+	require.True(t, *anthropic.Tools[0].EagerInputStreaming)
+	require.Equal(t, "1h", anthropic.Tools[0].CacheControl.TTL)
+	responseWire, err := json.Marshal(responses)
+	require.NoError(t, err)
+	var wire map[string]any
+	require.NoError(t, json.Unmarshal(responseWire, &wire))
+	tools := wire["tools"].([]any)
+	tool := tools[0].(map[string]any)
+	require.NotContains(t, tool, "cache_control", "Messages-only controls must not leak into real OpenAI Responses requests")
+	require.NotContains(t, tool, "eager_input_streaming")
+	require.Equal(t, true, tool["strict"])
+
+}

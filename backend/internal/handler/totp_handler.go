@@ -148,7 +148,7 @@ func (h *TotpHandler) Disable(c *gin.Context) {
 		return
 	}
 
-	if err := h.totpService.Disable(c.Request.Context(), subject.UserID, req.EmailCode, req.Password); err != nil {
+	if err := h.totpService.DisableWithSession(c.Request.Context(), subject.UserID, req.EmailCode, req.Password, middleware2.StepUpSessionKey(c, subject.UserID)); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}

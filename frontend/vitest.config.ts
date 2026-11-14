@@ -10,6 +10,11 @@ export default defineConfig({
       'vue-i18n': 'vue-i18n/dist/vue-i18n.runtime.esm-bundler.js'
     }
   },
+  define: {
+    // 與 vite.config.ts 一致：runtime 版 vue-i18n 需要 JIT 才能編譯訊息，
+    // 否則測試裡的 t() 只會回傳 key，測不到插值與 @: 連結訊息。
+    __INTLIFY_JIT_COMPILATION__: true
+  },
   test: {
     globals: true,
     environment: 'jsdom',

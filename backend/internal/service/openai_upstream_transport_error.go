@@ -5,18 +5,31 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/gateway/model"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
+	"golang.org/x/net/http2"
 )
 
 // openAITransportErrorTempUnschedDuration is how long an account is temporarily
 // unscheduled after a durable transport failure (matches tokenRefreshTempUnschedDuration).
 const openAITransportErrorTempUnschedDuration = 10 * time.Minute
+
+// OpenAITransportAttemptError retains the transport's actual send evidence.
+// Its zero state is unknown; absence of output never proves a request unsent.
+type OpenAITransportAttemptError struct {
+	Cause     error
+	SendState model.SendState
+}
+
+func (e *OpenAITransportAttemptError) Error() string { return e.Cause.Error() }
+func (e *OpenAITransportAttemptError) Unwrap() error { return e.Cause }
 
 // openAITransportFailoverBody is the OpenAI-format error body attached to the
 // failover error for a transport-level failure. Kept identical to the legacy
@@ -99,6 +112,18 @@ func isClientCanceledTransportError(ctx context.Context, err error) bool {
 	return errors.Is(err, context.Canceled) && ctx != nil && errors.Is(ctx.Err(), context.Canceled)
 }
 
+// net/http may wrap an unexported HTTP/2 StreamError. Match its complete
+// peer signature so an ordinary socket error does not take this path.
+var openAIHTTP2PeerResetPattern = regexp.MustCompile(`(?:^|: )stream error: stream ID [0-9]+; [^;\r\n]+; received from peer$`)
+
+func isOpenAIHTTP2PeerReset(err error) bool {
+	var streamErr http2.StreamError
+	if errors.As(err, &streamErr) {
+		return streamErr.Cause != nil && streamErr.Cause.Error() == "received from peer"
+	}
+	return openAIHTTP2PeerResetPattern.MatchString(err.Error())
+}
+
 // handleOpenAIUpstreamTransportError handles a transport-level upstream failure
 // (Do/DoWithTLS returned a non-HTTP error: proxy/DNS/TCP/TLS). It:
 //  1. records the failure in Ops error logs (status 0, kind=request_error),
@@ -106,19 +131,50 @@ func isClientCanceledTransportError(ctx context.Context, err error) bool {
 //  2. for durable faults (expired/rejected proxy creds, dead proxy, DNS/routing)
 //     temporarily unschedules the account (DB + in-memory) and logs a stable
 //     warn event that alert rules can key on;
-//  3. returns an error that is *UpstreamFailoverError (so the handler fails over
-//     to a healthy account) for all non-canceled errors, or a plain error for
-//     context.Canceled (client gone — no failover, no eviction).
+//  3. returns a failover error only when the send and recovery rules permit it.
 //
 // It deliberately does NOT write to the response: the handler owns the response
 // (failover, or a protocol-correct error once failover is exhausted).
 //
 // passthrough tags the Ops error event for the OpenAI passthrough forward path.
 func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Context, c *gin.Context, account *Account, err error, passthrough bool) error {
+	if IsTurnBudgetError(err) || IsNativeDispatchDenied(err) {
+		return err
+	}
+	var attempt *OpenAITransportAttemptError
+	if errors.As(err, &attempt) && errors.Is(err, ErrTurnTargetExhausted) {
+		if attempt.SendState != model.SendNotSent && (c == nil || !c.GetBool("openai_uncertain_replay_safe")) {
+			return err
+		}
+		// Translate the original target-budget failure only after considering
+		// all redirect/TLS hops. No contradictory inner failover is retained.
+		failure := turnAttemptFailure(err)
+		var targetFailure *UpstreamFailoverError
+		if errors.As(failure, &targetFailure) {
+			targetFailure.RequestNotSent = attempt.SendState == model.SendNotSent
+		}
+		return failure
+	}
+	var recovery *UpstreamFailoverError
+	if errors.As(err, &recovery) {
+		return err
+	}
+
+	if errors.Is(err, ErrOpenAITurnAttemptBudgetExhausted) || errors.Is(err, ErrOpenAIWSFirstOutputBudgetExhausted) {
+		return err
+	}
 	if isClientCanceledTransportError(ctx, err) {
 		return err
 	}
 	safeErr := sanitizeUpstreamErrorMessage(err.Error())
+	var peerReset error
+	// A peer can reset the stream after consuming the POST. The permissive
+	// replay hint does not prove an attempt without response headers was unsent.
+	if (attempt == nil || attempt.SendState != model.SendNotSent) &&
+		shouldClassifyOpenAIUpstreamStreamReadError(err, ctx) && isOpenAIHTTP2PeerReset(err) {
+		peerReset = newOpenAIUpstreamStreamReadError(err)
+		_, safeErr, _ = OpenAIUpstreamStreamReadErrorDetails(peerReset)
+	}
 	setOpsUpstreamError(c, 0, safeErr, "")
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 		ProxyID:            opsUpstreamProxyID(account),
@@ -131,7 +187,6 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 		Kind:               "request_error",
 		Message:            safeErr,
 	})
-
 	// Client disconnected: do NOT fail over to another account and do NOT evict
 	// this one — the upstream never had a chance to exhibit a fault.
 	if errors.Is(err, context.Canceled) || (errors.Is(err, context.DeadlineExceeded) && errors.Is(ctx.Err(), context.DeadlineExceeded)) {
@@ -143,6 +198,9 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 		scheduleOllamaCloudUsageActivity(s.deferredService, account)
 		scheduleOpenCodeGoUsageActivity(s.deferredService, account)
 	}
+	if peerReset != nil {
+		return peerReset
+	}
 
 	// 插件已把请求交给上游时，自动切换账号可能造成重复扣费或重复执行。
 	var pluginErr *PluginTransportError
@@ -153,10 +211,15 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 	if classifyUpstreamTransportError(err).Persistent {
 		s.tempUnscheduleOpenAITransportError(ctx, account, safeErr)
 	}
+	if errors.As(err, &attempt) && attempt.SendState != model.SendNotSent && (c == nil || !c.GetBool("openai_uncertain_replay_safe")) {
+		return err
+	}
 
 	return &UpstreamFailoverError{
-		StatusCode:   http.StatusBadGateway,
-		ResponseBody: openAITransportFailoverBody,
+		StatusCode:     http.StatusBadGateway,
+		ResponseBody:   openAITransportFailoverBody,
+		RequestNotSent: (attempt != nil && attempt.SendState == model.SendNotSent) || (pluginErr != nil && !pluginErr.RequestSent),
+		Cause:          err,
 	}
 }
 

@@ -108,6 +108,7 @@ type ChatGPTAccountInfo struct {
 
 var (
 	chatGPTAccountsCheckURL = "https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27"
+	chatGPTMeURL            = "https://chatgpt.com/backend-api/me"
 	chatGPTSubscriptionsURL = "https://chatgpt.com/backend-api/subscriptions"
 )
 
@@ -216,6 +217,19 @@ func fetchChatGPTAccountInfo(ctx context.Context, clientFactory PrivacyClientFac
 	if info.PlanType == "" {
 		slog.Debug("chatgpt_account_check_no_plan_type", "body", truncate(resp.String(), 300))
 		return nil
+	}
+
+	// Email is returned by the authenticated user endpoint, not accounts/check
+	// and never by decoding an unverified token. Profile failure does not discard
+	// an independently verified account/plan.
+	var profile struct {
+		Email string `json:"email"`
+	}
+	profileResp, profileErr := client.R().SetContext(ctx).
+		SetHeader("Authorization", "Bearer "+accessToken).
+		SetHeader("Accept", "application/json").SetSuccessResult(&profile).Get(chatGPTMeURL)
+	if profileErr == nil && profileResp.IsSuccessState() {
+		info.Email = strings.TrimSpace(profile.Email)
 	}
 
 	slog.Info("chatgpt_account_check_success", "plan_type", info.PlanType, "subscription_expires_at", info.SubscriptionExpiresAt, "org_id", orgID)

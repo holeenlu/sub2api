@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -48,20 +49,20 @@ func TestRetrieveModelMatchesVisibleCatalogue(t *testing.T) {
 				}})
 				list := requestModelForTest(h, group, "", "")
 				require.Equal(t, http.StatusOK, list.Code, list.Body.String())
-				var catalog struct {
+				var listedModels struct {
 					Data []json.RawMessage `json:"data"`
 				}
-				require.NoError(t, json.Unmarshal(list.Body.Bytes(), &catalog))
-				require.NotEmpty(t, catalog.Data)
+				require.NoError(t, json.Unmarshal(list.Body.Bytes(), &listedModels))
+				require.NotEmpty(t, listedModels.Data)
 				var model struct {
 					ID string `json:"id"`
 				}
-				require.NoError(t, json.Unmarshal(catalog.Data[0], &model))
+				require.NoError(t, json.Unmarshal(listedModels.Data[0], &model))
 				retrieved := requestModelForTest(h, group, model.ID, "")
 				require.Equal(t, http.StatusOK, retrieved.Code, retrieved.Body.String())
-				require.JSONEq(t, string(catalog.Data[0]), retrieved.Body.String())
+				require.JSONEq(t, string(listedModels.Data[0]), retrieved.Body.String())
 				require.Equal(t, http.StatusNotFound, requestModelForTest(h, group, "unknown-model", "").Code)
-				group.ModelAllowlist = service.GroupModelAllowlist{Enabled: true, Models: []string{"absent-from-source"}}
+				group.ModelAllowlist = catalog.ModelAllowlist{Enabled: true, Models: []string{"absent-from-source"}}
 				hidden := requestModelForTest(h, group, model.ID, "")
 				require.Equal(t, http.StatusNotFound, hidden.Code, hidden.Body.String())
 				require.Contains(t, hidden.Body.String(), `"code":"model_not_found"`)
@@ -91,17 +92,17 @@ func TestRetrievePinnedModelPreservesMetadataFilteringAndErrors(t *testing.T) {
 			codex := newPinnedCodexTestHandler([]service.Account{newPinnedCodexAccount(2, service.StatusActive, true, false)}, upstream, 3)
 			h := &GatewayHandler{openAIGatewayService: codex.gatewayService, maxAccountSwitches: 3}
 			group := &service.Group{ID: 72, Platform: service.PlatformOpenAI,
-				ModelAllowlist:            service.GroupModelAllowlist{Enabled: len(tc.selected) > 0, Models: tc.selected},
+				ModelAllowlist:            catalog.ModelAllowlist{Enabled: len(tc.selected) > 0, Models: tc.selected},
 				CodexModelsManifestConfig: service.GroupCodexModelsManifestConfig{Enabled: true, AccountIDs: []int64{2}}}
 			got := requestModelForTest(h, group, "special-model", "collection-etag")
 			require.Equal(t, tc.wantStatus, got.Code, got.Body.String())
 			if tc.wantStatus == http.StatusOK {
 				list := requestModelForTest(h, group, "", "")
-				var catalog struct {
+				var listedModels struct {
 					Data []json.RawMessage `json:"data"`
 				}
-				require.NoError(t, json.Unmarshal(list.Body.Bytes(), &catalog))
-				require.JSONEq(t, string(catalog.Data[0]), got.Body.String())
+				require.NoError(t, json.Unmarshal(list.Body.Bytes(), &listedModels))
+				require.JSONEq(t, string(listedModels.Data[0]), got.Body.String())
 				require.Contains(t, got.Body.String(), `"owned_by":"source-owner"`)
 				require.Contains(t, got.Body.String(), `"created":123`)
 				again := requestModelForTest(h, group, "special-model", list.Header().Get("ETag"))

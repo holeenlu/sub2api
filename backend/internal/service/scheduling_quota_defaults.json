@@ -1,0 +1,54 @@
+{
+  "protection": {
+    "anthropic_tier_thresholds_enabled": false,
+    "anthropic_default_5h": 85,
+    "anthropic_default_7d": 80,
+    "anthropic_max_5h": 95,
+    "anthropic_max_7d": 95,
+    "critical_band_percent": 5,
+    "large_cold_input_tokens": 100000,
+    "guard_large_cold": true,
+    "sample_max_age_seconds": 300
+  },
+  "openai": {
+    "default_threshold_5h": 0.85,
+    "default_threshold_7d": 0.8
+  },
+  "limits": {
+    "anthropic_default_5h": {
+      "min": 1,
+      "max": 100,
+      "step": 1
+    },
+    "anthropic_default_7d": {
+      "min": 1,
+      "max": 100,
+      "step": 1
+    },
+    "anthropic_max_5h": {
+      "min": 1,
+      "max": 100,
+      "step": 1
+    },
+    "anthropic_max_7d": {
+      "min": 1,
+      "max": 100,
+      "step": 1
+    },
+    "critical_band_percent": {
+      "min": 0,
+      "max": 50,
+      "step": 0.1
+    },
+    "large_cold_input_tokens": {
+      "min": 1000,
+      "max": 10000000,
+      "step": 1000
+    },
+    "sample_max_age_seconds": {
+      "min": 30,
+      "max": 3600,
+      "step": 1
+    }
+  }
+}

@@ -111,31 +111,7 @@ func TestDeriveCompatPromptCacheKey_UsesResolvedSparkFamily(t *testing.T) {
 	require.Equal(t, k1, k2, "resolved spark family should derive a stable compat cache key")
 }
 
-func TestDeriveAnthropicCompatPromptCacheKey_StableAcrossLaterTurns(t *testing.T) {
-	base := &apicompat.AnthropicRequest{
-		Model:  "claude-sonnet-4-5",
-		System: mustRawJSON(t, `"You are helpful."`),
-		Messages: []apicompat.AnthropicMessage{
-			{Role: "user", Content: mustRawJSON(t, `"Open repo"`)},
-		},
-	}
-	extended := &apicompat.AnthropicRequest{
-		Model:  "claude-sonnet-4-5",
-		System: mustRawJSON(t, `"You are helpful."`),
-		Messages: []apicompat.AnthropicMessage{
-			{Role: "user", Content: mustRawJSON(t, `"Open repo"`)},
-			{Role: "assistant", Content: mustRawJSON(t, `"Opened."`)},
-			{Role: "user", Content: mustRawJSON(t, `"Run tests"`)},
-		},
-	}
-
-	k1 := deriveAnthropicCompatPromptCacheKey(base, "gpt-5.3-codex")
-	k2 := deriveAnthropicCompatPromptCacheKey(extended, "gpt-5.3-codex")
-	require.NotEmpty(t, k1)
-	require.Equal(t, k1, k2, "cache key should stay stable as later Claude Code turns append history")
-}
-
-func TestDeriveAnthropicCompatPromptCacheKey_UsesCacheControlAnchors(t *testing.T) {
+func TestDeriveAnthropicCacheControlPromptCacheKey_StableAcrossLaterTurns(t *testing.T) {
 	base := &apicompat.AnthropicRequest{
 		Model: "claude-sonnet-4-5",
 		System: mustRawJSON(t, `[
@@ -157,8 +133,8 @@ func TestDeriveAnthropicCompatPromptCacheKey_UsesCacheControlAnchors(t *testing.
 		},
 	}
 
-	k1 := deriveAnthropicCompatPromptCacheKey(base, "gpt-5.4")
-	k2 := deriveAnthropicCompatPromptCacheKey(extended, "gpt-5.4")
+	k1 := deriveAnthropicCacheControlPromptCacheKey(base)
+	k2 := deriveAnthropicCacheControlPromptCacheKey(extended)
 	require.NotEmpty(t, k1)
 	require.Equal(t, k1, k2)
 	require.True(t, strings.HasPrefix(k1, "anthropic-cache-"))

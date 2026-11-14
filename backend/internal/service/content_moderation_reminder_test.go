@@ -86,7 +86,7 @@ func TestContentModerationCheck_ReminderKeywordModes(t *testing.T) {
 					if mode != ContentModerationKeywordModeAPIOnly {
 						cache.hashes = map[string]struct{}{semantic.Hash(): {}}
 					}
-					svc := NewContentModerationService(&contentModerationTestSettingRepo{values: map[string]string{SettingKeyRiskControlEnabled: "true", SettingKeyContentModerationConfig: string(raw)}}, repo, cache, nil, nil, nil, nil, nil)
+					svc := newStartedContentModerationTestService(t, &contentModerationTestSettingRepo{values: map[string]string{SettingKeyRiskControlEnabled: "true", SettingKeyContentModerationConfig: string(raw)}}, repo, cache, nil, nil, nil, nil, nil)
 					decision, err := svc.Check(context.Background(), ContentModerationCheckInput{Protocol: protocol, Body: body})
 					require.NoError(t, err)
 					if mode == ContentModerationKeywordModeAPIOnly {
@@ -182,7 +182,7 @@ func TestContentModerationCheck_ReminderPolicyPreserved(t *testing.T) {
 			raw, err := json.Marshal(cfg)
 			require.NoError(t, err)
 			repo := &contentModerationTestRepo{}
-			svc := NewContentModerationService(&contentModerationTestSettingRepo{values: map[string]string{SettingKeyRiskControlEnabled: "true", SettingKeyContentModerationConfig: string(raw)}}, repo, nil, nil, nil, nil, nil, nil)
+			svc := newStartedContentModerationTestService(t, &contentModerationTestSettingRepo{values: map[string]string{SettingKeyRiskControlEnabled: "true", SettingKeyContentModerationConfig: string(raw)}}, repo, nil, nil, nil, nil, nil, nil)
 			body := reminderTestBody(t, ContentModerationProtocolAnthropicMessages, []string{"<system-reminder>今晚打老虎</system-reminder>", "safe text"})
 			decision, err := svc.Check(context.Background(), ContentModerationCheckInput{Protocol: ContentModerationProtocolAnthropicMessages, Body: body})
 			require.NoError(t, err)

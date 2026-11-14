@@ -240,12 +240,8 @@ func TestPricingSchedulerStartsForCustomFilesWithoutRemoteURL(t *testing.T) {
 		FallbackFile: filepath.Join(t.TempDir(), "fallback.json"),
 	}}, nil)
 
-	svc.startUpdateScheduler()
-	done := make(chan struct{})
-	go func() {
-		svc.wg.Wait()
-		close(done)
-	}()
+	require.NoError(t, svc.Start(context.Background()))
+	done := svc.done
 
 	select {
 	case <-done:
@@ -253,7 +249,7 @@ func TestPricingSchedulerStartsForCustomFilesWithoutRemoteURL(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	svc.Stop()
+	svc.Stop(context.Background())
 	select {
 	case <-done:
 	case <-time.After(time.Second):

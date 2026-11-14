@@ -70,6 +70,36 @@ func DeletedAt(v time.Time) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldDeletedAt, v))
 }
 
+// CreatedBy applies equality check predicate on the "created_by" field. It's identical to CreatedByEQ.
+func CreatedBy(v int64) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldCreatedBy, v))
+}
+
+// CreatedByName applies equality check predicate on the "created_by_name" field. It's identical to CreatedByNameEQ.
+func CreatedByName(v string) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldCreatedByName, v))
+}
+
+// CreatedByRole applies equality check predicate on the "created_by_role" field. It's identical to CreatedByRoleEQ.
+func CreatedByRole(v string) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldCreatedByRole, v))
+}
+
+// VendorID applies equality check predicate on the "vendor_id" field. It's identical to VendorIDEQ.
+func VendorID(v int64) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldVendorID, v))
+}
+
+// VendorPausedAt applies equality check predicate on the "vendor_paused_at" field. It's identical to VendorPausedAtEQ.
+func VendorPausedAt(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldVendorPausedAt, v))
+}
+
+// VendorNotes applies equality check predicate on the "vendor_notes" field. It's identical to VendorNotesEQ.
+func VendorNotes(v string) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldVendorNotes, v))
+}
+
 // Name applies equality check predicate on the "name" field. It's identical to NameEQ.
 func Name(v string) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldName, v))
@@ -323,6 +353,351 @@ func DeletedAtIsNil() predicate.Account {
 // DeletedAtNotNil applies the NotNil predicate on the "deleted_at" field.
 func DeletedAtNotNil() predicate.Account {
 	return predicate.Account(sql.FieldNotNull(FieldDeletedAt))
+}
+
+// CreatedByEQ applies the EQ predicate on the "created_by" field.
+func CreatedByEQ(v int64) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldCreatedBy, v))
+}
+
+// CreatedByNEQ applies the NEQ predicate on the "created_by" field.
+func CreatedByNEQ(v int64) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldCreatedBy, v))
+}
+
+// CreatedByIn applies the In predicate on the "created_by" field.
+func CreatedByIn(vs ...int64) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldCreatedBy, vs...))
+}
+
+// CreatedByNotIn applies the NotIn predicate on the "created_by" field.
+func CreatedByNotIn(vs ...int64) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldCreatedBy, vs...))
+}
+
+// CreatedByGT applies the GT predicate on the "created_by" field.
+func CreatedByGT(v int64) predicate.Account {
+	return predicate.Account(sql.FieldGT(FieldCreatedBy, v))
+}
+
+// CreatedByGTE applies the GTE predicate on the "created_by" field.
+func CreatedByGTE(v int64) predicate.Account {
+	return predicate.Account(sql.FieldGTE(FieldCreatedBy, v))
+}
+
+// CreatedByLT applies the LT predicate on the "created_by" field.
+func CreatedByLT(v int64) predicate.Account {
+	return predicate.Account(sql.FieldLT(FieldCreatedBy, v))
+}
+
+// CreatedByLTE applies the LTE predicate on the "created_by" field.
+func CreatedByLTE(v int64) predicate.Account {
+	return predicate.Account(sql.FieldLTE(FieldCreatedBy, v))
+}
+
+// CreatedByIsNil applies the IsNil predicate on the "created_by" field.
+func CreatedByIsNil() predicate.Account {
+	return predicate.Account(sql.FieldIsNull(FieldCreatedBy))
+}
+
+// CreatedByNotNil applies the NotNil predicate on the "created_by" field.
+func CreatedByNotNil() predicate.Account {
+	return predicate.Account(sql.FieldNotNull(FieldCreatedBy))
+}
+
+// CreatedByNameEQ applies the EQ predicate on the "created_by_name" field.
+func CreatedByNameEQ(v string) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldCreatedByName, v))
+}
+
+// CreatedByNameNEQ applies the NEQ predicate on the "created_by_name" field.
+func CreatedByNameNEQ(v string) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldCreatedByName, v))
+}
+
+// CreatedByNameIn applies the In predicate on the "created_by_name" field.
+func CreatedByNameIn(vs ...string) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldCreatedByName, vs...))
+}
+
+// CreatedByNameNotIn applies the NotIn predicate on the "created_by_name" field.
+func CreatedByNameNotIn(vs ...string) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldCreatedByName, vs...))
+}
+
+// CreatedByNameGT applies the GT predicate on the "created_by_name" field.
+func CreatedByNameGT(v string) predicate.Account {
+	return predicate.Account(sql.FieldGT(FieldCreatedByName, v))
+}
+
+// CreatedByNameGTE applies the GTE predicate on the "created_by_name" field.
+func CreatedByNameGTE(v string) predicate.Account {
+	return predicate.Account(sql.FieldGTE(FieldCreatedByName, v))
+}
+
+// CreatedByNameLT applies the LT predicate on the "created_by_name" field.
+func CreatedByNameLT(v string) predicate.Account {
+	return predicate.Account(sql.FieldLT(FieldCreatedByName, v))
+}
+
+// CreatedByNameLTE applies the LTE predicate on the "created_by_name" field.
+func CreatedByNameLTE(v string) predicate.Account {
+	return predicate.Account(sql.FieldLTE(FieldCreatedByName, v))
+}
+
+// CreatedByNameContains applies the Contains predicate on the "created_by_name" field.
+func CreatedByNameContains(v string) predicate.Account {
+	return predicate.Account(sql.FieldContains(FieldCreatedByName, v))
+}
+
+// CreatedByNameHasPrefix applies the HasPrefix predicate on the "created_by_name" field.
+func CreatedByNameHasPrefix(v string) predicate.Account {
+	return predicate.Account(sql.FieldHasPrefix(FieldCreatedByName, v))
+}
+
+// CreatedByNameHasSuffix applies the HasSuffix predicate on the "created_by_name" field.
+func CreatedByNameHasSuffix(v string) predicate.Account {
+	return predicate.Account(sql.FieldHasSuffix(FieldCreatedByName, v))
+}
+
+// CreatedByNameEqualFold applies the EqualFold predicate on the "created_by_name" field.
+func CreatedByNameEqualFold(v string) predicate.Account {
+	return predicate.Account(sql.FieldEqualFold(FieldCreatedByName, v))
+}
+
+// CreatedByNameContainsFold applies the ContainsFold predicate on the "created_by_name" field.
+func CreatedByNameContainsFold(v string) predicate.Account {
+	return predicate.Account(sql.FieldContainsFold(FieldCreatedByName, v))
+}
+
+// CreatedByRoleEQ applies the EQ predicate on the "created_by_role" field.
+func CreatedByRoleEQ(v string) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldCreatedByRole, v))
+}
+
+// CreatedByRoleNEQ applies the NEQ predicate on the "created_by_role" field.
+func CreatedByRoleNEQ(v string) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldCreatedByRole, v))
+}
+
+// CreatedByRoleIn applies the In predicate on the "created_by_role" field.
+func CreatedByRoleIn(vs ...string) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldCreatedByRole, vs...))
+}
+
+// CreatedByRoleNotIn applies the NotIn predicate on the "created_by_role" field.
+func CreatedByRoleNotIn(vs ...string) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldCreatedByRole, vs...))
+}
+
+// CreatedByRoleGT applies the GT predicate on the "created_by_role" field.
+func CreatedByRoleGT(v string) predicate.Account {
+	return predicate.Account(sql.FieldGT(FieldCreatedByRole, v))
+}
+
+// CreatedByRoleGTE applies the GTE predicate on the "created_by_role" field.
+func CreatedByRoleGTE(v string) predicate.Account {
+	return predicate.Account(sql.FieldGTE(FieldCreatedByRole, v))
+}
+
+// CreatedByRoleLT applies the LT predicate on the "created_by_role" field.
+func CreatedByRoleLT(v string) predicate.Account {
+	return predicate.Account(sql.FieldLT(FieldCreatedByRole, v))
+}
+
+// CreatedByRoleLTE applies the LTE predicate on the "created_by_role" field.
+func CreatedByRoleLTE(v string) predicate.Account {
+	return predicate.Account(sql.FieldLTE(FieldCreatedByRole, v))
+}
+
+// CreatedByRoleContains applies the Contains predicate on the "created_by_role" field.
+func CreatedByRoleContains(v string) predicate.Account {
+	return predicate.Account(sql.FieldContains(FieldCreatedByRole, v))
+}
+
+// CreatedByRoleHasPrefix applies the HasPrefix predicate on the "created_by_role" field.
+func CreatedByRoleHasPrefix(v string) predicate.Account {
+	return predicate.Account(sql.FieldHasPrefix(FieldCreatedByRole, v))
+}
+
+// CreatedByRoleHasSuffix applies the HasSuffix predicate on the "created_by_role" field.
+func CreatedByRoleHasSuffix(v string) predicate.Account {
+	return predicate.Account(sql.FieldHasSuffix(FieldCreatedByRole, v))
+}
+
+// CreatedByRoleEqualFold applies the EqualFold predicate on the "created_by_role" field.
+func CreatedByRoleEqualFold(v string) predicate.Account {
+	return predicate.Account(sql.FieldEqualFold(FieldCreatedByRole, v))
+}
+
+// CreatedByRoleContainsFold applies the ContainsFold predicate on the "created_by_role" field.
+func CreatedByRoleContainsFold(v string) predicate.Account {
+	return predicate.Account(sql.FieldContainsFold(FieldCreatedByRole, v))
+}
+
+// VendorIDEQ applies the EQ predicate on the "vendor_id" field.
+func VendorIDEQ(v int64) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldVendorID, v))
+}
+
+// VendorIDNEQ applies the NEQ predicate on the "vendor_id" field.
+func VendorIDNEQ(v int64) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldVendorID, v))
+}
+
+// VendorIDIn applies the In predicate on the "vendor_id" field.
+func VendorIDIn(vs ...int64) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldVendorID, vs...))
+}
+
+// VendorIDNotIn applies the NotIn predicate on the "vendor_id" field.
+func VendorIDNotIn(vs ...int64) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldVendorID, vs...))
+}
+
+// VendorIDGT applies the GT predicate on the "vendor_id" field.
+func VendorIDGT(v int64) predicate.Account {
+	return predicate.Account(sql.FieldGT(FieldVendorID, v))
+}
+
+// VendorIDGTE applies the GTE predicate on the "vendor_id" field.
+func VendorIDGTE(v int64) predicate.Account {
+	return predicate.Account(sql.FieldGTE(FieldVendorID, v))
+}
+
+// VendorIDLT applies the LT predicate on the "vendor_id" field.
+func VendorIDLT(v int64) predicate.Account {
+	return predicate.Account(sql.FieldLT(FieldVendorID, v))
+}
+
+// VendorIDLTE applies the LTE predicate on the "vendor_id" field.
+func VendorIDLTE(v int64) predicate.Account {
+	return predicate.Account(sql.FieldLTE(FieldVendorID, v))
+}
+
+// VendorIDIsNil applies the IsNil predicate on the "vendor_id" field.
+func VendorIDIsNil() predicate.Account {
+	return predicate.Account(sql.FieldIsNull(FieldVendorID))
+}
+
+// VendorIDNotNil applies the NotNil predicate on the "vendor_id" field.
+func VendorIDNotNil() predicate.Account {
+	return predicate.Account(sql.FieldNotNull(FieldVendorID))
+}
+
+// VendorPausedAtEQ applies the EQ predicate on the "vendor_paused_at" field.
+func VendorPausedAtEQ(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldVendorPausedAt, v))
+}
+
+// VendorPausedAtNEQ applies the NEQ predicate on the "vendor_paused_at" field.
+func VendorPausedAtNEQ(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldVendorPausedAt, v))
+}
+
+// VendorPausedAtIn applies the In predicate on the "vendor_paused_at" field.
+func VendorPausedAtIn(vs ...time.Time) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldVendorPausedAt, vs...))
+}
+
+// VendorPausedAtNotIn applies the NotIn predicate on the "vendor_paused_at" field.
+func VendorPausedAtNotIn(vs ...time.Time) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldVendorPausedAt, vs...))
+}
+
+// VendorPausedAtGT applies the GT predicate on the "vendor_paused_at" field.
+func VendorPausedAtGT(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldGT(FieldVendorPausedAt, v))
+}
+
+// VendorPausedAtGTE applies the GTE predicate on the "vendor_paused_at" field.
+func VendorPausedAtGTE(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldGTE(FieldVendorPausedAt, v))
+}
+
+// VendorPausedAtLT applies the LT predicate on the "vendor_paused_at" field.
+func VendorPausedAtLT(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldLT(FieldVendorPausedAt, v))
+}
+
+// VendorPausedAtLTE applies the LTE predicate on the "vendor_paused_at" field.
+func VendorPausedAtLTE(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldLTE(FieldVendorPausedAt, v))
+}
+
+// VendorPausedAtIsNil applies the IsNil predicate on the "vendor_paused_at" field.
+func VendorPausedAtIsNil() predicate.Account {
+	return predicate.Account(sql.FieldIsNull(FieldVendorPausedAt))
+}
+
+// VendorPausedAtNotNil applies the NotNil predicate on the "vendor_paused_at" field.
+func VendorPausedAtNotNil() predicate.Account {
+	return predicate.Account(sql.FieldNotNull(FieldVendorPausedAt))
+}
+
+// VendorNotesEQ applies the EQ predicate on the "vendor_notes" field.
+func VendorNotesEQ(v string) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldVendorNotes, v))
+}
+
+// VendorNotesNEQ applies the NEQ predicate on the "vendor_notes" field.
+func VendorNotesNEQ(v string) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldVendorNotes, v))
+}
+
+// VendorNotesIn applies the In predicate on the "vendor_notes" field.
+func VendorNotesIn(vs ...string) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldVendorNotes, vs...))
+}
+
+// VendorNotesNotIn applies the NotIn predicate on the "vendor_notes" field.
+func VendorNotesNotIn(vs ...string) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldVendorNotes, vs...))
+}
+
+// VendorNotesGT applies the GT predicate on the "vendor_notes" field.
+func VendorNotesGT(v string) predicate.Account {
+	return predicate.Account(sql.FieldGT(FieldVendorNotes, v))
+}
+
+// VendorNotesGTE applies the GTE predicate on the "vendor_notes" field.
+func VendorNotesGTE(v string) predicate.Account {
+	return predicate.Account(sql.FieldGTE(FieldVendorNotes, v))
+}
+
+// VendorNotesLT applies the LT predicate on the "vendor_notes" field.
+func VendorNotesLT(v string) predicate.Account {
+	return predicate.Account(sql.FieldLT(FieldVendorNotes, v))
+}
+
+// VendorNotesLTE applies the LTE predicate on the "vendor_notes" field.
+func VendorNotesLTE(v string) predicate.Account {
+	return predicate.Account(sql.FieldLTE(FieldVendorNotes, v))
+}
+
+// VendorNotesContains applies the Contains predicate on the "vendor_notes" field.
+func VendorNotesContains(v string) predicate.Account {
+	return predicate.Account(sql.FieldContains(FieldVendorNotes, v))
+}
+
+// VendorNotesHasPrefix applies the HasPrefix predicate on the "vendor_notes" field.
+func VendorNotesHasPrefix(v string) predicate.Account {
+	return predicate.Account(sql.FieldHasPrefix(FieldVendorNotes, v))
+}
+
+// VendorNotesHasSuffix applies the HasSuffix predicate on the "vendor_notes" field.
+func VendorNotesHasSuffix(v string) predicate.Account {
+	return predicate.Account(sql.FieldHasSuffix(FieldVendorNotes, v))
+}
+
+// VendorNotesEqualFold applies the EqualFold predicate on the "vendor_notes" field.
+func VendorNotesEqualFold(v string) predicate.Account {
+	return predicate.Account(sql.FieldEqualFold(FieldVendorNotes, v))
+}
+
+// VendorNotesContainsFold applies the ContainsFold predicate on the "vendor_notes" field.
+func VendorNotesContainsFold(v string) predicate.Account {
+	return predicate.Account(sql.FieldContainsFold(FieldVendorNotes, v))
 }
 
 // NameEQ applies the EQ predicate on the "name" field.

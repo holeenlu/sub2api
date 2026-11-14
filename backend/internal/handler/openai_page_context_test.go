@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -30,6 +31,7 @@ func TestNormalizeCodexPageContextFirstMessage(t *testing.T) {
 	h := &OpenAIGatewayHandler{}
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	require.False(t, h.validateFunctionCallOutputRequest(c, body, zap.NewNop()))
 	require.Equal(t, 400, w.Code)
 	require.Contains(t, w.Body.String(), "function_call_output requires call_id")
@@ -38,6 +40,7 @@ func TestNormalizeCodexPageContextFirstMessage(t *testing.T) {
 	require.True(t, changed)
 	w = httptest.NewRecorder()
 	c, _ = gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	require.True(t, h.validateFunctionCallOutputRequest(c, got, zap.NewNop()))
 	require.False(t, c.Writer.Written())
 	for i, original := range []string{open, selected} {

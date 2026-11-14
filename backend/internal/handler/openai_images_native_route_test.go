@@ -85,7 +85,7 @@ func newNativeImageRoute(t *testing.T, delay time.Duration, status int) (*httpte
 	deferred := service.NewDeferredService(repo, nil, time.Minute)
 	gateway := service.NewOpenAIGatewayService(repo, nil, nil, nil, nil, nil, nil, cfg, nil, nil, service.NewBillingService(cfg, nil), nil, nil, transport, deferred, nil, nil, nil, nil, nil, nil, nil)
 	billing := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
-	t.Cleanup(billing.Stop)
+	t.Cleanup(func() { _ = billing.Stop(context.Background()) })
 	handler := NewOpenAIGatewayHandler(gateway, service.NewConcurrencyService(nil), billing, service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg), nil, nil, nil, nil, cfg)
 	router := gin.New()
 	router.Use(func(c *gin.Context) {

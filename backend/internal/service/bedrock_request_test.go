@@ -346,7 +346,7 @@ func TestFilterBedrockBetaTokens(t *testing.T) {
 	})
 
 	t.Run("all unsupported returns nil", func(t *testing.T) {
-		result := filterBedrockBetaTokens([]string{"output-128k-2025-02-19", "effort-2025-11-24"})
+		result := filterBedrockBetaTokens([]string{"output-128k-2025-02-19", "unknown-beta"})
 		assert.Nil(t, result)
 	})
 
@@ -784,31 +784,6 @@ func TestAdjustBedrockModelRegionPrefix(t *testing.T) {
 	}
 }
 
-func TestIsBedrockOpus47OrNewer(t *testing.T) {
-	tests := []struct {
-		modelID string
-		expect  bool
-	}{
-		{"us.anthropic.claude-opus-4-8-v1", true},
-		{"us.anthropic.claude-opus-4-7-v1", true},
-		{"us.anthropic.claude-opus-4-6-v1", false},
-		{"us.anthropic.claude-opus-4-5-20251101-v1:0", false},
-		{"us.anthropic.claude-opus-5-0-v1", true},
-		// Sonnet 4.7 is not Opus → false
-		{"us.anthropic.claude-sonnet-4-7-v1", false},
-		{"us.anthropic.claude-sonnet-4-6", false},
-		// Haiku is not Opus
-		{"us.anthropic.claude-haiku-4-5-20251001-v1:0", false},
-		// Non-Claude models
-		{"amazon.nova-pro-v1", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.modelID, func(t *testing.T) {
-			assert.Equal(t, tt.expect, isBedrockOpus47OrNewer(tt.modelID))
-		})
-	}
-}
-
 func TestSanitizeBedrockThinking(t *testing.T) {
 	t.Run("sonnet 5.5 converts legacy enabled to adaptive", func(t *testing.T) {
 		input := `{"thinking":{"type":"enabled","budget_tokens":10000},"messages":[]}`
@@ -961,11 +936,11 @@ func TestSanitizeBedrockThinking_EdgeCases(t *testing.T) {
 		assert.JSONEq(t, input, string(result))
 	})
 
-	t.Run("opus 4.7 adaptive with budget_tokens preserved", func(t *testing.T) {
+	t.Run("opus 4.7 adaptive removes unsupported budget_tokens", func(t *testing.T) {
 		input := `{"thinking":{"type":"adaptive","budget_tokens":5000},"messages":[]}`
 		result := sanitizeBedrockThinking([]byte(input), "us.anthropic.claude-opus-4-7-v1")
 		assert.Equal(t, "adaptive", gjson.GetBytes(result, "thinking.type").String())
-		assert.Equal(t, int64(5000), gjson.GetBytes(result, "thinking.budget_tokens").Int())
+		assert.False(t, gjson.GetBytes(result, "thinking.budget_tokens").Exists())
 	})
 
 	// Forward() passes parsed.Model (standard names like "claude-opus-4-7")
@@ -982,28 +957,6 @@ func TestSanitizeBedrockThinking_EdgeCases(t *testing.T) {
 		assert.Equal(t, "enabled", gjson.GetBytes(result, "thinking.type").String())
 		assert.Equal(t, int64(10000), gjson.GetBytes(result, "thinking.budget_tokens").Int())
 	})
-}
-
-func TestIsBedrockOpus47OrNewer_EdgeCases(t *testing.T) {
-	tests := []struct {
-		modelID string
-		expect  bool
-	}{
-		{"anthropic.claude-opus-4-8-v1", true},
-		{"anthropic.claude-opus-4-7-v1", true},
-		{"us.anthropic.claude-opus-4-7-20270101-v1:0", true},
-		{"", false},
-		// Forward() passes parsed.Model (standard names), not Bedrock IDs
-		{"claude-opus-4-8", true},
-		{"claude-opus-4-7", true},
-		{"claude-opus-4-6", false},
-		{"claude-sonnet-4-7", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.modelID, func(t *testing.T) {
-			assert.Equal(t, tt.expect, isBedrockOpus47OrNewer(tt.modelID))
-		})
-	}
 }
 
 func TestPrepareBedrockRequestBodyWithTokens_CCCompat(t *testing.T) {
@@ -1053,7 +1006,7 @@ func TestPrepareBedrockSonnet55PreservesEffort(t *testing.T) {
 	assert.Contains(t, gjson.GetBytes(result, "messages.0.content.1.text").String(), `"type":"object"`, "schema should still be included in the final user message")
 	assert.False(t, gjson.GetBytes(result, "model").Exists())
 
-	oldModel, err := PrepareBedrockRequestBodyWithTokens(input, "us.anthropic.claude-sonnet-4-6", nil, false)
+	oldModel, err := PrepareBedrockRequestBodyWithTokens(input, "us.anthropic.claude-sonnet-4-5", nil, false)
 	require.NoError(t, err)
 	assert.False(t, gjson.GetBytes(oldModel, "output_config").Exists())
 }
@@ -1186,4 +1139,11 @@ func TestSanitizeBedrockCCBetaTokens(t *testing.T) {
 		assert.Contains(t, []string{tokens[0].String(), tokens[1].String()}, "computer-use-2025-11-24")
 		assert.Contains(t, []string{tokens[0].String(), tokens[1].String()}, "context-1m-2025-08-07")
 	})
+}
+
+func TestBedrockEffortBetaFilterRespectsPolicy(t *testing.T) {
+	body := []byte(`{"output_config":{"effort":"medium"},"messages":[]}`)
+	result, err := PrepareBedrockRequestBodyWithTokens(body, "us.anthropic.claude-opus-4-5-20251101-v1:0", nil, false)
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(result, "output_config").Exists(), "filtered effort beta must not be reintroduced")
 }

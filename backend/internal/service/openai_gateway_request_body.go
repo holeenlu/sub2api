@@ -6,16 +6,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"net/http"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/MoeForge/moego/ojson"
+	"github.com/Wei-Shaw/sub2api/internal/catalog"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -188,7 +189,7 @@ func normalizeDeepSeekResponsesRequestBody(account *Account, body []byte) []byte
 	if err != nil {
 		return normalized
 	}
-	return rebuilt
+	return restoreOpenAIUpstreamJSONTopLevelOrder(normalized, rebuilt)
 }
 
 func shouldAliasDeepSeekResponsesInputImages(account *Account) bool {
@@ -279,9 +280,11 @@ func aliasDeepSeekResponsesImagePart(part map[string]any) bool {
 		part["image_url"] = imageURL
 		changed = true
 	}
-	if _, exists := part["url"]; exists {
-		delete(part, "url")
-		changed = true
+	for _, key := range []string{"url", "image", "source"} {
+		if _, exists := part[key]; exists {
+			delete(part, key)
+			changed = true
+		}
 	}
 	return changed
 }
@@ -464,117 +467,6 @@ func sanitizeEncryptedReasoningInputItem(item any) (next any, changed bool, keep
 	return inputItem, true, true
 }
 
-// SanitizeOpenAICrossModeFailoverReasoning derives a failover attempt body from
-// the canonical request body by dropping provider-specific encrypted reasoning
-// input items in full (encrypted_content plus the coupled id/summary shape).
-//
-// This is the proactive counterpart to the reactive same-account
-// invalid_encrypted_content recovery in Forward: when a failover switches from an
-// OpenAI passthrough account (which forwards upstream-native encrypted reasoning,
-// e.g. Kiro) to a non-passthrough account (e.g. Bedrock Mantle) that rejects the
-// provider-specific reasoning IDs/shape, the whole reasoning item must go before
-// the request reaches the new upstream. Unlike trimOpenAIEncryptedReasoningItems,
-// which only strips the encrypted_content / null-content fields while preserving
-// the reasoning item's id and summary, this drops the entire item.
-//
-// The input slice is treated as immutable and is never mutated; a distinct slice
-// is returned only when changed is true.
-func SanitizeOpenAICrossModeFailoverReasoning(body []byte) (sanitized []byte, changed bool, err error) {
-	if len(body) == 0 {
-		return body, false, nil
-	}
-	if !gjson.GetBytes(body, "input").Exists() {
-		return body, false, nil
-	}
-	var decoded map[string]any
-	if err := decodeOpenAIJSONUseNumber(body, &decoded); err != nil {
-		return body, false, fmt.Errorf("decode cross-mode failover body: %w", err)
-	}
-	if !dropOpenAIEncryptedReasoningInputItems(decoded) {
-		return body, false, nil
-	}
-	out, marshalErr := marshalOpenAIUpstreamJSON(decoded)
-	if marshalErr != nil {
-		return body, false, fmt.Errorf("serialize cross-mode failover body: %w", marshalErr)
-	}
-	return out, true, nil
-}
-
-// dropOpenAIEncryptedReasoningInputItems removes reasoning input items that carry
-// provider-specific encrypted_content in full — including their coupled id and
-// summary — and reports whether anything changed. Contrast with
-// trimOpenAIEncryptedReasoningItems, which only strips fields while keeping the
-// reasoning item skeleton.
-func dropOpenAIEncryptedReasoningInputItems(reqBody map[string]any) bool {
-	if len(reqBody) == 0 {
-		return false
-	}
-	inputValue, has := reqBody["input"]
-	if !has {
-		return false
-	}
-	switch input := inputValue.(type) {
-	case []any:
-		filtered := input[:0]
-		changed := false
-		for _, item := range input {
-			if isOpenAIEncryptedReasoningInputItem(item) {
-				changed = true
-				continue
-			}
-			filtered = append(filtered, item)
-		}
-		if !changed {
-			return false
-		}
-		if len(filtered) == 0 {
-			delete(reqBody, "input")
-			return true
-		}
-		reqBody["input"] = filtered
-		return true
-	case []map[string]any:
-		filtered := input[:0]
-		changed := false
-		for _, item := range input {
-			if isOpenAIEncryptedReasoningInputItem(item) {
-				changed = true
-				continue
-			}
-			filtered = append(filtered, item)
-		}
-		if !changed {
-			return false
-		}
-		if len(filtered) == 0 {
-			delete(reqBody, "input")
-			return true
-		}
-		reqBody["input"] = filtered
-		return true
-	case map[string]any:
-		if isOpenAIEncryptedReasoningInputItem(input) {
-			delete(reqBody, "input")
-			return true
-		}
-		return false
-	default:
-		return false
-	}
-}
-
-func isOpenAIEncryptedReasoningInputItem(item any) bool {
-	inputItem, ok := item.(map[string]any)
-	if !ok {
-		return false
-	}
-	if itemType, _ := inputItem["type"].(string); strings.TrimSpace(itemType) != "reasoning" {
-		return false
-	}
-	_, has := inputItem["encrypted_content"]
-	return has
-}
-
 // IsOpenAIResponsesCompactPath reports whether the request targets the legacy
 // /responses/compact endpoint, including its forwardable subpaths.
 func IsOpenAIResponsesCompactPath(c *gin.Context) bool {
@@ -631,7 +523,7 @@ func normalizeOpenAICompactRequestBody(body []byte) ([]byte, bool, error) {
 	if bytes.Equal(bytes.TrimSpace(body), bytes.TrimSpace(normalized)) {
 		return body, false, nil
 	}
-	return normalized, true, nil
+	return restoreOpenAIUpstreamJSONTopLevelOrder(body, normalized), true, nil
 }
 
 func normalizeOpenAIParallelToolCallsWithoutTools(body []byte, responsesLite bool) ([]byte, bool, error) {
@@ -649,7 +541,7 @@ func normalizeOpenAIParallelToolCallsWithoutTools(body []byte, responsesLite boo
 	if err != nil {
 		return body, false, fmt.Errorf("normalize parallel_tool_calls without tools: %w", err)
 	}
-	return normalized, true, nil
+	return restoreOpenAIUpstreamJSONTopLevelOrder(body, normalized), true, nil
 }
 
 // openAIRequestBodyHasTools 同时识别顶层 tools 和 input[].additional_tools。
@@ -726,7 +618,7 @@ func normalizeOpenAIResponsesReasoningContentReplay(body []byte) ([]byte, bool, 
 	if err != nil {
 		return body, false, fmt.Errorf("serialize normalized OpenAI reasoning content replay: %w", err)
 	}
-	return normalized, true, nil
+	return restoreOpenAIUpstreamJSONTopLevelOrder(body, normalized), true, nil
 }
 
 func normalizeOpenAIAPIKeyStoreFalseReasoningReplay(body []byte, knownStoreFalse bool) ([]byte, bool, error) {
@@ -762,7 +654,9 @@ func normalizeOpenAIAPIKeyStoreFalseReasoningReplay(body []byte, knownStoreFalse
 		encrypted := item.Get("encrypted_content")
 		if (typ == "reasoning" && (encrypted.Type != gjson.String || strings.TrimSpace(encrypted.Str) == "")) ||
 			(typ == "item_reference" && strings.HasPrefix(id, "rs_")) {
-			changed = true
+			// Missing content cannot be repaired by deleting history. Preserve it
+			// for a precise upstream rejection or a complete session replay.
+			items = append(items, item.Raw)
 			return true
 		}
 		stripID := typ == "reasoning" && strings.HasPrefix(id, "rs_")
@@ -839,7 +733,7 @@ func normalizeOpenAIAPIKeyStoreFalseReasoningReplayDecoded(body []byte, knownSto
 		case "reasoning":
 			encryptedContent, hasEncryptedContent := item["encrypted_content"].(string)
 			if !hasEncryptedContent || strings.TrimSpace(encryptedContent) == "" {
-				changed = true
+				filtered = append(filtered, item)
 				continue
 			}
 			if strings.HasPrefix(id, "rs_") {
@@ -849,11 +743,6 @@ func normalizeOpenAIAPIKeyStoreFalseReasoningReplayDecoded(body []byte, knownSto
 			if summary, ok := item["summary"]; !ok || summary == nil {
 				item["summary"] = []any{}
 				changed = true
-			}
-		case "item_reference":
-			if strings.HasPrefix(id, "rs_") {
-				changed = true
-				continue
 			}
 		}
 		if shouldStripOpenAIResponsesNonPairCallID(typ) {
@@ -872,7 +761,7 @@ func normalizeOpenAIAPIKeyStoreFalseReasoningReplayDecoded(body []byte, knownSto
 	if err != nil {
 		return body, false, fmt.Errorf("serialize API-key store=false reasoning replay: %w", err)
 	}
-	return normalized, true, nil
+	return restoreOpenAIUpstreamJSONTopLevelOrder(body, normalized), true, nil
 }
 
 func normalizeOpenAICodexCompactReasoningEffortForAccount(c *gin.Context, account *Account, body []byte) ([]byte, bool, error) {
@@ -898,7 +787,7 @@ func normalizeOpenAICodexCompactReasoningEffort(body []byte, effectiveModel stri
 	if err != nil {
 		return body, false, fmt.Errorf("normalize codex compact reasoning effort: %w", err)
 	}
-	return normalized, true, nil
+	return restoreOpenAIUpstreamJSONTopLevelOrder(body, normalized), true, nil
 }
 
 func resolveOpenAICompactSessionID(c *gin.Context) string {
@@ -1412,11 +1301,75 @@ func extractOpenAIRequestMetaFromBody(body []byte) (model string, stream bool, p
 	return view.Model, view.Stream, view.PromptCacheKey
 }
 
+// 来源 CPR 55526973：仅在已选定 Codex OAuth 后清理已确认不支持的选项。
+var codexOAuthUnsupportedOptionFields = []string{
+	"top_p", "frequency_penalty", "presence_penalty", "chat_template_kwargs", "user", "metadata", "safety_identifier",
+}
+
+func normalizeCodexOAuthUnsupportedOptions(body map[string]any) bool {
+	changed := false
+	for _, field := range codexOAuthUnsupportedOptionFields {
+		if _, exists := body[field]; exists {
+			delete(body, field)
+			changed = true
+		}
+	}
+	if options, ok := body["stream_options"].(map[string]any); ok {
+		if _, exists := options["include_usage"]; exists {
+			delete(options, "include_usage")
+			changed = true
+		}
+		if len(options) == 0 {
+			delete(body, "stream_options")
+			changed = true
+		}
+	}
+	if body["truncation"] == "disabled" {
+		delete(body, "truncation")
+		changed = true
+	}
+	if stop, ok := body["stop_sequences"].([]any); ok && len(stop) == 0 {
+		delete(body, "stop_sequences")
+		changed = true
+	}
+	if cache, ok := body["prompt_cache_options"].(map[string]any); ok && len(cache) == 0 {
+		delete(body, "prompt_cache_options")
+		changed = true
+	}
+	for _, alias := range []string{"max_completion_tokens", "max_tokens"} {
+		if limit, exists := body[alias]; exists {
+			delete(body, alias)
+			changed = true
+			if limit != nil && body["max_output_tokens"] == nil {
+				body["max_output_tokens"] = limit
+			}
+		}
+	}
+	return changed
+}
+
+func codexOAuthMayHaveUnsupportedOptions(body []byte) bool {
+	if bytes.Contains(body, []byte(`\u`)) {
+		return true
+	}
+	for _, key := range codexOAuthUnsupportedOptionFields {
+		if bytes.Contains(body, []byte(key)) {
+			return true
+		}
+	}
+	for _, key := range []string{"stream_options", "truncation", "stop_sequences", "prompt_cache_options", "max_completion_tokens", "max_tokens"} {
+		if bytes.Contains(body, []byte(key)) {
+			return true
+		}
+	}
+	return false
+}
+
 func normalizeOpenAIOAuthResponsesCompatibilityFields(reqBody map[string]any) bool {
 	if reqBody == nil {
 		return false
 	}
-	changed := false
+	changed := normalizeCodexOAuthUnsupportedOptions(reqBody)
 	if prompt, exists := reqBody["prompt"]; exists {
 		if input, hasInput := reqBody["input"]; !hasInput || input == nil {
 			if prompt != nil {
@@ -1452,6 +1405,58 @@ func normalizeOpenAIOAuthResponsesCompatibilityBody(body []byte) ([]byte, bool, 
 	}
 	normalized := body
 	changed := false
+	if codexOAuthMayHaveUnsupportedOptions(body) {
+		// 原始透传只读取选项，不解码 input/工具历史；字段规则与 map 路径共用。
+		fields := map[string]any{}
+		original := map[string]gjson.Result{}
+		keys := append(append([]string{}, codexOAuthUnsupportedOptionFields...), "stream_options", "truncation", "stop_sequences", "prompt_cache_options", "max_completion_tokens", "max_tokens", "max_output_tokens")
+		for _, key := range keys {
+			value := gjson.GetBytes(body, key)
+			if !value.Exists() {
+				continue
+			}
+			original[key] = value
+			// 总会删除的字段不保留用户元数据或扩展正文。
+			fields[key] = true
+			switch key {
+			case "stream_options", "truncation", "stop_sequences", "prompt_cache_options", "max_completion_tokens", "max_tokens", "max_output_tokens":
+				decoder := json.NewDecoder(strings.NewReader(value.Raw))
+				decoder.UseNumber()
+				var option any
+				if err := decoder.Decode(&option); err != nil {
+					return body, false, err
+				}
+				fields[key] = option
+			}
+		}
+		if normalizeCodexOAuthUnsupportedOptions(fields) {
+			for _, key := range keys {
+				prior, existed := original[key]
+				value, retained := fields[key]
+				if !retained && existed {
+					next, err := sjson.DeleteBytes(normalized, key)
+					if err != nil {
+						return body, false, err
+					}
+					normalized = next
+				} else if retained && (key == "stream_options" || key == "max_output_tokens") {
+					encoded, err := json.Marshal(value)
+					if err != nil {
+						return body, false, err
+					}
+					if existed && string(encoded) == prior.Raw {
+						continue
+					}
+					next, err := sjson.SetRawBytes(normalized, key, encoded)
+					if err != nil {
+						return body, false, err
+					}
+					normalized = restoreOpenAIUpstreamJSONTopLevelOrder(normalized, next)
+				}
+			}
+			changed = true
+		}
+	}
 	prompt := gjson.GetBytes(normalized, "prompt")
 	if prompt.Exists() {
 		input := gjson.GetBytes(normalized, "input")
@@ -1460,7 +1465,7 @@ func normalizeOpenAIOAuthResponsesCompatibilityBody(body []byte) ([]byte, bool, 
 			if err != nil {
 				return body, false, fmt.Errorf("normalize oauth responses prompt: %w", err)
 			}
-			normalized = next
+			normalized = restoreOpenAIUpstreamJSONTopLevelOrder(normalized, next)
 		}
 		next, err := sjson.DeleteBytes(normalized, "prompt")
 		if err != nil {
@@ -1497,7 +1502,7 @@ func normalizeOpenAIOAuthResponsesCompatibilityBody(body []byte) ([]byte, bool, 
 }
 
 func normalizeGPT6ResponsesSampling(body []byte, model string) ([]byte, bool, error) {
-	if (!openai.IsGPT6SolOrLunaModelSpelling(model) && !openai.IsGPT61SolModelSpelling(model)) || gjson.GetBytes(body, "reasoning.effort").String() == "none" {
+	if (!openai.IsGPT6SolOrLunaModelSpelling(model) && !openai.IsGPT61SolModelSpelling(model) && !openai.IsGPT61TerraModelSpelling(model)) || gjson.GetBytes(body, "reasoning.effort").String() == "none" {
 		return body, false, nil
 	}
 	out := body
@@ -1590,11 +1595,7 @@ func normalizeOpenAIResponseFormatSchemasBody(body []byte) ([]byte, bool, error)
 	if err != nil {
 		return body, false, fmt.Errorf("serialize normalized responses schema body: %w", err)
 	}
-	return normalized, true, nil
-}
-
-func normalizeOpenAIResponsesWebSocketCompatibilityBody(body []byte, account *Account, responsesLite bool) ([]byte, bool, error) {
-	return normalizeOpenAIResponsesCompatibilityBodyWithOptions(body, account, openAIResponsesCompatibilityOptions{ResponsesLite: responsesLite})
+	return restoreOpenAIUpstreamJSONTopLevelOrder(body, normalized), true, nil
 }
 
 func normalizeOpenAIResponsesWebSocketCompatibilityBodyWithConfig(cfg *config.Config, body []byte, account *Account, responsesLite bool) ([]byte, bool, error) {
@@ -1602,8 +1603,10 @@ func normalizeOpenAIResponsesWebSocketCompatibilityBodyWithConfig(cfg *config.Co
 }
 
 type openAIResponsesCompatibilityOptions struct {
-	Config        *config.Config
-	ResponsesLite bool
+	// Optional per-attempt provenance, never serialized into the upstream body.
+	WebSearchHistoryToolAdded *bool
+	Config                    *config.Config
+	ResponsesLite             bool
 	// Compact marks the /responses/compact wire shape, which is left as-is
 	// by request-shape compatibility rewrites such as web_search history.
 	Compact bool
@@ -1614,14 +1617,23 @@ func normalizeOpenAIResponsesCompatibilityBodyWithOptions(body []byte, account *
 	if account == nil || !account.IsOpenAI() {
 		return body, false, nil
 	}
-	normalized := body
-	changed := false
+
+	var normalized []byte
+	var changed bool
+	var err error
 	if account.IsOpenAIOAuthLike() {
-		var err error
 		normalized, changed, err = normalizeOpenAIResponsesLegacyIngressWithConfig(opts.Config, body)
-		if err != nil {
-			return body, false, err
-		}
+	} else {
+		normalized, changed, err = normalizeOpenAIResponsesNativeAliasesBody(body)
+	}
+	if err != nil {
+		return body, false, err
+	}
+
+	if next, expanded, err := normalizeOpenAIReadableCompactionBody(normalized); err != nil {
+		return body, false, err
+	} else if expanded {
+		normalized, changed = next, true
 	}
 	if next, normalizedReasoningContent, err := normalizeOpenAIResponsesReasoningContentReplay(normalized); err != nil {
 		return body, false, err
@@ -1633,13 +1645,13 @@ func normalizeOpenAIResponsesCompatibilityBodyWithOptions(body []byte, account *
 		if next, normalizedParallel, err := normalizeOpenAIParallelToolCallsWithoutTools(normalized, responsesLite); err != nil {
 			return body, false, err
 		} else if normalizedParallel {
-			normalized = next
+			normalized = restoreOpenAIUpstreamJSONTopLevelOrder(normalized, next)
 			changed = true
 		}
 		if next, normalizedReasoning, err := normalizeOpenAIAPIKeyStoreFalseReasoningReplay(normalized, false); err != nil {
 			return body, false, err
 		} else if normalizedReasoning {
-			normalized = next
+			normalized = restoreOpenAIUpstreamJSONTopLevelOrder(normalized, next)
 			changed = true
 		}
 	}
@@ -1672,13 +1684,16 @@ func normalizeOpenAIResponsesCompatibilityBodyWithOptions(body []byte, account *
 			if deleteErr != nil {
 				return body, false, fmt.Errorf("normalize websocket body delete %s: %w", field, deleteErr)
 			}
-			normalized = next
+			normalized = restoreOpenAIUpstreamJSONTopLevelOrder(normalized, next)
 			changed = true
 		}
 		if !opts.Compact {
 			webSearchBody, webSearchChanged, err := ensureOpenAIOAuthWebSearchToolForHistoryBody(normalized, responsesLite)
 			if err != nil {
 				return body, false, fmt.Errorf("normalize websocket body: %w", err)
+			}
+			if webSearchChanged && opts.WebSearchHistoryToolAdded != nil {
+				*opts.WebSearchHistoryToolAdded = true
 			}
 			normalized = webSearchBody
 			changed = changed || webSearchChanged
@@ -1693,12 +1708,12 @@ func normalizeOpenAIResponsesCompatibilityBodyWithOptions(body []byte, account *
 		}
 		mapChanged := false
 		if needsOrphanCleanup {
-			if input, ok := reqBody["input"].([]any); ok && sanitizeOpenAIResponsesOrphanToolOutputs(
-				reqBody,
-				input,
-				strings.TrimSpace(firstNonEmptyString(reqBody["previous_response_id"])) != "",
-			) {
-				mapChanged = true
+			if input, ok := reqBody["input"].([]any); ok {
+				inputChanged, inputErr := sanitizeOpenAIResponsesOrphanToolOutputs(reqBody, input, hasOpenAIResponsesContextReference(reqBody))
+				if inputErr != nil {
+					return body, false, inputErr
+				}
+				mapChanged = inputChanged
 			}
 		}
 		if truncateOpenAIResponsesInputText(reqBody) {
@@ -1709,19 +1724,21 @@ func normalizeOpenAIResponsesCompatibilityBodyWithOptions(body []byte, account *
 			if err != nil {
 				return body, false, fmt.Errorf("serialize normalized websocket Responses body: %w", err)
 			}
-			normalized = next
+			normalized = restoreOpenAIUpstreamJSONTopLevelOrder(normalized, next)
 			changed = true
 		}
 	}
-	if schemaBody, schemaChanged, err := normalizeOpenAIResponseFormatSchemasBody(normalized); err != nil {
-		return body, false, err
-	} else if schemaChanged {
-		normalized = schemaBody
-		changed = true
+	if account.UsesOpenAICodexProtocol() {
+		if schemaBody, schemaChanged, err := normalizeOpenAIResponseFormatSchemasBody(normalized); err != nil {
+			return body, false, err
+		} else if schemaChanged {
+			normalized = schemaBody
+			changed = true
+		}
 	}
 	if openAIRequestBodyImageGenerationToolNeedsNormalization(normalized) {
 		var reqBody map[string]any
-		if err := json.Unmarshal(normalized, &reqBody); err != nil {
+		if err := decodeOpenAIJSONUseNumber(normalized, &reqBody); err != nil {
 			return body, false, fmt.Errorf("normalize websocket image tool body: %w", err)
 		}
 		if normalizeOpenAIResponsesImageGenerationTools(reqBody) {
@@ -1729,7 +1746,7 @@ func normalizeOpenAIResponsesCompatibilityBodyWithOptions(body []byte, account *
 			if err != nil {
 				return body, false, fmt.Errorf("serialize normalized websocket image tool body: %w", err)
 			}
-			normalized = next
+			normalized = restoreOpenAIUpstreamJSONTopLevelOrder(normalized, next)
 			changed = true
 		}
 	}
@@ -1749,6 +1766,7 @@ func normalizeOpenAIResponsesCompatibilityBodyWithOptions(body []byte, account *
 		normalized = triggerBody
 		changed = true
 	}
+
 	return normalized, changed, nil
 }
 
@@ -1805,14 +1823,14 @@ func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool) ([]byte, boo
 			if err != nil {
 				return body, false, fmt.Errorf("normalize passthrough body input string: %w", err)
 			}
-			normalized = next
+			normalized = restoreOpenAIUpstreamJSONTopLevelOrder(normalized, next)
 			changed = true
 		case inputResult.Type == gjson.JSON && !inputResult.IsArray():
 			next, err := sjson.SetRawBytes(normalized, "input", []byte("["+inputResult.Raw+"]"))
 			if err != nil {
 				return body, false, fmt.Errorf("normalize passthrough body input object: %w", err)
 			}
-			normalized = next
+			normalized = restoreOpenAIUpstreamJSONTopLevelOrder(normalized, next)
 			changed = true
 		}
 	}
@@ -1823,7 +1841,7 @@ func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool) ([]byte, boo
 			if err != nil {
 				return body, false, fmt.Errorf("normalize passthrough body delete store: %w", err)
 			}
-			normalized = next
+			normalized = restoreOpenAIUpstreamJSONTopLevelOrder(normalized, next)
 			changed = true
 		}
 		if stream := gjson.GetBytes(normalized, "stream"); stream.Exists() {
@@ -1831,7 +1849,7 @@ func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool) ([]byte, boo
 			if err != nil {
 				return body, false, fmt.Errorf("normalize passthrough body delete stream: %w", err)
 			}
-			normalized = next
+			normalized = restoreOpenAIUpstreamJSONTopLevelOrder(normalized, next)
 			changed = true
 		}
 	} else {
@@ -1840,7 +1858,7 @@ func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool) ([]byte, boo
 			if err != nil {
 				return body, false, fmt.Errorf("normalize passthrough body store=false: %w", err)
 			}
-			normalized = next
+			normalized = restoreOpenAIUpstreamJSONTopLevelOrder(normalized, next)
 			changed = true
 		}
 		if stream := gjson.GetBytes(normalized, "stream"); !stream.Exists() || stream.Type != gjson.True {
@@ -1848,7 +1866,7 @@ func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool) ([]byte, boo
 			if err != nil {
 				return body, false, fmt.Errorf("normalize passthrough body stream=true: %w", err)
 			}
-			normalized = next
+			normalized = restoreOpenAIUpstreamJSONTopLevelOrder(normalized, next)
 			changed = true
 		}
 	}
@@ -1863,7 +1881,7 @@ func isOpenAICodexModel(model string) bool {
 // extractOpenAIReasoningEffortFromBody 按优先级传入模型候选（如 upstreamModel,
 // billingModel, originalModel）：显式 effort 的模型归一化（max 保留判定）用第一个
 // 非空候选；body 未携带 effort 时的模型后缀推导依次尝试每个候选——OAuth 的
-// normalizeCodexModel 会剥掉 upstreamModel 的 effort 后缀，只有原始模型名还留着。
+// catalog.NormalizeCodexModel 会剥掉 upstreamModel 的 effort 后缀，只有原始模型名还留着。
 func extractOpenAIReasoningEffortFromBody(body []byte, modelCandidates ...string) *string {
 	reasoningEffort := strings.TrimSpace(gjson.GetBytes(body, "reasoning.effort").String())
 	if reasoningEffort == "" {
@@ -2534,7 +2552,7 @@ func sanitizeEmptyBase64InputImagesInOpenAIBody(body []byte) ([]byte, bool, erro
 	}
 
 	var reqBody map[string]any
-	if err := json.Unmarshal(body, &reqBody); err != nil {
+	if err := decodeOpenAIJSONUseNumber(body, &reqBody); err != nil {
 		return body, false, fmt.Errorf("sanitize request body: %w", err)
 	}
 	if !sanitizeEmptyBase64InputImagesInOpenAIRequestBodyMap(reqBody) {
@@ -2544,7 +2562,7 @@ func sanitizeEmptyBase64InputImagesInOpenAIBody(body []byte) ([]byte, bool, erro
 	if err != nil {
 		return body, false, fmt.Errorf("serialize sanitized request body: %w", err)
 	}
-	return normalized, true, nil
+	return restoreOpenAIUpstreamJSONTopLevelOrder(body, normalized), true, nil
 }
 
 func sanitizeEmptyBase64InputImagesInOpenAIRequestBodyMap(reqBody map[string]any) bool {
@@ -2731,7 +2749,7 @@ func supportsOpenAIReasoningEffortMax(model string) bool {
 		return true
 	}
 
-	normalized := strings.ToLower(lastOpenAIModelSegment(model))
+	normalized := strings.ToLower(catalog.LastOpenAIModelSegment(model))
 	normalized = strings.ReplaceAll(normalized, "_", "-")
 	switch {
 	case strings.HasPrefix(normalized, "deepseek-v4"), strings.HasPrefix(normalized, "deepseek-flash"):
@@ -2774,6 +2792,40 @@ func validateGPT61RawEffort(body []byte, model string) error {
 		if strings.HasSuffix(strings.ToLower(requestedModel), "-"+effort) {
 			return openai.ValidateGPT61ReasoningEffort(model, effort)
 		}
+	}
+	return nil
+}
+
+// applyOpenAIFastPolicyToMap adapts the existing policy evaluator to a decoded
+// request. It performs no JSON read/encode and creates no additional policy.
+func (s *OpenAIGatewayService) applyOpenAIFastPolicyToMap(ctx context.Context, account *Account, model string, body map[string]any) error {
+	if openAIGroupForcesFast(ctx, account) {
+		body["service_tier"] = OpenAIFastTierPriority
+	}
+	raw, _ := body["service_tier"].(string)
+	if raw == "" {
+		if s.shouldForceOpenAIFastPriorityForMissingTier(ctx, account, model) {
+			body["service_tier"] = OpenAIFastTierPriority
+		}
+		return nil
+	}
+	tier := normalizedOpenAIServiceTierValue(raw)
+	if tier == "" {
+		return nil
+	}
+	action, message := s.evaluateOpenAIFastPolicy(ctx, account, model, tier)
+	switch action {
+	case BetaPolicyActionBlock:
+		if message == "" {
+			message = fmt.Sprintf("openai service_tier=%s is not allowed for model %s", tier, model)
+		}
+		return &OpenAIFastBlockedError{Message: message}
+	case BetaPolicyActionFilter:
+		delete(body, "service_tier")
+	case OpenAIFastPolicyActionForcePriority:
+		body["service_tier"] = OpenAIFastTierPriority
+	default:
+		body["service_tier"] = tier
 	}
 	return nil
 }

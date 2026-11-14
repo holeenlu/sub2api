@@ -49,10 +49,6 @@ func (f *fakeInsertRecorder) ResetExpiredWindow(_ context.Context, _ int64, _ st
 	return nil
 }
 
-func (f *fakeInsertRecorder) BatchSnapshotUsage(_ context.Context, _ []UserPlatformQuotaSnapshot, _ time.Time) error {
-	return nil
-}
-
 // TestSnapshotPlatformQuotaDefaults_PassesToRepoBulkInsert 锁定不变式：只有至少配置了一档限额的
 // 平台才建行；三档全空（含 nil 条目）的平台不进入 BulkInsertInitial。
 func TestSnapshotPlatformQuotaDefaults_PassesToRepoBulkInsert(t *testing.T) {

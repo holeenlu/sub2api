@@ -9,12 +9,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/authz"
+
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/authidentity"
 	"github.com/Wei-Shaw/sub2api/ent/authidentitychannel"
 	dbgroup "github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
+	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/ent/schema/mixins"
 	dbuser "github.com/Wei-Shaw/sub2api/ent/user"
@@ -31,8 +34,6 @@ type userRepository struct {
 	client *dbent.Client
 	sql    sqlExecutor
 }
-
-var _ service.RedeemUserAdjustmentRepository = (*userRepository)(nil)
 
 func NewUserRepository(client *dbent.Client, sqlDB *sql.DB) service.UserRepository {
 	return newUserRepositoryWithSQL(client, sqlDB)
@@ -68,6 +69,13 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 		return nil
 	}
 
+	if actor, ok := authz.FromContext(ctx); ok && actor.ManagementRequest && actor.Role == authz.Admin {
+		if userIn.Role != service.RoleUser || userIn.Balance != 0 {
+			return service.ErrAdminPermissionDenied
+		}
+		creator := actor.UserID
+		userIn.CreatedBy = &creator
+	}
 	// 统一使用 ent 的事务：保证用户与允许分组的更新原子化，
 	// 并避免基于 *sql.Tx 手动构造 ent client 导致的 ExecQuerier 断言错误。
 	//
@@ -95,6 +103,10 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 			txClient = tx.Client()
 			txCtx = dbent.NewTxContext(ctx, tx)
 		}
+	}
+
+	if err := authz.LockManagementWrite(txCtx, txClient, nil, userIn.Role, "", false); err != nil {
+		return err
 	}
 
 	lockKeys := []string{normalizedEmailUniquenessLockKey(userIn.Email)}
@@ -146,6 +158,7 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 		SetNotes(userIn.Notes).
 		SetPasswordHash(userIn.PasswordHash).
 		SetRole(userIn.Role).
+		SetNillableCreatedBy(userIn.CreatedBy).
 		SetBalance(userIn.Balance).
 		SetConcurrency(userIn.Concurrency).
 		SetStatus(userIn.Status).
@@ -166,6 +179,10 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 		return err
 	}
 
+	if err := service.RecordManagementUserChange(txCtx, txClient, created.ID, "admin.users.create", "", created.Role); err != nil {
+		return err
+	}
+
 	if ownedTx != nil {
 		if err := ownedTx.Commit(); err != nil {
 			return err
@@ -177,12 +194,12 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 }
 
 func (r *userRepository) GetByID(ctx context.Context, id int64) (*service.User, error) {
-	m, err := r.client.User.Query().Where(dbuser.IDEQ(id)).Only(ctx)
+	m, err := clientFromContext(ctx, r.client).User.Query().Where(userSupplyScopePredicate(ctx)).Where(dbuser.IDEQ(id)).Only(ctx)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrUserNotFound, nil)
 	}
 
-	out := userEntityToService(m)
+	out := userEntityToAuthService(m)
 	groups, err := r.loadAllowedGroups(ctx, []int64{id})
 	if err != nil {
 		return nil, err
@@ -195,11 +212,11 @@ func (r *userRepository) GetByID(ctx context.Context, id int64) (*service.User, 
 
 func (r *userRepository) GetByIDIncludeDeleted(ctx context.Context, id int64) (*service.User, error) {
 	ctx = mixins.SkipSoftDelete(ctx)
-	m, err := r.client.User.Query().Where(dbuser.IDEQ(id)).Only(ctx)
+	m, err := clientFromContext(ctx, r.client).User.Query().Where(userSupplyScopePredicate(ctx)).Where(dbuser.IDEQ(id)).Only(ctx)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrUserNotFound, nil)
 	}
-	out := userEntityToService(m)
+	out := userEntityToAuthService(m)
 	groups, err := r.loadAllowedGroups(ctx, []int64{id})
 	if err != nil {
 		return nil, err
@@ -211,7 +228,7 @@ func (r *userRepository) GetByIDIncludeDeleted(ctx context.Context, id int64) (*
 }
 
 func (r *userRepository) GetByEmail(ctx context.Context, email string) (*service.User, error) {
-	matches, err := r.client.User.Query().
+	matches, err := clientFromContext(ctx, r.client).User.Query().Where(userSupplyScopePredicate(ctx)).
 		Where(userEmailLookupPredicate(email)).
 		Order(dbent.Asc(dbuser.FieldID)).
 		All(ctx)
@@ -226,7 +243,7 @@ func (r *userRepository) GetByEmail(ctx context.Context, email string) (*service
 	}
 	m := matches[0]
 
-	out := userEntityToService(m)
+	out := userEntityToAuthService(m)
 	groups, err := r.loadAllowedGroups(ctx, []int64{m.ID})
 	if err != nil {
 		return nil, err
@@ -247,7 +264,13 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 	}
 
 	// 使用 ent 事务包裹用户更新与 allowed_groups 同步，避免跨层事务不一致。
-	tx, err := r.client.Tx(ctx)
+	var tx *dbent.Tx
+	var err error
+	if dbent.TxFromContext(ctx) != nil {
+		err = dbent.ErrTxStarted
+	} else {
+		tx, err = r.client.Tx(ctx)
+	}
 	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
 		return err
 	}
@@ -265,6 +288,17 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 		} else {
 			txClient = r.client
 		}
+	}
+
+	nextRole, nextStatus := "", ""
+	if fields.Role {
+		nextRole = userIn.Role
+	}
+	if fields.Status {
+		nextStatus = userIn.Status
+	}
+	if err := authz.LockManagementWrite(txCtx, txClient, []int64{userIn.ID}, nextRole, nextStatus, false); err != nil {
+		return err
 	}
 
 	// 邮箱唯一性锁与查重只在本次确实要改邮箱时才做：不改邮箱的更新既不需要
@@ -291,6 +325,8 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 		return translatePersistenceError(err, service.ErrUserNotFound, nil)
 	}
 	oldEmail := existing.Email
+	securityChanged := (fields.Role && existing.Role != userIn.Role) || (fields.Status && existing.Status != userIn.Status)
+	credentialsChanged := (fields.PasswordHash && existing.PasswordHash != userIn.PasswordHash) || (fields.Email && existing.Email != userIn.Email)
 
 	updateOp := txClient.User.UpdateOneID(userIn.ID)
 	if fields.Email {
@@ -341,25 +377,27 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 	if fields.LastActiveAt && userIn.LastActiveAt != nil {
 		updateOp = updateOp.SetLastActiveAt(*userIn.LastActiveAt)
 	}
+	if credentialsChanged || securityChanged {
+		updateOp = updateOp.AddSessionGeneration(1)
+	}
 	updated, err := updateOp.Save(txCtx)
 	if err != nil {
 		return translatePersistenceError(err, service.ErrUserNotFound, service.ErrEmailExists)
 	}
 
-	if fields.AllowedGroups {
-		if err := r.syncUserAllowedGroupsWithClient(txCtx, txClient, updated.ID, userIn.AllowedGroups); err != nil {
+	if credentialsChanged || securityChanged {
+		if err := service.RecordManagementUserChange(txCtx, txClient, userIn.ID, "admin.users.security.update", existing.Role, updated.Role); err != nil {
 			return err
 		}
 	}
-	// 停用或降级时在同一事务内吊销 MCP 授权，恢复账号或角色后旧授权不会复活。
-	disabled := fields.Status && updated.Status != existing.Status && updated.Status != service.StatusActive
-	demoted := fields.Role && updated.Role != existing.Role && updated.Role != service.RoleAdmin
-	if disabled || demoted {
-		exec := txAwareSQLExecutor(txCtx, r.sql, r.client)
-		if exec == nil {
-			return fmt.Errorf("sql executor is not configured")
+
+	if credentialsChanged || securityChanged {
+		if err := txClient.PendingAuthSession.Update().Where(pendingauthsession.TargetUserIDEQ(userIn.ID), pendingauthsession.ConsumedAtIsNil()).SetConsumedAt(time.Now()).Exec(txCtx); err != nil {
+			return err
 		}
-		if err := revokeMCPGrants(txCtx, exec, updated.ID, !disabled, time.Now().UTC()); err != nil {
+	}
+	if fields.AllowedGroups {
+		if err := r.syncUserAllowedGroupsWithClient(txCtx, txClient, updated.ID, userIn.AllowedGroups); err != nil {
 			return err
 		}
 	}
@@ -376,6 +414,11 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 	}
 
 	userIn.UpdatedAt = updated.UpdatedAt
+	userIn.SessionGeneration = updated.SessionGeneration
+	if credentialsChanged {
+		userIn.TokenVersion = 0
+		userIn.TokenVersionResolved = false
+	}
 	return nil
 }
 
@@ -496,6 +539,16 @@ func (r *userRepository) Delete(ctx context.Context, id int64) error {
 
 // deleteUser 在给定 client（可能是外部事务 client）上删除用户及其身份关联记录，自身不开启/提交事务。
 func (r *userRepository) deleteUser(ctx context.Context, exec *dbent.Client, id int64) error {
+	if err := authz.LockManagementWrite(ctx, exec, []int64{id}, "", "", true); err != nil {
+		return err
+	}
+	before, err := exec.User.Get(ctx, id)
+	if err != nil {
+		return translatePersistenceError(err, service.ErrUserNotFound, nil)
+	}
+	if err := service.RecordManagementUserChange(ctx, exec, id, "admin.users.delete", before.Role, ""); err != nil {
+		return err
+	}
 	identityIDs, err := exec.AuthIdentity.Query().
 		Where(authidentity.UserIDEQ(id)).
 		IDs(ctx)
@@ -542,7 +595,10 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 		userCtx = mixins.SkipSoftDelete(ctx)
 	}
 
-	q := r.client.User.Query()
+	q := clientFromContext(ctx, r.client).User.Query().Where(userSupplyScopePredicate(ctx))
+	if actor, ok := authz.FromContext(ctx); ok && actor.Role == authz.Admin {
+		q = q.Where(dbuser.RoleNEQ(authz.SuperAdmin))
+	}
 
 	if filters.Status != "" {
 		q = q.Where(dbuser.StatusEQ(filters.Status))
@@ -619,7 +675,7 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 	userMap := make(map[int64]*service.User, len(users))
 	for i := range users {
 		userIDs = append(userIDs, users[i].ID)
-		u := userEntityToService(users[i])
+		u := userEntityToAuthService(users[i])
 		outUsers = append(outUsers, *u)
 		userMap[u.ID] = &outUsers[len(outUsers)-1]
 	}
@@ -732,6 +788,16 @@ func (r *userRepository) GetLatestUsedAtByUserIDs(ctx context.Context, userIDs [
 		return nil, fmt.Errorf("sql executor is not configured")
 	}
 
+	if actor, ok := authz.FromContext(ctx); ok && actor.Role == authz.Admin {
+		var err error
+		userIDs, err = r.client.User.Query().Where(userSupplyScopePredicate(ctx), dbuser.IDIn(userIDs...)).IDs(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if len(userIDs) == 0 {
+			return result, nil
+		}
+	}
 	const query = `
 		SELECT user_id, MAX(created_at) AS last_used_at
 		FROM usage_logs
@@ -856,27 +922,6 @@ func (r *userRepository) UpdateBalance(ctx context.Context, id int64, amount flo
 	return nil
 }
 
-func (r *userRepository) ApplyRedeemBalanceAdjustment(ctx context.Context, id int64, delta float64) error {
-	const updateSQL = `
-		UPDATE users
-		SET balance = GREATEST(balance + $1, 0), updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL
-	`
-	client := clientFromContext(ctx, r.client)
-	result, err := client.ExecContext(ctx, updateSQL, delta, id)
-	if err != nil {
-		return err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		return service.ErrUserNotFound
-	}
-	return nil
-}
-
 // DeductBalance 扣除用户余额
 // 透支策略：允许余额变为负数，确保当前请求能够完成
 // 中间件会阻止余额 <= 0 的用户发起后续请求
@@ -953,53 +998,59 @@ func (r *userRepository) DeductAvailableBalance(ctx context.Context, id int64, a
 // 相比"读余额 → 算新值 → 整行写回"，这里把读与写压进同一条 UPDATE，
 // 并发的计费扣款不会被旧快照覆盖。
 func (r *userRepository) AdjustBalance(ctx context.Context, id int64, delta float64) (service.BalanceChange, error) {
-	const updateSQL = `
+	return service.WithManagementWrite(ctx, r.client, []int64{id}, func(ctx context.Context) (service.BalanceChange, error) {
+		const updateSQL = `
 		UPDATE users
 		SET balance = balance + $1, updated_at = NOW()
 		WHERE id = $2 AND deleted_at IS NULL AND balance + $1 >= 0
 		RETURNING balance - $1, balance
 	`
-	change, ok, err := scanBalanceChange(ctx, clientFromContext(ctx, r.client), updateSQL, delta, id)
-	if err != nil {
-		return service.BalanceChange{}, err
-	}
-	if ok {
-		return change, nil
-	}
+		change, ok, err := scanBalanceChange(ctx, clientFromContext(ctx, r.client), updateSQL, delta, id)
+		if err != nil {
+			return service.BalanceChange{}, err
+		}
+		if ok {
+			return change, nil
+		}
 
-	// 0 行既可能是用户不存在，也可能是余额不足以承受这次扣减，需要区分。
-	current, err := r.currentBalance(ctx, id)
-	if err != nil {
-		return service.BalanceChange{}, err
-	}
-	return service.BalanceChange{Old: current, New: current + delta}, service.ErrBalanceNegative
-}
-
-// SetBalance 原子地把余额置为 value，并返回变更前后的值。
-func (r *userRepository) SetBalance(ctx context.Context, id int64, value float64) (service.BalanceChange, error) {
-	if value < 0 {
-		// 连同当前余额一起返回，便于上层给出可读的错误信息。
+		// 0 行既可能是用户不存在，也可能是余额不足以承受这次扣减，需要区分。
 		current, err := r.currentBalance(ctx, id)
 		if err != nil {
 			return service.BalanceChange{}, err
 		}
-		return service.BalanceChange{Old: current, New: value}, service.ErrBalanceNegative
-	}
-	const updateSQL = `
+		return service.BalanceChange{Old: current, New: current + delta}, service.ErrBalanceNegative
+
+	})
+}
+
+// SetBalance 原子地把余额置为 value，并返回变更前后的值。
+func (r *userRepository) SetBalance(ctx context.Context, id int64, value float64) (service.BalanceChange, error) {
+	return service.WithManagementWrite(ctx, r.client, []int64{id}, func(ctx context.Context) (service.BalanceChange, error) {
+		if value < 0 {
+			// 连同当前余额一起返回，便于上层给出可读的错误信息。
+			current, err := r.currentBalance(ctx, id)
+			if err != nil {
+				return service.BalanceChange{}, err
+			}
+			return service.BalanceChange{Old: current, New: value}, service.ErrBalanceNegative
+		}
+		const updateSQL = `
 		UPDATE users AS u
 		SET balance = $1, updated_at = NOW()
 		FROM (SELECT id, balance FROM users WHERE id = $2 AND deleted_at IS NULL) AS prev
 		WHERE u.id = prev.id AND u.deleted_at IS NULL
 		RETURNING prev.balance, u.balance
 	`
-	change, ok, err := scanBalanceChange(ctx, clientFromContext(ctx, r.client), updateSQL, value, id)
-	if err != nil {
-		return service.BalanceChange{}, err
-	}
-	if !ok {
-		return service.BalanceChange{}, service.ErrUserNotFound
-	}
-	return change, nil
+		change, ok, err := scanBalanceChange(ctx, clientFromContext(ctx, r.client), updateSQL, value, id)
+		if err != nil {
+			return service.BalanceChange{}, err
+		}
+		if !ok {
+			return service.BalanceChange{}, service.ErrUserNotFound
+		}
+		return change, nil
+
+	})
 }
 
 // currentBalance 读取用户当前余额，用户不存在时返回 ErrUserNotFound。
@@ -1061,93 +1112,81 @@ func (r *userRepository) UpdateConcurrency(ctx context.Context, id int64, amount
 	return nil
 }
 
-func (r *userRepository) ApplyRedeemConcurrencyAdjustment(ctx context.Context, id int64, delta int) error {
-	const updateSQL = `
-		UPDATE users
-		SET concurrency = GREATEST(concurrency + $1, 0), updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL
-	`
-	client := clientFromContext(ctx, r.client)
-	result, err := client.ExecContext(ctx, updateSQL, delta, id)
-	if err != nil {
-		return err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		return service.ErrUserNotFound
-	}
-	return nil
-}
-
 func (r *userRepository) BatchSetConcurrency(ctx context.Context, userIDs []int64, value int) (int, error) {
-	if len(userIDs) == 0 {
-		return 0, nil
-	}
-	if value < 0 {
-		value = 0
-	}
-	res, err := r.sql.ExecContext(ctx,
-		"UPDATE users SET concurrency = $1, updated_at = NOW() WHERE id = ANY($2) AND deleted_at IS NULL",
-		value, pq.Array(userIDs))
-	if err != nil {
-		return 0, fmt.Errorf("batch set concurrency: %w", err)
-	}
-	affected, _ := res.RowsAffected()
-	return int(affected), nil
+	return service.WithManagementWrite(ctx, r.client, userIDs, func(ctx context.Context) (int, error) {
+		if len(userIDs) == 0 {
+			return 0, nil
+		}
+		if value < 0 {
+			value = 0
+		}
+		res, err := clientFromContext(ctx, r.client).ExecContext(ctx,
+			"UPDATE users SET concurrency = $1, updated_at = NOW() WHERE id = ANY($2) AND deleted_at IS NULL",
+			value, pq.Array(userIDs))
+		if err != nil {
+			return 0, fmt.Errorf("batch set concurrency: %w", err)
+		}
+		affected, _ := res.RowsAffected()
+		return int(affected), nil
+
+	})
 }
 
 func (r *userRepository) BatchAddConcurrency(ctx context.Context, userIDs []int64, delta int) (int, error) {
-	if len(userIDs) == 0 {
-		return 0, nil
-	}
-	res, err := r.sql.ExecContext(ctx,
-		"UPDATE users SET concurrency = GREATEST(concurrency + $1, 0), updated_at = NOW() WHERE id = ANY($2) AND deleted_at IS NULL",
-		delta, pq.Array(userIDs))
-	if err != nil {
-		return 0, fmt.Errorf("batch add concurrency: %w", err)
-	}
-	affected, _ := res.RowsAffected()
-	return int(affected), nil
+	return service.WithManagementWrite(ctx, r.client, userIDs, func(ctx context.Context) (int, error) {
+		if len(userIDs) == 0 {
+			return 0, nil
+		}
+		res, err := clientFromContext(ctx, r.client).ExecContext(ctx,
+			"UPDATE users SET concurrency = GREATEST(concurrency + $1, 0), updated_at = NOW() WHERE id = ANY($2) AND deleted_at IS NULL",
+			delta, pq.Array(userIDs))
+		if err != nil {
+			return 0, fmt.Errorf("batch add concurrency: %w", err)
+		}
+		affected, _ := res.RowsAffected()
+		return int(affected), nil
+
+	})
 }
 
 func (r *userRepository) BatchUpdateLimits(ctx context.Context, userIDs []int64, concurrency, rpmLimit *int) (int, error) {
-	if len(userIDs) == 0 || (concurrency == nil && rpmLimit == nil) {
-		return 0, nil
-	}
+	return service.WithManagementWrite(ctx, r.client, userIDs, func(ctx context.Context) (int, error) {
+		if len(userIDs) == 0 || (concurrency == nil && rpmLimit == nil) {
+			return 0, nil
+		}
 
-	setClauses := make([]string, 0, 3)
-	args := make([]any, 0, 3)
-	if concurrency != nil {
-		value := max(*concurrency, 0)
-		args = append(args, value)
-		setClauses = append(setClauses, fmt.Sprintf("concurrency = $%d", len(args)))
-	}
-	if rpmLimit != nil {
-		value := max(*rpmLimit, 0)
-		args = append(args, value)
-		setClauses = append(setClauses, fmt.Sprintf("rpm_limit = $%d", len(args)))
-	}
-	setClauses = append(setClauses, "updated_at = NOW()")
-	args = append(args, pq.Array(userIDs))
+		setClauses := make([]string, 0, 3)
+		args := make([]any, 0, 3)
+		if concurrency != nil {
+			value := max(*concurrency, 0)
+			args = append(args, value)
+			setClauses = append(setClauses, fmt.Sprintf("concurrency = $%d", len(args)))
+		}
+		if rpmLimit != nil {
+			value := max(*rpmLimit, 0)
+			args = append(args, value)
+			setClauses = append(setClauses, fmt.Sprintf("rpm_limit = $%d", len(args)))
+		}
+		setClauses = append(setClauses, "updated_at = NOW()")
+		args = append(args, pq.Array(userIDs))
 
-	query := fmt.Sprintf(
-		"UPDATE users SET %s WHERE id = ANY($%d) AND deleted_at IS NULL",
-		strings.Join(setClauses, ", "),
-		len(args),
-	)
-	res, err := r.sql.ExecContext(ctx, query, args...)
-	if err != nil {
-		return 0, fmt.Errorf("batch update user limits: %w", err)
-	}
-	affected, _ := res.RowsAffected()
-	return int(affected), nil
+		query := fmt.Sprintf(
+			"UPDATE users SET %s WHERE id = ANY($%d) AND deleted_at IS NULL",
+			strings.Join(setClauses, ", "),
+			len(args),
+		)
+		res, err := clientFromContext(ctx, r.client).ExecContext(ctx, query, args...)
+		if err != nil {
+			return 0, fmt.Errorf("batch update user limits: %w", err)
+		}
+		affected, _ := res.RowsAffected()
+		return int(affected), nil
+
+	})
 }
 
 func (r *userRepository) ExistsByEmail(ctx context.Context, email string) (bool, error) {
-	return r.client.User.Query().Where(userEmailLookupPredicate(email)).Exist(ctx)
+	return clientFromContext(ctx, r.client).User.Query().Where(userSupplyScopePredicate(ctx)).Where(userEmailLookupPredicate(email)).Exist(ctx)
 }
 
 // emailAliasCandidateLimit 限制一次别名查重最多取回的候选行数。探针都以去点后的
@@ -1260,7 +1299,9 @@ func (r *userRepository) UpdateEmailWithAliasGuard(
 		Save(ctx); err != nil {
 		return translatePersistenceError(err, service.ErrUserNotFound, service.ErrEmailExists)
 	}
-	return nil
+	// Email/password fingerprints already invalidate sessions atomically. Keep the
+	// generation unchanged so the existing email-binding return value can issue fresh tokens.
+	return client.PendingAuthSession.Update().Where(pendingauthsession.TargetUserIDEQ(userID), pendingauthsession.ConsumedAtIsNil()).SetConsumedAt(time.Now()).Exec(ctx)
 }
 
 // dotStrippedEmailExpr 渲染下面的表达式：去掉存量邮箱的大小写、首尾空白（与
@@ -1400,6 +1441,9 @@ func emailAliasUniquenessLockKey(email string) string {
 
 func (r *userRepository) AddGroupToAllowedGroups(ctx context.Context, userID int64, groupID int64) error {
 	client := clientFromContext(ctx, r.client)
+	if err := authz.LockManagementWrite(ctx, client, []int64{userID}, "", "", false); err != nil {
+		return err
+	}
 	err := client.UserAllowedGroup.Create().
 		SetUserID(userID).
 		SetGroupID(groupID).
@@ -1426,16 +1470,19 @@ func (r *userRepository) RemoveGroupFromAllowedGroups(ctx context.Context, group
 // RemoveGroupFromUserAllowedGroups 移除单个用户的指定分组权限
 func (r *userRepository) RemoveGroupFromUserAllowedGroups(ctx context.Context, userID int64, groupID int64) error {
 	client := clientFromContext(ctx, r.client)
+	if err := authz.LockManagementWrite(ctx, client, []int64{userID}, "", "", false); err != nil {
+		return err
+	}
 	_, err := client.UserAllowedGroup.Delete().
 		Where(userallowedgroup.UserIDEQ(userID), userallowedgroup.GroupIDEQ(groupID)).
 		Exec(ctx)
 	return err
 }
 
-func (r *userRepository) GetFirstAdmin(ctx context.Context) (*service.User, error) {
-	m, err := r.client.User.Query().
+func (r *userRepository) GetFirstSuperAdmin(ctx context.Context) (*service.User, error) {
+	m, err := clientFromContext(ctx, r.client).User.Query().Where(userSupplyScopePredicate(ctx)).
 		Where(
-			dbuser.RoleEQ(service.RoleAdmin),
+			dbuser.RoleEQ(service.RoleSuperAdmin),
 			dbuser.StatusEQ(service.StatusActive),
 		).
 		Order(dbent.Asc(dbuser.FieldID)).
@@ -1444,7 +1491,7 @@ func (r *userRepository) GetFirstAdmin(ctx context.Context) (*service.User, erro
 		return nil, translatePersistenceError(err, service.ErrUserNotFound, nil)
 	}
 
-	out := userEntityToService(m)
+	out := userEntityToAuthService(m)
 	groups, err := r.loadAllowedGroups(ctx, []int64{m.ID})
 	if err != nil {
 		return nil, err
@@ -1540,6 +1587,9 @@ func (r *userRepository) syncUserAllowedGroupsWithClient(ctx context.Context, cl
 }
 
 func applyUserEntityToService(dst *service.User, src *dbent.User) {
+	if dst != nil && src != nil {
+		dst.SessionGeneration = src.SessionGeneration
+	}
 	if dst == nil || src == nil {
 		return
 	}
@@ -1601,11 +1651,46 @@ func (r *userRepository) DisableTotp(ctx context.Context, userID int64) error {
 	client := clientFromContext(ctx, r.client)
 	_, err := client.User.UpdateOneID(userID).
 		SetTotpEnabled(false).
+		AddSessionGeneration(1).
 		ClearTotpEnabledAt().
 		ClearTotpSecretEncrypted().
 		Save(ctx)
 	if err != nil {
 		return translatePersistenceError(err, service.ErrUserNotFound, nil)
+	}
+	return nil
+}
+
+// Keep auth lifecycle state in every user-repository read without changing API-key DTOs.
+func userEntityToAuthService(u *dbent.User) *service.User {
+	out := userEntityToService(u)
+	if out != nil {
+		out.SessionGeneration = u.SessionGeneration
+	}
+	return out
+}
+
+func (r *userRepository) RevokeUserSessions(ctx context.Context, userID int64) error {
+	return r.WithUserProfileIdentityTx(ctx, func(ctx context.Context) error {
+		client := clientFromContext(ctx, r.client)
+		if err := client.User.UpdateOneID(userID).AddSessionGeneration(1).Exec(ctx); err != nil {
+			return err
+		}
+		return client.PendingAuthSession.Update().Where(pendingauthsession.TargetUserIDEQ(userID), pendingauthsession.ConsumedAtIsNil()).SetConsumedAt(time.Now()).Exec(ctx)
+	})
+}
+
+// ActivateTotp is a compare-and-set: a stale setup cannot overwrite an existing factor.
+func (r *userRepository) ActivateTotp(ctx context.Context, expected *service.User, secret string) error {
+	n, err := clientFromContext(ctx, r.client).User.Update().Where(
+		dbuser.IDEQ(expected.ID), dbuser.TotpEnabledEQ(false),
+		dbuser.SessionGenerationEQ(expected.SessionGeneration), dbuser.PasswordHashEQ(expected.PasswordHash), dbuser.EmailEQ(expected.Email),
+	).SetTotpSecretEncrypted(secret).SetTotpEnabled(true).SetTotpEnabledAt(time.Now()).Save(ctx)
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return service.ErrTokenRevoked
 	}
 	return nil
 }

@@ -24,7 +24,7 @@ func ClassifyChannelMonitorV2Error(input ChannelMonitorV2ErrorInput) string {
 	if input.StatusCode == 401 || input.UpstreamStatusCode == 401 || channelMonitorV2ContainsAny(text, "unauthorized", "invalid api key", "invalid_api_key", "authentication", "api_key_disabled") {
 		return "authentication"
 	}
-	if channelMonitorV2ContainsAny(text, "context window", "context length", "maximum prompt length", "too many tokens", "max_tokens") {
+	if errorType == "context_limit" || channelMonitorV2ContainsAny(text, "context window", "context length", "maximum prompt length", "too many tokens", "max_tokens") {
 		return "context_limit"
 	}
 	if channelMonitorV2ContainsAny(text, "failed to deserialize", "missing required parameter", "invalid request", "invalid_request", "tool_choice") {

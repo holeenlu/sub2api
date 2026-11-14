@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -104,10 +105,9 @@ func TestOpenAIGatewayService_Forward_WSv2_TurnStateBoundToExecutionScope(t *tes
 	require.Equal(t, "turn-state-from-upstream", turnState)
 }
 
-// Forward 在转发前会按账号 namespace 改写请求体里的 client_metadata，指纹 full 模式还会给每个
-// 请求注入同一个 thread_id。执行作用域必须取自客户端原始请求：否则同一 API key 下不同
-// session_id 的会话会落到同一个键共用 turn state，客户端自带线程标识时也会与 WS 接入路径
-// 按原始报文算出的键对不上。
+// Forward scopes body identity and preserves caller-aware distinct threads even
+// in full convergence mode. State keys must still use original client identity;
+// the connection pool separately enforces final handshake compatibility.
 func TestOpenAIGatewayService_Forward_WSv2_ExecutionScopeUsesOriginalIdentity(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -125,11 +125,22 @@ func TestOpenAIGatewayService_Forward_WSv2_ExecutionScopeUsesOriginalIdentity(t 
 	completed := func(id string) []byte {
 		return []byte(`{"type":"response.completed","response":{"id":"` + id + `","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
 	}
-	captureConn := &openAIWSCaptureConn{events: [][]byte{completed("resp_a"), completed("resp_b"), completed("resp_c")}}
 	handshake := http.Header{}
 	handshake.Set(openAIWSTurnStateHeader, "turn-state-from-upstream")
+	var dialMu sync.Mutex
+	var capturedConns []*openAIWSCaptureConn
+	var capturedHeaders []http.Header
 	pool := newOpenAIWSConnPool(cfg)
-	pool.setClientDialerForTest(&openAIWSCaptureDialer{conn: captureConn, handshake: handshake})
+	pool.setClientDialerForTest(openAIWSExecutionScopeDialFunc(func(_ context.Context, _ string, headers http.Header, _ string) (openAIWSClientConn, int, http.Header, error) {
+		dialMu.Lock()
+		defer dialMu.Unlock()
+		// A real dial creates a new socket. Distinct compatible-key buckets
+		// evict the old idle socket at capacity=1; never return that closed one.
+		conn := &openAIWSCaptureConn{events: [][]byte{completed(fmt.Sprintf("resp_scope_%d", len(capturedConns)))}}
+		capturedConns = append(capturedConns, conn)
+		capturedHeaders = append(capturedHeaders, headers.Clone())
+		return conn, 0, handshake.Clone(), nil
+	}))
 	defer pool.Close()
 
 	stateStore := NewOpenAIWSStateStore(nil)
@@ -198,4 +209,32 @@ func TestOpenAIGatewayService_Forward_WSv2_ExecutionScopeUsesOriginalIdentity(t 
 	require.Equal(t, "child-thread", threadC)
 	_, boundC := stateStore.GetSessionTurnState(groupID, scopeC)
 	require.True(t, boundC, "客户端自带线程标识时，键必须与按原始报文算出的一致，不受账号 namespace 改写影响")
+	require.NotEqual(t, scopeA, scopeC)
+	require.NotEqual(t, scopeB, scopeC)
+	dialMu.Lock()
+	conns := append([]*openAIWSCaptureConn(nil), capturedConns...)
+	headers := append([]http.Header(nil), capturedHeaders...)
+	dialMu.Unlock()
+	require.Len(t, conns, 3, "each incompatible session requires a fresh socket")
+	for i, conn := range conns {
+		conn.mu.Lock()
+		closed := conn.closed
+		payload := cloneMapStringAny(conn.lastWrite)
+		conn.mu.Unlock()
+		metadata := payload["client_metadata"].(map[string]any)
+		require.Equal(t, metadata["thread_id"], headers[i].Get("thread-id"))
+		require.Empty(t, headers[i].Get("session_id"))
+		require.Empty(t, headers[i].Get("x-codex-installation-id"))
+		if i < 2 {
+			require.True(t, closed, "pool must close the incompatible idle socket")
+			require.NotEqual(t, normalizeOpenAIWSHandshakeCompatibility(account, headers[i]), normalizeOpenAIWSHandshakeCompatibility(account, headers[i+1]))
+		}
+	}
+	require.Equal(t, scopeCodexAccountIdentityValue(account, apiKeyID, "thread", "child-thread"), headers[2].Get("thread-id"))
+}
+
+type openAIWSExecutionScopeDialFunc func(context.Context, string, http.Header, string) (openAIWSClientConn, int, http.Header, error)
+
+func (f openAIWSExecutionScopeDialFunc) Dial(ctx context.Context, url string, headers http.Header, proxy string) (openAIWSClientConn, int, http.Header, error) {
+	return f(ctx, url, headers, proxy)
 }

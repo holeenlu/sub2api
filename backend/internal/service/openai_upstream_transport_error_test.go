@@ -5,10 +5,19 @@ package service
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
+
+	"github.com/Wei-Shaw/sub2api/internal/gateway/model"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
 )
 
 // TestClassifyUpstreamTransportError pins which transport-level upstream failures
@@ -89,4 +98,54 @@ func errString(err error) string {
 		return "<nil>"
 	}
 	return err.Error()
+}
+
+func TestOpenAITransportHTTP2PeerResetStopsAmbiguousReplay(t *testing.T) {
+	var consumed atomic.Int32
+	upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if body, err := io.ReadAll(r.Body); err == nil && string(body) == "generation" && r.ProtoMajor == 2 {
+			consumed.Add(1)
+		}
+		panic(http.ErrAbortHandler)
+	}))
+	upstream.EnableHTTP2 = true
+	upstream.StartTLS()
+	defer upstream.Close()
+
+	response, reset := upstream.Client().Post(upstream.URL, "text/plain", strings.NewReader("generation"))
+	require.Nil(t, response)
+	require.Error(t, reset)
+	require.Equal(t, int32(1), consumed.Load())
+
+	for _, tc := range []struct {
+		name     string
+		err      error
+		failover bool
+	}{
+		{name: "untracked transport", err: reset},
+		{name: "ambiguous send", err: &OpenAITransportAttemptError{Cause: reset, SendState: model.SendAmbiguous}},
+		{name: "confirmed send", err: &OpenAITransportAttemptError{Cause: reset, SendState: model.SendSent}},
+		{name: "proven unsent", err: &OpenAITransportAttemptError{Cause: reset, SendState: model.SendNotSent}, failover: true},
+		{name: "ordinary transport error", err: errors.New("read tcp: connection reset by peer"), failover: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			c.Set("openai_uncertain_replay_safe", true)
+			got := (&OpenAIGatewayService{}).handleOpenAIUpstreamTransportError(t.Context(), c, &Account{ID: 1}, tc.err, false)
+			var failover *UpstreamFailoverError
+			require.Equal(t, tc.failover, errors.As(got, &failover))
+			if tc.failover {
+				require.Equal(t, tc.name == "proven unsent", failover.RequestNotSent)
+				return
+			}
+			require.ErrorIs(t, got, reset)
+			code, message, ok := OpenAIUpstreamStreamReadErrorDetails(got)
+			require.True(t, ok)
+			require.Equal(t, OpenAIUpstreamHTTP2StreamErrorCode, code)
+			require.NotContains(t, message, upstream.URL)
+			require.False(t, c.Writer.Written(), "the protocol handler owns the client response")
+		})
+	}
 }

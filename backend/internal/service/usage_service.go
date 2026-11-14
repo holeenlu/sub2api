@@ -7,6 +7,7 @@ import (
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
@@ -18,6 +19,10 @@ var (
 
 // CreateUsageLogRequest 创建使用日志请求
 type CreateUsageLogRequest struct {
+	// Only trusted in-process producers may provide selected resource snapshots.
+	SelectedAccount *Account `json:"-"`
+	ServingGroup    *Group   `json:"-"`
+
 	UserID                int64   `json:"user_id"`
 	APIKeyID              int64   `json:"api_key_id"`
 	AccountID             int64   `json:"account_id"`
@@ -56,6 +61,8 @@ type UsageStats struct {
 
 // UsageService 使用统计服务
 type UsageService struct {
+	exportLocks          LeaderLockCache
+	exportLimits         config.UsageExportConfig
 	usageRepo            UsageLogRepository
 	userRepo             UserRepository
 	entClient            *dbent.Client
@@ -116,6 +123,9 @@ func (s *UsageService) Create(ctx context.Context, req CreateUsageLogRequest) (*
 		DurationMs:            req.DurationMs,
 	}
 
+	if req.SelectedAccount != nil && req.SelectedAccount.ID == req.AccountID {
+		usageLog.CaptureVendorSnapshot(req.SelectedAccount, req.ServingGroup)
+	}
 	inserted, err := s.usageRepo.Create(txCtx, usageLog)
 	if err != nil {
 		return nil, fmt.Errorf("create usage log: %w", err)
@@ -402,6 +412,16 @@ func (s *UsageService) GetAPIKeyModelStats(ctx context.Context, apiKeyID int64, 
 	return stats, nil
 }
 
+// GetAPIKeyBreakdownStats returns API-key ranking rows scoped by the supplied filters.
+// The caller must set UserID before exposing this to a non-admin user.
+func (s *UsageService) GetAPIKeyBreakdownStats(ctx context.Context, startTime, endTime time.Time, dim usagestats.UserBreakdownDimension, limit int) ([]usagestats.APIKeyBreakdownItem, error) {
+	stats, err := s.usageRepo.GetAPIKeyBreakdownStats(ctx, startTime, endTime, dim, limit)
+	if err != nil {
+		return nil, fmt.Errorf("get api key breakdown stats: %w", err)
+	}
+	return stats, nil
+}
+
 // GetAPIKeyDailyUsage returns daily usage stats for a user's API key.
 func (s *UsageService) GetAPIKeyDailyUsage(ctx context.Context, userID, apiKeyID int64, startTime, endTime time.Time) ([]usagestats.APIKeyDailyUsagePoint, error) {
 	trend, err := s.usageRepo.GetUsageTrendWithFilters(ctx, startTime, endTime, "day", userID, apiKeyID, 0, 0, "", nil, nil, nil)
@@ -437,6 +457,12 @@ func (s *UsageService) GetBatchAPIKeyUsageStats(ctx context.Context, apiKeyIDs [
 
 // ListWithFilters lists usage logs with admin filters.
 func (s *UsageService) ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters usagestats.UsageLogFilters) ([]UsageLog, *pagination.PaginationResult, error) {
+	var rangeErr error
+	filters, rangeErr = s.BoundUsageFilters(filters, time.Now())
+	if rangeErr != nil {
+		return nil, nil, rangeErr
+	}
+
 	logs, result, err := s.usageRepo.ListWithFilters(ctx, params, filters)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list usage logs with filters: %w", err)
@@ -455,6 +481,12 @@ func (s *UsageService) GetGlobalStats(ctx context.Context, startTime, endTime ti
 
 // GetStatsWithFilters returns usage stats with optional filters.
 func (s *UsageService) GetStatsWithFilters(ctx context.Context, filters usagestats.UsageLogFilters) (*usagestats.UsageStats, error) {
+	var rangeErr error
+	filters, rangeErr = s.BoundUsageFilters(filters, time.Now())
+	if rangeErr != nil {
+		return nil, rangeErr
+	}
+
 	stats, err := s.usageRepo.GetStatsWithFilters(ctx, filters)
 	if err != nil {
 		return nil, fmt.Errorf("get usage stats with filters: %w", err)

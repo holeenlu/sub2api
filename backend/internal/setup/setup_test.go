@@ -317,7 +317,11 @@ func TestDatabaseConnectionUsesConfiguredTargetBeforeBootstrapDatabase(t *testin
 	if err != nil {
 		t.Fatalf("sqlmock.New() error = %v", err)
 	}
-	defer func() { _ = targetDB.Close() }()
+	t.Cleanup(func() {
+		if err := targetDB.Close(); err != nil {
+			t.Errorf("close target database: %v", err)
+		}
+	})
 
 	var opened []string
 	openDatabase := func(_ *DatabaseConfig, dbName string) (*sql.DB, error) {
@@ -339,12 +343,20 @@ func TestDatabaseConnectionUsesLegacyBootstrapOnlyForMissingTarget(t *testing.T)
 	if err != nil {
 		t.Fatalf("sqlmock.New() bootstrap error = %v", err)
 	}
-	defer func() { _ = bootstrapDB.Close() }()
+	t.Cleanup(func() {
+		if err := bootstrapDB.Close(); err != nil {
+			t.Errorf("close bootstrap database: %v", err)
+		}
+	})
 	targetDB, _, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New() target error = %v", err)
 	}
-	defer func() { _ = targetDB.Close() }()
+	t.Cleanup(func() {
+		if err := targetDB.Close(); err != nil {
+			t.Errorf("close target database: %v", err)
+		}
+	})
 
 	bootstrapMock.ExpectQuery(`SELECT EXISTS\(SELECT 1 FROM pg_database WHERE datname = \$1\)`).
 		WithArgs(cfg.DBName).
@@ -414,8 +426,8 @@ func TestPrepareAdminCredentialsGeneratesMissingValues(t *testing.T) {
 	if !emailGenerated || !passwordGenerated {
 		t.Fatalf("generated flags = (%v, %v), want (true, true)", emailGenerated, passwordGenerated)
 	}
-	if !regexp.MustCompile(`^admin-[0-9a-f]{12}@sub2api\.local$`).MatchString(admin.Email) {
-		t.Fatalf("generated email = %q, want admin-<12 hex>@sub2api.local", admin.Email)
+	if !regexp.MustCompile(`^admin-[0-9a-f]{12}@` + regexp.QuoteMeta(strings.ToLower(service.DefaultSiteName)) + `\.local$`).MatchString(admin.Email) {
+		t.Fatalf("generated email = %q, want a random branded admin email", admin.Email)
 	}
 	// 生成的邮箱必须能通过登录接口的 binding:"required,email" 校验。
 	loginReq := struct {
@@ -525,7 +537,7 @@ func expectAdminBootstrapCounts(mock sqlmock.Sqlmock, totalUsers, adminUsers int
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(1) FROM users")).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(totalUsers))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(1) FROM users WHERE role = $1")).
-		WithArgs(service.RoleAdmin).
+		WithArgs(service.RoleSuperAdmin).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(adminUsers))
 }
 
@@ -587,7 +599,7 @@ func TestBootstrapAdminUserRejectsWeakPasswordWithoutInsert(t *testing.T) {
 	}
 }
 
-func TestBootstrapAdminUserCreatesAdminWithGeneratedCredentials(t *testing.T) {
+func TestBootstrapAdminUserCreatesSuperAdminWithGeneratedCredentials(t *testing.T) {
 	t.Parallel()
 
 	db, mock, err := sqlmock.New()
@@ -598,7 +610,7 @@ func TestBootstrapAdminUserCreatesAdminWithGeneratedCredentials(t *testing.T) {
 	expectAdminBootstrapCounts(mock, 0, 0)
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO users")).
 		WithArgs(
-			sqlmock.AnyArg(), sqlmock.AnyArg(), service.RoleAdmin, sqlmock.AnyArg(),
+			sqlmock.AnyArg(), sqlmock.AnyArg(), service.RoleSuperAdmin, sqlmock.AnyArg(),
 			sqlmock.AnyArg(), service.StatusActive, sqlmock.AnyArg(), sqlmock.AnyArg(),
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -608,8 +620,8 @@ func TestBootstrapAdminUserCreatesAdminWithGeneratedCredentials(t *testing.T) {
 	if err != nil || !created || reason != adminBootstrapReasonEmptyDatabase {
 		t.Fatalf("bootstrapAdminUser() = (%v, %q, %v), want (true, %q, nil)", created, reason, err, adminBootstrapReasonEmptyDatabase)
 	}
-	if !regexp.MustCompile(`^admin-[0-9a-f]{12}@sub2api\.local$`).MatchString(cfg.Admin.Email) {
-		t.Fatalf("admin email = %q, want generated admin-<12 hex>@sub2api.local", cfg.Admin.Email)
+	if !regexp.MustCompile(`^admin-[0-9a-f]{12}@` + regexp.QuoteMeta(strings.ToLower(service.DefaultSiteName)) + `\.local$`).MatchString(cfg.Admin.Email) {
+		t.Fatalf("admin email = %q, want a random branded admin email", cfg.Admin.Email)
 	}
 	if len(cfg.Admin.Password) != 32 {
 		t.Fatalf("admin password length = %d, want generated 32", len(cfg.Admin.Password))

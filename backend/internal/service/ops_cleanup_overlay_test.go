@@ -290,7 +290,13 @@ func TestUpdateOpsAdvancedSettings_NilReloader_NoPanic(t *testing.T) {
 
 func TestStart_IdempotentSecondCall(t *testing.T) {
 	svc := &OpsCleanupService{started: true}
-	svc.Start() // second call should be noop, not panic
+	if err := svc.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stopMaintenanceForTest(t, svc) })
 }
 
 func TestRefreshEffectiveBeforeRun_UpdatesSnapshot(t *testing.T) {

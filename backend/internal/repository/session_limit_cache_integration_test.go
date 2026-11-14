@@ -32,12 +32,12 @@ func (s *SessionLimitCacheSuite) TestUnregisterSession_FreesSlotForNewSession() 
 	// 会话 A 注册成功（请求开始转发）
 	allowed, err := s.cache.RegisterSession(s.ctx, accountID, "session-A", maxSessions, idleTimeout)
 	s.RequireNoError(err, "RegisterSession A")
-	s.True(allowed, "首个会话应被允许")
+	s.True(allowed.Allowed, "首个会话应被允许")
 
 	// 转发失败后的新会话 B 在空闲超时窗口内被拒（修复前的行为）
 	allowed, err = s.cache.RegisterSession(s.ctx, accountID, "session-B", maxSessions, idleTimeout)
 	s.RequireNoError(err, "RegisterSession B before release")
-	s.False(allowed, "槽位被 A 占用时新会话应被拒绝")
+	s.False(allowed.Allowed, "槽位被 A 占用时新会话应被拒绝")
 
 	// 请求最终失败：立即释放 A 的会话注册（不等待空闲超时）
 	s.RequireNoError(s.cache.UnregisterSession(s.ctx, accountID, "session-A"), "UnregisterSession A")
@@ -45,7 +45,7 @@ func (s *SessionLimitCacheSuite) TestUnregisterSession_FreesSlotForNewSession() 
 	// A 释放后 B 立即可注册，无需等待空闲超时
 	allowed, err = s.cache.RegisterSession(s.ctx, accountID, "session-B", maxSessions, idleTimeout)
 	s.RequireNoError(err, "RegisterSession B after release")
-	s.True(allowed, "释放后新会话应立即可注册")
+	s.True(allowed.Allowed, "释放后新会话应立即可注册")
 
 	count, err := s.cache.GetActiveSessionCount(s.ctx, accountID)
 	s.RequireNoError(err, "GetActiveSessionCount")
@@ -73,7 +73,7 @@ func (s *SessionLimitCacheSuite) TestUnregisterSession_OnlyTargetsSpecifiedSessi
 	for _, sid := range []string{"session-A", "session-B"} {
 		allowed, err := s.cache.RegisterSession(s.ctx, accountID, sid, maxSessions, idleTimeout)
 		s.RequireNoError(err, "RegisterSession "+sid)
-		s.True(allowed)
+		s.True(allowed.Allowed)
 	}
 
 	s.RequireNoError(s.cache.UnregisterSession(s.ctx, accountID, "session-A"), "UnregisterSession A")

@@ -38,8 +38,10 @@ func TestScopedAdminReviewGroupPriorityAndStatus(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close(); _, _ = base.Exec(`DROP SCHEMA ` + name + ` CASCADE`); _ = base.Close() })
 	driver := entsql.OpenDB(dialect.Postgres, db)
 	client := dbent.NewClient(dbent.Driver(driver))
-	require.NoError(t, migrate.Create(context.Background(), migrate.NewSchema(driver), []*schema.Table{migrate.ProxiesTable, migrate.AccountsTable, migrate.GroupsTable, migrate.AccountGroupsTable}, migrate.WithForeignKeys(false)))
-	_, err = db.Exec(`CREATE TABLE scheduler_outbox(id BIGSERIAL PRIMARY KEY,event_type TEXT,account_id BIGINT,group_id BIGINT,payload JSONB,dedup_key TEXT,created_at TIMESTAMPTZ DEFAULT NOW());CREATE UNIQUE INDEX review_outbox_dedup ON scheduler_outbox(dedup_key) WHERE dedup_key IS NOT NULL`)
+	require.NoError(t, migrate.Create(context.Background(), migrate.NewSchema(driver), []*schema.Table{migrate.UsersTable, migrate.ProxiesTable, migrate.AccountsTable, migrate.GroupsTable, migrate.AccountGroupsTable}, migrate.WithForeignKeys(false)))
+	_, err = db.Exec(`CREATE TABLE vendors(id BIGINT PRIMARY KEY,user_id BIGINT,status TEXT,policy_version BIGINT,platforms JSONB,allow_direct BOOL,tier INT,parent_vendor_id BIGINT);
+ CREATE TABLE vendor_groups(vendor_id BIGINT,group_id BIGINT);
+ CREATE TABLE scheduler_outbox(id BIGSERIAL PRIMARY KEY,event_type TEXT,account_id BIGINT,group_id BIGINT,payload JSONB,dedup_key TEXT,created_at TIMESTAMPTZ DEFAULT NOW());CREATE UNIQUE INDEX review_outbox_dedup ON scheduler_outbox(dedup_key) WHERE dedup_key IS NOT NULL`)
 	require.NoError(t, err)
 	cache := &scopedReviewSchedulerCache{accounts: make(map[int64]*service.Account)}
 	repo := NewAdminAccountRepository(client, db, cache)
@@ -60,6 +62,20 @@ func TestScopedAdminReviewGroupPriorityAndStatus(t *testing.T) {
 	require.NoError(t, err)
 	principal := &adminaccess.Principal{Policy: adminaccess.Policy{Rules: []adminaccess.Rule{{Permissions: []string{"accounts.groups", "accounts.status"}, GroupIDs: []int64{a.ID, c.ID}, AccountTypes: []string{"apikey"}}}}}
 	ctx = adminaccess.WithPrincipal(ctx, principal)
+	t.Run("供应商分组约束仍生效", func(t *testing.T) {
+		_, err := db.Exec(`INSERT INTO vendors(id,status,tier,platforms) VALUES(88,'disabled',1,'["openai"]')`)
+		require.NoError(t, err)
+		_, err = db.Exec(`UPDATE accounts SET vendor_id=88 WHERE id=$1`, account.ID)
+		require.NoError(t, err)
+		t.Cleanup(func() { _, _ = db.Exec("UPDATE accounts SET vendor_id=NULL WHERE id=$1", account.ID) })
+		tx, err := client.Tx(ctx)
+		require.NoError(t, err)
+		err = repo.BindGroups(dbent.NewTxContext(ctx, tx), account.ID, []int64{a.ID, c.ID})
+		require.Error(t, err, "受限Key不能绕过供应商供给和归档规则")
+		require.NoError(t, tx.Rollback())
+		_, err = db.Exec("UPDATE accounts SET vendor_id=NULL WHERE id=$1", account.ID)
+		require.NoError(t, err)
+	})
 	t.Run("非法状态不得落库", func(t *testing.T) {
 		for _, raw := range []string{`"garbage"`, `""`, `null`, `12`, `" active "`} {
 			_, err := scoped.ScopedAdminWrite(ctx, account.ID, "", map[string]json.RawMessage{"status": json.RawMessage(raw)}, nil)

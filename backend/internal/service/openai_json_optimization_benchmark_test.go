@@ -1,11 +1,17 @@
 package service
 
 import (
+	"bytes"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
 
@@ -354,4 +360,94 @@ func legacyExtractOpenAIUsageFromJSONBytes(body []byte) (OpenAIUsage, bool) {
 		OutputTokens:         response.Usage.OutputTokens,
 		CacheReadInputTokens: response.Usage.InputTokenDetails.CachedTokens,
 	}, true
+}
+
+// BenchmarkNativeOpenAIResponsesPreparation covers request-view construction,
+// decoding, protocol/history validation, account preparation and final encoding.
+// HTTP/context setup is intentionally included and fresh on every iteration;
+// this is not a final-encoder-only benchmark or a measurement of network TTFT.
+func BenchmarkNativeOpenAIResponsesPreparation(b *testing.B) {
+	gin.SetMode(gin.TestMode)
+	message := func(role, text string) any {
+		kind := "input_text"
+		if role == "assistant" {
+			kind = "output_text"
+		}
+		return map[string]any{"type": "message", "role": role, "content": []any{map[string]any{"type": kind, "text": text}}}
+	}
+	history := make([]any, 0, 128)
+	for i := 0; i < 64; i++ {
+		history = append(history,
+			message("user", strings.Repeat("Synthetic user context. ", 128)),
+			message("assistant", strings.Repeat("Synthetic answer context. ", 128)))
+	}
+	tools := []any{map[string]any{
+		"type": "function", "name": "lookup_fixture", "description": "Synthetic local benchmark tool",
+		"parameters": map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}, "required": []any{"query"}, "additionalProperties": false},
+		"strict":     true,
+	}}
+	reasoningTools := make([]any, 0, 129)
+	for i := 0; i < 32; i++ {
+		callID := "fc_fixture_" + strconv.Itoa(i)
+		reasoningTools = append(reasoningTools,
+			message("user", "Look up synthetic fixture "+strconv.Itoa(i)),
+			map[string]any{"type": "reasoning", "encrypted_content": strings.Repeat("opaque_fixture", 128), "summary": []any{}},
+			map[string]any{"type": "function_call", "call_id": callID, "name": "lookup_fixture", "arguments": `{"query":"fixture"}`},
+			map[string]any{"type": "function_call_output", "call_id": callID, "output": strings.Repeat("Synthetic tool result. ", 128)})
+	}
+	reasoningTools = append(reasoningTools, message("user", "Summarize the fixture results."))
+	imageInput := []any{map[string]any{"type": "message", "role": "user", "content": []any{
+		map[string]any{"type": "input_text", "text": "Describe this synthetic image fixture."},
+		map[string]any{"type": "input_image", "image_url": "data:image/png;base64," + strings.Repeat("A", 4<<20)},
+	}}}
+	for _, fixture := range []struct {
+		name  string
+		input []any
+		tools []any
+	}{
+		{"long_history", history, nil},
+		{"reasoning_tools", reasoningTools, tools},
+		{"large_image", imageInput, nil},
+	} {
+		b.Run(fixture.name, func(b *testing.B) {
+			bodyMap := map[string]any{
+				"model": "gpt-5.4", "instructions": "Use only synthetic benchmark context.",
+				"store": false, "stream": true, "reasoning": map[string]any{"effort": "medium"},
+				"tool_choice": "auto", "parallel_tool_calls": len(fixture.tools) > 0,
+				"include": []any{"reasoning.encrypted_content"}, "input": fixture.input,
+			}
+			if fixture.tools != nil {
+				bodyMap["tools"] = fixture.tools
+			}
+			body, err := json.Marshal(bodyMap)
+			if err != nil {
+				b.Fatal(err)
+			}
+			account := &Account{ID: 71, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{codexFingerprintModeExtraKey: "off"}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}}
+			prepare := func() (*openAIPreparedResponses, error) {
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+				return svc.prepareNativeOpenAIResponses(c.Request.Context(), c, account, openAIResponsesPreparation{
+					body: body, canonicalBody: body, view: newOpenAIRequestView(body), codexClient: true,
+				})
+			}
+			prepared, err := prepare()
+			if err != nil {
+				b.Fatal(err)
+			}
+			if !bytes.Equal(prepared.body, body) {
+				b.Fatal("normalized fixture unexpectedly changed")
+			}
+			b.SetBytes(int64(len(body)))
+			b.ReportAllocs()
+			for b.Loop() {
+				prepared, err := prepare()
+				if err != nil {
+					b.Fatal(err)
+				}
+				runtime.KeepAlive(prepared)
+			}
+		})
+	}
 }

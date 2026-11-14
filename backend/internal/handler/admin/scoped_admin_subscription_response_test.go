@@ -31,7 +31,7 @@ func (*scopedSubscriptionRepo) GetByID(context.Context, int64) (*service.UserSub
 func TestScopedAdminSubscriptionDoesNotExposeAssociatedUserAndPricing(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	s := service.NewSubscriptionService(nil, &scopedSubscriptionRepo{}, nil, nil, nil)
-	defer s.Stop()
+	startAdminFixtureService(t, s)
 	h := NewSubscriptionHandler(s)
 	for _, scoped := range []bool{false, true} {
 		w := httptest.NewRecorder()
@@ -73,14 +73,14 @@ func (r *scopedSubscriptionRepo) ExtendExpiry(context.Context, int64, time.Time)
 	return nil
 }
 
-func TestScopedAdminSubscriptionExtendReplayRejectsChangedAuthorization(t *testing.T) {
+func TestScopedAdminSubscriptionExtendReplayRespectsReadPermission(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	previous := service.DefaultIdempotencyCoordinator()
 	t.Cleanup(func() { service.SetDefaultIdempotencyCoordinator(previous) })
 	service.SetDefaultIdempotencyCoordinator(service.NewIdempotencyCoordinator(newMemoryIdempotencyRepoStub(), service.DefaultIdempotencyConfig()))
 	repo := &scopedSubscriptionRepo{}
 	svc := service.NewSubscriptionService(nil, repo, nil, nil, nil)
-	defer svc.Stop()
+	startAdminFixtureService(t, svc)
 	h := NewSubscriptionHandler(svc)
 	r := gin.New()
 	r.Use(func(c *gin.Context) {
@@ -100,12 +100,10 @@ func TestScopedAdminSubscriptionExtendReplayRejectsChangedAuthorization(t *testi
 		req.Header.Set("X-Test-Mode", mode)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
-		if i > 0 {
-			require.Equal(t, 409, w.Code, w.Body.String())
-			require.NotContains(t, w.Body.String(), "private-user")
-			continue
-		}
 		require.Equal(t, 200, w.Code, w.Body.String())
+		if i > 0 {
+			require.Equal(t, "true", w.Header().Get("X-Idempotency-Replayed"))
+		}
 		var result struct {
 			Data map[string]json.RawMessage `json:"data"`
 		}

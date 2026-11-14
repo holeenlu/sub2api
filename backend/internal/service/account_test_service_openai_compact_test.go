@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -64,7 +65,8 @@ func TestAccountTestService_TestAccountConnection_OpenAICompactOAuthSuccessPersi
 	require.Equal(t, "chatgpt.com", upstream.lastReq.Host)
 	require.Equal(t, "text/event-stream", upstream.lastReq.Header.Get("Accept"))
 	require.Contains(t, upstream.lastReq.Header.Get("x-codex-beta-features"), "remote_compaction_v2")
-	require.NotEmpty(t, upstream.lastReq.Header.Get("Session_Id"))
+	require.Empty(t, upstream.lastReq.Header.Get("session_id"))
+	require.Equal(t, scopeCodexAccountIdentityValue(&account, 0, "session", compactProbeSessionID(account.ID)), upstream.lastReq.Header.Get("session-id"))
 	require.Equal(t, HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileFromContext(upstream.lastReq.Context()))
 	require.Equal(t, codexCLIUserAgent, upstream.lastReq.Header.Get("User-Agent"))
 	require.Equal(t, "chatgpt-acc", upstream.lastReq.Header.Get("chatgpt-account-id"))
@@ -164,12 +166,22 @@ func TestAccountTestService_TestAccountConnection_OpenAICompactAPIKeyUsesNativeR
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/3/test", bytes.NewReader(nil))
+	c.Set("api_key", &APIKey{ID: 77})
 
 	err := svc.TestAccountConnection(c, account.ID, "gpt-5.4", "", AccountTestModeCompact)
 	require.NoError(t, err)
 
 	require.Equal(t, "https://example.com/v1/responses", upstream.lastReq.URL.String())
 	requireOpenAICodexProbeHeaders(t, upstream.lastReq.Header)
+	require.Equal(t, "Bearer sk-test", upstream.lastReq.Header.Get("Authorization"))
+	require.Equal(t, compactProbeSessionID(account.ID), upstream.lastReq.Header.Get("session_id"))
+	require.Equal(t, compactProbeSessionID(account.ID), upstream.lastReq.Header.Get("conversation_id"))
+	require.Empty(t, upstream.lastReq.Header.Get("session-id"))
+	require.Empty(t, upstream.lastReq.Header.Get("thread-id"))
+	require.Empty(t, upstream.lastReq.Header.Get(openAIWSTurnMetadataHeader))
+	expectedBody, err := json.Marshal(createOpenAICompactProbePayload("gpt-5.4", false))
+	require.NoError(t, err)
+	require.Equal(t, expectedBody, upstream.lastBody, "API-key probe body must remain unchanged")
 	require.Contains(t, upstream.lastReq.Header.Get("x-codex-beta-features"), "remote_compaction_v2")
 	require.Equal(t, "gpt-5.4", gjson.GetBytes(upstream.lastBody, "model").String(),
 		"原生 v2 探测不应用 compact_model_mapping")
@@ -265,58 +277,142 @@ func TestAccountTestService_TestAccountConnection_OpenAICompact2xxWithoutItemMar
 	require.Contains(t, rec.Body.String(), `"type":"error"`)
 }
 
-// 探测与真实转发走同一 /responses 端点，出站身份必须与真实 Codex 同构：
-// session/thread 为 UUID、携带 x-codex-installation-id（收敛账号用收敛值）。
+// Capture the actual doOpenAIAccountTestUpstream request, including its replay
+// body: native v2 must share one final identity across body and official headers.
 func TestAccountTestService_TestAccountConnection_OpenAICompactProbeIdentityMatchesRealTraffic(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-
-	updateCalls := make(chan map[string]any, 1)
-	account := Account{
-		ID:          6,
-		Name:        "openai-oauth-identity",
-		Platform:    PlatformOpenAI,
-		Type:        AccountTypeOAuth,
-		Status:      StatusActive,
-		Schedulable: true,
-		Concurrency: 1,
-		Credentials: map[string]any{
-			"access_token":       "oauth-token",
-			"chatgpt_account_id": "chatgpt-acc",
-		},
-		// 收敛是显式 opt-in（#5610），这里显式开启以验证探测身份与真实流量同构。
-		Extra: map[string]any{
-			"codex_fingerprint_mode":     "session",
-			codexFingerprintSeedExtraKey: testCodexFingerprintSeed,
-		},
+	for _, mode := range []string{"off", "device", "session", "full"} {
+		t.Run(mode, func(t *testing.T) {
+			captured := map[string]http.Header{}
+			for _, tc := range []struct {
+				name, upstreamAccount string
+				caller                int64
+				shadow                bool
+			}{
+				{"direct", "parent-a", 77, false},
+				{"shadow", "parent-a", 77, true},
+				{"other_caller", "parent-a", 88, true},
+				{"other_parent", "parent-b", 77, true},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					credential := Account{
+						ID: 50, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+						Status: StatusActive, Schedulable: true, Concurrency: 1,
+						Credentials: map[string]any{"access_token": "parent-token", "chatgpt_account_id": tc.upstreamAccount},
+						Extra:       map[string]any{"codex_fingerprint_mode": mode, codexFingerprintSeedExtraKey: testCodexFingerprintSeed},
+					}
+					account := credential
+					account.ID = 6 // Keep the raw probe identity fixed across caller/credential changes.
+					if tc.shadow {
+						account.ParentAccountID = &credential.ID
+						account.Credentials = nil
+						account.Extra = nil // Convergence must come from the credential parent.
+					}
+					repo := &snapshotUpdateAccountRepo{stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: []Account{account, credential}}}
+					upstream := &httpUpstreamRecorder{resp: &http.Response{
+						StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}},
+						Body: io.NopCloser(strings.NewReader(compactProbeSSESuccessBody)),
+					}}
+					svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
+					c, _ := gin.CreateTestContext(httptest.NewRecorder())
+					c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/6/test", nil)
+					c.Set("api_key", &APIKey{ID: tc.caller})
+					require.NoError(t, svc.TestAccountConnection(c, account.ID, "gpt-5.4", "", AccountTestModeCompact))
+					require.Len(t, upstream.requests, 1)
+					req := upstream.lastReq
+					h := req.Header
+					captured[tc.name] = h
+					require.Equal(t, chatgptCodexAPIURL, req.URL.String())
+					require.Equal(t, "Bearer parent-token", h.Get("Authorization"))
+					require.Equal(t, tc.upstreamAccount, h.Get("chatgpt-account-id"))
+					require.Equal(t, "text/event-stream", h.Get("Accept"))
+					require.Contains(t, h.Get("x-codex-beta-features"), "remote_compaction_v2")
+					require.Empty(t, h.Values("OpenAI-Beta"), "HTTP must not carry legacy/WS responses negotiation")
+					for _, key := range []string{"session_id", "conversation_id", "installation_id", "x-codex-installation-id", "accept-language"} {
+						require.Empty(t, h.Get(key), key)
+					}
+					cm := gjson.GetBytes(upstream.lastBody, "client_metadata")
+					require.True(t, cm.IsObject(), "native v2 admits normalized body metadata")
+					for _, field := range []string{"session_id", "thread_id", "turn_id", "x-codex-installation-id"} {
+						id, err := uuid.Parse(cm.Get(field).String())
+						require.NoError(t, err, field)
+						if field == "session_id" || field == "thread_id" {
+							require.Equal(t, uuid.Version(4), id.Version(), "preserve the local v4 identity contract")
+						}
+					}
+					require.Equal(t, cm.Get("session_id").String(), h.Get("session-id"))
+					require.Equal(t, cm.Get("thread_id").String(), h.Get("thread-id"))
+					require.Equal(t, h.Get("thread-id"), h.Get("x-client-request-id"))
+					require.NotEqual(t, h.Get("session-id"), h.Get("thread-id"))
+					if mode == "session" || mode == "full" {
+						require.Equal(t, h.Get("thread-id")+":0", h.Get("x-codex-window-id"))
+					} else {
+						_, err := uuid.Parse(h.Get("x-codex-window-id"))
+						require.NoError(t, err, "off/device preserve the scoped opaque probe window")
+					}
+					metadata := cm.Get(openAIWSTurnMetadataHeader).String()
+					require.JSONEq(t, metadata, h.Get(openAIWSTurnMetadataHeader))
+					for field, flat := range map[string]string{"session_id": "session_id", "thread_id": "thread_id", "turn_id": "turn_id", "installation_id": "x-codex-installation-id", "window_id": "x-codex-window-id"} {
+						require.Equal(t, cm.Get(flat).String(), gjson.Get(metadata, field).String(), field)
+					}
+					require.Equal(t, "compaction", gjson.Get(metadata, "request_kind").String())
+					require.Positive(t, gjson.Get(metadata, "turn_started_at_unix_ms").Int())
+					require.NotEmpty(t, gjson.Get(metadata, "context_window_id").String())
+					rawSession := compactProbeSessionID(account.ID)
+					if mode == "off" || mode == "device" {
+						require.Equal(t, scopeCodexAccountIdentityValue(&credential, tc.caller, "session", rawSession), h.Get("session-id"))
+						require.NotEqual(t, scopeCodexAccountIdentityValue(&credential, tc.caller, "session", isolateOpenAIUpstreamSessionID(tc.caller, &credential, rawSession)), h.Get("session-id"), "do not scope a legacy hash")
+					} else {
+						ids := resolveCodexFingerprintIDsForCaller(&credential, http.Header{"Session_id": []string{rawSession}}, tc.caller)
+						require.NotNil(t, ids)
+						require.Equal(t, ids.sessionID, h.Get("session-id"))
+						require.Equal(t, ids.threadID, h.Get("thread-id"))
+					}
+					if mode != "off" {
+						require.Equal(t, resolveConvergedInstallationID(&credential, testCodexFingerprintSeed), cm.Get("x-codex-installation-id").String())
+					}
+					var body map[string]any
+					require.NoError(t, json.Unmarshal(upstream.lastBody, &body))
+					delete(body, "client_metadata")
+					require.Equal(t, createOpenAICompactProbePayload("gpt-5.4", true), body, "normalization must preserve probe payload and compaction_trigger")
+					replay, err := req.GetBody()
+					require.NoError(t, err)
+					replayBody, err := io.ReadAll(replay)
+					require.NoError(t, err)
+					require.NoError(t, replay.Close())
+					require.Equal(t, upstream.lastBody, replayBody)
+					require.Equal(t, int64(len(replayBody)), req.ContentLength)
+				})
+			}
+			require.Equal(t, captured["direct"].Get("thread-id"), captured["shadow"].Get("thread-id"), "the same credential must own both identities")
+			require.NotEqual(t, captured["shadow"].Get("thread-id"), captured["other_caller"].Get("thread-id"))
+			require.NotEqual(t, captured["shadow"].Get("thread-id"), captured["other_parent"].Get("thread-id"), "parent isolation must survive shared convergence seeds")
+		})
 	}
-	repo := &snapshotUpdateAccountRepo{
-		stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: []Account{account}},
-		updateExtraCalls:      updateCalls,
-	}
-	upstream := &httpUpstreamRecorder{resp: &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-		Body:       io.NopCloser(strings.NewReader(compactProbeSSESuccessBody)),
-	}}
-	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
-
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/6/test", bytes.NewReader(nil))
-
-	require.NoError(t, svc.TestAccountConnection(c, account.ID, "gpt-5.4", "", AccountTestModeCompact))
-
-	// 显式 session 收敛模式：出站身份 = 账号级收敛值
-	seed, ok := codexFingerprintSeed(account.Extra)
-	require.True(t, ok)
-	converged := resolveConvergedSessionID(seed)
-	require.Equal(t, converged, upstream.lastReq.Header.Get("session-id"))
-	require.Equal(t, converged, upstream.lastReq.Header.Get("session_id"))
-	require.Equal(t, resolveConvergedInstallationID(&account, seed), upstream.lastReq.Header.Get("x-codex-installation-id"),
-		"真实 Codex 每个请求必带 installation-id，探测不得缺失")
-	require.NotContains(t, upstream.lastReq.Header.Get("session-id"), "probe_compact",
-		"探测标识不得是可被上游一眼识别的字面量")
-	<-updateCalls
+	t.Run("namespace_missing", func(t *testing.T) {
+		account := Account{
+			ID: 6, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+			Credentials: map[string]any{"access_token": "token-without-account-identity"},
+		}
+		repo := &snapshotUpdateAccountRepo{stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: []Account{account}}}
+		upstream := &httpUpstreamRecorder{resp: &http.Response{
+			StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body: io.NopCloser(strings.NewReader(compactProbeSSESuccessBody)),
+		}}
+		svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/6/test", nil)
+		c.Set("api_key", &APIKey{ID: 77})
+		require.NoError(t, svc.TestAccountConnection(c, account.ID, "gpt-5.4", "", AccountTestModeCompact))
+		require.Empty(t, codexAccountIdentityNamespace(&account))
+		for _, key := range []string{"session-id", "thread-id", openAIWSTurnMetadataHeader} {
+			require.Empty(t, upstream.lastReq.Header.Get(key), "missing namespace must not expose an unscoped official identity")
+		}
+		legacy := isolateOpenAIUpstreamSessionID(77, &account, compactProbeSessionID(account.ID))
+		require.Equal(t, legacy, upstream.lastReq.Header.Get("session_id"))
+		require.Equal(t, legacy, upstream.lastReq.Header.Get("conversation_id"))
+		require.False(t, gjson.GetBytes(upstream.lastBody, "client_metadata").Exists())
+	})
 }
 
 func TestCompactProbeSessionID_IsUUIDShaped(t *testing.T) {

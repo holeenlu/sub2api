@@ -91,7 +91,6 @@ func TestOpenAIGatewayService_ResponsesToolLoopKeepsStickyAccount(t *testing.T) 
 				require.True(t, json.Valid(nextBody))
 				groupID := int64(10)
 				cfg := &config.Config{}
-				cfg.Gateway.OpenAIWS.LBTopK = 1
 				svc := &OpenAIGatewayService{
 					accountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{
 						{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 100, GroupIDs: []int64{groupID}},

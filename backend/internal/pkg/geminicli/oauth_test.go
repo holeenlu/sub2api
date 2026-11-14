@@ -1,6 +1,7 @@
 package geminicli
 
 import (
+	"context"
 	"encoding/hex"
 	"strings"
 	"sync"
@@ -14,7 +15,10 @@ import (
 
 func TestSessionStore_SetAndGet(t *testing.T) {
 	store := NewSessionStore()
-	defer store.Stop()
+	if err := store.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer store.Stop(context.Background())
 
 	session := &OAuthSession{
 		State:     "test-state",
@@ -34,7 +38,10 @@ func TestSessionStore_SetAndGet(t *testing.T) {
 
 func TestSessionStore_GetNotFound(t *testing.T) {
 	store := NewSessionStore()
-	defer store.Stop()
+	if err := store.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer store.Stop(context.Background())
 
 	_, ok := store.Get("不存在的ID")
 	if ok {
@@ -44,7 +51,10 @@ func TestSessionStore_GetNotFound(t *testing.T) {
 
 func TestSessionStore_GetExpired(t *testing.T) {
 	store := NewSessionStore()
-	defer store.Stop()
+	if err := store.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer store.Stop(context.Background())
 
 	// 创建一个已过期的 session（CreatedAt 设置为 SessionTTL+1 分钟之前）
 	session := &OAuthSession{
@@ -62,7 +72,10 @@ func TestSessionStore_GetExpired(t *testing.T) {
 
 func TestSessionStore_Delete(t *testing.T) {
 	store := NewSessionStore()
-	defer store.Stop()
+	if err := store.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer store.Stop(context.Background())
 
 	session := &OAuthSession{
 		State:     "to-delete",
@@ -85,16 +98,22 @@ func TestSessionStore_Delete(t *testing.T) {
 
 func TestSessionStore_Stop_Idempotent(t *testing.T) {
 	store := NewSessionStore()
+	if err := store.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 
 	// 多次调用 Stop 不应 panic
-	store.Stop()
-	store.Stop()
-	store.Stop()
+	store.Stop(context.Background())
+	store.Stop(context.Background())
+	store.Stop(context.Background())
 }
 
 func TestSessionStore_ConcurrentAccess(t *testing.T) {
 	store := NewSessionStore()
-	defer store.Stop()
+	if err := store.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer store.Stop(context.Background())
 
 	const goroutines = 50
 	var wg sync.WaitGroup

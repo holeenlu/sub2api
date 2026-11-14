@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"unsafe"
 
@@ -36,19 +37,31 @@ var (
 //     ResolveThinkingProtocol) all server_tool_use / web_search_tool_result
 //     blocks are stripped: these upstreams only accept
 //     text/thinking/image/tool_use/tool_result and reject anything else with
-//     400 "invalid value: `server_tool_use`". anthropic-strict and unknown
-//     upstreams keep genuine blocks untouched.
+//     400 "invalid value: `server_tool_use`".
+//
+// Genuine search history without a native web_search declaration is converted
+// to visible text; tools with only a client function name do not count as native.
+// Declared native history stays intact. Adapted from dofastted/vm2api 4732e71d;
+// its LICENSE/NOTICE and the confirmed commercial authorization still apply.
 //
 // The emulated assistant turn always carries a trailing text summary, so the
 // search context survives the strip. A message whose content would become
 // empty gets a placeholder text block (mirroring FilterThinkingBlocksForRetry).
 // Returns the original body unchanged when nothing needs stripping.
 func FilterWebSearchHistoryBlocks(body []byte, mappedModel string) []byte {
-	if !bytes.Contains(body, patternServerToolUse) && !bytes.Contains(body, patternWebSearchToolResult) {
+	if !bytes.Contains(body, patternServerToolUse) && !bytes.Contains(body, patternWebSearchToolResult) &&
+		!bytes.Contains(body, []byte(`"search_result"`)) && !bytes.Contains(body, []byte(`"web_search_result"`)) {
 		return body
 	}
 
 	stripAll := ResolveThinkingProtocol(mappedModel) == ThinkingProtocolPassbackRequired
+	flattenSearch := true
+	for _, tool := range gjson.GetBytes(body, "tools").Array() {
+		if strings.HasPrefix(tool.Get("type").String(), toolTypeWebSearchPrefix) {
+			flattenSearch = false
+			break
+		}
+	}
 
 	jsonStr := *(*string)(unsafe.Pointer(&body))
 	msgsRes := gjson.Get(jsonStr, "messages")
@@ -57,7 +70,9 @@ func FilterWebSearchHistoryBlocks(body []byte, mappedModel string) []byte {
 	}
 
 	var messages []any
-	if err := json.Unmarshal(sliceRawFromBody(body, msgsRes), &messages); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(sliceRawFromBody(body, msgsRes)))
+	decoder.UseNumber() // Rewriting search history must not round other tool arguments.
+	if err := decoder.Decode(&messages); err != nil {
 		return body
 	}
 
@@ -83,8 +98,36 @@ func FilterWebSearchHistoryBlocks(body []byte, mappedModel string) []byte {
 				}
 				continue
 			}
+			next := block
+			blockChanged := false
+			if isMap && flattenSearch {
+				if text, ok := undeclaredSearchHistoryText(blockMap); ok {
+					textBlock := map[string]any{"type": "text", "text": text}
+					if control, ok := blockMap["cache_control"]; ok {
+						textBlock["cache_control"] = control
+					}
+					next = textBlock
+					blockChanged = true
+				} else if blockMap["type"] == "tool_result" {
+					// Client calls/results keep their identity; only encrypted search
+					// artifacts inside a result become visible text.
+					if nested, ok := blockMap["content"].([]any); ok {
+						for j, inner := range nested {
+							if item, ok := inner.(map[string]any); ok {
+								if text, ok := undeclaredSearchHistoryText(item); ok {
+									nested[j] = map[string]any{"type": "text", "text": text}
+									modified = true
+								}
+							}
+						}
+					}
+				}
+			}
+			if blockChanged && newContent == nil {
+				newContent = append(make([]any, 0, len(content)), content[:i]...)
+			}
 			if newContent != nil {
-				newContent = append(newContent, block)
+				newContent = append(newContent, next)
 			}
 		}
 		if newContent == nil {
@@ -135,4 +178,74 @@ func shouldStripWebSearchBlock(block map[string]any, stripAll bool) bool {
 	default:
 		return false
 	}
+}
+
+// Only search artifacts are converted: unrelated server tools and encrypted
+// thinking remain under their existing protocol rules.
+func undeclaredSearchHistoryText(block map[string]any) (string, bool) {
+	kind, _ := block["type"].(string)
+	switch kind {
+	case blockTypeServerToolUse:
+		name, _ := block["name"].(string)
+		if name != toolNameWebSearch {
+			return "", false
+		}
+		input, _ := block["input"].(map[string]any)
+		query, _ := input["query"].(string)
+		return "[web search] " + query, true
+	case blockTypeWebSearchToolResult:
+		if failure, ok := block["content"].(map[string]any); ok {
+			code, _ := failure["error_code"].(string)
+			return "[web search unavailable: " + code + "]", true
+		}
+		results, _ := block["content"].([]any)
+		var text strings.Builder
+		text.WriteString("[web search results]")
+		for i, result := range results {
+			if item, ok := result.(map[string]any); ok {
+				fmt.Fprintf(&text, "\n%d. %s", i+1, visibleSearchResult(item))
+			}
+		}
+		return text.String(), true
+	case "search_result", "web_search_result":
+		if _, encrypted := block["encrypted_content"].(string); encrypted {
+			return "[search result] " + visibleSearchResult(block), true
+		}
+	}
+	return "", false
+}
+
+func visibleSearchResult(result map[string]any) string {
+	title, _ := result["title"].(string)
+	url, _ := result["url"].(string)
+	if url == "" {
+		url, _ = result["source"].(string)
+	}
+	var parts []string
+	for _, value := range []string{title, url} {
+		if value != "" {
+			parts = append(parts, value)
+		}
+	}
+	head := strings.Join(parts, " — ")
+	if head == "" {
+		head = "result"
+	}
+	var content []string
+	switch value := result["content"].(type) {
+	case string:
+		content = append(content, value)
+	case []any:
+		for _, block := range value {
+			if item, ok := block.(map[string]any); ok && item["type"] == "text" {
+				if text, ok := item["text"].(string); ok {
+					content = append(content, text)
+				}
+			}
+		}
+	}
+	if len(content) > 0 {
+		head += "\n" + strings.Join(content, "\n")
+	}
+	return head
 }

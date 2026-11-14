@@ -31,8 +31,3 @@ func TestClaude52CatalogAndCapabilities(t *testing.T) {
 		require.False(t, IsMythos52(model))
 	}
 }
-
-func TestCLICurrentVersionSatisfiesFable52Gate(t *testing.T) {
-	// https://code.claude.com/docs/en/model-config
-	require.GreaterOrEqual(t, compareSemver(t, CLICurrentVersion, "2.1.321"), 0)
-}

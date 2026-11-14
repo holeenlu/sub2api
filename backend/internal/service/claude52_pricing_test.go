@@ -98,7 +98,7 @@ func TestClaude52CatalogOverridesAndVersionBoundaries(t *testing.T) {
 			require.Zero(t, pricing.CacheCreationPricePerToken)
 			require.Zero(t, pricing.CacheReadPricePerToken)
 			for _, name := range []string{model, "anthropic/" + model, "global.anthropic." + model} {
-				require.Same(t, catalog.pricingData[model], catalog.GetModelPricing(name))
+				require.Equal(t, catalog.pricingData[model], catalog.GetModelPricing(name))
 			}
 		})
 	}

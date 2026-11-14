@@ -67,7 +67,7 @@ func TestAuthServiceRefreshTokenPairConsumesTokenOnce(t *testing.T) {
 			RefreshTokenExpireDays:   7,
 		},
 	}
-	svc := service.NewAuthService(nil, newEmailBindUserRepoStub(user), nil, cache, cfg, nil, nil, nil, nil, nil, nil, nil, nil)
+	svc := service.NewAuthService(nil, newEmailBindUserRepoStub(user), cache, cfg, nil, nil, nil, nil, nil, nil)
 
 	pair, err := svc.GenerateTokenPair(ctx, user, "")
 	require.NoError(t, err)
@@ -93,7 +93,7 @@ func TestAuthServiceRefreshTokenPairConsumesTokenOnce(t *testing.T) {
 		switch {
 		case refreshErr == nil:
 			successes++
-		case errors.Is(refreshErr, service.ErrRefreshTokenInvalid):
+		case errors.Is(refreshErr, service.ErrRefreshTokenInvalid), errors.Is(refreshErr, service.ErrRefreshTokenReused):
 			invalid++
 		default:
 			t.Fatalf("unexpected refresh error: %v", refreshErr)
